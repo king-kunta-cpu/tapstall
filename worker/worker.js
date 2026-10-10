@@ -21,7 +21,7 @@ import {
   EDITABLE_FIELDS, SOFT_FIELDS, sign, adminStore,
 } from './core.js';
 
-const VERSION = '0.4.0';
+const VERSION = '0.4.1';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 const MAX_ORDERS_KEPT = 200;

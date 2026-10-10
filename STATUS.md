@@ -229,7 +229,7 @@ Two design changes that came out of testing rather than taste:
   a 15-minute "you can cancel this" window is useless if you cannot read what
   was typed.
 
-## The first real capacity event (2026-10-10, ~10:50 UTC)
+## The first real capacity event (2026-10-10, ~10:50 UTC, shipped as 0.4.1)
 
 `POST /api/order` started answering `{"ok":false,"error":"KV put() limit exceeded
 for the day.","stage":"worker"}` — 500-shaped, opaque, and true. Cloudflare's
