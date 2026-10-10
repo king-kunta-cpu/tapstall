@@ -156,8 +156,13 @@ if [[ -n "${LEGACY_WORKER_NAME:-}" && "$LEGACY_WORKER_NAME" != "$WORKER_NAME" ]]
   OLD="https://$LEGACY_WORKER_NAME.$(workers_subdomain | tail -1).workers.dev"
   say "alias answers $OLD/__ping -> $(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$OLD/__ping")"
   say "alias redirects a saved store link: $(curl -s -o /dev/null -w '%{http_code} -> %{redirect_url}' --max-time 20 "$OLD/s/mamatoe")"
-  # the alias has no cron, so the schedule check is only meaningful for the main one
-  CF_TOKEN="$CF_TOKEN" CF_ACCOUNT="$CF_ACCOUNT" python3 scripts/set_triggers.py "$WORKER_NAME" "15 6,12,18,0 * * *" >/dev/null 2>&1 || true
+  # The alias inherited a cron schedule from the day it was the only Worker, and
+  # this token cannot delete it (PUT /schedules -> success:false). That is safe
+  # rather than sloppy: a Worker deployed with REDIRECT_TO returns from
+  # scheduled() without touching KV, which the alias's own selftest reports as
+  # cron_owner:false — so the sweep still runs once a day, from one origin.
+  say "alias cron is inert: $(curl -s --max-time 20 "$OLD/__selftest" | jq -c '{cron_owner, version}' 2>/dev/null)"
+  CF_TOKEN="$CF_TOKEN" CF_ACCOUNT="$CF_ACCOUNT" python3 scripts/set_triggers.py "$WORKER_NAME" "15 6,12,18,0 * * *" || warn "cron check failed on $WORKER_NAME"
 fi
 
 [[ "$MODE" == "--push" ]] && push_github

@@ -105,6 +105,14 @@ export default {
     }
   },
   async scheduled(event, env, ctx) {
+    // An alias origin never owns the sweep. Cloudflare's API would not let this
+    // token remove the schedule that the previous hostname kept when it was
+    // deployed as a second Worker (PUT /schedules answers success:false), and
+    // deleting it from a dashboard is a manual step — so the guard lives here
+    // instead, where forgetting it costs something: two Workers on one KV running
+    // the same daily job means double writes on a 1,000/day plan and two expiry
+    // notices where the merchant expected one.
+    if (env.REDIRECT_TO) return;
     ctx.waitUntil(runCron(env));
   },
 };
@@ -862,7 +870,10 @@ async function buyerTouch(env, handle, h) {
 }
 
 async function selftest(env) {
-  const t = { version: VERSION, kv_stores: !!env.STORES, kv_orders: !!env.ORDERS, email: !!env.EMAIL };
+  const t = { version: VERSION, kv_stores: !!env.STORES, kv_orders: !!env.ORDERS, email: !!env.EMAIL,
+    // whose cron is this? an alias answers redirects and skips the sweep, and the
+    // deploy check reads this instead of trusting that the schedule was deleted
+    cron_owner: !env.REDIRECT_TO };
   if (env.STORES) {
     const beat = await env.STORES.get('cron:last', 'json');
     t.cron_heartbeat = beat ? { at: beat.at, minutes_ago: Math.round((Date.now() - (beat.unix || 0)) / 60000) } : 'never run';
@@ -937,7 +948,7 @@ async function selftest(env) {
 // yet created on a fresh one — both documented gaps, neither a failure, so they
 // must not turn the single verdict red. A new capability flag has to be listed
 // here or it becomes an alarm.
-const CAPABILITY_FLAGS = ['kv_stores', 'kv_orders', 'email'];
+const CAPABILITY_FLAGS = ['kv_stores', 'kv_orders', 'email', 'cron_owner'];
 
 /**
  * The rails a store may price with: the built-in table (published tariffs for

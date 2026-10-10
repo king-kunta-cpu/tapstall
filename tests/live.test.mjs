@@ -1035,6 +1035,35 @@ test('the rails console is behind the operator session, the rail list is not', a
   assert.ok(!/rails:extra/.test(open.text), 'the public list does not announce the KV key behind it');
 });
 
+test('an alias origin does not sweep the same KV twice a day', async () => {
+  // Cloudflare would not let this token delete the schedule the old hostname kept
+  // (PUT /schedules -> success:false), so the guard is in the code: a Worker
+  // deployed with REDIRECT_TO returns from scheduled() before runCron. The
+  // selftest reports which kind of origin it is, so the deploy can check that
+  // rather than assume a dashboard click happened.
+  const w = await load();
+  const had = Object.prototype.hasOwnProperty.call(env, 'REDIRECT_TO');
+  const before = env.REDIRECT_TO;
+  env.REDIRECT_TO = 'https://tapstall.test';
+  const ctx = { waitUntil: (p) => p };
+  let wrote = false;
+  const put = env.STORES.put.bind(env.STORES);
+  env.STORES.put = async (k, v, o) => { if (String(k).startsWith('cron:')) wrote = true; return put(k, v, o); };
+  try {
+    await w.scheduled({ scheduledTime: Date.now() }, env, ctx);
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(wrote, false, 'the alias wrote no heartbeat, so it wrote nothing at all');
+    const asAlias = await call('/__selftest');
+    assert.equal(asAlias.json.cron_owner, false, 'and it admits it');
+    assert.equal(asAlias.json.ok, true, 'without that making the health verdict red');
+  } finally {
+    env.STORES.put = put;
+    if (had) env.REDIRECT_TO = before; else delete env.REDIRECT_TO;
+  }
+  const owner = await call('/__selftest');
+  assert.equal(owner.json.cron_owner, true, 'the canonical origin owns the daily sweep');
+});
+
 test('the previous brand’s hostname is an alias that moves people, not data', async () => {
   const had = Object.prototype.hasOwnProperty.call(env, 'REDIRECT_TO');
   const before = env.REDIRECT_TO;

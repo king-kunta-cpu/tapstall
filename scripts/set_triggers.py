@@ -50,31 +50,54 @@ def multipart(meta):
     return out + f"--{b}--\r\n".encode(), b
 
 
+def read_crons(base, tok):
+    """The real schedule, from the endpoint that answers JSON for this token type.
+
+    `GET /cron_triggers` streams the script bundle back instead (multipart), which
+    is why this check used to "repair" a schedule that was already correct: it read
+    nothing, wrote nothing, and printed a warning on every deploy.
+    """
+    r = req(base + "/schedules", tok)
+    if isinstance(r.get("result"), dict) and "schedules" in r["result"]:
+        return " ".join(x.get("cron", "") for x in r["result"]["schedules"])
+    return None
+
+
+def write_crons(base, tok, crons):
+    body = json.dumps({"crons": list(crons)}).encode()
+    return req(base + "/schedules", tok, "PUT", body, {"Content-Type": "application/json"})
+
+
 def main():
     if len(sys.argv) < 3:
         sys.exit(__doc__)
     name, crons = sys.argv[1], sys.argv[2:]
+    clearing = crons == ["none"]
+    want = "" if clearing else " ".join(crons)
     tok, acct = os.environ.get("CF_TOKEN"), os.environ.get("CF_ACCOUNT")
     if not tok or not acct:
         sys.exit("CF_TOKEN / CF_ACCOUNT not set")
     base = f"{API}/{acct}/workers/scripts/{name}"
 
-    want = " ".join(crons)
-    cur = req(base + "/cron_triggers", tok)
-    got = ""
-    if not cur.get("unparsed") and isinstance(cur.get("result"), dict):
-        got = " ".join(t.get("cron", "") for t in cur["result"].get("targets", []))
-    if got.strip() == want.strip():
-        print(f"  cron ok: {got}")
+    got = read_crons(base, tok)
+    if got is None:
+        print("  cron: schedule not readable with this token; wrangler.toml [triggers] is the source of truth")
+    elif got.strip() == want.strip():
+        print(f"  cron ok: {got or '(none, as intended)'}")
     else:
-        print(f"  cron is {got!r}, want {want!r} — repairing")
-        body, b = multipart({"targets": [{"cron": c, "retry": {}} for c in crons], "predictions": []})
-        res = req(base + "/cron_triggers", tok, "PUT", body,
-                  {"Content-Type": f"multipart/form-data; boundary={b}"})
-        note = ("  cron could not be written over this API (endpoint wants a script body). "
-                "If the deploy went through wrangler, wrangler.toml [triggers] already set it. "
-                "Verify without the dashboard: GET /__selftest -> cron_heartbeat minutes_ago.")
-        print(note)
+        res = write_crons(base, tok, [] if clearing else crons)
+        after = read_crons(base, tok)
+        if res.get("success") and (after or "").strip() == want.strip():
+            print(f"  cron {'cleared' if clearing else 'repaired'}: {got!r} -> {after!r}")
+        else:
+            # not fatal, and deliberately so: the alarm may be one a Worker ignores
+            # in code (an alias origin returns from scheduled() when REDIRECT_TO is
+            # set), and this script cannot see that config. /__selftest can: it
+            # answers cron_owner true only for the Worker that actually sweeps.
+            print("  note cron unchanged (PUT success=%s, schedule now %r): if this Worker is a"
+                  " redirect alias, its schedule is inert by design; otherwise clear it in the"
+                  " dashboard and confirm with GET /__selftest -> cron_owner"
+                  % (res.get("success"), after))
 
     # The schedule is declared in wrangler.toml (the primary deploy path). This
     # API endpoint rejects both JSON and metadata-only multipart for this token
