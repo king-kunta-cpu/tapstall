@@ -117,6 +117,17 @@ document, read straight back out of the ORDERS namespace, still said
 number) and `pay.amount = 0.04`. Under v0.2 the first of those six fetches would
 have marked the order paid on its own.
 
+**Throttling, and the DoS it must not create.** Twelve failed credential
+attempts per store per ten minutes is what stops a stranger sweeping an old
+10-character link or a leaked API key. It is consulted on exactly the paths
+where guessing is possible — the `x-zimlink-admin` header, the legacy
+`?token=` trade-up, and "Lost your link?" — and never on an HMAC session or a
+signed capability. The first version of the gate also blocked the merchant's own
+confirm button, which meant twelve junk requests from anyone could freeze a
+shop's order flow for ten minutes; the test suite now asserts the opposite
+(a throttled store still confirms with a valid link, and still opens its
+dashboard with a valid cookie, which also clears the counter).
+
 ## Also fixed on the way (found by the new tests, not by a customer)
 
 * **`publicStore` was a denylist and leaked the queued change.** Once `pending`

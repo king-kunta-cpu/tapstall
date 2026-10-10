@@ -354,11 +354,14 @@ async function markPaid(req, url, env) {
   const want = markTarget(viaCap ? p.s : b.status);
   const st = await getStore(env, handle);
   if (!st) return json({ ok: false, error: 'no store' }, 404);
-  if (await lockedOut(env, handle)) return json({ ok: false, error: 'too many failed attempts, wait 10 minutes' }, 429);
 
   let id = viaCap ? p.id : String(b.id || '');
   if (!viaCap) {
+    // The lockout guards guessable credentials only. A valid capability needs
+    // no guessing, so a stranger must not be able to freeze the merchant's
+    // one-tap confirm — 12 bad requests would otherwise be a cheap DoS.
     const who = await identify(req, env, handle);
+    const lr = lockRes(who); if (lr) return lr;
     if (!who || who.anonymous) return json({ ok: false, error: 'not signed in', need_login: true }, 401);
     if (who.bad) { await authFail(env, handle); return json({ ok: false, error: 'bad key or revoked session' }, 403); }
     if (who.via === 'sess' && (req.headers.get('x-zimlink-confirm') || '') !== '1') {
@@ -485,7 +488,8 @@ async function adminView(req, url, env) {
   const handle = slug(url.searchParams.get('handle') || '');
   const who = await identify(req, env, handle);
   if (!who || !who.st) return json({ ok: false, error: 'no store' }, 404);
-  if (who.anonymous) return json({ ok: false, error: 'unauthorised', need_login: true }, 401);
+  const lr = lockRes(who); if (lr) return lr;
+    if (who.anonymous) return json({ ok: false, error: 'unauthorised', need_login: true }, 401);
   if (who.bad) { await authFail(env, handle); return json({ ok: false, error: 'bad key or revoked session' }, 403); }
   const st = who.st;
   const rows = (await env.ORDERS.get('list:' + handle, 'json')) || [];
@@ -845,6 +849,10 @@ async function identify(req, env, handle) {
   }
   const key = req.headers.get('x-zimlink-admin');
   if (key) {
+    // Throttle guessing where guessing is possible. The session cookie and a
+    // capability cannot be guessed (HMAC), so they are never gated — otherwise
+    // 12 junk requests would freeze the merchant's own dashboard.
+    if (await lockedOut(env, handle)) return { locked: true, st, handle };
     if (st.admin_token && timingSafeEq(String(key), String(st.admin_token))) {
       await authClear(env, handle);
       return { via: 'key', st, handle };
@@ -852,6 +860,13 @@ async function identify(req, env, handle) {
     return { bad: true, st, handle };
   }
   return { anonymous: true, st, handle };
+}
+
+/** 429 for a store whose key is being guessed; null everywhere else. */
+function lockRes(who) {
+  return who && who.locked
+    ? json({ ok: false, error: 'too many failed attempts with that key — wait 10 minutes, or open the dashboard link' }, 429)
+    : null;
 }
 
 async function issueLogin(env, st, origin) {
@@ -896,7 +911,8 @@ async function settingsEdit(req, url, env) {
   const b = await readBody(req);
   const who = await identify(req, env, b.handle || url.searchParams.get('handle'));
   if (!who || !who.st) return json({ ok: false, error: 'no store' }, 404);
-  if (who.anonymous) return json({ ok: false, error: 'sign in from your dashboard link first', need_login: true }, 401);
+  const lr = lockRes(who); if (lr) return lr;
+    if (who.anonymous) return json({ ok: false, error: 'sign in from your dashboard link first', need_login: true }, 401);
   if (who.bad) { await authFail(env, who.handle); return json({ ok: false, error: 'bad key or revoked session' }, 403); }
   // A cookie is ambient authority, so require a header a cross-site form
   // cannot set. SameSite=Strict already blocks most of that; this is the belt.
@@ -937,7 +953,8 @@ async function revertPending(req, url, env) {
   const b = await readBody(req);
   const who = await identify(req, env, b.handle || url.searchParams.get('handle'));
   if (!who || !who.st) return json({ ok: false, error: 'no store' }, 404);
-  if (who.anonymous || who.bad) return json({ ok: false, error: 'sign in first' }, 401);
+  const lr = lockRes(who); if (lr) return lr;
+    if (who.anonymous || who.bad) return json({ ok: false, error: 'sign in first' }, 401);
   const was = who.st.pending ? Object.keys(who.st.pending.fields) : [];
   if (was.length) { delete who.st.pending; await writeStore(env, who.st); }
   await pushAudit(env, who.st, { act: 'revert', via: who.via, fields: was, ip: ipOf(req) });
@@ -949,7 +966,8 @@ async function revokeKeys(req, url, env) {
   const b = await readBody(req);
   const who = await identify(req, env, b.handle || url.searchParams.get('handle'));
   if (!who || !who.st) return json({ ok: false, error: 'no store' }, 404);
-  if (who.anonymous || who.bad) return json({ ok: false, error: 'sign in first' }, 401);
+  const lr = lockRes(who); if (lr) return lr;
+    if (who.anonymous || who.bad) return json({ ok: false, error: 'sign in first' }, 401);
   const st = who.st;
   st.auth_gen = Date.now().toString(36);
   st.admin_token = randomKey(16);

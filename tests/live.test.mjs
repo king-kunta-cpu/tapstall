@@ -315,6 +315,27 @@ test('nobody can read a store ledger — or find its dashboard — from a handle
   assert.equal(look.json.store.orders_today >= 1, true, 'but keeps the useful part');
 });
 
+test('a throttled store can still confirm an order with a valid link', async () => {
+  // 12 guessed credentials is all it takes to fill the counter, so it must not
+  // also freeze the merchant's own one-tap confirm
+  await env.STORES.put('lock:mamatoe', String(12));
+  const order = await call('/api/order', {
+    method: 'POST',
+    body: { handle: 'mamatoe', service: 'pickup', buyer: { name: 'Throttle Test', phone: '0780009988' },
+      items: [{ id: '1', name: 'Chicken & rice', price: 5.5, qty: 1 }] },
+  });
+  assert.equal(order.status, 201, order.text);
+  const cap = order.json.mark_url.slice('/c/'.length);
+  const r = await call('/api/mark', { method: 'POST', body: { cap } });
+  assert.equal(r.status, 200, 'confirmation still works while locked out: ' + r.text);
+  assert.equal(r.json.status, 'paid');
+  const refused = await call('/api/admin?handle=mamatoe', { headers: { 'x-zimlink-admin': 'guess' } });
+  assert.equal(refused.status, 429, 'while a guessed key is what the lock is for: ' + refused.text);
+  await env.STORES.delete('lock:mamatoe');
+  const back = await call('/api/admin?handle=mamatoe', { cookie: store.cookie });
+  assert.equal(back.status, 200, 'a valid session clears the counter');
+});
+
 test('bad token / unknown store are refused', async () => {
   const noTok = await call('/api/admin?handle=mamatoe', { cookie: 'zl_sess=nope' });
   assert.ok(noTok.status === 403 || noTok.status === 401, 'refused: ' + noTok.status);
