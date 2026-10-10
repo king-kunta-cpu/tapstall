@@ -107,6 +107,16 @@ against the stored key and is redirected to a fresh code, and `GET` on such a
 link is answered the same way — never by marking anything paid. Guessing at
 either path counts as a failed attempt against the store's lock counter.
 
+Scanner proof, taken from production after the deploy: one probe order's
+`mark_url` fetched with six user agents — `WhatsApp/2.24.0`,
+`TelegramBot (like TwitterBot)`, `Twitterbot/1.0`, `Googlebot/2.1`,
+`Slack-ImgProxy 0.65`, `curl/8.5.0` — each with `-L`, following redirects the way
+a preview bot does. Every one returned `200` on the same `/c/…` URL and the order
+document, read straight back out of the ORDERS namespace, still said
+`awaiting_payment` with `pay.account = 0771234567` (the merchant's real EcoCash
+number) and `pay.amount = 0.04`. Under v0.2 the first of those six fetches would
+have marked the order paid on its own.
+
 ## Also fixed on the way (found by the new tests, not by a customer)
 
 * **`publicStore` was a denylist and leaked the queued change.** Once `pending`
