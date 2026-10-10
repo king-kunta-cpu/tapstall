@@ -79,7 +79,7 @@ fn = "pages/%s.html" % name
 if name.endswith(".csv"): fn = "pages/%s" % name
 body = open(fn, encoding="utf-8").read().encode()
 url  = ("https://api.cloudflare.com/client/v4/accounts/%s/storage/kv/namespaces/%s/values/tpl:%s"
-        % (acct, ns, name.replace(".csv", "-menu") if name.endswith(".csv") else name))
+        % (acct, ns, name[:-4] if name.endswith(".csv") else name))   # sample-menu.csv -> tpl:sample-menu
 req  = urllib.request.Request(url, data=body, method="PUT",
                               headers={"Authorization": "Bearer " + tok})
 out = urllib.request.urlopen(req, timeout=90).read().decode()
