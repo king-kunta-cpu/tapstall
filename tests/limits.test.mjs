@@ -65,9 +65,9 @@ async function call(path, { method = 'GET', body, cookie, admin, confirm, header
   if (!worker) worker = (await import('file://' + bundle)).default;
   const h = { 'content-type': 'application/json', 'cf-connecting-ip': '41.9.1.1', ...(headers || {}) };
   if (cookie) h.cookie = cookie;
-  if (admin) h['x-zimlink-admin'] = admin;
-  if (confirm) h['x-zimlink-confirm'] = '1';
-  const res = await worker.fetch(new Request('https://zimlink.test' + path, {
+  if (admin) h['x-tapstall-admin'] = admin;
+  if (confirm) h['x-tapstall-confirm'] = '1';
+  const res = await worker.fetch(new Request('https://tapstall.test' + path, {
     method, headers: h, body: body === undefined ? undefined : (typeof body === 'string' ? body : JSON.stringify(body)),
   }), env, { waitUntil: (p) => p });
   const text = await res.text();
@@ -158,8 +158,8 @@ test('a settings save still lands while the log write fails, and says so', async
 test('the operator can still sign in, read the estate, and pull a lever', async () => {
   const ok = await call('/ops/login', { method: 'POST', body: { secret: 'test-secret' }, confirm: true });
   assert.equal(ok.status, 200, 'a failed ops-log write must not lock the operator out: ' + ok.text.slice(0, 200));
-  assert.match(ok.cookie, /zl_ops=/);
-  const c = 'zl_ops=' + (ok.cookie.match(/zl_ops=([^;]+)/) || [])[1];
+  assert.match(ok.cookie, /tp_ops=/);
+  const c = 'tp_ops=' + (ok.cookie.match(/tp_ops=([^;]+)/) || [])[1];
 
   const bad = await call('/ops/login', { method: 'POST', body: { secret: 'nope' }, confirm: true });
   assert.equal(bad.status, 403, 'a wrong secret is still a 403, not a 500, when the counter cannot be written');
@@ -182,7 +182,7 @@ test('the operator can still sign in, read the estate, and pull a lever', async 
 
 test('a spent quota answers each reader in their own words', async () => {
   const login = await call('/ops/login', { method: 'POST', body: { secret: 'test-secret' }, confirm: true });
-  const c = 'zl_ops=' + (login.cookie.match(/zl_ops=([^;]+)/) || [])[1];
+  const c = 'tp_ops=' + (login.cookie.match(/tp_ops=([^;]+)/) || [])[1];
   FLIP.all = true;
   try {
     const rails = await call('/ops/api/rails', { method: 'POST', cookie: c, confirm: true, body: { rails: { gcbank: { label: 'GCB transfer', pct: 0.01 } } } });
@@ -263,7 +263,7 @@ test('a matured hold is served even when the fold cannot be written down', async
 
 test('signing out admits when it could not revoke the other sessions', async () => {
   const login = await call('/ops/login', { method: 'POST', body: { secret: 'test-secret' }, confirm: true });
-  const c = 'zl_ops=' + (login.cookie.match(/zl_ops=([^;]+)/) || [])[1];
+  const c = 'tp_ops=' + (login.cookie.match(/tp_ops=([^;]+)/) || [])[1];
   FLIP.all = true;
   let out;
   try { out = await call('/ops/logout', { method: 'POST', cookie: c }); } finally { FLIP.all = false; }

@@ -1,12 +1,26 @@
 #!/usr/bin/env bash
-# ZimLink — shared helpers for deploy.sh. bash + curl + jq + python3 only.
+# Tapstall — shared helpers for deploy.sh. bash + curl + jq + python3 only.
 # No wrangler, no npm install, no interactive login: CI-scriptable and
 # reproducible on a phone with termux if you ever need to.
 
-WORKER_NAME="${WORKER_NAME:-zimlink}"
-KV_STORES="${KV_STORES:-zimlink-stores}"
-KV_ORDERS="${KV_ORDERS:-zimlink-orders}"
-GH_REPO="${GH_REPO:-zimlink}"
+WORKER_NAME="${WORKER_NAME:-tapstall}"
+# The old brand's Worker is deployed alongside this one and does nothing but
+# redirect page visits, so every link already sent to a merchant keeps working.
+# Retire it by deleting LEGACY_WORKER_NAME here and in the workflow, once nobody
+# is arriving from the old hostname any more (watch it in the deploy log).
+LEGACY_WORKER_NAME="${LEGACY_WORKER_NAME:-zimlink}"
+# The KV namespaces keep their original titles: they are looked up by title and a
+# miss would *create an empty namespace*, which is how a rename would silently
+# orphan every store. kv_id therefore searches the new title, then the old one,
+# and only creates when neither exists.
+KV_STORES="${KV_STORES:-tapstall-stores}"
+KV_ORDERS="${KV_ORDERS:-tapstall-orders}"
+# …but the titles the namespaces were created under are searched too, and only a
+# miss on *both* creates anything. Otherwise a title that stops matching is how a
+# rename ends with a Worker pointing at an empty namespace full of nothing.
+KV_STORES_LEGACY="${KV_STORES_LEGACY:-zimlink-stores}"
+KV_ORDERS_LEGACY="${KV_ORDERS_LEGACY:-zimlink-orders}"
+GH_REPO="${GH_REPO:-tapstall}"
 GH_OWNER="${GH_OWNER:-}"
 CF_API="https://api.cloudflare.com/client/v4"
 
@@ -53,9 +67,20 @@ cf() { # cf GET|POST|PUT|DELETE /accounts-relative-path [json]
 
 workers_subdomain() { cf GET "/workers/subdomain" | jq -r '.result.subdomain // "main"'; }
 
-kv_id() { # kv_id <title> <binding> -> namespace id (creates when missing)
-  local title="$1" binding="$2" id
-  id=$(cf GET "/storage/kv/namespaces?per_page=100" | jq -r --arg t "$title" '.result[]|select(.title==$t)|.id' | head -1)
+kv_id() { # kv_id <title> <binding> [legacy title...] -> namespace id (creates only when none exist)
+  # Every title given is searched, newest first, before anything is created: a
+  # namespace lookup that misses does not fail loudly — it makes an EMPTY new
+  # namespace, and the deploy then "succeeds" against a store list with nothing in
+  # it. That is the one way a rename could delete a business by accident.
+  local title="$1" binding="$2" id="" t
+  shift 2
+  for t in "$title" "$@"; do
+    [[ -n "$id" && "$id" != "null" ]] && break
+    id=$(cf GET "/storage/kv/namespaces?per_page=100" | jq -r --arg t "$t" '.result[]|select(.title==$t)|.id' | head -1)
+    if [[ -n "$id" && "$id" != "null" && "$t" != "$title" ]]; then
+      say "KV namespace '$t' still carries the old title; using it (id $id)"
+    fi
+  done
   if [[ -z "$id" || "$id" == "null" ]]; then
     id=$(cf POST "/storage/kv/namespaces" "{\"title\":\"$title\",\"binding\":\"$binding\"}" | jq -r '.result.id')
     [[ -n "$id" && "$id" != "null" ]] || die "could not create KV namespace '$title'"
@@ -154,10 +179,10 @@ admin_secret() {
 
 put_secret() { # <KEY> <value>
   local key="$1" val="$2"
-  CF_TOKEN="$CF_TOKEN" CF_ACCOUNT="$CF_ACCOUNT" WORKER_NAME="$WORKER_NAME" ZL_KEY="$key" ZL_VAL="$val" python3 - <<'PYEOF' || warn "secret $key not set"
+  CF_TOKEN="$CF_TOKEN" CF_ACCOUNT="$CF_ACCOUNT" WORKER_NAME="$WORKER_NAME" TP_KEY="$key" TP_VAL="$val" python3 - <<'PYEOF' || warn "secret $key not set"
 import json, os, urllib.error, urllib.request
 tok  = os.environ["CF_TOKEN"]; acct = os.environ["CF_ACCOUNT"]; w = os.environ["WORKER_NAME"]
-key, val = os.environ["ZL_KEY"], os.environ["ZL_VAL"]
+key, val = os.environ["TP_KEY"], os.environ["TP_VAL"]
 url = "https://api.cloudflare.com/client/v4/accounts/%s/workers/scripts/%s/secrets" % (acct, w)
 # Cloudflare rejects a body without an explicit type:
 #   400 code 100145 "Secret 'X' has unsupported type ''"
@@ -200,10 +225,10 @@ PYEOF
 run_tests() {
   command -v node >/dev/null || die "node required for tests"
   say "unit tests"
-  if node --test tests/ >/tmp/zl_tests.log 2>&1; then
-    grep -E '^# (tests|pass|fail)' /tmp/zl_tests.log | tr '\n' ' '; echo
+  if node --test tests/ >/tmp/tp_tests.log 2>&1; then
+    grep -E '^# (tests|pass|fail)' /tmp/tp_tests.log | tr '\n' ' '; echo
   else
-    tail -50 /tmp/zl_tests.log; die "tests failed — refusing to deploy"
+    tail -50 /tmp/tp_tests.log; die "tests failed — refusing to deploy"
   fi
 }
 
@@ -229,9 +254,9 @@ push_github() {
     *)   warn "repo create returned $code: $(jq -c '.message' /tmp/gh_create.json 2>/dev/null)" ;;
   esac
 
-  [[ -d .git ]] || { git init -q -b main; git config user.name zimlink; git config user.email zimlink@localhost; }
+  [[ -d .git ]] || { git init -q -b main; git config user.name tapstall; git config user.email tapstall@localhost; }
   git add -A >/dev/null 2>&1
-  git -c commit.gpgsign=false commit -q -m "ZimLink $(worker_version): storefront worker, self-serve onboarding, fee math, QR poster" \
+  git -c commit.gpgsign=false commit -q -m "Tapstall $(worker_version): storefront worker, self-serve onboarding, fee math, QR poster" \
     || say "nothing new to commit"
   local url="https://x-access-token:${tok}@github.com/${owner}/${GH_REPO}.git"
   git remote get-url origin >/dev/null 2>&1 && git remote set-url origin "$url" || git remote add origin "$url"

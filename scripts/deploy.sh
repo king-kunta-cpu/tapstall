@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ZimLink deploy — one command, no dashboard clicking, no manual per-customer step.
+# Tapstall deploy — one command, no dashboard clicking, no manual per-customer step.
 # (wrangler is used when installed; a dependency-free publisher is the fallback.)
 #
 #   ./scripts/deploy.sh            tests → bundle → KV → Worker → templates → cron → self-check
@@ -49,9 +49,23 @@ print("  CI workflow YAML validates")
 PYEOF
 
 say "KV namespaces"
-STORES_ID=$(kv_id "$KV_STORES" STORES | tail -1 | tr -dc "a-f0-9")
-ORDERS_ID=$(kv_id "$KV_ORDERS" ORDERS | tail -1 | tr -dc "a-f0-9")
+STORES_ID=$(kv_id "$KV_STORES" STORES "$KV_STORES_LEGACY" | tail -1 | tr -dc "a-f0-9")
+ORDERS_ID=$(kv_id "$KV_ORDERS" ORDERS "$KV_ORDERS_LEGACY" | tail -1 | tr -dc "a-f0-9")
 say "stores=$STORES_ID  orders=$ORDERS_ID"
+
+# The one accident a rename can cause that looks like success: kv_id creates an
+# empty namespace when a title does not match, every deploy then "works", and the
+# stores are simply gone from the point of view of the Worker. So the resolved id
+# has to agree with the one recorded by the last deploy, and the namespace has to
+# have keys in it. Both are reads, so this costs nothing on a quota day.
+if [[ -f .deploy/state.json ]]; then
+  PREVIOUS=$(jq -r '.kv_stores // empty' .deploy/state.json)
+  if [[ -n "$PREVIOUS" && "$PREVIOUS" != "$STORES_ID" ]]; then
+    die "STORES resolved to $STORES_ID but the last deploy used $PREVIOUS. Refusing to publish against a namespace that is not the one with the stores in it — check KV_STORES/KV_STORES_LEGACY before anything else."
+  fi
+fi
+KEYS=$(cf GET "/storage/kv/namespaces/$STORES_ID/keys?per_page=1" | jq -r '.result_info.count // 0')
+[[ "$KEYS" != "0" ]] || die "STORES namespace $STORES_ID reports zero keys. If that is a fresh account, delete .deploy/state.json and run again; otherwise the title lookup found the wrong namespace."
 
 # the shipped pages must be the generated ones, or KV would publish a stale UI
 python3 scripts/ui_kit.py check || die "pages/*.html are out of date with pages/src/ — run python3 scripts/ui_kit.py and commit"
@@ -62,35 +76,8 @@ kv_put_tpl "$STORES_ID" store onboard admin fees index confirm renew ops sample-
 say "building bundle"
 bash scripts/build_bundle.sh .build
 
-# wrangler.toml is generated, never hand-edited, so the KV ids can not drift
-WORKER_NAME="$WORKER_NAME" STORES_ID="$STORES_ID" ORDERS_ID="$ORDERS_ID" python3 - <<'PYEOF'
-import os
-w, sid, oid = os.environ["WORKER_NAME"], os.environ["STORES_ID"], os.environ["ORDERS_ID"]
-open("wrangler.toml", "w").write(f"""name = "{w}"
-main = "worker/worker.js"
-compatibility_date = "2025-06-01"
-workers_dev = true
-
-# Templates are served from KV (keys tpl:*) so an HTML fix is one PUT, not a
-# redeploy: no git push, no dashboard, no build step. That is why there is no
-# [assets] block here — Cloudflare's static-asset upload format is the one part
-# of this stack that is not pleasant to script, and KV does the job for free.
-[[kv_namespaces]]
-binding = "STORES"
-id = "{sid}"
-
-[[kv_namespaces]]
-binding = "ORDERS"
-id = "{oid}"
-
-[triggers]
-crons = ["15 6,12,18,0 * * *"]
-
-[observability]
-enabled = true
-""")
-print("wrangler.toml regenerated")
-PYEOF
+NAME="$WORKER_NAME" STORES_ID="$STORES_ID" ORDERS_ID="$ORDERS_ID" WITH_CRON=1 REDIRECT_TO="" \
+  python3 scripts/gen_wrangler_toml.py
 
 say "publishing worker to Cloudflare"
 if [[ -x node_modules/.bin/wrangler ]]; then
@@ -122,6 +109,9 @@ else
 fi
 put_secret ADMIN_SECRET "$ADMIN_SECRET"
 [[ -n "${FLUTTERWAVE_SECRET:-}" ]] && put_secret FW_SECRET "$FLUTTERWAVE_SECRET"
+# the slug of the Flutterwave payment link in the receiving account: a brand
+# change must not silently break payouts, so it is configuration, not a literal
+[[ -n "${FW_PAY_SLUG:-}" ]] && put_secret FW_PAY_SLUG "$FW_PAY_SLUG" || true
 
 rm -rf .build
 
@@ -141,6 +131,32 @@ echo "--- routes ---"
 for r in / /onboard /fees /rails /ops /data/sample-menu.csv; do
   printf '  %-9s %s\n' "$r" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$BASE$r")"
 done
+# ------------------------------------------------- the old hostname, kept alive
+# Links already sent to merchants are absolute and were minted on the previous
+# brand's hostname. Deleting that Worker would 404 a storefront a buyer has saved
+# in WhatsApp, so the old name is deployed too: same code, same KV, and the one
+# env var that makes it answer redirects for page visits. A failure here is a
+# warning, never a red release: the alias is what was already running until now.
+if [[ -n "${LEGACY_WORKER_NAME:-}" && "$LEGACY_WORKER_NAME" != "$WORKER_NAME" ]]; then
+  say "alias worker $LEGACY_WORKER_NAME -> redirects to $BASE"
+  NAME="$LEGACY_WORKER_NAME" STORES_ID="$STORES_ID" ORDERS_ID="$ORDERS_ID" WITH_CRON=0 REDIRECT_TO="$BASE" \
+    python3 scripts/gen_wrangler_toml.py || warn "alias config not written"
+  if [[ -x node_modules/.bin/wrangler ]]; then
+    CLOUDFLARE_API_TOKEN="$CF_TOKEN" CLOUDFLARE_ACCOUNT_ID="$CF_ACCOUNT" \
+      node_modules/.bin/wrangler deploy --config wrangler.toml 2>&1 | grep -Ev "^$" | tail -3 || warn "alias deploy failed"
+  else
+    CF_TOKEN="$CF_TOKEN" CF_ACCOUNT="$CF_ACCOUNT" WORKER_NAME="$LEGACY_WORKER_NAME" \
+      python3 scripts/cf_publish.py "$LEGACY_WORKER_NAME" .build "kv:STORES:$STORES_ID" "kv:ORDERS:$ORDERS_ID" \
+      || warn "alias publish failed"
+  fi
+  WORKER_NAME="$LEGACY_WORKER_NAME" put_secret ADMIN_SECRET "$ADMIN_SECRET" || warn "alias secret not set"
+  OLD="https://$LEGACY_WORKER_NAME.$(workers_subdomain | tail -1).workers.dev"
+  say "alias answers $OLD/__ping -> $(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$OLD/__ping")"
+  say "alias redirects a saved store link: $(curl -s -o /dev/null -w '%{http_code} -> %{redirect_url}' --max-time 20 "$OLD/s/mamatoe")"
+  # the alias has no cron, so the schedule check is only meaningful for the main one
+  CF_TOKEN="$CF_TOKEN" CF_ACCOUNT="$CF_ACCOUNT" python3 scripts/set_triggers.py "$WORKER_NAME" "15 6,12,18,0 * * *" >/dev/null 2>&1 || true
+fi
+
 [[ "$MODE" == "--push" ]] && push_github
 echo
 ok "done. Give merchants this one link: $BASE/onboard"

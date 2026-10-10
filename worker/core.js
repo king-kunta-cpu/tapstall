@@ -1,5 +1,5 @@
 /**
- * ZimLink core — the pure logic (pricing, CSV/menu parsing, feed normalisation,
+ * Tapstall core — the pure logic (pricing, CSV/menu parsing, feed normalisation,
  * fraud flags, receipt text). Imported by worker/worker.js and unit-tested by
  * tests/core.test.mjs, so the tests run against shipped code, not a copy.
  */

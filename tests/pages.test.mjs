@@ -133,7 +133,7 @@ test('merchant-facing pages share the kit and the private ones hide from crawler
     assert.match(html, /var\(--tap\)/, name + ' defines the tap size but never applies it');
   }
   for (const name of MONEY) {
-    const hook = name === 'confirm' ? '/*__ZIMLINK_CONFIRM__*/null' : '/*__ZIMLINK_RENEW__*/null';
+    const hook = name === 'confirm' ? '/*__TAPSTALL_CONFIRM__*/null' : '/*__TAPSTALL_RENEW__*/null';
     assert.ok(src(name).includes(hook), name + ' lost the server data hook');
     assert.ok(page(name).includes(hook), name + ' shipped without its data hook');
   }

@@ -12,12 +12,12 @@
 # else about that store is left changed.
 set -uo pipefail
 cd "$(dirname "$0")/.."
-ORIGIN="${ORIGIN:-https://zimlink.simalidudu.workers.dev}"
+ORIGIN="${ORIGIN:-https://tapstall.simalidudu.workers.dev}"
 HANDLE="${HANDLE:-mamatoe}"
 TOK=$(cat /home/user/.secrets/cf_token 2>/dev/null || echo "${CLOUDFLARE_API_TOKEN:-}")
 ACCT=$(cat /home/user/.secrets/cf_account 2>/dev/null || echo "${CLOUDFLARE_ACCOUNT_ID:-}")
-KV=${KV_NS:-b5c1c89d95114092ae91bbafc5a2d76c}     # zimlink-stores: store docs, templates
-ORD_KV=${ORDERS_NS:-4f4ac94a66db4b859b61668a3c160819}   # zimlink-orders: order docs, lists
+KV=${KV_NS:-b5c1c89d95114092ae91bbafc5a2d76c}     # tapstall-stores (was zimlink-stores): store docs, templates
+ORD_KV=${ORDERS_NS:-4f4ac94a66db4b859b61668a3c160819}   # tapstall-orders (was zimlink-orders): order docs, lists
 pass=0 fail=0
 blocked=0
 
@@ -128,7 +128,7 @@ ck "and says what it will do" 'from ' "$PAGE"
 KVORDER=$(curl -s -m 30 -H "Authorization: Bearer $TOK" "https://api.cloudflare.com/client/v4/accounts/$ACCT/storage/kv/namespaces/$ORD_KV/values/order:$HANDLE:$ID")
 ckw "order document still awaiting_payment after the prefetch" '"status":"awaiting_payment"' "$KVORDER"
 nk "and it kept the payout details printed at order time" 'ZZ-PROBE' "$KVORDER"
-DASH=$(curl -s -m 30 -H "x-zimlink-admin: $ADMIN_KEY" "$ORIGIN/api/admin?handle=$HANDLE")
+DASH=$(curl -s -m 30 -H "x-tapstall-admin: $ADMIN_KEY" "$ORIGIN/api/admin?handle=$HANDLE")
 nk "no raw login code in the ledger payload" 'code=v1\.' "$DASH"
 # now be the browser: post the cap the page would post
 POST=$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"${MARK#/c/}"'"}' "$ORIGIN/api/mark")
@@ -142,25 +142,25 @@ ckw "undo returns it to awaiting_payment" '"awaiting_payment"' "$UNDO"
 echo "[5] settings: cosmetic instant, money held 15 minutes, cancellable"
 HOURS=$(printf '%s' "$STORE" | python3 -c "import sys,json;print(json.load(sys.stdin).get('hours','') or 'open')" 2>/dev/null)
 PROBE="ZZ-PROBE-$(date +%s | tail -c 6)"
-SR=$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-zimlink-admin: $ADMIN_KEY" \
+SR=$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" \
   -d '{"handle":"'"$HANDLE"'","hours":"'"$HOURS"'","pay_account":"'"$PROBE"'"}' "$ORIGIN/api/settings")
 ck "held list names the payout field" '"held":\["pay_account"\]' "$SR"
 ck "and gives a fuse, not a maybe" '"hold_until":[0-9]' "$SR"
 PUB=$(curl -s -m 30 "$ORIGIN/s/$HANDLE/config.json")
 nk "the new payout account is NOT live yet" "$PROBE" "$PUB"
 nk "and not even visible as a queue" 'pending|auth_gen' "$PUB"
-ADMBEF=$(curl -s -m 30 -H "x-zimlink-admin: $ADMIN_KEY" "$ORIGIN/api/admin?handle=$HANDLE")
+ADMBEF=$(curl -s -m 30 -H "x-tapstall-admin: $ADMIN_KEY" "$ORIGIN/api/admin?handle=$HANDLE")
 ckw "the owner sees the raw queued value" "$PROBE" "$(printf '%s' "$ADMBEF" | python3 -c "
 import sys,json
 d=json.load(sys.stdin)
 print(json.dumps((d.get('pending') or {}).get('fields', {})))" 2>/dev/null)"
 ckw "with a countdown, not a vague promise" '"in_ms":[1-9]' "$ADMBEF"
-RV=$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-zimlink-admin: $ADMIN_KEY" -d '{"handle":"'"$HANDLE"'"}' "$ORIGIN/api/settings/revert")
+RV=$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" -d '{"handle":"'"$HANDLE"'"}' "$ORIGIN/api/settings/revert")
 ckw "revert cancels it" '"cancelled":\["pay_account"\]' "$RV"
 PUB2=$(curl -s -m 30 "$ORIGIN/s/$HANDLE/config.json")
 nk "nothing was applied in the meantime" "$PROBE" "$PUB2"
 ck "hours unchanged after the whole test" "\"hours\":\"$HOURS\"" "$PUB2"
-ck "a bad value is refused by field" '"fields":\{"rail"' "$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-zimlink-admin: $ADMIN_KEY" -d '{"handle":"'"$HANDLE"'","rail":"momo_pay"}' "$ORIGIN/api/settings")"
+ck "a bad value is refused by field" '"fields":\{"rail"' "$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" -d '{"handle":"'"$HANDLE"'","rail":"momo_pay"}' "$ORIGIN/api/settings")"
 ck "a forged cap is refused as expired" '"link_expired"' "$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"v1.9999999999.eyJhIjoibWFyayJ9.AAAAAAAA"}' "$ORIGIN/api/mark")"
 ck "a truncated copy of a real cap is refused" '"link_expired"' "$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"${MARK#/c/}"'x"}' "$ORIGIN/api/mark")"
 
@@ -171,7 +171,7 @@ ck "their v0.2 link trades up for a code" '^v1\.' "$CODE"
 JAR=$(mktemp)
 LR=$(curl -s -m 30 -c "$JAR" -X POST -H 'content-type: application/json' -d '{"code":"'"$CODE"'"}' "$ORIGIN/api/login")
 ck "the code exchanges for a session" '"ok":true' "$LR"
-ck "cookie is HttpOnly, SameSite=Strict, Secure, 12 h" 'HttpOnly' "$(grep -i zl_sess "$JAR")"
+ck "cookie is HttpOnly, SameSite=Strict, Secure, 12 h" 'HttpOnly' "$(grep -i tp_sess "$JAR")"
 ck "dashboard opens with the cookie" '"orders"' "$(curl -s -m 30 -b "$JAR" "$ORIGIN/api/admin?handle=$HANDLE")"
 ck "and 401s without it" '^401$' "$(code "$ORIGIN/api/admin?handle=$HANDLE")"
 ck "the admin page is the new one" 'Store settings' "$(curl -s -m 30 "$ORIGIN/a")"
@@ -196,16 +196,16 @@ ONE=$(printf '%s' "$STORE" | python3 -c "import sys,json;print(json.load(sys.std
 OTH_DOC=$(curl -s -m 30 -H "Authorization: Bearer $TOK" "https://api.cloudflare.com/client/v4/accounts/$ACCT/storage/kv/namespaces/$KV/values/store:$OTHER")
 OTH_KEY=$(printf '%s' "$OTH_DOC" | python3 -c "import sys,json;print(json.load(sys.stdin).get('admin_token',''))" 2>/dev/null)
 if [[ -n "$OTH_KEY" ]]; then
-  ck "$HANDLE's key cannot read $OTHER's ledger" '^403$' "$(code -H "x-zimlink-admin: $ADMIN_KEY" "$ORIGIN/api/admin?handle=$OTHER")"
-  ck "$OTHER's key cannot write $HANDLE's settings" '^403$' "$(curl -s -m 30 -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -H "x-zimlink-admin: $OTH_KEY" -d '{"handle":"'"$HANDLE"'","pay_account":"cross-tenant"}' "$ORIGIN/api/settings")"
+  ck "$HANDLE's key cannot read $OTHER's ledger" '^403$' "$(code -H "x-tapstall-admin: $ADMIN_KEY" "$ORIGIN/api/admin?handle=$OTHER")"
+  ck "$OTHER's key cannot write $HANDLE's settings" '^403$' "$(curl -s -m 30 -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $OTH_KEY" -d '{"handle":"'"$HANDLE"'","pay_account":"cross-tenant"}' "$ORIGIN/api/settings")"
   PUBT=$(curl -s -m 30 "$ORIGIN/s/$HANDLE/config.json")
   nk "and no trace of that attempt reached the public page" 'cross-tenant' "$PUBT"
   # a confirm cap is bound to the store inside its signed payload; the `handle`
   # in the body is not consulted, so it cannot be re-pointed at another tenant
-  BEFORE=$(curl -s -m 30 -H "x-zimlink-admin: $OTH_KEY" "$ORIGIN/api/admin?handle=$OTHER" | python3 -c "
+  BEFORE=$(curl -s -m 30 -H "x-tapstall-admin: $OTH_KEY" "$ORIGIN/api/admin?handle=$OTHER" | python3 -c "
 import sys,json;d=json.load(sys.stdin);print(sum(1 for o in d.get('orders',[]) if o.get('status')=='paid'))" 2>/dev/null)
 curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"${MARK#/c/}"'","handle":"'"$OTHER"'"}' "$ORIGIN/api/mark" > /tmp/resp.json
-AFTER=$(curl -s -m 30 -H "x-zimlink-admin: $OTH_KEY" "$ORIGIN/api/admin?handle=$OTHER" | python3 -c "
+AFTER=$(curl -s -m 30 -H "x-tapstall-admin: $OTH_KEY" "$ORIGIN/api/admin?handle=$OTHER" | python3 -c "
 import sys,json;d=json.load(sys.stdin);print(sum(1 for o in d.get('orders',[]) if o.get('status')=='paid'))" 2>/dev/null)
 ck "the body's handle is ignored, $OTHER's paid count stays $BEFORE" "^${AFTER}$" "$BEFORE"
   VERDICT=$(python3 -c "import json;r=json.load(open('/tmp/resp.json'));print('own-store='+str(bool(r.get('ok'))).lower())" 2>/dev/null)
@@ -256,8 +256,8 @@ open('$BODY','w').write(json.dumps({'secret': open('$SEC_FILE').read().strip()})
 HDR=$(mktemp)
 curl -s -m 30 -D "$HDR" -o /dev/null -X POST -H 'content-type: application/json' --data-binary "@$BODY" "$ORIGIN/ops/login"
 # only derived values are passed to ck from here on
-HAVE=$(grep -ic '^set-cookie: *zl_ops=' "$HDR")
-attrs() { awk 'BEGIN{IGNORECASE=1} /^set-cookie: *zl_ops/ {print}' "$HDR" | tr -d '\r'; }
+HAVE=$(grep -ic '^set-cookie: *tp_ops=' "$HDR")
+attrs() { awk 'BEGIN{IGNORECASE=1} /^set-cookie: *tp_ops/ {print}' "$HDR" | tr -d '\r'; }
 FLAGS=$(attrs | grep -c 'HttpOnly' || true)
 SAMESITE=$(attrs | grep -cE 'SameSite=Strict' || true)
 SECURE=$(attrs | grep -cE '; ?Secure' || true)
@@ -272,21 +272,21 @@ if [[ -z "$OC" ]]; then
   echo "  ! /ops/login did not answer with a session — the rest of [8] would be noise"
   rm -f "$BODY" "$HDR"
 else
-ST2=$(curl -s -m 60 -b "zl_ops=$OC" "$ORIGIN/ops/api/state")
+ST2=$(curl -s -m 60 -b "tp_ops=$OC" "$ORIGIN/ops/api/state")
 ck "the estate reads back as data the console can render" '"totals":\{' "$ST2"
 ck "  · with an attention queue that names its reasons" '"attention":\[' "$ST2"
 ck "  · and a per-refresh KV cost, so polling is a choice" '"reads_used_estimate":' "$ST2"
 nk "  · holding no credential, masked or not" 'admin_token|secret_hash|fw_secret|auth_gen|"admin_url":' "$ST2"
-HL=$(curl -s -m 60 -b "zl_ops=$OC" "$ORIGIN/ops/api/health")
+HL=$(curl -s -m 60 -b "tp_ops=$OC" "$ORIGIN/ops/api/health")
 ck "health carries the runtime self-check" '"selftest":\{' "$HL"
 ck "  · and the Pages mirror it is served beside" '"pages":' "$HL"
-TPLS=$(curl -s -m 30 -b "zl_ops=$OC" "$ORIGIN/ops/api/templates")
+TPLS=$(curl -s -m 30 -b "tp_ops=$OC" "$ORIGIN/ops/api/templates")
 ck "every page the Worker serves is in KV" '"live": ?true' "$TPLS"
 nk "  · none missing" '"live": ?false' "$TPLS"
-DET=$(curl -s -m 30 -b "zl_ops=$OC" "$ORIGIN/ops/api/store?handle=$HANDLE")
+DET=$(curl -s -m 30 -b "tp_ops=$OC" "$ORIGIN/ops/api/store?handle=$HANDLE")
 ck "one store opens with its orders, log and queued change" '"summary":\{' "$DET"
 ck "  · the drawer is told which fields the merchant may queue" '"editable":\[' "$DET"
-LL=$(curl -s -m 30 -b "zl_ops=$OC" -H 'x-zimlink-confirm: 1' -X POST -H 'content-type: application/json' \
+LL=$(curl -s -m 30 -b "tp_ops=$OC" -H 'x-tapstall-confirm: 1' -X POST -H 'content-type: application/json' \
   -d '{"handle":"'"$HANDLE"'","action":"link"}' "$ORIGIN/ops/api/store")
 # a dashboard link is a 7-day credential: it is counted, never printed
 LINK_OK=$(printf '%s' "$LL" | grep -c '/a?code=v1' || true)
@@ -295,12 +295,12 @@ LINK_TTL=$(printf '%s' "$LL" | grep -oE '"dashboard_url":"https://[^/]+/a\?code=
 LINK_LEFT=$(( LINK_TTL - $(date +%s) ))
 ck "  · and it expires on its own (in days, not never)" '^([0-6]|7)$' "$(( LINK_LEFT / 86400 ))"
 ck "  · notify and link are real actions, not dead buttons" '"ok": ?true' "$LL"
-AUD=$(curl -s -m 30 -b "zl_ops=$OC" "$ORIGIN/ops/api/audit")
+AUD=$(curl -s -m 30 -b "tp_ops=$OC" "$ORIGIN/ops/api/audit")
 ck "  · and the write lands in the operator log" '"ops":\[' "$AUD"
 nk "  · the log line carries no secret" 'admin_token' "$AUD"
 LOB=$(mktemp)
-LO=$(curl -s -m 30 -o "$LOB" -w '%{http_code}' -X POST -b "zl_ops=$OC" "$ORIGIN/ops/logout")
-AFTER=$(curl -s -m 30 -o /dev/null -w '%{http_code}' -b "zl_ops=$OC" "$ORIGIN/ops/api/state")
+LO=$(curl -s -m 30 -o "$LOB" -w '%{http_code}' -X POST -b "tp_ops=$OC" "$ORIGIN/ops/logout")
+AFTER=$(curl -s -m 30 -o /dev/null -w '%{http_code}' -b "tp_ops=$OC" "$ORIGIN/ops/api/state")
 ck "signing out answers" '^200$' "$LO"
 if [ "$AFTER" = "401" ]; then
   ck "  · and the cookie is worth nothing afterwards" '^401$' "$AFTER"
@@ -311,7 +311,7 @@ else
   ck "  · and when it could not revoke the rest, it says exactly that" '"sessions_ended":false' "$(cat "$LOB")"
 fi
 rm -f "$LOB"
-code -b "zl_ops=$OC" "$ORIGIN/ops/api/state" >/dev/null; code -b "zl_ops=$OC" "$ORIGIN/ops/api/state" >/dev/null
+code -b "tp_ops=$OC" "$ORIGIN/ops/api/state" >/dev/null; code -b "tp_ops=$OC" "$ORIGIN/ops/api/state" >/dev/null
 TRY=$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"secret":"not-the-platform-secret"}' "$ORIGIN/ops/login" | grep -oE '"tries_left": ?[0-9]+' | grep -oE '[0-9]+' | head -1)
 ck "  · dead-cookie probes did not lock anybody out" '^([6-9]|1[0-2])$' "$TRY"
 # and the guess this check just made is wiped from the counter, so running
@@ -323,7 +323,7 @@ rm -f "$HDR"
 fi
 
 echo "[9] tidy up"
-CK2=$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-zimlink-admin: $ADMIN_KEY" \
+CK2=$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" \
   -d '{"handle":"'"$HANDLE"'","id":"'"$ID"'","status":"cancelled"}' "$ORIGIN/api/mark")
 ckw "probe order cancelled" '"status":"cancelled"' "$CK2"
 rm -f "$H" "$JAR"

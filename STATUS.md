@@ -1,4 +1,44 @@
-# Status — 2026-10-10
+# Tapstall — status
+
+## The rename: ZimLink → Tapstall (2026-10-10, v0.5.0)
+
+The name was a research artifact — Zimbabwe-shaped because that is where the
+tariffs were verified — and the brief is now "anyone on WhatsApp the global
+platforms will not serve". A country in the name says the opposite of that. So:
+product, repo (`king-kunta-cpu/tapstall`), Worker (`tapstall.simalidudu.workers.dev`),
+Pages mirror, KV namespace titles, mail subject, ICS `PRODID`, day-sheet file
+names, the storefront poster default. Older entries in this file keep saying
+ZimLink: that is what was true when they were written.
+
+What did **not** change is the point of the exercise — a rename must not cost
+anybody anything they had already:
+
+| Carried by | How |
+|---|---|
+| Every link already sent (`/s/<handle>`, `/a?code=`, `/c/<cap>`, `/renew/<token>`) | the old Worker is deployed too, from the same code and the same KV, with `REDIRECT_TO` set: page GETs 301 to the canonical origin, everything with a body is still served there, so a browser mid-order never loses it. Its cron is off — two Workers on one KV must not sweep twice. |
+| Merchant and operator sessions | cookies are written as `tp_sess`/`tp_ops`, read as either. `auth_gen`/`ops_gen` still govern validity, so revocation works under both spellings; signing in clears the old name so "sign out" cannot be defeated by a cookie we accept on purpose. |
+| Pages cached in a phone | they post `x-zimlink-confirm`/`x-zimlink-admin`; both are accepted, and CORS allows both. |
+| Templates still in KV | `fillPage()` replaces `/*__TAPSTALL_*__*/null` **and** `/*__ZIMLINK_*__*/null` in one pass, so the Worker does not have to be deployed in the same second as the pages (and today it cannot be: no KV writes left). |
+| A buyer's basket, a merchant's half-typed sign-up | `zl_cart_*` and `zl_onboard` are read, copied to the new key and only then removed. Losing a cart to a rebrand is not a rename, it is a lost order. |
+| Merchant webhook integrations | `x-tapstall-body` is sent alongside `x-zimlink-body`; `x-tapstall`/`x-zimlink` response headers both carry the version. |
+| A Flutterwave payout link | the slug became config (`FW_PAY_SLUG`, default `tapstall`) instead of a string welded to the old brand. |
+| `VERSION` | 0.4.3 → 0.5.0: a hostname change is not a patch. |
+
+Two guards were added while doing it, because the dangerous part of a rename is a
+step that *succeeds quietly*:
+
+* `kv_id` now searches the new namespace title, then the old one, and creates only
+  if neither exists. A miss does not fail, it makes an empty namespace, and the
+  deploy would then "work" against a store list with nothing in it. Testing that
+  line is exactly how I created an empty `tapstall-stores` — caught it (0 keys),
+  deleted it, wrote the guard.
+* `deploy.sh` refuses to publish if the resolved STORES id differs from the one in
+  `.deploy/state.json`, or if the namespace reports zero keys.
+
+Not done, deliberately: `no-reply@simalidudu.workers.dev` stays the send address —
+it is what the Email binding will allow, not a brand choice. The orphan namespace
+`zimlink-store` (b32c2fe9…) is still there for you to delete. `LEGACY_WORKER_NAME`
+is one line to remove once the old hostname stops getting traffic.
 
 ## Live right now
 

@@ -53,7 +53,7 @@ def val(name, fname):
 
 
 def main():
-    repo = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("GH_REPO", "king-kunta-cpu/zimlink")
+    repo = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("GH_REPO", "king-kunta-cpu/tapstall")
     token = val("GH_TOKEN", "gh_token")
     if not token:
         sys.exit("GH_TOKEN not found (env or .secrets/gh_token)")
@@ -82,7 +82,7 @@ def main():
         print(f"  {name}: {'set' if st in (201, 204) else str(st) + ' ' + str(res.get('message'))[:60]}")
 
     st, res = gh(f"/repos/{repo}/actions/variables", token, "POST",
-                 {"name": "WORKER_NAME", "value": os.environ.get("WORKER_NAME", "zimlink")})
+                 {"name": "WORKER_NAME", "value": os.environ.get("WORKER_NAME", "tapstall")})
     print("  WORKER_NAME variable:", "created" if st == 201 else ("exists" if st == 409 else st))
     # CI needs to be able to write Pages from a workflow
     st, res = gh(f"/repos/{repo}/pages", token, "PUT", {"build_type": "workflow"})

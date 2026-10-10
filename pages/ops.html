@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex,nofollow">
 <meta name="theme-color" content="#0b0f14">
-<title>ZimLink · operator</title>
+<title>Tapstall · operator</title>
 <style>
-/* ZimLink UI kit — one visual language for both suites (merchant pages and the
+/* Tapstall UI kit — one visual language for both suites (merchant pages and the
  * operator console). Every shipped page inlines this block instead of linking to
  * it: a page that arrives as one file survives the KV template store, a mail
  * preview, a sandboxed viewer and a 2G reconnect, none of which can be counted
@@ -215,7 +215,7 @@ input[type=search] { max-width: 16rem }
 </head>
 <body>
 <div class="chrome"><div class="in">
-  <b>ZimLink <span class="badge" id="ver" style="background:#1a2530;border-color:#22303c;color:#aebbc7">operator</span></b>
+  <b>Tapstall <span class="badge" id="ver" style="background:#1a2530;border-color:#22303c;color:#aebbc7">operator</span></b>
   <span class="bar">
     <a href="#" id="hCron" title="last cron run">cron <span class="dot" id="dCron"></span></a>
     <a href="#" id="hPages" title="GitHub Pages mirror">pages <span class="dot" id="dPages"></span></a>
@@ -325,7 +325,7 @@ input[type=search] { max-width: 16rem }
       <div class="card flat">
         <h3>Last deploy (CI writes this)</h3>
         <pre class="out" id="ciOut">loading…</pre>
-        <p class="muted tiny"><a href="https://github.com/king-kunta-cpu/zimlink/actions" target="_blank">Actions runs</a> · push to <span class="mono">main</span> is the only deploy path · <a href="#" id="dlCheck">run prod_check locally</a></p>
+        <p class="muted tiny"><a href="https://github.com/king-kunta-cpu/tapstall/actions" target="_blank">Actions runs</a> · push to <span class="mono">main</span> is the only deploy path · <a href="#" id="dlCheck">run prod_check locally</a></p>
       </div>
     </div>
   </section>
@@ -347,7 +347,7 @@ var D = { stores: [], totals: {}, attention: [], sel: null, filter: 'all', q: ''
 
 function api(path, body) {
   var init = body === undefined ? { method: 'GET', credentials: 'same-origin' }
-    : { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json', 'x-zimlink-confirm': '1' }, body: JSON.stringify(body) };
+    : { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json', 'x-tapstall-confirm': '1' }, body: JSON.stringify(body) };
   return fetch(path, init).then(function (r) {
     return r.text().then(function (t) { var j = null; try { j = JSON.parse(t); } catch (e) {} return { s: r.status, j: j, t: t }; });
   });
@@ -361,14 +361,15 @@ function toast(msg, bad) {
 
 /* ---------------------------------------------------------------- sign-in */
 (function boot() {
-  var cfg = /*__ZIMLINK_OPS__*/null || {};
+  var cfg = /*__TAPSTALL_OPS__*/null || {};
   if (cfg.version) q('#ver').textContent = 'v' + cfg.version + ' · operator';
   if (cfg.signed_in) start(); else q('#gate').classList.remove('hide');
   q('#inBtn').onclick = signIn;
   q('#secret').onkeydown = function (e) { if (e.key === 'Enter') signIn(); };
   q('#outBtn').onclick = function (e) { e.preventDefault(); api('/ops/logout', {}).then(function () { location.href = '/ops'; }); };
-  q('#darkBtn').onclick = function (e) { e.preventDefault(); var on = document.body.classList.toggle('dark'); localStorage.setItem('zl_ops_dark', on ? '1' : ''); this.textContent = on ? 'light' : 'dark'; };
-  if (localStorage.getItem('zl_ops_dark')) { document.body.classList.add('dark'); q('#darkBtn').textContent = 'light'; }
+  q('#darkBtn').onclick = function (e) { e.preventDefault(); var on = document.body.classList.toggle('dark'); localStorage.setItem('tp_ops_dark', on ? '1' : ''); this.textContent = on ? 'light' : 'dark'; };
+  var darkPref = localStorage.getItem('tp_ops_dark') || localStorage.getItem('zl_ops_dark');
+  if (darkPref) { document.body.classList.add('dark'); q('#darkBtn').textContent = 'light'; }
   q('#tabs').onclick = function (e) {
     var b = e.target.closest('button[data-v]'); if (!b) return;
     ['overview', 'tenants', 'templates', 'deploys', 'log'].forEach(function (v) { q('#v-' + v).classList.toggle('hide', v !== b.getAttribute('data-v')); });

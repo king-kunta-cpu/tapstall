@@ -1,9 +1,9 @@
-# ZimLink — a WhatsApp order desk for markets a global platform will not serve
+# Tapstall — a WhatsApp order desk for markets a global platform will not serve
 
 Merchants on WhatsApp lose money in the last five minutes before the money
 moves: buyers send screenshots instead of payments, mobile-money rails cost
 3–5% and nobody passes that on, and a spreadsheet of "pending" orders is the
-only ledger. ZimLink gives each merchant a real storefront link that runs
+only ledger. Tapstall gives each merchant a real storefront link that runs
 itself. The whole stack is on free tiers, and **no operator touches it** —
 sign-up, provisioning, menu updates, payment confirmation and renewal are all
 self-serve.
@@ -13,7 +13,10 @@ that is where the incumbent refuses to work. The product is not limited to
 those two: a payment method or a country we have not priced is a config entry,
 not a release. See *Markets are data, not code*.
 
-**Live:** `https://zimlink.simalidudu.workers.dev/onboard`
+**Live:** `https://tapstall.simalidudu.workers.dev/onboard`
+(storefront `…/s/<handle>` and every link minted before the rename still work: the
+previous hostname `zimlink.simalidudu.workers.dev` is deployed as an alias and
+answers with a redirect for page visits)
 Storefront `…/s/<handle>` · dashboard `…/a` · rate calculator `…/fees`
 
 ---
@@ -135,7 +138,7 @@ verified ZW/SA tariffs) but it is now a **default, not the whole answer**:
   and the dashboard all build their pickers from it, so a new method is live for
   the next buyer within the 60-second cache and no page is redeployed.
 - **Operator:** Ops console → *Templates* → *Markets & rails* (`POST
-  /ops/api/rails`, same session and same `x-zimlink-confirm: 1` click as every
+  /ops/api/rails`, same session and same `x-tapstall-confirm: 1` click as every
   other lever). A rail is `{label, dial, pct, imtt, fixed, type}`; label must be
   ≥ 2 characters, `pct`/`imtt` are clamped to 0–30% and `fixed` to ≤ 1000 so a
   fat-fingered percentage cannot quote a 300% surcharge. Keys that already exist
@@ -190,7 +193,7 @@ Three rules hold it together, and each is tested:
   ("Lost your link?") never routes through the operator, which is what keeps the
   no-participation rule true.
 * **Every lever needs a second click.** `POST /ops/api/*` mutations refuse
-  without `x-zimlink-confirm: 1`, which a stray `<img>` cannot send, and each one
+  without `x-tapstall-confirm: 1`, which a stray `<img>` cannot send, and each one
   writes both the operator log and the store's own log — so "was that us?" has an
   answer in the merchant's dashboard.
 * **A sign-in is a cookie, never a URL.** `/ops/login` exchanges the platform
@@ -245,7 +248,7 @@ see and cancel, and because revoking takes one press.
 ## What is deliberately not here
 
 * **A password.** The store's `admin_token` is an API key for the merchant's own
-  tooling (`x-zimlink-admin`), not something a human types. Losing a device is
+  tooling (`x-tapstall-admin`), not something a human types. Losing a device is
   answered by sign-out and `POST /api/revoke`; losing the link is answered by
   knowledge recovery (`owner_email` *or* the store's WhatsApp, plus the payout
   account, or the sheet link for a cash shop) — 12 tries per 10 minutes per
@@ -272,7 +275,7 @@ see and cancel, and because revoking takes one press.
 
 | | |
 |---|---|
-| Onboarding (give this to merchants) | `https://zimlink.simalidudu.workers.dev/onboard` |
+| Onboarding (give this to merchants) | `https://tapstall.simalidudu.workers.dev/onboard` |
 | A store | `…/s/<handle>` · its config `…/s/<handle>/config.json` · its menu `…/s/<handle>/feed.json` |
 | Merchant dashboard | `…/a` — opened by the code returned at sign-up and sent with each order; `POST /api/login`, `POST /api/logout`, `POST /api/recover`, `POST /api/revoke` |
 | Self-service settings | `POST /api/settings` · `POST /api/settings/revert` (fields from `GET /api/admin` → `editable`) |
@@ -280,7 +283,7 @@ see and cancel, and because revoking takes one press.
 | Health / diagnostics | `…/__ping`, `…/__selftest`, `…/__selftest?scheduled=1` |
 | Rail table | `…/rails` |
 | Production check (70 assertions, run it any time) | `./scripts/prod_check.sh` — needs the KV read token for the crawler probe, works with `HANDLE=` set to any store |
-| Deploy log of the last CI run | `https://raw.githubusercontent.com/king-kunta-cpu/zimlink/main/ci-deploy.log` |
+| Deploy log of the last CI run | `https://raw.githubusercontent.com/king-kunta-cpu/tapstall/main/ci-deploy.log` |
 
 `STATUS.md` records what has been proven on production, the one item still
 waiting on a clock (the cron heartbeat), and the deliberate limits.

@@ -16,7 +16,7 @@ import urllib.error
 import urllib.request
 
 API = "https://api.cloudflare.com/client/v4"
-CRON = os.environ.get("ZIMLINK_CRON", "15 6,12,18,0 * * *")   # 4x daily UTC
+CRON = os.environ.get("TAPSTALL_CRON", "15 6,12,18,0 * * *")   # 4x daily UTC
 COMPAT_DATE = os.environ.get("COMPAT_DATE", "2025-06-01")
 CT = {
     ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript",

@@ -1,5 +1,5 @@
 /**
- * ZimLink — zero-touch WhatsApp storefront platform.
+ * Tapstall — zero-touch WhatsApp storefront platform.
  * Cloudflare Worker. Free-tier only (Worker + 2 KV namespaces + cron + assets).
  *
  * Bindings
@@ -21,11 +21,63 @@ import {
   EDITABLE_FIELDS, SOFT_FIELDS, sign, adminStore, normaliseRail, resolveRail,
 } from './core.js';
 
-const VERSION = '0.4.3';
+const VERSION = '0.5.0';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 const MAX_ORDERS_KEPT = 200;
 const RL = { windowSec: 60, max: 8 };
+
+/* ---- rename compatibility: ZimLink -> Tapstall, 2026-10-10 -----------------
+   A rename may change what a person reads. It must not change what a person has
+   already been sent, what sits in their browser, or what an integration already
+   posts. So every spelling the old brand wrote is still accepted, and only the
+   new one is ever written out. These aliases are load-bearing until the last KV
+   template has been republished — deleting one logs merchants out, drops buyer
+   carts in progress, or renders a page whose data hook never filled.
+   Revocation does NOT depend on the old names: both cookies carry the store's
+   `auth_gen` (or the platform's `ops_gen`) inside the signed payload, so one KV
+   write still invalidates every link, key and cookie under either spelling. */
+const LEGACY_COOKIE = { tp_sess: 'zl_sess', tp_ops: 'zl_ops' };
+const LEGACY_HEADER = {
+  'x-tapstall-confirm': 'x-zimlink-confirm',
+  'x-tapstall-admin': 'x-zimlink-admin',
+};
+function reqHeader(req, name) {
+  const v = req.headers.get(name);
+  if (v !== null && v !== '') return v;
+  const alt = LEGACY_HEADER[name];
+  return alt ? req.headers.get(alt) : v;
+}
+function cookieVal(req, name) {
+  const raw = req.headers.get('cookie') || '';
+  for (const n of [name, LEGACY_COOKIE[name]].filter(Boolean)) {
+    const m = raw.match(new RegExp('(?:^|;\\s*)' + n + '=([^;]*)'));
+    if (m && m[1]) return decodeURIComponent(m[1]);
+  }
+  return '';
+}
+/** Both cookie names, cleared: an old one left in a browser would still read as
+ *  a valid session here, because we accept it. Signing out means both. */
+function killCookies(names) {
+  const extra = names.map((n) => LEGACY_COOKIE[n]).filter(Boolean);
+  return names.concat(extra)
+    .map((n) => n + '=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict; Secure');
+}
+/** Fill a page's data hook under either brand. The templates in KV are republished
+ *  on their own schedule (and cannot be written at all on a spent-quota day), so
+ *  the Worker has to speak both spellings for as long as any old copy is live. */
+function fillPage(html, pairs) {
+  // `marker` is the whole brand-bearing name, e.g. `TAPSTALL_CONFIG`: the pages
+  // are written with `/*__TAPSTALL_CONFIG__*/null` and yesterday's KV copy with
+  // `/*__ZIMLINK_CONFIG__*/null`, and both must land in one pass
+  let out = String(html || '');
+  for (const [marker, value] of pairs) {
+    const txt = JSON.stringify(value);
+    out = out.replace('/*__' + marker + '__*/null', txt)
+             .replace('/*__' + marker.replace('TAPSTALL', 'ZIMLINK') + '__*/null', txt);
+  }
+  return out;
+}
 
 /* ---- authority model (see core.js: "a GET must never move money") ---- */
 const HOLD_MS = 15 * 60 * 1000;      // money-moving settings land after this hold
@@ -60,6 +112,17 @@ export default {
 async function route(req, url, env, ctx) {
   const p = url.pathname;
   const NOSTORE = { 'Cache-Control': 'no-store' };
+
+  /* The previous brand's hostname is kept alive as an alias of this Worker and
+     answers nothing but a redirect (env.REDIRECT_TO is set only on that deploy).
+     Only page GETs: a request with a body — placing an order, tapping confirm,
+     saving a setting — is served here as normal, because a 301 loses a POST and
+     a browser that is mid-action must not lose the order. Nothing a customer
+     already saved dies when the name changes. */
+  if (env.REDIRECT_TO && req.method === 'GET' && LEGACY_PAGES_RE.test(p)) {
+    const to = env.REDIRECT_TO.replace(/\/+$/, '') + p + (url.search || '');
+    return redirect(to, 301);
+  }
 
   if (p === '/__ping') return json({ ok: true, version: VERSION, ts: Date.now() });
   if (p === '/__selftest') {
@@ -115,7 +178,7 @@ async function route(req, url, env, ctx) {
     return json({ ok: false, error: 'method_not_allowed', why: 'This endpoint changes state, so it never answers GET.' }, 405, { Allow: 'POST' });
   }
   if (p === '/api/login' && req.method === 'POST') return loginExchange(req, env);
-  if (p === '/api/logout' && req.method === 'POST') return withCookie(json({ ok: true, signed_out: true }), KILL_COOKIE);
+  if (p === '/api/logout' && req.method === 'POST') return withCookie(json({ ok: true, signed_out: true }), ...KILL_COOKIES);
   if (p === '/api/recover' && req.method === 'POST') return recoverLink(req, url, env);
 
   if (p === '/api/order' && req.method === 'POST') return placeOrder(req, url, env, ctx);
@@ -145,7 +208,7 @@ async function route(req, url, env, ctx) {
       note: ended
         ? 'Every console session on this platform is ended now, not just this tab.'
         : 'This tab is signed out, but the platform-wide revocation could not be written — any other session stays valid until its cookie expires (12 hours max). Sign out again after the write budget resets at 00:00 UTC to be certain.',
-    }), opsKillCookie());
+    }), opsKillCookies());
   }
   if (p === '/ops/api/state') return opsGate(req, env, () => opsState(env));
   if (p === '/ops/api/health') return opsGate(req, env, () => opsHealth(env));
@@ -179,10 +242,8 @@ async function storePage(env, handle) {
   const st = await getStore(env, handle);
   if (!st) return html(notFoundPage(handle), 404);
   const term = await env.STORES.get('term:' + handle, 'json');
-  let page = await tpl(env, 'store');
-  page = page
-    .replace('/*__ZIMLINK_CONFIG__*/null', JSON.stringify(publicStore(st, await railsCatalog(env))))
-    .replace('/*__ZIMLINK_TERM__*/null', JSON.stringify(term || null));
+  const page = fillPage(await tpl(env, 'store'),
+    [['TAPSTALL_CONFIG', publicStore(st, await railsCatalog(env))], ['TAPSTALL_TERM', term || null]]);
   return html(page, 200, { 'Cache-Control': 'public, max-age=60, s-maxage=300' });
 }
 
@@ -221,7 +282,7 @@ async function loadProducts(st, env, force) {
     const feed = normalizeFeedUrl(st.feed_url);
     if (!feed) error = 'no_feed';
     else {
-      const r = await fetch(feed, { headers: { 'User-Agent': 'zimlink/1' }, cf: { cacheTtl: 60 } });
+      const r = await fetch(feed, { headers: { 'User-Agent': 'tapstall/1' }, cf: { cacheTtl: 60 } });
       if (!r.ok) error = 'feed_http_' + r.status;
       else products = parseProducts(await r.text(), st);
     }
@@ -356,10 +417,12 @@ async function notify(env, st, order) {
         // Integrity proof for the merchant's own tooling. Never send a
         // credential in a header here: their webhook target is third-party
         // software that logs what it receives.
+        'x-tapstall-body': await sign(env.ADMIN_SECRET || 'dev-secret', body),
+        // same signature under the old name, for whoever already wired it up
         'x-zimlink-body': await sign(env.ADMIN_SECRET || 'dev-secret', body),
         // workers.dev bot rules reject requests without a browser-ish UA, which
         // would silently swallow a merchant's order notification
-        'user-agent': 'zimlink/1 (order notification)',
+        'user-agent': 'tapstall/1 (order notification)',
       },
       body,
     }).catch(() => {}));
@@ -367,7 +430,7 @@ async function notify(env, st, order) {
   if (env.EMAIL && st.notify_email) {
     try {
       await env.EMAIL.send(new EmailMessage(
-        `${st.handle}@notify.zimlink`, st.notify_email,
+        `${st.handle}@notify.tapstall`, st.notify_email,
         `New order ${order.code} — ${order.pricing.pay_now} ${st.currency || 'USD'}`,
         `Buyer: ${order.buyer.name} (${order.buyer.phone})\n${waSummary(st, order)}\nFlags: ${(order.risk_flags || []).join(', ') || 'none'}\n`
         + `Open this to confirm (it needs your browser, nothing else): ${order.confirm_url || ''}\n`
@@ -424,7 +487,7 @@ async function markPaid(req, url, env) {
     const lr = lockRes(who); if (lr) return lr;
     if (!who || who.anonymous) return json({ ok: false, error: 'not signed in', need_login: true }, 401);
     if (who.bad) { await authFail(env, handle); return json({ ok: false, error: 'bad key or revoked session' }, 403); }
-    if (who.via === 'sess' && (req.headers.get('x-zimlink-confirm') || '') !== '1') {
+    if (who.via === 'sess' && (reqHeader(req, 'x-tapstall-confirm') || '') !== '1') {
       return json({ ok: false, error: 'confirm header missing' }, 403);
     }
     if (!id) return json({ ok: false, error: 'id required' }, 422);
@@ -599,7 +662,10 @@ async function checkout(req, url, env) {
   await env.STORES.put('tx:' + txRef, JSON.stringify({ handle: rec.handle, days, amount }));
   return json({
     ok: true, tx_ref: txRef, amount, days,
-    pay_url: `https://flutterwave.com/pay/zimlink?tx_ref=${txRef}&amount=${amount}&currency=USD&customer_email=${encodeURIComponent(b.email || '')}&redirect_url=${encodeURIComponent(url.origin + '/api/hook/flutterwave?done=1&tx_ref=' + txRef)}`,
+    // the slug of the Flutterwave *payment link* in whoever's account is
+    // receiving money; it is external configuration, so it is a secret and not a
+    // string in the source — the brand can change without breaking payouts
+    pay_url: `https://flutterwave.com/pay/${env.FW_PAY_SLUG || 'tapstall'}?tx_ref=${txRef}&amount=${amount}&currency=USD&customer_email=${encodeURIComponent(b.email || '')}&redirect_url=${encodeURIComponent(url.origin + '/api/hook/flutterwave?done=1&tx_ref=' + txRef)}`,
     manual: `Or send ${amount} USD / local equivalent and paste the payment reference to the operator's WhatsApp — activation is automatic on the webhook, manual only if you pay cash.`,
   });
 }
@@ -725,7 +791,7 @@ async function renewPage(env, token) {
       price: PRICE_USD, store_url: st ? '/s/' + st.handle : '/onboard',
       pay_url: st ? (st.admin_url || '/a') : '/onboard',
     };
-    return html(custom.replace('/*__ZIMLINK_RENEW__*/null', JSON.stringify(data)));
+    return html(fillPage(custom, [['TAPSTALL_RENEW', data]]));
   }
   if (!rec) return html(`<h1 style="font:16px system-ui;padding:2rem">That renew link is old. Use the one from your welcome email, or <a href="/onboard">create a store</a>.</h1>`, 404);
   const st = await getStore(env, rec.handle);
@@ -934,14 +1000,25 @@ const SEC_HEADERS = {
  * admin, settings, mark and login endpoints deliberately do not, so no foreign
  * page can read a ledger or fire a mutation from a visitor's browser.
  */
+const LEGACY_PAGES_RE = /^\/$|^\/s\/|^\/a$|^\/c\/|^\/renew\/|^\/fees\b|^\/onboard\b|^\/rails\b|^\/data\/|^\/ops$/;
 const OPEN_RE = /^\/s\/|^\/rails\b|^\/fees\b|^\/data\/|^\/onboard\b|^\/__ping\b|^\/api\/(order|register|lookup|hook\/)|^\/renew\//;
 function isOpenPath(pathname) { return OPEN_RE.test(pathname); }
-const KILL_COOKIE = 'zl_sess=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict; Secure';
+const SESS_COOKIE = 'tp_sess';
+const KILL_COOKIES = killCookies([SESS_COOKIE]);
+/** The session cookie, plus the clearing of the old brand's spelling: a browser
+ *  that still holds `zl_sess` would otherwise keep a signed-in tab alive after
+ *  "sign out", because this Worker accepts that name on purpose. */
+function sessCookie(value) {
+  return [`${SESS_COOKIE}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=${SESS_TTL}`,
+    'zl_sess=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict; Secure'];
+}
 
 /** Merge per-route headers over the defaults, lower-cased, so callers that
  *  write `Cache-Control` cannot end up with `no-store, no-store`. */
 function hdr(extra) {
-  const h = { 'cache-control': 'no-store', 'x-zimlink': VERSION, ...SEC_HEADERS };
+  // both spellings for one release: a cached page or a script an operator wrote
+  // against the old header should keep working while it is still in use
+  const h = { 'cache-control': 'no-store', 'x-tapstall': VERSION, 'x-zimlink': VERSION, ...SEC_HEADERS };
   for (const k of Object.keys(extra || {})) h[k.toLowerCase()] = extra[k];
   return h;
 }
@@ -960,12 +1037,13 @@ function html(s, status = 200, extra = {}) {
 function redirect(loc, status = 302) {
   return new Response(null, { status, headers: { location: loc, 'cache-control': 'no-store' } });
 }
-function withCookie(res, cookie) { res.headers.append('set-cookie', cookie); return res; }
+function withCookie(res, ...cookies) { for (const c of cookies) if (c) res.headers.append('set-cookie', c); return res; }
 function openCors(r) {
   r.headers.set('Access-Control-Allow-Origin', '*');
-  r.headers.set('Access-Control-Allow-Headers', 'content-type, x-zimlink-confirm');
+  r.headers.set('Access-Control-Allow-Headers',
+    'content-type, x-tapstall-confirm, x-zimlink-confirm, x-tapstall-admin, x-zimlink-admin');
   r.headers.set('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  r.headers.set('X-ZimLink', VERSION);
+  r.headers.set('X-Tapstall', VERSION);
   return r;
 }
 
@@ -1012,16 +1090,16 @@ async function identify(req, env, handle) {
   handle = slug(String(handle || ''));
   const st = await getStore(env, handle);
   if (!st) return null;
-  const raw = (req.headers.get('cookie') || '').match(/(?:^|;\s*)zl_sess=([^;]+)/);
+  const raw = cookieVal(req, 'tp_sess');
   if (raw) {
-    const p = await verifyCap(env.ADMIN_SECRET || 'dev-secret', decodeURIComponent(raw[1]));
+    const p = await verifyCap(env.ADMIN_SECRET || 'dev-secret', raw);
     if (p && p.a === 'sess' && p.h === handle && String(p.g) === String(st.auth_gen || '0')) {
       await authClear(env, handle);
       return { via: 'sess', st, handle };
     }
     return { bad: true, st, handle };
   }
-  const key = req.headers.get('x-zimlink-admin');
+  const key = reqHeader(req, 'x-tapstall-admin');
   if (key) {
     // Right key first, always. The lock exists to slow guessing at a key; an
     // attacker who fills it must not thereby gain the ability to lock the real
@@ -1061,7 +1139,7 @@ async function loginExchange(req, env) {
     { a: 'sess', h: st.handle, g: String(st.auth_gen || '0') }, SESS_TTL);
   await authClear(env, st.handle);
   return withCookie(json({ ok: true, handle: st.handle, valid_for_sec: SESS_TTL }),
-    `zl_sess=${encodeURIComponent(sess)}; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=${SESS_TTL}`);
+    ...sessCookie(sess));
 }
 
 /** Legacy `?handle=..&token=..` links still work, but trade down to a code. */
@@ -1091,8 +1169,8 @@ async function settingsEdit(req, url, env) {
   if (who.bad) { await authFail(env, who.handle); return json({ ok: false, error: 'bad key or revoked session' }, 403); }
   // A cookie is ambient authority, so require a header a cross-site form
   // cannot set. SameSite=Strict already blocks most of that; this is the belt.
-  if (who.via === 'sess' && (req.headers.get('x-zimlink-confirm') || '') !== '1') {
-    return json({ ok: false, error: 'missing x-zimlink-confirm header' }, 403);
+  if (who.via === 'sess' && (reqHeader(req, 'x-tapstall-confirm') || '') !== '1') {
+    return json({ ok: false, error: 'missing x-tapstall-confirm header' }, 403);
   }
   const st = who.st;
   const patch = (b.settings && typeof b.settings === 'object') ? b.settings : b;
@@ -1170,7 +1248,7 @@ async function revokeKeys(req, url, env) {
     ok: true, dashboard_url: await issueLogin(env, st, url.origin), api_key: st.admin_token,
     note: 'Every older link, session and API key for this store is dead. Save the new ones; the old key stops working immediately.',
   });
-  return withCookie(res, KILL_COOKIE);
+  return withCookie(res, ...KILL_COOKIES);
 }
 
 /**
@@ -1205,7 +1283,7 @@ async function recoverLink(req, url, env) {
   let sent = false;
   if (env.EMAIL && (st.owner_email || st.notify_email)) {
     try {
-      await sendMail(env, st.owner_email || st.notify_email, 'Your ZimLink dashboard link',
+      await sendMail(env, st.owner_email || st.notify_email, 'Your Tapstall dashboard link',
         `A fresh dashboard link (valid 7 days):\n${link}\n\nIf you did not ask for this, open it and press "Revoke links & API key" at once.`);
       sent = true;
     } catch (e) { /* shown here instead */ }
@@ -1277,7 +1355,7 @@ async function confirmPage(env, cap) {
         };
       }
     }
-    return html(custom.replace('/*__ZIMLINK_CONFIRM__*/null', JSON.stringify(data)));
+    return html(fillPage(custom, [['TAPSTALL_CONFIRM', data]]));
   }
   if (!p || p.a !== 'mark') {
     return html(shell('Link expired', '<h2>This link has expired</h2><p class=t>Confirm links last 72 hours. Open your dashboard and use the Confirm button on the order — it does exactly the same thing.</p>'));
@@ -1311,10 +1389,10 @@ async function confirmPage(env, cap) {
 }
 function feesIcs() {
   const d = new Date().toISOString().replace(/[-:]/g, '').slice(0, 8);
-  const body = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//zimlink//rates//EN', 'BEGIN:VEVENT',
-    `UID:zimlink-rates-${d}@zimlink`, `DTSTAMP:${d}T090000Z`, `DTSTART;VALUE=DATE:${nextJan(d.slice(0, 4))}`,
+  const body = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//tapstall//rates//EN', 'BEGIN:VEVENT',
+    `UID:tapstall-rates-${d}@tapstall`, `DTSTAMP:${d}T090000Z`, `DTSTART;VALUE=DATE:${nextJan(d.slice(0, 4))}`,
     'SUMMARY:Re-check mobile money tariffs after the national budget',
-    'DESCRIPTION:EcoCash/InnBucks/PayShap/PayFast rates and VAT change with budgets. Update surcharge settings and prices on your ZimLink store.',
+    'DESCRIPTION:EcoCash/InnBucks/PayShap/PayFast rates and VAT change with budgets. Update surcharge settings and prices on your Tapstall store.',
     'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
   return new Response(body, { headers: { 'content-type': 'text/calendar; charset=utf-8', 'access-control-allow-origin': '*' } });
 }
@@ -1340,11 +1418,11 @@ function secsToMidnightUTC() {
   return Math.max(60, Math.round((midnight - now.getTime()) / 1000));
 }
 
-const OPS_COOKIE = 'zl_ops';
+const OPS_COOKIE = 'tp_ops';
 const OPS_TPL_NAMES = ['store', 'onboard', 'admin', 'fees', 'index', 'confirm', 'renew', 'ops', 'sample-menu'];
-const PAGES_URL = 'https://king-kunta-cpu.github.io/zimlink/';
+const PAGES_URL = 'https://king-kunta-cpu.github.io/tapstall/';
 
-function opsKillCookie() { return OPS_COOKIE + '=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict; Secure'; }
+function opsKillCookies() { return killCookies([OPS_COOKIE]); }
 
 /** The console session is a stateless signed cap — nothing to look up, which
  *  is why it costs no KV write to sign in from a hotel laptop. It also means
@@ -1369,9 +1447,9 @@ async function opsIssue(env) {
 }
 
 async function opsAuthed(req, env) {
-  const raw = (req.headers.get('cookie') || '').match(new RegExp('(?:^|;\\s*)' + OPS_COOKIE + '=([^;]+)'));
+  const raw = cookieVal(req, OPS_COOKIE);
   if (!raw) return { anon: true };
-  const p = await verifyCap(env.ADMIN_SECRET || 'dev-secret', decodeURIComponent(raw[1]));
+  const p = await verifyCap(env.ADMIN_SECRET || 'dev-secret', raw);
   if (p && p.a === 'ops' && String(p.n) === String(await opsGen(env))) return { ok: true };
   return { bad: true };
 }
@@ -1434,7 +1512,8 @@ async function opsLogin(req, env) {
     const cap = await opsIssue(env);
     await pushOpsLog(env, { act: 'login', ip: ipOf(req) });
     return withCookie(json({ ok: true, valid_for_sec: SESS_TTL, note: 'This console is oversight only — no customer flow waits on it.' }),
-      `${OPS_COOKIE}=${encodeURIComponent(cap)}; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=${SESS_TTL}`);
+      `${OPS_COOKIE}=${encodeURIComponent(cap)}; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=${SESS_TTL}`,
+      'zl_ops=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict; Secure');
   }
   const n = await authFail(env, '__ops');
   return json({ ok: false, error: 'not the platform secret', tries_left: Math.max(0, LOCK_MAX - n) }, 403);
@@ -1444,7 +1523,7 @@ async function opsPage(req, env) {
   const who = await opsAuthed(req, env);
   const page = await tpl(env, 'ops');
   const signed = who.ok ? 'true' : 'false';
-  return html(page.replace('/*__ZIMLINK_OPS__*/null', JSON.stringify({ signed_in: who.ok === true, version: VERSION })));
+  return html(fillPage(page, [['TAPSTALL_OPS', { signed_in: who.ok === true, version: VERSION }]]));
 }
 
 function opsSummarise(st, rows) {
@@ -1518,12 +1597,12 @@ async function opsHealth(env) {
   const t = await selftest(env);
   let pages = 'unreachable';
   try {
-    const r = await fetch(PAGES_URL, { headers: { 'user-agent': 'zimlink/1 (operator health check)' } });
+    const r = await fetch(PAGES_URL, { headers: { 'user-agent': 'tapstall/1 (operator health check)' } });
     pages = r.status === 200 ? 'ok' : 'http ' + r.status;
   } catch (e) { pages = 'unreachable'; }
   let ci = null;
   try {
-    const r = await fetch('https://raw.githubusercontent.com/king-kunta-cpu/zimlink/main/ci-deploy.log', { headers: { 'user-agent': 'zimlink/1 (operator health check)' } });
+    const r = await fetch(REPO_RAW + 'ci-deploy.log', { headers: { 'user-agent': 'tapstall/1 (operator health check)' } });
     if (r.ok) { const txt = await r.text(); ci = txt.split('\n').filter(l => /==== exit|tests |pass |fail /.test(l)).slice(-6); }
   } catch (e) { ci = null; }
   return json({ ok: true, selftest: t, pages, ci, cron: t.cron_heartbeat || null, version: VERSION, templates: OPS_TPL_NAMES }, 200, { 'Cache-Control': 'no-store' });
@@ -1575,7 +1654,7 @@ async function pushOpsLog(env, row) {
  */
 async function opsStoreAction(req, env) {
   const b = await readBody(req);
-  if ((req.headers.get('x-zimlink-confirm') || '') !== '1') return json({ ok: false, error: 'missing x-zimlink-confirm header' }, 403);
+  if ((reqHeader(req, 'x-tapstall-confirm') || '') !== '1') return json({ ok: false, error: 'missing x-tapstall-confirm header' }, 403);
   const handle = slug(String(b.handle || ''));
   const st = await getStore(env, handle);
   if (!st) return json({ ok: false, error: 'no store' }, 404);
@@ -1590,15 +1669,15 @@ async function opsStoreAction(req, env) {
     if (st.notify_webhook) {
       try {
         await fetch(st.notify_webhook, {
-          method: 'POST', headers: { 'content-type': 'application/json', 'user-agent': 'zimlink/1 (operator notice)' },
-          body: JSON.stringify({ type: 'store.notice', store: handle, text: b.message || 'A note from your ZimLink store: your store is fine, nothing is needed from you.' }),
+          method: 'POST', headers: { 'content-type': 'application/json', 'user-agent': 'tapstall/1 (operator notice)' },
+          body: JSON.stringify({ type: 'store.notice', store: handle, text: b.message || 'A note from your Tapstall store: your store is fine, nothing is needed from you.' }),
         });
         sent.push('webhook');
       } catch (e) { failed.push('webhook'); }
     }
     if (env.EMAIL && (st.owner_email || st.notify_email)) {
       try {
-        await sendMail(env, st.owner_email || st.notify_email, 'A note about your ZimLink store', String(b.message || 'Your store is running normally. No action needed.'));
+        await sendMail(env, st.owner_email || st.notify_email, 'A note about your Tapstall store', String(b.message || 'Your store is running normally. No action needed.'));
         sent.push('email');
       } catch (e) { failed.push('email'); }
     }
@@ -1671,7 +1750,7 @@ async function opsRailsRead(env) {
 }
 async function opsRailsWrite(req, env) {
   const b = await readBody(req);
-  if ((req.headers.get('x-zimlink-confirm') || '') !== '1') return json({ ok: false, error: 'missing x-zimlink-confirm header' }, 403);
+  if ((reqHeader(req, 'x-tapstall-confirm') || '') !== '1') return json({ ok: false, error: 'missing x-tapstall-confirm header' }, 403);
   if (b.restore) {
     const prev = (await env.STORES.get('rails:extra', 'json')) || {};
     if (Object.keys(prev).length) {
@@ -1754,7 +1833,7 @@ function opsOrderLite(o) {
   };
 }
 
-const REPO_RAW = 'https://raw.githubusercontent.com/king-kunta-cpu/zimlink/main/';
+const REPO_RAW = 'https://raw.githubusercontent.com/king-kunta-cpu/tapstall/main/';
 
 async function opsTemplates(env) {
   const out = [];
@@ -1773,7 +1852,7 @@ async function opsTemplateRead(url, env) {
 function safeTplName(n) { const x = String(n || ''); return OPS_TPL_NAMES.indexOf(x) >= 0 ? x : null; }
 async function opsTemplateWrite(req, env) {
   const b = await readBody(req);
-  if ((req.headers.get('x-zimlink-confirm') || '') !== '1') return json({ ok: false, error: 'missing x-zimlink-confirm header' }, 403);
+  if ((reqHeader(req, 'x-tapstall-confirm') || '') !== '1') return json({ ok: false, error: 'missing x-tapstall-confirm header' }, 403);
   const name = safeTplName(b.name);
   if (!name) return json({ ok: false, error: 'not a template this console may write', allowed: OPS_TPL_NAMES }, 422);
   const html = String(b.html || '');
@@ -1786,7 +1865,7 @@ async function opsTemplateWrite(req, env) {
     // the committed copy is the safety net: a hand-edit that goes wrong in the
     // console is one press from being undone, with nothing to redeploy
     const raw = await fetch(REPO_RAW + (name === 'sample-menu' ? 'pages/sample-menu.csv' : 'pages/' + name + '.html'),
-      { headers: { 'user-agent': 'zimlink/1 (template restore)' } });
+      { headers: { 'user-agent': 'tapstall/1 (template restore)' } });
     if (!raw.ok) return json({ ok: false, error: 'could not read the committed copy (HTTP ' + raw.status + ')' }, 502);
     const text = await raw.text();
     if (text.length < 200) return json({ ok: false, error: 'committed copy looks truncated; refusing to publish it' }, 502);

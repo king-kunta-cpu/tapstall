@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>ZimLink Store</title>
+<title>Tapstall Store</title>
 <meta name="theme-color" content="#0b0f14">
 <style>
 *{box-sizing:border-box}
@@ -119,15 +119,24 @@ ol.steps li{margin:.25rem 0}
 </div>
 
 <script>
-var CFG = /*__ZIMLINK_CONFIG__*/null;
-var TERM = /*__ZIMLINK_TERM__*/null;
+var CFG = /*__TAPSTALL_CONFIG__*/null;
+var TERM = /*__TAPSTALL_TERM__*/null;
 (function () {
   if (!CFG) { document.getElementById('notice').hidden = false; document.getElementById('notice').textContent = 'Store config missing. Open /onboard to create a store — it takes about 90 seconds.'; return; }
   var CUR = CFG.currency || 'USD';
   var ZIG = Number(CFG.zig_rate) || 0;
   var $ = function (id) { return document.getElementById(id); };
   var cart = [];
-  try { cart = JSON.parse(localStorage.getItem('zl_cart_' + CFG.handle) || '[]') || []; } catch (e) { cart = []; }
+  /* The rename moved this key (zl_cart_* -> tp_cart_*). Read the new one, fall
+     back to the old one and move it forward, because a buyer with six items in a
+     basket must not arrive at an empty cart because the platform changed its
+     shirt. The old key is removed only once the new one holds the same list. */
+  try {
+    var CK = 'tp_cart_' + CFG.handle, OK = 'zl_cart_' + CFG.handle;
+    var rawCart = localStorage.getItem(CK);
+    if (!rawCart && localStorage.getItem(OK)) { rawCart = localStorage.getItem(OK); localStorage.setItem(CK, rawCart); localStorage.removeItem(OK); }
+    cart = JSON.parse(rawCart || '[]') || [];
+  } catch (e) { cart = []; }
 
   document.title = CFG.shop_name + ' — order on WhatsApp';
   $('sname').textContent = CFG.shop_name;
@@ -136,7 +145,7 @@ var TERM = /*__ZIMLINK_TERM__*/null;
   if (CFG.hours) { $('chours').textContent = CFG.hours; $('chours').hidden = false; }
   if (CFG.location) { $('cloc').textContent = CFG.location; $('cloc').hidden = false; }
   $('curnow').textContent = 'Prices in ' + CUR + (ZIG ? ' + ZiG' : '');
-  $('powered').innerHTML = 'Runs on <a href="/onboard">ZimLink</a> — free store for your WhatsApp business, no monthly bill.';
+  $('powered').innerHTML = 'Runs on <a href="/onboard">Tapstall</a> — free store for your WhatsApp business, no monthly bill.';
   if (CFG.closed) note('Shop closed right now — you can still order and we will confirm when we open.');
   if (TERM && TERM.state === 'expired') note('This store is paused until the owner renews. Existing orders still reach us on WhatsApp.');
   if (CFG.rail === 'cash' && !CFG.pay_account) note('Cash / pickup payments: pay the runner or pay when you collect.');
@@ -247,7 +256,7 @@ var TERM = /*__ZIMLINK_TERM__*/null;
     $('addBtn').onclick = function () {
       var ups = Object.keys(draft.opts).map(function (k) { return { name: draft.opts[k], up: 0 }; });
       cart.push({ id: p.id, name: p.name, price: p.price, qty: draft.qty, options: ups, addons: Object.keys(draft.addons).map(function (k) { return draft.addons[k]; }) });
-      try { localStorage.setItem('zl_cart_' + CFG.handle, JSON.stringify(cart)); } catch (e) {}
+      try { localStorage.setItem('tp_cart_' + CFG.handle, JSON.stringify(cart)); } catch (e) {}
       closeSheet(); renderCards();
     };
     $('sheet').classList.add('on');
@@ -338,7 +347,7 @@ var TERM = /*__ZIMLINK_TERM__*/null;
     svc.onchange = function () { $('addrWrap').hidden = svc.value !== 'delivery'; };
     if (CFG.only_delivery) { svc.value = 'delivery'; svc.onchange(); }
     Array.prototype.forEach.call($('shBody').querySelectorAll('[data-rm]'), function (b) {
-      b.onclick = function () { cart.splice(Number(b.getAttribute('data-rm')), 1); try { localStorage.setItem('zl_cart_' + CFG.handle, JSON.stringify(cart)); } catch (e) {} closeSheet(); renderCards(); };
+      b.onclick = function () { cart.splice(Number(b.getAttribute('data-rm')), 1); try { localStorage.setItem('tp_cart_' + CFG.handle, JSON.stringify(cart)); } catch (e) {} closeSheet(); renderCards(); };
     });
     $('shut').onclick = closeSheet;
     $('place').onclick = function () {
@@ -353,7 +362,7 @@ var TERM = /*__ZIMLINK_TERM__*/null;
         .then(function (res) {
           btn.disabled = false;
           if (!res.ok || !res.j.ok) { btn.textContent = res.j && res.j.error ? res.j.error : 'Could not place order'; return; }
-          cart = []; try { localStorage.setItem('zl_cart_' + CFG.handle, '[]'); } catch (e) {}
+          cart = []; try { localStorage.setItem('tp_cart_' + CFG.handle, '[]'); } catch (e) {}
           showDone(res.j);
         })
         .catch(function () { btn.disabled = false; btn.textContent = 'Network problem — try again'; });

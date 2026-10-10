@@ -2,10 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ZimLink — my store</title>
+<title>Tapstall — my store</title>
 <meta name="robots" content="noindex,nofollow">
 <style>
-/* ZimLink UI kit — one visual language for both suites (merchant pages and the
+/* Tapstall UI kit — one visual language for both suites (merchant pages and the
  * operator console). Every shipped page inlines this block instead of linking to
  * it: a page that arrives as one file survives the KV template store, a mail
  * preview, a sandboxed viewer and a 2G reconnect, none of which can be counted
@@ -247,7 +247,7 @@ body[data-tab="orders"] #list{display:block}
 </style>
 </head>
 <body>
-<div class="top"><div class="in"><b id="ttl">ZimLink · my store</b><span><a href="/onboard">new store</a> · <a href="#" id="renewLn">renew</a> · <a href="#" id="outLn">sign out</a></span></div></div>
+<div class="top"><div class="in"><b id="ttl">Tapstall · my store</b><span><a href="/onboard">new store</a> · <a href="#" id="renewLn">renew</a> · <a href="#" id="outLn">sign out</a></span></div></div>
 <main><div class="wrap">
 
 <div class="card" id="login">
@@ -394,7 +394,7 @@ function esc(x) { return String(x == null ? '' : x).replace(/[&<>"]/g, function 
 function api(path, body) {
   return fetch(path, body === undefined ? { method: 'GET', credentials: 'same-origin' }
     : { method: 'POST', credentials: 'same-origin',
-        headers: { 'content-type': 'application/json', 'x-zimlink-confirm': '1' },
+        headers: { 'content-type': 'application/json', 'x-tapstall-confirm': '1' },
         body: JSON.stringify(body) })
     .then(function (r) { return r.text().then(function (t) { var j = null; try { j = JSON.parse(t); } catch (e) {} return { s: r.status, j: j, t: t }; }); });
 }
@@ -604,7 +604,7 @@ function revoke() {
   api('/api/revoke', { handle: S.handle }).then(function (r) {
     if (!r.j || !r.j.ok) { alert((r.j && r.j.error) || 'failed'); return; }
     q('#revOut').innerHTML = '<div class="hint" style="margin-top:.5rem">Done. New dashboard link (save it, valid 7 days):</div><div class="mono"><a href="' + esc(r.j.dashboard_url) + '">' + esc(r.j.dashboard_url) + '</a></div>'
-      + '<div class="hint" style="margin-top:.4rem">New API key for your own tools: <b>' + esc(r.j.api_key) + '</b> (send it as <code>x-zimlink-admin</code>). ' + esc(r.j.note || '') + '</div>';
+      + '<div class="hint" style="margin-top:.4rem">New API key for your own tools: <b>' + esc(r.j.api_key) + '</b> (send it as <code>x-tapstall-admin</code>). ' + esc(r.j.note || '') + '</div>';
   });
 }
 
@@ -744,7 +744,7 @@ function exportCsv() {
   var head = 'code,when,status,name,phone,service,items,total,currency,pay_to,reference,flags\n';
   var body = S.orders.map(function (o) { if (!o) return ''; var p = o.pricing || {};
     return [o.code, o.at, o.status, o.buyer.name, o.buyer.phone, o.service, (o.items || []).map(function (i) { return (i.qty || 1) + 'x ' + i.name; }).join(' + '), (p.total || 0).toFixed(2), S.store.currency || 'USD', S.store.pay_account || '', o.code, (o.risk_flags || []).join(' ')].map(csvq).join(','); }).join('\n');
-  dl('zimlink-' + S.handle + '-' + new Date().toISOString().slice(0, 10) + '.csv', head + body);
+  dl('tapstall-' + S.handle + '-' + new Date().toISOString().slice(0, 10) + '.csv', head + body);
 }
 function csvq(s) { s = String(s == null ? '' : s); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
 function dl(name, text) {
