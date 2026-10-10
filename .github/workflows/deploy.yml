@@ -4,6 +4,7 @@ name: deploy
 on:
   push:
     branches: [main]
+    paths-ignore: ['ci-deploy.log']
   workflow_dispatch: {}
 permissions:
   contents: read
@@ -15,6 +16,8 @@ concurrency:
 jobs:
   worker:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # so a failed deploy can publish its own log for diagnosis
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -33,14 +36,22 @@ jobs:
           set +e
           bash -x ./scripts/deploy.sh 2>&1 | tee /tmp/deploy.log
           code=${PIPESTATUS[0]}
-          echo "---- tools ----"; for c in node jq curl openssl python3; do printf '%s=%s ' "$c" "$(command -v $c || echo MISSING)"; done; echo
-          echo "---- env ----"; for v in CF_TOKEN CF_ACCOUNT ADMIN_SECRET WORKER_NAME; do printf '%s:len=%s ' "$v" "${!#v:+set}"; done; echo
-          mkdir -p "$RUNNER_TEMP/artifact" && cp /tmp/deploy.log "$RUNNER_TEMP/artifact/deploy.log"
+          echo "---- tools ----" >> /tmp/deploy.log
+          for c in node jq curl openssl python3 npm; do printf '%s=%s ' "$c" "$(command -v $c || echo MISSING)" >> /tmp/deploy.log; done >> /tmp/deploy.log
+          echo >> /tmp/deploy.log
+          echo "---- present vars ----" >> /tmp/deploy.log
+          for v in CF_TOKEN CF_ACCOUNT ADMIN_SECRET WORKER_NAME GITHUB_REF; do
+            eval "val=\${$v:-}"; echo "$v=$([ -n "$val" ] && echo set || echo MISSING)" >> /tmp/deploy.log
+          done
+          # publish the log into the repo: job logs need actions:read on the token,
+          # and a deploy that can fail silently is not zero-touch
+          git config user.name ci >> /tmp/deploy.log 2>&1
+          git config user.email ci@zimlink >> /tmp/deploy.log 2>&1
+          cp /tmp/deploy.log ci-deploy.log
+          git add -f ci-deploy.log >> /tmp/deploy.log 2>&1
+          git commit -m "ci deploy log ($(date -u +%H:%M:%S)) exit=$code" >> /tmp/deploy.log 2>&1
+          git push >> /tmp/deploy.log 2>&1 || true
           exit $code
-      - name: upload deploy log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with: { name: deploy-log, path: '${{ runner.temp }}/artifact/' , if-no-files-found: ignore }
   pages:
     needs: worker
     runs-on: ubuntu-latest
