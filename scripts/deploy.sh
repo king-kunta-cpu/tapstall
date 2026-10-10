@@ -17,14 +17,36 @@ cd "$(dirname "$0")/.."
 
 MODE="${1:-deploy}"
 require_cmd curl jq python3 node
-load_secrets
 
+# --check must work with no credentials at all (that is what makes it usable as a
+# pre-commit / editor check), so secrets are only demanded by a real deploy.
 if [[ "$MODE" == "--check" ]]; then
-  run_tests; ./scripts/build_bundle.sh /tmp/zl-dryrun >/dev/null && ok "dry run: tests pass, bundle builds"
+  check_workflows
+  run_tests
+  ./scripts/build_bundle.sh /tmp/zl-dryrun >/dev/null && ok "dry run: tests pass, bundle builds"
   exit 0
 fi
+load_secrets
 
-run_tests
+# A workflow that does not parse fails as a jobless run with no readable logs,
+# so catch it here where the error is legible.
+python3 - <<'PYEOF' || die "fix .github/workflows/*.yml"
+import glob, sys
+try:
+    import yaml
+except ImportError:
+    print("  (pyyaml absent — skipping workflow parse check)"); sys.exit(0)
+bad = []
+for f in glob.glob(".github/workflows/*.yml"):
+    try:
+        yaml.safe_load(open(f))
+    except Exception as e:
+        bad.append("%s: %s" % (f, str(e).split(chr(10))[0]))
+if bad:
+    print("  workflow YAML invalid:"); [print("   ", b) for b in bad]; sys.exit(1)
+print("  CI workflow YAML validates")
+PYEOF
+
 say "KV namespaces"
 STORES_ID=$(kv_id "$KV_STORES" STORES | tail -1 | tr -dc "a-f0-9")
 ORDERS_ID=$(kv_id "$KV_ORDERS" ORDERS | tail -1 | tr -dc "a-f0-9")

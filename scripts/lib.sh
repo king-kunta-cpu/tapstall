@@ -119,6 +119,29 @@ PYEOF
 }
 
 # ---- tests ----------------------------------------------------------------
+check_workflows() {
+  # A workflow that does not parse fails as a jobless run with no readable logs.
+  python3 - <<'PYEOF' || die "fix .github/workflows/*.yml"
+import glob, sys
+try:
+    import yaml
+except ImportError:
+    print("  (pyyaml absent — skipping workflow parse check)"); sys.exit(0)
+bad = []
+for f in glob.glob(".github/workflows/*.yml"):
+    try:
+        yaml.safe_load(open(f))
+    except Exception as e:
+        bad.append("%s: %s" % (f, str(e).splitlines()[0]))
+if bad:
+    print("  workflow YAML invalid:")
+    for b in bad:
+        print("   ", b)
+    sys.exit(1)
+print("  CI workflow YAML validates")
+PYEOF
+}
+
 run_tests() {
   command -v node >/dev/null || die "node required for tests"
   say "unit tests"

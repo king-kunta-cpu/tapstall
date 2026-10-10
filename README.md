@@ -115,6 +115,21 @@ curl -X PUT --data-binary @pages/store.html \
   WhatsApp handoff, analytics-lite. `publicStore()` strips everything private
   from the public config — asserted by tests.
 
+## Where things live
+
+| | |
+|---|---|
+| Onboarding (give this to merchants) | `https://zimlink.simalidudu.workers.dev/onboard` |
+| A store | `…/s/<handle>` · its config `…/s/<handle>/config.json` · its menu `…/s/<handle>/feed.json` |
+| Merchant dashboard | `…/a` (the link is returned at sign-up and emailed/webhooked with each order) |
+| Rate calculator | `…/fees` (also on Pages, shareable with query-string state) |
+| Health / diagnostics | `…/__ping`, `…/__selftest`, `…/__selftest?scheduled=1` |
+| Rail table | `…/rails` |
+| Deploy log of the last CI run | `https://raw.githubusercontent.com/king-kunta-cpu/zimlink/main/ci-deploy.log` |
+
+`STATUS.md` records what has been proven on production, the one item still
+waiting on a clock (the cron heartbeat), and the deliberate limits.
+
 ## Verified
 
 `node --test tests/` → 30 pass. Deployed and exercised on the real Worker:
