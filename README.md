@@ -172,6 +172,7 @@ see and cancel, and because revoking takes one press.
 | Rate calculator | `…/fees` (also on Pages, shareable with query-string state) |
 | Health / diagnostics | `…/__ping`, `…/__selftest`, `…/__selftest?scheduled=1` |
 | Rail table | `…/rails` |
+| Production check (70 assertions, run it any time) | `./scripts/prod_check.sh` — needs the KV read token for the crawler probe, works with `HANDLE=` set to any store |
 | Deploy log of the last CI run | `https://raw.githubusercontent.com/king-kunta-cpu/zimlink/main/ci-deploy.log` |
 
 `STATUS.md` records what has been proven on production, the one item still
