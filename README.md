@@ -250,9 +250,8 @@ buttons backed by Worker actions). Deployed and exercised on the real Worker:
 two tenants (Harare/USD/EcoCash, Durban/ZAR/PayShap), order → one-tap paid,
 cross-tenant isolation, expiry → cron suspension → 503 → webhook → reinstated
 (`plan: annual`, 746 days). `/__selftest` reports bindings, all five templates,
-pricing, and a `secret_leak_check`. `scripts/prod_check.sh` → 100 assertions
-across nine sections against the live Worker (88/88 on both demo tenants at
-v0.3.0), covering the crawler prefetch, the 405s, the CORS split, the
+pricing, and a `secret_leak_check`. `scripts/prod_check.sh` → **124/124 on both demo
+tenants** against the live Worker at v0.4.0, nine sections, covering the crawler prefetch, the 405s, the CORS split, the
 15-minute hold, masked audit, revocation, self-serve recovery, cross-tenant
 refusal and — from v0.4.0 — the two consoles: money pages present in KV, `/ops`
 refusing an anonymous reader, the cookie's flags, a lever needing the confirm

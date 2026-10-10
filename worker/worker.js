@@ -1247,7 +1247,8 @@ async function opsGate(req, env, fn) {
   // cookies instead let a refresh on an expired session walk the operator's own
   // door toward a 10-minute freeze — the same self-inflicted DoS the per-store
   // lockout had, found by the prod check hammering this endpoint.
-  return json({ ok: false, error: 'session expired — paste the platform secret again', need_login: who.anon === true }, 401);
+  if (who.anon) return json({ ok: false, error: 'sign in with the platform secret', need_login: true }, 401);
+  return json({ ok: false, error: 'session expired — paste the platform secret again', need_login: false }, 401);
 }
 
 async function opsLogin(req, env) {

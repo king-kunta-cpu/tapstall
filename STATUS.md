@@ -4,14 +4,16 @@
 
 | What | Where | Proof |
 |---|---|---|
-| Worker (every tenant) | `https://zimlink.simalidudu.workers.dev` | `/__ping` → `{"ok":true,"version":"0.2.0"}` |
-| Onboarding | `/onboard` | HTTP 200, self-serve, posts to `/api/register` |
+| Worker (every tenant) | `https://zimlink.simalidudu.workers.dev` | `/__ping` → `{"ok":true,"version":"0.4.0"}` |
+| Onboarding | `/onboard` | 35,692 bytes served, byte-identical to `pages/onboard.html` in git |
+| Operator console | `/ops` | served page = committed `pages/ops.html` with the session hook filled (37,512 bytes both sides); `/ops/api/*` → `401` anonymous |
+| Money pages from KV | `tpl:confirm`, `tpl:renew`, `tpl:ops` | `/__selftest` → all eight `tpl_*` true, so no page is on the inline fallback |
 | Rate calculator | `/fees?aov=7&n=140&cod=35&cash=20&min=6&hr=3&m=zw` | HTTP 200, 11,117 B, URL-synced |
 | Landing (Pages) | `https://king-kunta-cpu.github.io/zimlink/` | HTTP 200 |
 | Demo tenant (ZW) | `/s/mamatoe` | 4 products from its own CSV feed, 0 leaked secret fields |
 | Demo tenant (ZA) | `/s/kotaking` | order `KOT-0001` marked `paid` by one tap, plan `annual` |
 | Rail reference | `/rails` | 9 rails with pct/IMTT/type |
-| CI/CD | `.github/workflows/deploy.yml` | run #7 `success` — tests → Worker → cron → Pages |
+| CI/CD | `.github/workflows/deploy.yml` | run #18 `success` at v0.4.0 — tests → templates → Worker → cron → Pages |
 
 ## Verified on production, not only in tests
 
@@ -24,6 +26,18 @@
   the 15-minute `undo_url`. Re-measured after v0.3.0 with `scripts/prod_check.sh`:
   **88/88 on `mamatoe` and 88/88 on `kotaking`**, including the Slackbot-UA
   prefetch (order document read straight from KV, still `awaiting_payment`).
+- Re-measured again after v0.4.0 with the two consoles added: **124/124 on
+  `mamatoe` and 124/124 on `kotaking`**, section [8] covering the open door
+  (`/ops/api/{state,health,audit,templates}` → 401 to an anonymous reader, a lever
+  without `x-zimlink-confirm: 1` → 401), the cookie's flags (`HttpOnly`,
+  `SameSite=Strict`, `Secure`, `Max-Age=43200`), a state read that holds no
+  credential (`admin_token`, `secret_hash`, `fw_secret`, `auth_gen`, `admin_url` all
+  absent), all eight templates live in KV, the link lever returning a `/a?code=v1`
+  capability that expires in ≤7 days, and sign-out making the cookie worth 401.
+  Two things the check does on purpose: it counts a dashboard link rather than
+  printing it (`ck` echoes 240 bytes of a failing value, and that value is a
+  credential), and it re-logs in at the end so its own wrong-guess probes cannot
+  walk the operator's lockout counter toward a freeze.
 - Expiry → `runCron` suspended the store (`{"checked":2,"suspended":1}`) → orders
   answered `503 store paused — owner needs to renew` → Flutterwave-shaped webhook
   activated it (`paid_until` +365 d, `plan: annual`) → next cron tick clean.

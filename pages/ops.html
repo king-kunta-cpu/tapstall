@@ -329,7 +329,6 @@ input[type=search] { max-width: 16rem }
 
 <script>
 var q = function (s) { return document.querySelector(s); };
-var qa = function (s) { return Array.prototype.forEach.call(document.querySelectorAll(s), function () {}); };
 function esc(x) { return String(x == null ? '' : x).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
 var D = { stores: [], totals: {}, attention: [], sel: null, filter: 'all', q: '', tpl: [], timer: null, at: 0 };
 
@@ -494,7 +493,6 @@ function detail(h) {
   api('/ops/api/store?handle=' + encodeURIComponent(h)).then(function (r) {
     if (!r.j || !r.j.ok) { q('#drawer').innerHTML = '<p class="notice bad">' + esc((r.j || {}).error || 'failed') + '</p>'; return; }
     var s = r.j.summary, st = r.j.store || {}, o = r.j.orders || [];
-    window.__det = r.j;
     q('#drawer').innerHTML =
       '<div class="row between" style="align-items:baseline"><h3 style="margin:0">' + esc(s.shop_name) + '</h3><a class="sm" style="text-decoration:none" href="/s/' + esc(s.handle) + '" target="_blank">open store</a></div>'
       + '<p class="small mono" style="margin:.2rem 0 .5rem">' + esc(s.handle) + ' · ' + esc(s.rail) + ' · ' + esc(s.currency) + (s.owner_email ? ' · ' + esc(s.owner_email) : ' · no email on file') + '</p>'

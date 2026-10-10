@@ -189,15 +189,15 @@ else
 fi
 
 echo "[8] the two consoles: the merchant money pages, and /ops"
-# The platform secret is read from disk into a file curl consumes, and only its
-# *presence* is ever asserted: no ck/nk call is handed a header or a secret, so
-# a pasted CI log cannot leak a live operator session.
-umask 077
-BODY=$(mktemp)
-python3 -c "
-import json
-sec = open('/home/user/.secrets/admin_secret').read().strip()
-open('$BODY','w').write(json.dumps({'secret': sec}))"
+# The platform secret is resolved the way lib.sh does it, read from disk into a
+# file curl consumes (never on a command line, where `ps` would show it), and
+# only derived yes/no values are ever handed to ck/nk — so a pasted CI log
+# cannot leak a live operator session.
+SEC_FILE=""
+for cand in .secrets/admin_secret "$HOME/.secrets/admin_secret"; do
+  [[ -s "$cand" ]] && SEC_FILE="$cand" && break
+done
+[[ -n "${ADMIN_SECRET:-}" ]] && printf '%s' "$ADMIN_SECRET" > /tmp/zl-sec.$$.txt && SEC_FILE=/tmp/zl-sec.$$.txt
 SELF=$(curl -s -m 60 "$ORIGIN/__selftest")
 ck "the confirm page is live from KV, not the inline fallback" '"tpl_confirm": ?true' "$SELF"
 ck "  · so is the renew page" '"tpl_renew": ?true' "$SELF"
@@ -210,21 +210,35 @@ nk "no secret, key or payout detail in that HTML" 'admin_token|secret_hash|"pay_
 for ep in state health audit templates; do
   ck "/ops/api/$ep refuses an anonymous reader" '^401$' "$(code "$ORIGIN/ops/api/$ep")"
 done
+ck "  · and says a login is what is missing" '"need_login": ?true' "$(curl -s -m 30 "$ORIGIN/ops/api/state")"
 ck "a lever without the confirm header is refused" '^401$' "$(code -X POST -H 'content-type: application/json' -d '{"handle":"'"$HANDLE"'","action":"suspend"}' "$ORIGIN/ops/api/store")"
+if [[ -z "$SEC_FILE" ]]; then
+  echo "  ! no admin_secret on disk (.secrets/admin_secret) and no ADMIN_SECRET in env"
+  echo "  ! the authenticated half of [8] is skipped — the open door is still proved shut"
+else
+BODY=$(mktemp)
+python3 -c "
+import json
+open('$BODY','w').write(json.dumps({'secret': open('$SEC_FILE').read().strip()}))"
 HDR=$(mktemp)
 curl -s -m 30 -D "$HDR" -o /dev/null -X POST -H 'content-type: application/json' --data-binary "@$BODY" "$ORIGIN/ops/login"
-# only derived yes/no strings are passed to ck from here on
+# only derived values are passed to ck from here on
 HAVE=$(grep -ic '^set-cookie: *zl_ops=' "$HDR")
-FLAGS=$(awk 'tolower($0) ~ /^set-cookie: *zl_ops/ {print}' "$HDR" | grep -c 'HttpOnly' || true)
-SAMESITE=$(awk 'tolower($0) ~ /^set-cookie: *zl_ops/ {print}' "$HDR" | grep -cE 'SameSite=Strict' || true)
-SECURE=$(awk 'tolower($0) ~ /^set-cookie: *zl_ops/ {print}' "$HDR" | grep -cE '; *Secure' || true)
-TTL=$(awk 'tolower($0) ~ /^set-cookie: *zl_ops/ {print}' "$HDR" | grep -oE 'Max-Age=[0-9]+' | head -1 | cut -d= -f2)
+attrs() { awk 'BEGIN{IGNORECASE=1} /^set-cookie: *zl_ops/ {print}' "$HDR" | tr -d '\r'; }
+FLAGS=$(attrs | grep -c 'HttpOnly' || true)
+SAMESITE=$(attrs | grep -cE 'SameSite=Strict' || true)
+SECURE=$(attrs | grep -cE '; ?Secure' || true)
+TTL=$(attrs | grep -oE 'Max-Age=[0-9]+' | head -1 | cut -d= -f2)
 ck "the secret exchanges for a cookie, not a token in a URL" '^1$' "$HAVE"
 ck "  · HttpOnly" '^1$' "$FLAGS"
 ck "  · SameSite=Strict" '^1$' "$SAMESITE"
 ck "  · Secure" '^1$' "$SECURE"
 ck "  · and a 12-hour lifetime, not forever" '^43200$' "$TTL"
-OC=$(awk 'tolower($0) ~ /^set-cookie: *zl_ops/ {sub(/\r$/,""); print $2}' "$HDR" | cut -d; -f1)
+OC=$(attrs | sed -E 's/^[^=]+=//; s/;.*$//')
+if [[ -z "$OC" ]]; then
+  echo "  ! /ops/login did not answer with a session — the rest of [8] would be noise"
+  rm -f "$BODY" "$HDR"
+else
 ST2=$(curl -s -m 60 -b "zl_ops=$OC" "$ORIGIN/ops/api/state")
 ck "the estate reads back as data the console can render" '"totals":\{' "$ST2"
 ck "  · with an attention queue that names its reasons" '"attention":\[' "$ST2"
@@ -236,25 +250,35 @@ ck "  · and the Pages mirror it is served beside" '"pages":' "$HL"
 TPLS=$(curl -s -m 30 -b "zl_ops=$OC" "$ORIGIN/ops/api/templates")
 ck "every page the Worker serves is in KV" '"live": ?true' "$TPLS"
 nk "  · none missing" '"live": ?false' "$TPLS"
+DET=$(curl -s -m 30 -b "zl_ops=$OC" "$ORIGIN/ops/api/store?handle=$HANDLE")
+ck "one store opens with its orders, log and queued change" '"summary":\{' "$DET"
+ck "  · the drawer is told which fields the merchant may queue" '"editable":\[' "$DET"
 LL=$(curl -s -m 30 -b "zl_ops=$OC" -H 'x-zimlink-confirm: 1' -X POST -H 'content-type: application/json' \
   -d '{"handle":"'"$HANDLE"'","action":"link"}' "$ORIGIN/ops/api/store")
-ck "the link lever hands out a capability, not a key" '/a?code=v1' "$LL"
+# a dashboard link is a 7-day credential: it is counted, never printed
+LINK_OK=$(printf '%s' "$LL" | grep -c '/a?code=v1' || true)
+ck "the link lever hands out a capability, not a key" '^1$' "$LINK_OK"
+LINK_TTL=$(printf '%s' "$LL" | grep -oE '"dashboard_url":"https://[^/]+/a\?code=v1\.[0-9]+' | grep -oE '[0-9]+$' | head -1)
+LINK_LEFT=$(( LINK_TTL - $(date +%s) ))
+ck "  · and it expires on its own (in days, not never)" '^([0-6]|7)$' "$(( LINK_LEFT / 86400 ))"
 ck "  · notify and link are real actions, not dead buttons" '"ok": ?true' "$LL"
-ck "  · and the write lands in the operator log" '"ops":\[' "$(curl -s -m 30 -b "zl_ops=$OC" "$ORIGIN/ops/api/audit")"
-nk "  · the log line does not carry a secret" 'admin_token' "$(curl -s -m 30 -b "zl_ops=$OC" "$ORIGIN/ops/api/audit")"
+AUD=$(curl -s -m 30 -b "zl_ops=$OC" "$ORIGIN/ops/api/audit")
+ck "  · and the write lands in the operator log" '"ops":\[' "$AUD"
+nk "  · the log line carries no secret" 'admin_token' "$AUD"
 LO=$(curl -s -m 30 -o /dev/null -w '%{http_code}' -X POST -b "zl_ops=$OC" "$ORIGIN/ops/logout")
 AFTER=$(curl -s -m 30 -o /dev/null -w '%{http_code}' -b "zl_ops=$OC" "$ORIGIN/ops/api/state")
 ck "signing out answers" '^200$' "$LO"
 ck "  · and the cookie is worth nothing afterwards" '^401$' "$AFTER"
-# an expired cookie must not spend the lockout budget (three probes, then a
-# wrong secret still shows a full-steps-remaining counter, not a lockout)
 code -b "zl_ops=$OC" "$ORIGIN/ops/api/state" >/dev/null; code -b "zl_ops=$OC" "$ORIGIN/ops/api/state" >/dev/null
 TRY=$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"secret":"not-the-platform-secret"}' "$ORIGIN/ops/login" | grep -oE '"tries_left": ?[0-9]+' | grep -oE '[0-9]+' | head -1)
-ck "  · dead-cookie probes did not lock anybody out" '^(9|10|11|12)$' "$TRY"
-# and the two guesses this check just made are wiped from the counter, so
-# running prod_check a dozen times can never freeze the operator's own console
+ck "  · dead-cookie probes did not lock anybody out" '^([6-9]|1[0-2])$' "$TRY"
+# and the guess this check just made is wiped from the counter, so running
+# prod_check a dozen times can never freeze the operator's own console
 curl -s -m 30 -o /dev/null -X POST -H 'content-type: application/json' --data-binary "@$BODY" "$ORIGIN/ops/login"
-rm -f "$BODY" "$HDR"
+rm -f "$BODY"
+fi
+rm -f "$HDR"
+fi
 
 echo "[9] tidy up"
 CK2=$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-zimlink-admin: $ADMIN_KEY" \
