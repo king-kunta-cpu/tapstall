@@ -37,6 +37,11 @@ The schedule is declared in `wrangler.toml` and wrangler reported
 refuses both JSON and metadata-only multipart for this token type, so it cannot be
 read back over HTTP. Verify without the dashboard:
 
+Note: `runCron` also runs on demand via `/__selftest?scheduled=1`, and the deploy
+self-check does exactly that — so a fresh `minutes_ago` right after a deploy is not
+proof on its own. Proof is a timestamp that moves at 06:15/12:15/18:15/00:15 UTC
+with **no** deploy in between.
+
 ```
 curl -s https://zimlink.simalidudu.workers.dev/__selftest | jq .cron_heartbeat
 ```
