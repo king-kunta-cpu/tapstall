@@ -177,9 +177,11 @@ ck "the body's handle is ignored, $OTHER's paid count stays $BEFORE" "^${AFTER}$
   ck "it acted only on the store named inside the cap" "own-store=true" "$VERDICT"
   ck "the ledger endpoint still refuses a key from a stranger store" '^401$' "$(code "$ORIGIN/api/admin?handle=$OTHER")"
   ck "recovery for $OTHER does not answer for $HANDLE" '^403$' "$(curl -s -m 30 -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"handle":"'"$OTHER"'","owner_email":"x@y.z","pay_account":"'"$OTH_KEY"'"}' "$ORIGIN/api/recover")"
-  curl -s -m 30 -o /dev/null -X POST -H "Authorization: Bearer $TOK" -H "Content-Type: application/json" \
-    "https://api.cloudflare.com/client/v4/accounts/$ACCT/storage/kv/namespaces/$KV/values/lock:$OTHER" -d "$(python3 -c 'import json;print(json.dumps({"value":"0"}))')" 2>/dev/null
-  echo "  · cleared the lock counter $OTHER accumulated from those probes"
+  curl -s -m 30 -o /dev/null -X DELETE -H "Authorization: Bearer $TOK" \
+    "https://api.cloudflare.com/client/v4/accounts/$ACCT/storage/kv/namespaces/$KV/values/lock:$OTHER" 2>/dev/null
+  curl -s -m 30 -o /dev/null -X DELETE -H "Authorization: Bearer $TOK" \
+    "https://api.cloudflare.com/client/v4/accounts/$ACCT/storage/kv/namespaces/$KV/values/lock:$HANDLE" 2>/dev/null
+  echo "  · cleared the lock counters both stores accumulated from those probes"
 else
   echo "  ! no second store found to test isolation against (set OTHER_HANDLE=)"
 fi
