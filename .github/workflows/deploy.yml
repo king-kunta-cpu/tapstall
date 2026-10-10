@@ -1,43 +1,55 @@
 name: deploy
-# Push to main => tests, then deploy the Worker and publish the public pages.
-# Zero human steps: no dashboard, no wrangler login, no manual store work.
+# Push to main => tests, deploy the Worker, publish the public pages.
+# Zero human steps: no dashboard, no wrangler login, no per-customer work.
 on:
   push:
     branches: [main]
     paths-ignore: ['ci-deploy.log']
   workflow_dispatch: {}
+
 permissions:
-  contents: read
+  contents: write      # deploy log + Pages
   pages: write
   id-token: write
+
 concurrency:
-  group: pages
-  cancel-in-progress: true
+  group: deploy
+  cancel-in-progress: false
+
 jobs:
   worker:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write   # so a failed deploy can publish its own log for diagnosis
     steps:
-      # First step, before any action can fail: reports through the API so a job
-      # that dies in checkout still tells us it started.
+      - uses: actions/checkout@v4
+
+      # Announce the run through the contents API *before* anything that can
+      # fail, because a job whose logs the token cannot read is undiagnosable.
       - name: heartbeat
-        env: { GH_TOKEN: ${{ github.token } }
-        run: |
-          curl -s -X PUT -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ci-deploy.log" \
-            -d "$(printf '{"message":"ci heartbeat worker start","content":"%s","sha":"%s"}' \
-              "$(printf 'worker job started %s run=%s sha=%s\n' "$(date -u +%T)" "$GITHUB_RUN_ID" "${GITHUB_SHA:0:7}" | base64 -w0)" \
-              "$(curl -s -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ci-deploy.log" | sed -n 's/.*"sha": "\([a-f0-9]*\)".*/\1/p')")" > /tmp/hb.json
-          cat /tmp/hb.json | head -c 300
-      - name: heartbeat2 (after a no-op)
         if: always()
-        run: echo "this step runs only if the previous one exists" 
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          printf 'worker job started %s run=%s sha=%s\n' "$(date -u +%FT%TZ)" "$GITHUB_RUN_ID" "${GITHUB_SHA:0:7}" > ci-deploy.log
+          sha=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ci-deploy.log" \
+            | sed -n 's/.*"sha": "\([a-f0-9]*\)".*/\1/p')
+          body=$(python3 -c '
+          import base64,json,os,sys
+          raw=open("ci-deploy.log","rb").read()
+          out={"message":"ci heartbeat","content":base64.b64encode(raw).decode()}
+          if sys.argv[1]: out["sha"]=sys.argv[1]
+          print(json.dumps(out))' "$sha")
+          curl -s -o /tmp/hb.json -X PUT -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ci-deploy.log" -d "$body"
+          head -c 200 /tmp/hb.json
+
       - uses: actions/setup-node@v4
-        with: { node-version: '20' }
-      - run: npm ci   # devDependency: wrangler (owns the deploy format + schedule)
-      - name: tests
-        run: node --test tests/
+        with:
+          node-version: '20'
+      - run: npm ci          # devDependency: wrangler (owns the upload format + schedule)
+      - run: node --test tests/
+
       - name: deploy worker to Cloudflare
         if: github.ref == 'refs/heads/main'
         env:
@@ -47,38 +59,56 @@ jobs:
           WORKER_NAME: zimlink
         run: |
           set +e
-          bash -x ./scripts/deploy.sh 2>&1 | tee /tmp/deploy.log
+          bash ./scripts/deploy.sh 2>&1 | tee /tmp/deploy.log
           code=${PIPESTATUS[0]}
-          echo "---- tools ----" >> /tmp/deploy.log
-          for c in node jq curl openssl python3 npm; do printf '%s=%s ' "$c" "$(command -v $c || echo MISSING)" >> /tmp/deploy.log; done >> /tmp/deploy.log
-          echo >> /tmp/deploy.log
-          echo "---- present vars ----" >> /tmp/deploy.log
-          for v in CF_TOKEN CF_ACCOUNT ADMIN_SECRET WORKER_NAME GITHUB_REF; do
-            eval "val=\${$v:-}"; echo "$v=$([ -n "$val" ] && echo set || echo MISSING)" >> /tmp/deploy.log
-          done
-          # publish the log into the repo: job logs need actions:read on the token,
-          # and a deploy that can fail silently is not zero-touch
-          git config user.name ci >> /tmp/deploy.log 2>&1
-          git config user.email ci@zimlink >> /tmp/deploy.log 2>&1
-          cp /tmp/deploy.log ci-deploy.log
-          git add -f ci-deploy.log >> /tmp/deploy.log 2>&1
-          git commit -m "ci deploy log ($(date -u +%H:%M:%S)) exit=$code" >> /tmp/deploy.log 2>&1
-          git push >> /tmp/deploy.log 2>&1 || true
+          {
+            echo "==== exit=$code $(date -u +%FT%TZ) ===="
+            echo "==== tools ===="
+            for c in node npm jq curl openssl python3; do
+              printf '%s=%s ' "$c" "$(command -v "$c" || echo MISSING)"
+            done
+            echo
+            echo "==== inputs visible to this step ===="
+            for v in CF_TOKEN CF_ACCOUNT ADMIN_SECRET WORKER_NAME; do
+              eval "x=\${$v:-}"
+              printf '%s=%s ' "$v" "$([ -n "$x" ] && echo "set(len ${#x})" || echo MISSING)"
+            done
+            echo
+          } >> /tmp/deploy.log
+          tail -40 /tmp/deploy.log
           exit $code
+
+      - name: publish the deploy log
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [ -s /tmp/deploy.log ] || exit 0
+          sha=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ci-deploy.log" \
+            | sed -n 's/.*"sha": "\([a-f0-9]*\)".*/\1/p')
+          body=$(python3 -c '
+          import base64,json,os,sys
+          raw=open("/tmp/deploy.log","rb").read()[:90000]
+          out={"message":os.environ.get("LOG_MSG","ci deploy log"),"content":base64.b64encode(raw).decode()}
+          if sys.argv[1]: out["sha"]=sys.argv[1]
+          print(json.dumps(out))' "$sha")
+          curl -s -o /dev/null -w 'log publish: http %{http_code}\n' -X PUT \
+            -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ci-deploy.log" -d "$body"
+
+  # Pages is independent: a broken Cloudflare token must never take the public
+  # landing page and the fee calculator off the air.
   pages:
-    needs: worker
     runs-on: ubuntu-latest
-    environment: { name: github-pages, url: ${{ steps.out.outputs.page_url }} }
+    environment:
+      name: github-pages
+      url: ${{ steps.out.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
-        with: { path: pages/public }
+        with:
+          path: pages/public
       - id: out
         uses: actions/deploy-pages@v4
-      - name: heartbeat (pages ok)
-        if: always()
-        run: |
-          echo "pages job finished conclusion=${{ job.status }} $(date -u +%T)" > ci-deploy.log
-          git config user.name ci; git config user.email ci@zimlink
-          git add -f ci-deploy.log && git commit -m "ci heartbeat: pages" && git push || true
