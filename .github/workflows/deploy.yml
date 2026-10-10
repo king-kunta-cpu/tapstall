@@ -19,13 +19,20 @@ jobs:
     permissions:
       contents: write   # so a failed deploy can publish its own log for diagnosis
     steps:
-      - uses: actions/checkout@v4
-      - name: heartbeat (job started)
+      # First step, before any action can fail: reports through the API so a job
+      # that dies in checkout still tells us it started.
+      - name: heartbeat
+        env: { GH_TOKEN: ${{ github.token } }
         run: |
-          echo "worker job started $(date -u +%T) run=$GITHUB_RUN_ID sha=${GITHUB_SHA:0:7}" > ci-deploy.log
-          git config user.name ci; git config user.email ci@zimlink
-          git add -f ci-deploy.log && git commit -m "ci heartbeat: worker started" && git push
-          exit 1   # temporary: proves the heartbeat survives a failing job
+          curl -s -X PUT -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ci-deploy.log" \
+            -d "$(printf '{"message":"ci heartbeat worker start","content":"%s","sha":"%s"}' \
+              "$(printf 'worker job started %s run=%s sha=%s\n' "$(date -u +%T)" "$GITHUB_RUN_ID" "${GITHUB_SHA:0:7}" | base64 -w0)" \
+              "$(curl -s -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ci-deploy.log" | sed -n 's/.*"sha": "\([a-f0-9]*\)".*/\1/p')")" > /tmp/hb.json
+          cat /tmp/hb.json | head -c 300
+      - name: heartbeat2 (after a no-op)
+        if: always()
+        run: echo "this step runs only if the previous one exists" 
       - uses: actions/setup-node@v4
         with: { node-version: '20' }
       - run: npm ci   # devDependency: wrangler (owns the deploy format + schedule)
