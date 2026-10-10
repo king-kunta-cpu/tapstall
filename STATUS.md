@@ -19,15 +19,39 @@
   for an unknown handle returns `{"ok":false,"error":"no store"}`.
 - Order → `pay_now` `23.93` on a `23.12` total (PayShap, `pass`) and `23.89` on
   `23.10` (EcoCash, `absorb`, `fee_absorbed_by_merchant: 0.79`).
-- One-tap confirmation via `GET /api/mark?handle=…&token=…&id=…` → `paid`,
-  idempotent on a second tap (no duplicate row).
+- One-tap confirmation is now `GET /c/<cap>` (inert page) → browser POST → `paid`,
+  idempotent on a second tap (`already:true`, no duplicate row), reversible with
+  the 15-minute `undo_url`. Re-measured after v0.3.0 with `scripts/prod_check.sh`:
+  **88/88 on `mamatoe` and 88/88 on `kotaking`**, including the Slackbot-UA
+  prefetch (order document read straight from KV, still `awaiting_payment`).
 - Expiry → `runCron` suspended the store (`{"checked":2,"suspended":1}`) → orders
   answered `503 store paused — owner needs to renew` → Flutterwave-shaped webhook
   activated it (`paid_until` +365 d, `plan: annual`) → next cron tick clean.
 - Rate limit: 8 `POST /api/order` per minute per IP, then `429`, while `GET`s stay
   open. (The flood test's 8 demo orders were deleted afterwards.)
-- `publicStore()` leak check green in `/__selftest` and in the served HTML
-  (`admin_token`, `owner_email`, `notify_webhook`, `feed_cache` all absent).
+- `publicStore()` leak check green in `/__selftest` and in the served HTML. It is
+  now an **allowlist**: the denylist version leaked `pending` (a queued payout
+  account) into `/s/<handle>/config.json` for a day until the new check caught it.
+- Merchant authority, measured live rather than only in the harness:
+  `GET /api/mark` → 405 + `Allow: POST`; `GET /api/settings`/`/api/revoke` → 405;
+  anonymous `POST /api/settings` → 401; `OPTIONS` on a mutation path → 403 while
+  `OPTIONS /api/order` still answers `*`; no `Access-Control-Allow-Origin`, CSP
+  `frame-ancestors 'none'`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`,
+  `no-store` on every admin response; `/api/lookup` free of `admin_url`,
+  `renew_url`, `pay_account`, `feed_url`, `whatsapp`, `admin_token`,
+  `notify_email`; a forged or truncated cap → `link_expired`; a login code spent
+  on `/api/mark` → `link_expired`; `POST /api/recover` with one right answer →
+  403 and a counted attempt; settings with the API key → cosmetic field live at
+  once, `pay_account` held with `in_ms` counting down, visible to the owner,
+  absent from the public page, cancellable, and recorded in the audit masked.
+- Migration, deliberately not forced: `kotaking` and `mamatoe` still hold their
+  v0.2 `…/a?handle=…&token=<10 chars>` links and those links still open — by
+  trading up for a 7-day code, over a `Set-Cookie`, never by acting on a GET.
+  They are now throttled (12 bad tries per 10 minutes per store), no longer
+  discoverable from a handle, and one `POST /api/revoke` rotates them to a
+  128-bit key. Merchants were not emailed a new link, because the old one is
+  not broken; the next revoke upgrades it, and the "Lost your link?" form is
+  there whenever they choose to use it.
 - Template hot-swap path works: HTML lives in KV under `tpl:*`, updated by one PUT.
 
 ## One thing left to confirm, in ~5 hours

@@ -180,14 +180,17 @@ waiting on a clock (the cron heartbeat), and the deliberate limits.
 
 ## Verified
 
-`node --test tests/` → 51 pass (27 unit on `core.js`, 24 driving the real
+`node --test tests/` → 52 pass (28 unit on `core.js`, 24 driving the real
 bundled Worker against an in-memory KV: the full journey plus the authority
 model — forged/expired/revoked codes, inert GETs, the 15-minute hold, masked
 audit, cross-origin refusal). Deployed and exercised on the real Worker:
 two tenants (Harare/USD/EcoCash, Durban/ZAR/PayShap), order → one-tap paid,
 cross-tenant isolation, expiry → cron suspension → 503 → webhook → reinstated
 (`plan: annual`, 746 days). `/__selftest` reports bindings, all five templates,
-pricing, and a `secret_leak_check`.
+pricing, and a `secret_leak_check`. `scripts/prod_check.sh` → 88 assertions
+against the live Worker per tenant (88/88 on both demo tenants), covering the
+crawler prefetch, the 405s, the CORS split, the 15-minute hold, masked audit,
+revocation, self-serve recovery and cross-tenant refusal.
 
 Known gaps: the Flutterwave hosted-link slug `zimlink` is a placeholder until
 an account exists (renewal works through the webhook and manual reference

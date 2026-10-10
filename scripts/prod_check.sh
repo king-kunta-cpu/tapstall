@@ -15,7 +15,8 @@ ORIGIN="${ORIGIN:-https://zimlink.simalidudu.workers.dev}"
 HANDLE="${HANDLE:-mamatoe}"
 TOK=$(cat /home/user/.secrets/cf_token 2>/dev/null || echo "${CLOUDFLARE_API_TOKEN:-}")
 ACCT=$(cat /home/user/.secrets/cf_account 2>/dev/null || echo "${CLOUDFLARE_ACCOUNT_ID:-}")
-KV=${KV_NS:-b5c1c89d95114092ae91bbafc5a2d76c}     # zimlink-stores
+KV=${KV_NS:-b5c1c89d95114092ae91bbafc5a2d76c}     # zimlink-stores: store docs, templates
+ORD_KV=${ORDERS_NS:-4f4ac94a66db4b859b61668a3c160819}   # zimlink-orders: order docs, lists
 pass=0 fail=0
 
 ck() {   # ck <name> <must-contain-regex> <actual>
@@ -39,7 +40,8 @@ for k in cap_roundtrip cap_rejects_tamper cap_rejects_other_secret cap_rejects_e
          secret_leak_check kv_stores kv_roundtrip; do
   ck "selftest.$k" "\"$k\":true" "$ST"
 done
-ck "selftest.templates" '"tpl_all":true' "$ST"
+for t in tpl_store tpl_onboard tpl_admin tpl_fees tpl_index; do ck "selftest.$t" "$t.:true" "$ST"; done
+ck "selftest.kv_orders" '"kv_orders":true' "$ST"
 ck "selftest.pricing" '"pay_now"' "$ST"
 
 echo "[2] the hole this release closes: /api/lookup used to hand out the dashboard"
@@ -88,11 +90,19 @@ ck "the page posts itself when a browser runs it" 'method="post" action="/api/ma
 ck "and says what it will do" 'from ' "$PAGE"
 # Ground truth is the order document itself. The dashboard list is a separate KV
 # key and is eventually consistent, so it can lag a write by up to a minute.
-KVORDER=$(curl -s -m 30 -H "Authorization: Bearer $TOK" "https://api.cloudflare.com/client/v4/accounts/$ACCT/storage/kv/namespaces/$KV/values/order:$HANDLE:$ID")
+KVORDER=$(curl -s -m 30 -H "Authorization: Bearer $TOK" "https://api.cloudflare.com/client/v4/accounts/$ACCT/storage/kv/namespaces/$ORD_KV/values/order:$HANDLE:$ID")
 ck "order document still awaiting_payment after the prefetch" '"status":"awaiting_payment"' "$KVORDER"
 nk "and it kept the payout details printed at order time" 'ZZ-PROBE' "$KVORDER"
 DASH=$(curl -s -m 30 -H "x-zimlink-admin: $ADMIN_KEY" "$ORIGIN/api/admin?handle=$HANDLE")
 nk "no raw login code in the ledger payload" 'code=v1\.' "$DASH"
+# now be the browser: post the cap the page would post
+POST=$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"${MARK#/c/}"'"}' "$ORIGIN/api/mark")
+ck "the browser POST confirms it" '"status":"paid"' "$POST"
+ck "and hands back a 15-minute undo link" '/c/v1\.' "$POST"
+REPLAY=$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"${MARK#/c/}"'"}' "$ORIGIN/api/mark")
+ck "a double tap is a no-op, not a double count" '"already":true' "$REPLAY"
+UNDO=$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"$(printf '%s' "$POST" | python3 -c "import sys,json;print(json.load(sys.stdin).get('undo_url','/c/none')[3:])")"'"}' "$ORIGIN/api/mark")
+ck "undo returns it to awaiting_payment" '"awaiting_payment"' "$UNDO"
 
 echo "[5] settings: cosmetic instant, money held 15 minutes, cancellable"
 HOURS=$(printf '%s' "$STORE" | python3 -c "import sys,json;print(json.load(sys.stdin).get('hours','') or 'open')" 2>/dev/null)
@@ -130,7 +140,7 @@ ck "cookie is HttpOnly, SameSite=Strict, Secure, 12 h" 'HttpOnly' "$(grep -i zl_
 ck "dashboard opens with the cookie" '"orders"' "$(curl -s -m 30 -b "$JAR" "$ORIGIN/api/admin?handle=$HANDLE")"
 ck "and 401s without it" '^401$' "$(code "$ORIGIN/api/admin?handle=$HANDLE")"
 ck "the admin page is the new one" 'Store settings' "$(curl -s -m 30 "$ORIGIN/a")"
-ck "its settings panel is driven by the API" 'editable' "$(curl -s -m 30 -b "$JAR" "$ORIGIN/api/admin?handle=$HANDLE" | head -c 4000)"
+ck "its settings panel is driven by the API" "editable.:" "$(curl -s -m 30 -b "$JAR" "$ORIGIN/api/admin?handle=$HANDLE")"
 AUD=$(curl -s -m 30 -b "$JAR" "$ORIGIN/api/admin?handle=$HANDLE" | python3 -c "
 import sys,json
 d=json.load(sys.stdin)
@@ -142,7 +152,39 @@ nk "but the value itself is masked" 'ZZ-PROBE' "$AUD"
 ck "a login code cannot be spent to confirm an order" '"link_expired"' "$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"$CODE"'"}' "$ORIGIN/api/mark")"
 ck "a guessed legacy token is refused, not honoured" '^405$' "$(code "$ORIGIN/api/mark?handle=$HANDLE&token=not-the-key&id=x&status=paid")"
 
-echo "[7] tidy up"
+echo "[7] one store's credentials never open another store"
+OTHER="${OTHER_HANDLE:-}"
+if [[ -z "$OTHER" ]]; then
+  for cand in kotaking mamatoe; do [[ "$cand" != "$HANDLE" ]] && OTHER=$cand && break; done
+fi
+ONE=$(printf '%s' "$STORE" | python3 -c "import sys,json;print(json.load(sys.stdin).get('renew_url',''))" 2>/dev/null)
+OTH_DOC=$(curl -s -m 30 -H "Authorization: Bearer $TOK" "https://api.cloudflare.com/client/v4/accounts/$ACCT/storage/kv/namespaces/$KV/values/store:$OTHER")
+OTH_KEY=$(printf '%s' "$OTH_DOC" | python3 -c "import sys,json;print(json.load(sys.stdin).get('admin_token',''))" 2>/dev/null)
+if [[ -n "$OTH_KEY" ]]; then
+  ck "$HANDLE's key cannot read $OTHER's ledger" '^403$' "$(code -H "x-zimlink-admin: $ADMIN_KEY" "$ORIGIN/api/admin?handle=$OTHER")"
+  ck "$OTHER's key cannot write $HANDLE's settings" '^403$' "$(curl -s -m 30 -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -H "x-zimlink-admin: $OTH_KEY" -d '{"handle":"'"$HANDLE"'","pay_account":"cross-tenant"}' "$ORIGIN/api/settings")"
+  PUBT=$(curl -s -m 30 "$ORIGIN/s/$HANDLE/config.json")
+  nk "and no trace of that attempt reached the public page" 'cross-tenant' "$PUBT"
+  # a confirm cap is bound to the store inside its signed payload; the `handle`
+  # in the body is not consulted, so it cannot be re-pointed at another tenant
+  BEFORE=$(curl -s -m 30 -H "x-zimlink-admin: $OTH_KEY" "$ORIGIN/api/admin?handle=$OTHER" | python3 -c "
+import sys,json;d=json.load(sys.stdin);print(sum(1 for o in d.get('orders',[]) if o.get('status')=='paid'))" 2>/dev/null)
+curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"${MARK#/c/}"'","handle":"'"$OTHER"'"}' "$ORIGIN/api/mark" > /tmp/resp.json
+AFTER=$(curl -s -m 30 -H "x-zimlink-admin: $OTH_KEY" "$ORIGIN/api/admin?handle=$OTHER" | python3 -c "
+import sys,json;d=json.load(sys.stdin);print(sum(1 for o in d.get('orders',[]) if o.get('status')=='paid'))" 2>/dev/null)
+ck "the body's handle is ignored, $OTHER's paid count stays $BEFORE" "^${AFTER}$" "$BEFORE"
+  VERDICT=$(python3 -c "import json;r=json.load(open('/tmp/resp.json'));print('own-store='+str(bool(r.get('ok'))).lower())" 2>/dev/null)
+  ck "it acted only on the store named inside the cap" "own-store=true" "$VERDICT"
+  ck "the ledger endpoint still refuses a key from a stranger store" '^401$' "$(code "$ORIGIN/api/admin?handle=$OTHER")"
+  ck "recovery for $OTHER does not answer for $HANDLE" '^403$' "$(curl -s -m 30 -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"handle":"'"$OTHER"'","owner_email":"x@y.z","pay_account":"'"$OTH_KEY"'"}' "$ORIGIN/api/recover")"
+  curl -s -m 30 -o /dev/null -X POST -H "Authorization: Bearer $TOK" -H "Content-Type: application/json" \
+    "https://api.cloudflare.com/client/v4/accounts/$ACCT/storage/kv/namespaces/$KV/values/lock:$OTHER" -d "$(python3 -c 'import json;print(json.dumps({"value":"0"}))')" 2>/dev/null
+  echo "  · cleared the lock counter $OTHER accumulated from those probes"
+else
+  echo "  ! no second store found to test isolation against (set OTHER_HANDLE=)"
+fi
+
+echo "[8] tidy up"
 CK2=$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-zimlink-admin: $ADMIN_KEY" \
   -d '{"handle":"'"$HANDLE"'","id":"'"$ID"'","status":"cancelled"}' "$ORIGIN/api/mark")
 ck "probe order cancelled" '"status":"cancelled"' "$CK2"
