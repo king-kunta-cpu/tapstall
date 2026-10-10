@@ -4,9 +4,8 @@
   python3 cf_publish.py <worker-name> <bundle-dir> <kv:NAME:id> [kv:NAME:id ...]
 
 Reads CF_TOKEN / CF_ACCOUNT from the environment or .secrets/. No wrangler, no
-login, no npm install — this is what makes the deploy scriptable from CI and
-from a phone. Uses `wrangler` instead when CLOUDFLARE_API_TOKEN is already set
-and wrangler happens to be installed.
+login, no npm install. scripts/deploy.sh prefers wrangler (it owns the upload
+format and the schedule) and falls back to this when node_modules is absent.
 """
 import base64
 import hashlib
@@ -17,6 +16,7 @@ import urllib.error
 import urllib.request
 
 API = "https://api.cloudflare.com/client/v4"
+CRON = os.environ.get("ZIMLINK_CRON", "15 6,12,18,0 * * *")   # 4x daily UTC
 COMPAT_DATE = os.environ.get("COMPAT_DATE", "2025-06-01")
 CT = {
     ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript",
@@ -108,10 +108,11 @@ def main():
 
     assets_dir = os.path.join(bundle, "assets")
     metadata = {
-        "workers_dev": True,
+        "workers_dev": True,                     # the *.workers.dev route
         "compatibility_date": COMPAT_DATE,
         "compatibility_flags": ["nodejs_compat"],
         "main_module": "worker.js",
+        "triggers": {"crons": [CRON]},           # rides along with the upload
         "bindings": bindings,
         "observability": {"enabled": True, "head_sampling_rate": 1},
     }
@@ -124,8 +125,6 @@ def main():
         # parity with wrangler-based deploys.
         print("note: %d asset file(s) available in %s, uploading via KV templates instead"
               % (sum(len(f) for _, _, f in os.walk(assets_dir)), assets_dir))
-    json.dump({}, open(os.path.join(bundle, "assets-unused.json"), "w")) if False else None
-
     md = dict(metadata)
     files = {"data": ("worker.js", open(script, "rb").read(), "application/javascript+module")}
     body, boundary = form({"metadata": json.dumps(md)}, files)
@@ -134,11 +133,10 @@ def main():
     ver = (res.get("result") or {}).get("version_id", "?")
     print("deployed %s (version %s, %d binding(s), no assets binding)" % (name, ver, len(bindings)))
 
-    # cron: keep the paid-term enforcement alive
-    api("PUT", f"/accounts/{acct}/workers/scripts/{name}/cron_triggers",
-        json.dumps({"targets": [{"cron": "15 6,12,18,0 * * *", "retry": {}}], "predictions": []}).encode(),
-        {"Content-Type": "application/json"}, token)
-    print("cron set: 06:15/12:15/18:15/00:15 UTC")
+    # The schedule ships inside the upload above: PUT .../cron_triggers rejects
+    # both JSON and metadata-only multipart for an API-token deploy (it insists on
+    # a script body), so a separate call is a dead end — verify instead:
+    #   GET /__selftest -> cron_heartbeat.minutes_ago
 
 
 if __name__ == "__main__":

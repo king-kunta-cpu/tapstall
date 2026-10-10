@@ -3,8 +3,10 @@ main = "worker/worker.js"
 compatibility_date = "2025-06-01"
 workers_dev = true
 
-# Menu/feed HTML lives in KV (tpl:*) so templates can be fixed with one PUT —
-# no redeploy, no git push, no dashboard.
+# Templates are served from KV (keys tpl:*) so an HTML fix is one PUT, not a
+# redeploy: no git push, no dashboard, no build step. That is why there is no
+# [assets] block here — Cloudflare's static-asset upload format is the one part
+# of this stack that is not pleasant to script, and KV does the job for free.
 [[kv_namespaces]]
 binding = "STORES"
 id = "b5c1c89d95114092ae91bbafc5a2d76c"

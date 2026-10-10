@@ -219,3 +219,9 @@ export function publicStore(st) {
   } = st;
   return pub;
 }
+
+/** SHA-256 hex — used for buyer fingerprints (no PII stored in the open). */
+export async function hash(input) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(input)));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}

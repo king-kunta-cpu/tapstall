@@ -1,5 +1,6 @@
 name: deploy
-# Push to main => test, then deploy the Worker (API, not wrangler) and publish Pages.
+# Push to main => tests, then deploy the Worker and publish the public pages.
+# Zero human steps: no dashboard, no wrangler login, no manual store work.
 on:
   push:
     branches: [main]
@@ -12,12 +13,13 @@ concurrency:
   group: pages
   cancel-in-progress: true
 jobs:
-  test-and-worker:
+  worker:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: '20' }
+      - run: npm ci   # devDependency: wrangler (owns the deploy format + schedule)
       - name: tests
         run: node --test tests/
       - name: deploy worker to Cloudflare
@@ -25,13 +27,11 @@ jobs:
         env:
           CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          WORKER_NAME: ${{ secrets.WORKER_NAME || 'zimlink' }}
-        run: bash scripts/deploy.sh
-      - name: upload bundle artifact
-        uses: actions/upload-artifact@v4
-        with: { name: bundle, path: .build }
+          ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+          WORKER_NAME: zimlink
+        run: ./scripts/deploy.sh
   pages:
-    needs: test-and-worker
+    needs: worker
     runs-on: ubuntu-latest
     environment: { name: github-pages, url: ${{ steps.out.outputs.page_url }} }
     steps:

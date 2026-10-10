@@ -16,7 +16,7 @@
 
 import {
   RAILS, round2, clamp, slug, digits, isEmail, validHandle, parseCSV, normalizeFeedUrl,
-  parseProducts, priceOrder, payInstructions, riskFlags, waSummary, publicStore,
+  parseProducts, priceOrder, payInstructions, riskFlags, waSummary, publicStore, hash,
 } from './core.js';
 
 const VERSION = '0.2.0';
@@ -44,7 +44,15 @@ async function route(req, url, env, ctx) {
   const p = url.pathname;
 
   if (p === '/__ping') return json({ ok: true, version: VERSION, ts: Date.now() });
-  if (p === '/__selftest') return json(await selftest(env));
+  if (p === '/__selftest') {
+    const t = await selftest(env);
+    // ?scheduled=1 also runs the cron body live, so term enforcement is verifiable
+    if (url.searchParams.get('scheduled') === '1') {
+      try { t.scheduled = await runCron(env); }
+      catch (e) { t.scheduled_error = String(e && e.message || e); }
+    }
+    return json(t);
+  }
   if (p === '/rails') return json({ ok: true, rails: RAILS, price_usd: PRICE_USD, free_days: FREE_DAYS });
   if (p === '/fees.ics') return feesIcs();
   if (p === '/fees' || p === '/fees.html') {
@@ -79,7 +87,7 @@ async function route(req, url, env, ctx) {
   if (p === '/api/register' && req.method === 'POST') return register(req, url, env);
   if (p === '/api/lookup') return lookup(url, env);
   if (p === '/api/admin') return adminView(url, env);
-  if (p === '/api/mark' && req.method === 'POST') return markPaid(req, env);
+  if (p === '/api/mark') return markPaid(req, url, env);   // POST body or one-tap GET link
   if (p === '/a') return html(await tpl(env, 'admin'));
   if ((m = p.match(/^\/renew\/([A-Za-z0-9]{6,40})$/))) return renewPage(env, m[1]);
   if (p === '/api/admin-put' && req.method === 'POST') return adminPut(req, env);
@@ -172,7 +180,7 @@ async function placeOrder(req, url, env, ctx) {
 
   const order = {
     id, code, service, at: new Date().toISOString(), handle: st.handle,
-    buyer, service, when: String(body.when || 'asap').slice(0, 40),
+    buyer, when: String(body.when || 'asap').slice(0, 40),
     pricing, items,
     buyer_hash: buyerHash.slice(0, 16), prior_orders: hist.count, prior_unpaid: hist.unpaid,
     status: railKey === 'cash' ? 'cod' : 'awaiting_payment',
@@ -193,6 +201,9 @@ async function placeOrder(req, url, env, ctx) {
     wa_link: wa ? `https://wa.me/${wa}?text=${encodeURIComponent(summary)}` : null,
     trust: { orders_before: hist.count, unconfirmed_before: hist.unpaid },
     risk_flags: order.risk_flags,
+    // one-tap confirm for the merchant: no app, no key, no dashboard login
+    mark_url: `/api/mark?handle=${encodeURIComponent(st.handle)}&token=${encodeURIComponent(st.admin_token || '')}&id=${id}`,
+    cancel_url: `/api/mark?handle=${encodeURIComponent(st.handle)}&token=${encodeURIComponent(st.admin_token || '')}&id=${id}&status=cancelled`,
   }, 201);
 }
 
@@ -211,13 +222,24 @@ async function persistOrder(env, st, order) {
 }
 
 
+const MARK_BASE = '/api/mark?handle=';
+
 async function notify(env, st, order) {
   const tasks = [];
   if (st.notify_webhook) {
     tasks.push(fetch(st.notify_webhook, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-zimlink-token': st.admin_token || '' },
-      body: JSON.stringify({ type: 'order.new', store: st.handle, order }),
+      headers: {
+        'content-type': 'application/json', 'x-zimlink-token': st.admin_token || '',
+        // workers.dev bot rules reject requests without a browser-ish UA, which
+        // would silently swallow a merchant's order webhook
+        'user-agent': 'zimlink/1 (order notification)',
+      },
+      body: JSON.stringify({
+        type: 'order.new', store: st.handle, order,
+        // tap-to-confirm: the merchant's tool is whatever can open a link
+        mark_url: `${MARK_BASE}${st.handle}&token=${st.admin_token}&id=${order.id}`,
+      }),
     }).catch(() => {}));
   }
   if (env.EMAIL && st.notify_email) {
@@ -225,15 +247,20 @@ async function notify(env, st, order) {
       await env.EMAIL.send(new EmailMessage(
         `${st.handle}@notify.zimlink`, st.notify_email,
         `New order ${order.code} — ${order.pricing.pay_now} ${st.currency || 'USD'}`,
-        `Buyer: ${order.buyer.name} (${order.buyer.phone})\n${waSummary(st, order)}\nFlags: ${(order.risk_flags || []).join(', ') || 'none'}\nManage: ${st.admin_url || ''}`
+        `Buyer: ${order.buyer.name} (${order.buyer.phone})\n${waSummary(st, order)}\nFlags: ${(order.risk_flags || []).join(', ') || 'none'}\n`
+        + `One tap when the money lands: ${MARK_BASE}${st.handle}&token=${st.admin_token}&id=${order.id}\n`
+        + `Or the dashboard: ${st.admin_url || ''}`
       ));
     } catch (e) { /* email optional */ }
   }
   await Promise.all(tasks);
 }
 
-async function markPaid(req, env) {
-  const b = await req.json().catch(() => null) || {};
+async function markPaid(req, url, env) {
+  // Works from the merchant dashboard (POST) and from a one-tap link in the
+  // notification (GET /api/mark?handle=..&token=..&id=..) — no app, no API key.
+  const b = (req.method === 'POST' ? await req.json().catch(() => null) : null) || {};
+  for (const k of ['handle', 'token', 'id', 'status']) if (b[k] == null) b[k] = url.searchParams.get(k);
   const st = await getStore(env, String(b.handle || ''));
   if (!st) return json({ ok: false, error: 'no store' }, 404);
   if (!st.admin_token || String(b.token) !== st.admin_token) return json({ ok: false, error: 'bad token' }, 403);
@@ -416,6 +443,8 @@ async function hookPayfast(url, env) {
 async function runCron(env) {
   const out = { checked: 0, suspended: 0, reinstated: 0, warned: 0 };
   if (!env.STORES) return out;
+  // heartbeat: proves the schedule actually fires, without opening a dashboard
+  try { await env.STORES.put('cron:last', JSON.stringify({ at: new Date().toISOString(), unix: Date.now() })); } catch (e) {}
   let cursor, loops = 0;
   do {
     const list = await env.STORES.list({ prefix: 'store:', cursor });
@@ -523,7 +552,11 @@ async function buyerTouch(env, handle, h) {
 }
 
 async function selftest(env) {
-  const t = { version: VERSION, kv_stores: !!env.STORES, kv_orders: !!env.ORDERS, email: !!env.EMAIL, assets: !!env.ASSETS };
+  const t = { version: VERSION, kv_stores: !!env.STORES, kv_orders: !!env.ORDERS, email: !!env.EMAIL };
+  if (env.STORES) {
+    const beat = await env.STORES.get('cron:last', 'json');
+    t.cron_heartbeat = beat ? { at: beat.at, minutes_ago: Math.round((Date.now() - (beat.unix || 0)) / 60000) } : 'never run';
+  }
   if (env.STORES) {
     const k = '__ping:' + Date.now();
     await env.STORES.put(k, '1');
