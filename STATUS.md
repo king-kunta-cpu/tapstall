@@ -60,7 +60,8 @@ is one line to remove once the old hostname stops getting traffic.
 | Markets & rails | `/rails`, `/ops/api/rails` | 9 built-in + 0 added = 10 live; `/ops/api/rails` → `401` anonymous, `422` for a label-less rail; `rail_catalogue_ok`, `rail_custom_ok`, `rail_price_with_own` all true in `/__selftest` |
 | Money pages from KV | `tpl:confirm`, `tpl:renew`, `tpl:ops` | all eight `tpl_*` true, so nothing is on the inline fallback |
 | Rate calculator | `/fees?aov=7&n=140&…&m=zw` | 200, 11,117 B (git is 11,119 — the two bytes are the brand in `<title>`) |
-| Landing + calculator mirror | `https://king-kunta-cpu.github.io/tapstall/` | 200, already titled "Tapstall calculator" (Pages is built from git, so it moved with the commit). The old `…/zimlink/` path is `404`, which is exactly why `PAGES_URL` and `REPO_RAW` changed in the same release |
+| Landing + calculator mirror | `https://king-kunta-cpu.github.io/tapstall/` | `/` and `/fees` 200, titled "Tapstall calculator" (Pages is built from git, so it moved with the commit). The old `…/zimlink/` path is `404`, which is exactly why `PAGES_URL` and `REPO_RAW` changed in the same release. `/onboard` was `404` too — see the mirror paragraph below |
+| Mirror sign-up link | measured 2026-10-10 | `pages/index.html` and `pages/fees.html` both carry `href="/onboard"`. On the Worker that is a template; on Pages it was nothing, because `pages/public/_redirects` held `/onboard /onboard 200` — a Netlify convention that GitHub Pages does not implement. Fixed with a real handoff file and a test that walks every internal link on the mirror against the artifact |
 | Demo tenants | `/s/mamatoe`, `/s/kotaking` | 4 products from each store's own CSV; `feed.json` answers 200 on a day with no KV writes; `config.json` carries `rail_info` |
 | Merchant API | `/api/admin?handle=mamatoe` | `200` with 22 orders, `via:"key"`, under **either** `x-tapstall-admin` or `x-zimlink-admin`; no header → `401` |
 | CI/CD | `.github/workflows/deploy.yml` | run #27 `success` at 0.5.0 on the renamed repo: tests → templates (refused, warned) → Worker → **alias Worker** → cron → Pages |
@@ -137,7 +138,23 @@ curl -s https://tapstall.simalidudu.workers.dev/__selftest | jq .cron_heartbeat
 
 `minutes_ago` should be under ~365 after 06:15 UTC and never reset by a deploy.
 If it reads `never run` long after that, set the trigger once in
-Workers & Pages → zimlink → Settings → Triggers → `15 6,12,18,0 * * *`.
+Workers & Pages → zimlink → Settings → Triggers → `15 6,12,18,0 * * *`
+(you may delete it; nothing depends on it being gone, because the code ignores it
+while `REDIRECT_TO` is set — `/__selftest` answers `cron_owner:false`).
+
+The mirror has one defect class the Worker cannot cover for it: a link that resolves
+because a *server* implements it. `pages/public/_redirects` said
+`/onboard  /onboard  200`, which is Netlify syntax — GitHub Pages uploads files and
+rewrites nothing, so the landing page's "Open the store builder" button 404d from the
+mirror while working fine on the Worker. Nobody could see it: the Worker serves `/`
+from a KV template, and the deploy only checked the mirror's status code for `/`. Now
+`pages/public/onboard{.html,/index.html}` is a handoff that redirects to the origin
+with the API (query string kept — an invite link may carry a code), `_redirects` is
+deleted, and `tests/pages.test.mjs` resolves every internal link in the mirror's pages
+against the actual artifact set. The artifact set is assembled by CI (`cp
+pages/index.html pages/fees.html pages/public/`), so the mirror cannot carry a stale
+draft of a page the Worker serves — the two copies had been kept identical by hand, and
+still are, but now there is only one source.
 Nothing else breaks if it is missing — expiry checks also run whenever a merchant
 renews, and orders are never lost.
 

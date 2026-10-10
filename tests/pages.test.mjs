@@ -14,7 +14,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -157,4 +157,56 @@ test('no page prints a credential, and none can be framed', () => {
   // the console is the one page that must never be embeddable, and it is the
   // Worker that sets the header; the page still must not carry a secret itself
   assert.ok(!/value="[A-Za-z0-9_-]{20,}"/.test(page('ops')), 'ops page has a long hard-coded value that looks like a key');
+});
+
+/* --------------------------------------------------------------------------
+   The GitHub Pages mirror — the one host with no server to fall back on.
+   -------------------------------------------------------------------------- */
+
+test('the mirror never links to a page it does not have', () => {
+  // Pages serves files and nothing else. It has no rewrite engine and ignores
+  // `_redirects` (that file is Netlify's), so `/onboard` on the mirror 404'd for
+  // as long as the landing page's "Open the store builder" button existed — while
+  // the same link worked on the Worker, which serves that path from a template.
+  // Nothing in CI or in a browser would ever have noticed: this does.
+  const pub = (rel) => existsSync(join(root, 'pages', 'public', rel));
+  // The artifact CI uploads: pages/public, plus the marketing pages copied in
+  // from pages/ so the mirror cannot drift from the shipped page.
+  const inArtifact = (rel) => pub(rel) || ['index.html', 'fees.html'].includes(rel);
+  const resolves = (href) => {
+    const path = href.split('?')[0].split('#')[0].replace(/\/+$/, '').replace(/^\//, '');
+    if (path === '') return inArtifact('index.html');
+    return inArtifact(path + '.html') || inArtifact(path + '/index.html');
+  };
+  for (const name of ['index', 'fees']) {
+    const html = page(name);
+    const links = [...html.matchAll(/(?:href|action)="(\/[^"]*)"/g)].map((m) => m[1]);
+    for (const l of links) {
+      assert.ok(resolves(l), `pages/${name}.html links ${l}, which the Pages artifact does not contain`);
+    }
+  }
+  assert.equal(pub('_redirects'), false,
+    'a _redirects rule is a promise Pages does not keep; keeping the file invites trusting it');
+  for (const shape of ['onboard.html', 'onboard/index.html']) {
+    assert.ok(pub(shape), `${shape} is the handoff that makes the mirror's sign-up link work`);
+  }
+  const handoff = page('public/onboard').slice(0, 4000);
+  assert.match(handoff, /http-equiv="refresh"[^>]*url=https:\/\/tapstall\.[^/"]*\/onboard/,
+    'and it moves the visitor by two independent means, because a handoff nobody reads is a 404 with manners');
+});
+
+test('the mirror marketing page is the shipped one, not a copy that drifted', () => {
+  // build_bundle.sh puts pages/public/{index,fees}.html in the Worker's bundle as
+  // the fallback under the KV templates, and CI copies pages/{index,fees}.html
+  // into the same directory for Pages. Two consumers, one source: if somebody
+  // commits a draft into public/ again, the Worker and the mirror disagree.
+  const pub = (rel) => existsSync(join(root, 'pages', 'public', rel));
+  const wf = readFileSync(join(root, '.github', 'workflows', 'deploy.yml'), 'utf8');
+  const copies = /cp pages\/index\.html pages\/fees\.html pages\/public\//.test(wf);
+  assert.ok(copies, 'the pages job must copy the shipped marketing pages into the artifact dir');
+  for (const name of ['index.html', 'fees.html']) {
+    // …and they must not be committed there as well, or the copy masks a draft.
+    assert.equal(pub(name), false,
+      `pages/public/${name} belongs to CI's copy step; committing it re-opens the drift`);
+  }
 });

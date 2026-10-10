@@ -109,6 +109,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+      # The mirror's marketing pages are the shipped ones, copied in here so
+      # pages/public can never carry a stale draft of a page the Worker serves.
+      # (index/fees are not committed under public/ any more; onboard.html is,
+      # because it exists only for this host.)
+      - name: assemble the mirror
+        run: |
+          cp pages/index.html pages/fees.html pages/public/
       - uses: actions/upload-pages-artifact@v3
         with:
           path: pages/public

@@ -1,0 +1,44 @@
+<!doctype html>
+<!--
+  A handoff, not a copy of the form.
+
+  The GitHub Pages mirror carries the marketing pages only; the store builder
+  needs the Worker's API (/api/signup, /api/store, the code that opens the
+  dashboard), and a form that cannot post is worse than no form. So this file
+  exists to make one link on the mirror work instead of 404 — the mirror's
+  "Open the store builder" button points at /onboard, and Pages has no rewrite
+  engine (it ignores _redirects, which is why the old _redirects file is gone:
+  it promised something the host does not do).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="0; url=https://tapstall.simalidudu.workers.dev/onboard">
+<title>Tapstall — the store builder is on the app</title>
+<style>
+  body { font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+         margin: 0; padding: 3rem 1.25rem; background: #0d1117; color: #e6edf3; }
+  main { max-width: 34rem; margin: 0 auto; }
+  a { color: #4cc9a6; }
+  p.note { color: #9198a1; font-size: .9rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Tapstall</h1>
+  <p>Take orders on WhatsApp. Free for 60 days.</p>
+  <p>The store builder runs on the app, where the API lives.
+     <a href="https://tapstall.simalidudu.workers.dev/onboard">Open it</a>.</p>
+  <p class="note">If you got here from a link on this mirror, that link is meant to
+     move you to <code>tapstall.simalidudu.workers.dev/onboard</code>. Nothing about
+     your store is stored here — this page is static and reads nothing.</p>
+</main>
+<script>
+  // The meta refresh above works without JS; this makes the same move for the
+  // visitors whose browser ignores it, and keeps the query string, because a
+  // merchant arriving from a shared invite link may be carrying a code.
+  try { location.replace('https://tapstall.simalidudu.workers.dev/onboard' + (location.search || '')); } catch (e) {}
+</script>
+</body>
+</html>

@@ -64,7 +64,11 @@ worker/worker.js      the Worker: routes, KV, cron, webhooks
 pages/kit.css         the one design language both suites are drawn from
 pages/src/*.html      authored pages (onboard, admin, confirm, renew, ops)
 pages/*.html          the shipped ones: storefront, onboarding, dashboard, fees, landing
-pages/public/         static mirror for GitHub Pages (+ _headers, _redirects, sample CSV)
+pages/public/         what GitHub Pages uploads: _headers, the sample CSV, and
+                      onboard{.html,/index.html} — a handoff, because Pages has no
+                      rewrite engine and the builder needs the Worker's API.
+                      index.html/fees.html are copied in by CI from pages/, never
+                      committed here (two consumers, one source)
 scripts/ui_kit.py     inlines kit.css into every page; `check` is the drift gate
 tests/core.test.mjs   28 unit tests on the money and the parser
 tests/live.test.mjs   34 tests that run the real handler + cron against a stub KV
@@ -284,31 +288,36 @@ see and cancel, and because revoking takes one press.
 | Rail table | `…/rails` |
 | Production check (70 assertions, run it any time) | `./scripts/prod_check.sh` — needs the KV read token for the crawler probe, works with `HANDLE=` set to any store |
 | Deploy log of the last CI run | `https://raw.githubusercontent.com/king-kunta-cpu/tapstall/main/ci-deploy.log` |
+| Re-run a failed deploy | `POST /repos/king-kunta-cpu/tapstall/actions/runs/<id>/rerun-failed-jobs` with the repo PAT — the one Actions call that works (job *logs* are not readable with it, which is why `ci-deploy.log` and step annotations exist). `deploy-pages` fails on GitHub's side from time to time — "Fetching artifact metadata failed… re-run the deployment at a later time" — and a rerun is the whole fix; the Worker job is unaffected, so the product stays live and current while the mirror lags a run |
 
 `STATUS.md` records what has been proven on production, the one item still
 waiting on a clock (the cron heartbeat), and the deliberate limits.
 
 ## Verified
 
-`node --test tests/` → **76 pass** (28 unit on `core.js`, 34 driving the real
+`node --test tests/` → **94 pass** (28 unit on `core.js`, 42 driving the real
 bundled Worker against an in-memory KV — the full journey plus the authority
 model: forged/expired/revoked codes, inert GETs, the 15-minute hold, masked
 audit, cross-origin refusal, and now every `/ops` gate, lever and template rule;
 14 on the shipped HTML — script compiles, ids resolve, endpoints routed, console
-buttons backed by Worker actions). Deployed and exercised on the real Worker:
+buttons backed by Worker actions — and 10 on the limits that a caller cannot talk
+past: the per-IP order rate, the lockout, the KV quota). Deployed and exercised on the real Worker:
 two tenants (Harare/USD/EcoCash, Durban/ZAR/PayShap), order → one-tap paid,
 cross-tenant isolation, expiry → cron suspension → 503 → webhook → reinstated
 (`plan: annual`, 746 days). `/__selftest` reports bindings, all five templates,
-pricing, and a `secret_leak_check`. `scripts/prod_check.sh` → **124/124 on both demo
-tenants** against the live Worker at v0.4.0, nine sections, covering the crawler prefetch, the 405s, the CORS split, the
+pricing, and a `secret_leak_check`. `scripts/prod_check.sh` (92 checks,
+several of them per-tenant loops) against the live Worker at v0.5.0: nine sections, covering the crawler prefetch, the 405s, the CORS split, the
 15-minute hold, masked audit, revocation, self-serve recovery, cross-tenant
 refusal and — from v0.4.0 — the two consoles: money pages present in KV, `/ops`
 refusing an anonymous reader, the cookie's flags, a lever needing the confirm
-header, and sign-out actually ending the session. The version assertion reads
+header, and sign-out actually ending the session. A check that the day's KV quota
+made impossible is reported as **blocked**, not failed — `0 blocked` is the only
+number that says the product works; a red write check on a capped day says nothing. The version assertion reads
 `VERSION` out of `worker/worker.js`, so it can never go stale again.
 
-Known gaps: the Flutterwave hosted-link slug `zimlink` is a placeholder until
-an account exists (renewal works through the webhook and manual reference
+Known gaps: the Flutterwave hosted-link slug (`FW_PAY_SLUG`, default
+`tapstall`) is a placeholder until an account exists — it is config, so changing it
+is a secret set and a redeploy, never an edit to shipped code (renewal works through the webhook and manual reference
 until then); email delivery needs the `EMAIL` binding to be created in the
 dashboard once; buyers' phone numbers are stored per order (POPIA/Zim GDPR
 posture is "minimise + 180-day TTL on the fingerprint hash", not zero-knowledge).
