@@ -6,7 +6,7 @@ The name was a research artifact — Zimbabwe-shaped because that is where the
 tariffs were verified — and the brief is now "anyone on WhatsApp the global
 platforms will not serve". A country in the name says the opposite of that. So:
 product, repo (`king-kunta-cpu/tapstall`), Worker (`tapstall.simalidudu.workers.dev`),
-Pages mirror, KV namespace titles, mail subject, ICS `PRODID`, day-sheet file
+Pages mirror, mail subject, ICS `PRODID`, day-sheet file
 names, the storefront poster default. Older entries in this file keep saying
 ZimLink: that is what was true when they were written.
 
@@ -34,6 +34,15 @@ step that *succeeds quietly*:
   deleted it, wrote the guard.
 * `deploy.sh` refuses to publish if the resolved STORES id differs from the one in
   `.deploy/state.json`, or if the namespace reports zero keys.
+
+**The KV namespaces keep the titles** `zimlink-stores` and `zimlink-orders`.
+Cloudflare refuses a namespace rename — `PATCH /storage/kv/namespaces/<id>`
+answers `405 {code: 7001, "PATCH not supported for requested URI"}`, measured
+today — and a title is visible to nobody but the deploy script, which binds by id.
+So `kv_id` searches both titles, prints which one it settled on and why, and
+creates nothing until both miss; the run resolved `b5c1c89d…` (25 keys) and
+`4f4ac94a…`, the same ids as always. Chasing the label would be a data migration
+wearing a rename's clothes.
 
 Not done, deliberately: `no-reply@simalidudu.workers.dev` stays the send address —
 it is what the Email binding will allow, not a brand choice. The orphan namespace

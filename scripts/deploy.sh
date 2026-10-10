@@ -145,6 +145,9 @@ if [[ -n "${LEGACY_WORKER_NAME:-}" && "$LEGACY_WORKER_NAME" != "$WORKER_NAME" ]]
     CLOUDFLARE_API_TOKEN="$CF_TOKEN" CLOUDFLARE_ACCOUNT_ID="$CF_ACCOUNT" \
       node_modules/.bin/wrangler deploy --config wrangler.toml 2>&1 | grep -Ev "^$" | tail -3 || warn "alias deploy failed"
   else
+    # the bundle is normally cleaned up above; the dependency-free publisher needs
+    # it, so rebuild rather than "succeed" at publishing nothing
+    [[ -d .build ]] || bash scripts/build_bundle.sh .build
     CF_TOKEN="$CF_TOKEN" CF_ACCOUNT="$CF_ACCOUNT" WORKER_NAME="$LEGACY_WORKER_NAME" \
       python3 scripts/cf_publish.py "$LEGACY_WORKER_NAME" .build "kv:STORES:$STORES_ID" "kv:ORDERS:$ORDERS_ID" \
       || warn "alias publish failed"

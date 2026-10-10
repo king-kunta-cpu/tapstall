@@ -13,13 +13,16 @@ LEGACY_WORKER_NAME="${LEGACY_WORKER_NAME:-zimlink}"
 # miss would *create an empty namespace*, which is how a rename would silently
 # orphan every store. kv_id therefore searches the new title, then the old one,
 # and only creates when neither exists.
-KV_STORES="${KV_STORES:-tapstall-stores}"
-KV_ORDERS="${KV_ORDERS:-tapstall-orders}"
-# …but the titles the namespaces were created under are searched too, and only a
-# miss on *both* creates anything. Otherwise a title that stops matching is how a
-# rename ends with a Worker pointing at an empty namespace full of nothing.
-KV_STORES_LEGACY="${KV_STORES_LEGACY:-zimlink-stores}"
-KV_ORDERS_LEGACY="${KV_ORDERS_LEGACY:-zimlink-orders}"
+# The KV namespaces keep the titles they were created under and will keep them
+# forever: Cloudflare answers 405 / code 7001 to a namespace title rename
+# (measured today), and a title is invisible to a merchant and to the Worker,
+# which binds by id. If a namespace is ever recreated under the new title, put it
+# here and the lookup below prefers it, with the old one as a fallback and nothing
+# created until both miss.
+KV_STORES="${KV_STORES:-zimlink-stores}"
+KV_ORDERS="${KV_ORDERS:-zimlink-orders}"
+KV_STORES_LEGACY="${KV_STORES_LEGACY:-tapstall-stores}"
+KV_ORDERS_LEGACY="${KV_ORDERS_LEGACY:-tapstall-orders}"
 GH_REPO="${GH_REPO:-tapstall}"
 GH_OWNER="${GH_OWNER:-}"
 CF_API="https://api.cloudflare.com/client/v4"
