@@ -849,14 +849,15 @@ async function identify(req, env, handle) {
   }
   const key = req.headers.get('x-zimlink-admin');
   if (key) {
-    // Throttle guessing where guessing is possible. The session cookie and a
-    // capability cannot be guessed (HMAC), so they are never gated — otherwise
-    // 12 junk requests would freeze the merchant's own dashboard.
-    if (await lockedOut(env, handle)) return { locked: true, st, handle };
+    // Right key first, always. The lock exists to slow guessing at a key; an
+    // attacker who fills it must not thereby gain the ability to lock the real
+    // owner out — measured on production, where gating before the comparison
+    // answered 429 to a correct key.
     if (st.admin_token && timingSafeEq(String(key), String(st.admin_token))) {
       await authClear(env, handle);
       return { via: 'key', st, handle };
     }
+    if (await lockedOut(env, handle)) return { locked: true, st, handle };
     return { bad: true, st, handle };
   }
   return { anonymous: true, st, handle };
@@ -895,11 +896,11 @@ async function adminEntry(req, url, env) {
   if (legacy && !url.searchParams.get('code')) {
     const handle = slug(url.searchParams.get('handle') || '');
     const st = await getStore(env, handle);
-    if (await lockedOut(env, handle)) return json({ ok: false, error: 'too many failed attempts — wait 10 minutes' }, 429);
     if (st && st.admin_token && timingSafeEq(String(st.admin_token), String(legacy))) {
       await authClear(env, handle);
       return redirect(await issueLogin(env, st, url.origin));
     }
+    if (st && await lockedOut(env, handle)) return json({ ok: false, error: 'too many failed attempts — wait 10 minutes' }, 429);
     if (st) await authFail(env, handle);
     return redirect('/a');
   }

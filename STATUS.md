@@ -128,6 +128,14 @@ shop's order flow for ten minutes; the test suite now asserts the opposite
 (a throttled store still confirms with a valid link, and still opens its
 dashboard with a valid cookie, which also clears the counter).
 
+**The lockout is a brake on guessing, not a kill switch on the owner.** The
+first version consulted the counter before comparing the key, so twelve junk
+requests from a stranger answered `429` to the merchant's own correct API key.
+Caught by repeating the sequence against production — 12 × `403`, then `429`,
+then a *valid* key also `429` — and now asserted in the suite: the correct key
+(or a correct legacy `?token=` link) always gets in and clears the counter, and
+the lock only ever changes the answer given to a credential that is wrong.
+
 ## Also fixed on the way (found by the new tests, not by a customer)
 
 * **`publicStore` was a denylist and leaked the queued change.** Once `pending`

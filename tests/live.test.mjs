@@ -331,6 +331,17 @@ test('a throttled store can still confirm an order with a valid link', async () 
   assert.equal(r.json.status, 'paid');
   const refused = await call('/api/admin?handle=mamatoe', { headers: { 'x-zimlink-admin': 'guess' } });
   assert.equal(refused.status, 429, 'while a guessed key is what the lock is for: ' + refused.text);
+  // the exact regression seen on production: a filled counter must not lock out
+  // the owner whose key is correct
+  const liveKey = JSON.parse(env.STORES._map.get('store:mamatoe').value).admin_token;
+  assert.equal(liveKey.length >= 20, true, 'mamatoe has a 128-bit key after revoke');
+  const owner = await call('/api/admin?handle=mamatoe', { headers: { 'x-zimlink-admin': liveKey } });
+  assert.equal(owner.status, 200, 'the real owner gets in even mid-lockout: ' + owner.text);
+  assert.equal(await env.STORES.get('lock:mamatoe'), null, 'and a correct key clears the counter');
+  await env.STORES.put('lock:mamatoe', String(12));
+  const legacyLocked = await call('/a?handle=mamatoe&token=' + liveKey);
+  assert.equal(legacyLocked.status, 302, 'a correct legacy ?token= link still trades up during a lockout');
+  assert.equal((await env.STORES.get('lock:mamatoe')), null, 'and clears it too');
   await env.STORES.delete('lock:mamatoe');
   const back = await call('/api/admin?handle=mamatoe', { cookie: store.cookie });
   assert.equal(back.status, 200, 'a valid session clears the counter');
