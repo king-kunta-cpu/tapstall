@@ -95,14 +95,19 @@ admin_secret() {
 put_secret() { # <KEY> <value>
   local key="$1" val="$2"
   CF_TOKEN="$CF_TOKEN" CF_ACCOUNT="$CF_ACCOUNT" WORKER_NAME="$WORKER_NAME" ZL_KEY="$key" ZL_VAL="$val" python3 - <<'PYEOF' || warn "secret $key not set"
-import json, os, urllib.request
+import json, os, urllib.error, urllib.request
 tok  = os.environ["CF_TOKEN"]; acct = os.environ["CF_ACCOUNT"]; w = os.environ["WORKER_NAME"]
 key, val = os.environ["ZL_KEY"], os.environ["ZL_VAL"]
 url = "https://api.cloudflare.com/client/v4/accounts/%s/workers/scripts/%s/secrets" % (acct, w)
-data = json.dumps({"name": key, "text": val}).encode()
+# Cloudflare rejects a body without an explicit type:
+#   400 code 100145 "Secret 'X' has unsupported type ''"
+data = json.dumps({"name": key, "text": val, "type": "secret_text"}).encode()
 req = urllib.request.Request(url, data=data, method="PUT",
         headers={"Authorization": "Bearer " + tok, "Content-Type": "application/json"})
-res = json.loads(urllib.request.urlopen(req, timeout=60).read())
+try:
+    res = json.loads(urllib.request.urlopen(req, timeout=60).read())
+except urllib.error.HTTPError as e:
+    raise SystemExit("HTTP %s: %s" % (e.code, e.read().decode()[:200]))
 assert res.get("success"), res
 print("  secret %s set" % key)
 PYEOF
