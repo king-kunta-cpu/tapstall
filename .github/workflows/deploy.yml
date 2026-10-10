@@ -83,6 +83,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          git config user.name "zimlink-ci" || true
+          git config user.email "ci@zimlink.invalid" || true
           [ -s /tmp/deploy.log ] || exit 0
           sha=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
             "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ci-deploy.log" \
