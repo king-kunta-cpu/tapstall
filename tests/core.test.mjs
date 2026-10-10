@@ -167,3 +167,95 @@ test('slug + handle validation', () => {
   assert.equal(C.validHandle('A'), false);
   assert.equal(C.validHandle('-lead'), false);
 });
+
+/* ---------- capability tokens: the thing that replaced the URL master key ---------- */
+const SEC = 'unit-secret';
+test('a capability round-trips and carries its payload', async () => {
+  const cap = await C.issueCap(SEC, { a: 'mark', h: 'shop', id: 'o9', s: 'paid' }, 900);
+  assert.equal(cap.split('.').length, 4, 'v1.<exp>.<payload>.<tag>');
+  const p = await C.verifyCap(SEC, cap);
+  assert.deepEqual({ a: p.a, h: p.h, id: p.id, s: p.s }, { a: 'mark', h: 'shop', id: 'o9', s: 'paid' });
+  assert.ok(p.exp >= Math.floor(Date.now() / 1000) + 800, 'expiry attached');
+});
+
+test('a capability dies on tamper, on expiry, on another secret and on garbage', async () => {
+  const cap = await C.issueCap(SEC, { a: 'sess', h: 'shop' }, 900);
+  assert.equal(await C.verifyCap(SEC, cap.slice(0, -2) + 'xy'), null, 'edited tag');
+  const b64u = (o) => Buffer.from(JSON.stringify(o)).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const seg = cap.split('.'); seg[2] = b64u({ a: 'sess', h: 'other-shop' });
+  assert.equal(await C.verifyCap(SEC, seg.join('.')), null, 'payload swapped for another store, tag recomputed by hand');
+  assert.equal(await C.verifyCap('other-secret', cap), null, 'other master secret');
+  const far = Math.floor(Date.now() / 1000) + 100000;
+  assert.equal(await C.verifyCap(SEC, cap, far), null, 'expired');
+  for (const junk of ['', 'x', 'v1', 'v1.1.2.3.4', 'v1.9999999999.@@@.tag', 'v2.1.2.3']) {
+    assert.equal(await C.verifyCap(SEC, junk), null, 'no throw on: ' + junk);
+  }
+});
+
+test('a minimum TTL keeps a link usable even if a caller asks for seconds', async () => {
+  const cap = await C.issueCap(SEC, { a: 'mark' }, 1);
+  const p = await C.verifyCap(SEC, cap);
+  assert.ok(p && p.exp - Math.floor(Date.now() / 1000) >= 290, 'floored at 5 minutes');
+});
+
+/* ---------- sign: what the outbound webhook proves ---------- */
+test('sign is deterministic and secret-bound', async () => {
+  const a = await C.sign(SEC, '{"type":"order.new"}');
+  assert.equal(a, await C.sign(SEC, '{"type":"order.new"}'), 'same message, same tag');
+  assert.notEqual(a, await C.sign('other', '{"type":"order.new"}'), 'other secret, other tag');
+  assert.match(a, /^[A-Za-z0-9_-]{20,}$/, 'url-safe');
+});
+
+/* ---------- the settings gate ---------- */
+test('validateSettings splits cosmetic from money and names bad fields', () => {
+  const v = C.validateSettings({ hours: '9-5', closed: true, pay_account: '078', tax_pct: 2, rail: 'payfast', junk: 1 }, 5);
+  assert.equal(v.ok, true, JSON.stringify(v.errors));
+  assert.deepEqual(v.soft, { hours: '9-5', closed: true });
+  assert.equal(v.money.rail, 'payfast');
+  assert.equal(v.money.pay_account, '078', 'a payout number is never "cosmetic"');
+  assert.deepEqual(v.ignored, ['junk'], 'unknown keys are reported, not stored');
+  const bad = C.validateSettings({ feed_url: 'not-a-url', zig_rate: -3 }, 5);
+  assert.equal(bad.ok, false);
+  assert.deepEqual(Object.keys(bad.errors).sort(), ['feed_url', 'zig_rate']);
+});
+
+test('a held change merges with an earlier one instead of overwriting it', () => {
+  const st = { rail: 'cash', pay_account: 'A', whatsapp: '771', hours: 'x' };
+  C.stageSettings(st, {}, { pay_account: 'B' }, 900e3, 1000);
+  C.stageSettings(st, {}, { whatsapp: '772' }, 900e3, 60_000);
+  assert.deepEqual(Object.keys(st.pending.fields).sort(), ['pay_account', 'whatsapp'], 'both still queued');
+  assert.equal(st.pending.apply_at, 60_000 + 900_000, 'the window restarts from the newest save');
+  assert.equal(st.pay_account, 'A', 'nothing landed');
+  const early = C.applyPending(st, 959000);
+  assert.equal(early.applied.length, 0, 'not before the hold is up');
+  assert.equal(early.pending.in_ms, 1000, 'and the caller is told how long is left');
+  const late = C.applyPending(st, 961000);
+  assert.deepEqual(late.applied.sort(), ['pay_account', 'whatsapp']);
+  assert.equal(st.pay_account, 'B');
+  assert.equal(st.whatsapp, '772');
+  assert.equal(st.pending, undefined, 'queue drained');
+});
+
+test('the queue is empty for a soft-only save, so the dashboard shows no banner', () => {
+  const st = { hours: 'old' };
+  const r = C.stageSettings(st, { hours: 'new' }, {}, 900e3, 1000);
+  assert.equal(r.changed, 1);
+  assert.equal(r.staged, 0);
+  assert.equal(st.pending, undefined);
+  assert.equal(C.applyPending(st, 5000).pending, null, 'nothing to land');
+});
+
+test('masks keep the audit readable and the values unreadable', () => {
+  assert.equal(C.maskField('pay_account', '0771234567'), '•••4567');
+  assert.equal(C.maskField('whatsapp', '263771234567'), '•••4567');
+  assert.equal(C.maskField('notify_email', 'merchant@example.com'), 'm***@example.com');
+  assert.equal(C.maskField('feed_url', 'https://docs.google.com/spreadsheets/d/1AbC/edit?usp=sharing'), 'docs.google.com', 'a sheet link is its host, nothing else');
+  assert.equal(C.maskField('notify_webhook', 'https://hooks.zapier.com/x/y'), 'hooks.zapier.com');
+  assert.equal(C.maskField('hours', 'Tue-Sat 9-6'), 'Tue-…-6', 'cosmetic fields stay legible');
+  assert.equal(C.maskField('pay_account', ''), '(blank)', 'a blanking is visible as a blanking');
+});
+
+test('publicStore also strips the dashboard and renew links', () => {
+  const out = JSON.stringify(C.publicStore({ handle: 'x', admin_url: 'https://z/a?code=v1.1.2.3', renew_url: 'https://z/renew/abc', admin_token: 't' }));
+  assert.ok(!out.includes('admin_url') && !out.includes('renew_url') && !out.includes('v1.1.2.3'), out);
+});

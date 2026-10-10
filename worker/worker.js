@@ -17,20 +17,34 @@
 import {
   RAILS, round2, clamp, slug, digits, isEmail, validHandle, parseCSV, normalizeFeedUrl,
   parseProducts, priceOrder, payInstructions, riskFlags, waSummary, publicStore, hash,
+  issueCap, verifyCap, randomKey, validateSettings, stageSettings, applyPending, maskField,
+  EDITABLE_FIELDS, SOFT_FIELDS, sign,
 } from './core.js';
 
-const VERSION = '0.2.0';
+const VERSION = '0.3.0';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 const MAX_ORDERS_KEPT = 200;
 const RL = { windowSec: 60, max: 8 };
 
+/* ---- authority model (see core.js: "a GET must never move money") ---- */
+const HOLD_MS = 15 * 60 * 1000;      // money-moving settings land after this hold
+const CODE_TTL = 7 * 24 * 3600;       // dashboard link lifetime
+const MARK_TTL = 72 * 3600;           // per-order confirm link lifetime
+const UNDO_TTL = 15 * 60;             // tap-back to reverse a confirmation
+const SESS_TTL = 12 * 3600;           // signed-in browser session
+const LOCK_MAX = 12;                  // bad credentials per handle before a cooldown
+const LOCK_TTL = 600;
+
 
 export default {
   async fetch(req, env, ctx) {
-    if (req.method === 'OPTIONS') return cors(new Response(null, { status: 204 }));
+    const url = new URL(req.url);
+    const open = isOpenPath(url.pathname);
+    if (req.method === 'OPTIONS') return open ? openCors(new Response(null, { status: 204 })) : new Response(null, { status: 403 });
     try {
-      return (await route(req, new URL(req.url), env, ctx)) || json({ ok: false, error: 'not_found' }, 404);
+      const res = (await route(req, url, env, ctx)) || json({ ok: false, error: 'not_found' }, 404);
+      return open ? openCors(res) : res;
     } catch (e) {
       return json({ ok: false, error: String((e && e.message) || e), stage: 'worker' }, 500);
     }
@@ -42,6 +56,7 @@ export default {
 
 async function route(req, url, env, ctx) {
   const p = url.pathname;
+  const NOSTORE = { 'Cache-Control': 'no-store' };
 
   if (p === '/__ping') return json({ ok: true, version: VERSION, ts: Date.now() });
   if (p === '/__selftest') {
@@ -51,9 +66,9 @@ async function route(req, url, env, ctx) {
       try { t.scheduled = await runCron(env); }
       catch (e) { t.scheduled_error = String(e && e.message || e); }
     }
-    return json(t);
+    return json(t, 200, NOSTORE);
   }
-  if (p === '/rails') return json({ ok: true, rails: RAILS, price_usd: PRICE_USD, free_days: FREE_DAYS });
+  if (p === '/rails') return json({ ok: true, rails: RAILS, price_usd: PRICE_USD, free_days: FREE_DAYS }, 200, { 'Cache-Control': 'public, max-age=300' });
   if (p === '/fees.ics') return feesIcs();
   if (p === '/fees' || p === '/fees.html') {
     const page = await tpl(env, 'fees');
@@ -83,13 +98,32 @@ async function route(req, url, env, ctx) {
     return json({ ok: true, products: await loadProducts(st, env, true) });
   }
 
+  // ---- merchant authority: a code becomes a cookie, and only POSTs act ----
+  const MUT = /^\/api\/(mark|settings|settings\/revert|revoke|login|logout|recover)$/;
+  // A v0.2 style ?token= GET still reaches markPaid, which only trades it for a
+  // session — it never performs the write. Everything else is a flat 405.
+  const legacyMark = p === '/api/mark' && url.searchParams.get('token');
+  if (MUT.test(p) && req.method !== 'POST' && !legacyMark) {
+    return json({ ok: false, error: 'method_not_allowed', why: 'This endpoint changes state, so it never answers GET.' }, 405, { Allow: 'POST' });
+  }
+  if (p === '/api/login' && req.method === 'POST') return loginExchange(req, env);
+  if (p === '/api/logout' && req.method === 'POST') return withCookie(json({ ok: true, signed_out: true }), KILL_COOKIE);
+  if (p === '/api/recover' && req.method === 'POST') return recoverLink(req, url, env);
+
   if (p === '/api/order' && req.method === 'POST') return placeOrder(req, url, env, ctx);
   if (p === '/api/register' && req.method === 'POST') return register(req, url, env);
   if (p === '/api/lookup') return lookup(url, env);
-  if (p === '/api/admin') return adminView(url, env);
-  if (p === '/api/mark') return markPaid(req, url, env);   // POST body or one-tap GET link
-  if (p === '/a') return html(await tpl(env, 'admin'));
-  if ((m = p.match(/^\/renew\/([A-Za-z0-9]{6,40})$/))) return renewPage(env, m[1]);
+  if (p === '/api/mark') return markPaid(req, url, env);
+  if (p === '/api/admin') return adminView(req, url, env);
+  if (p === '/api/settings' && req.method === 'POST') return settingsEdit(req, url, env);
+  if (p === '/api/settings/revert' && req.method === 'POST') return revertPending(req, url, env);
+  if (p === '/api/revoke' && req.method === 'POST') return revokeKeys(req, url, env);
+
+  // The one-tap confirm link: GET renders an inert page, the browser posts.
+  if ((m = p.match(/^\/c\/([A-Za-z0-9._-]{20,400})$/))) return confirmPage(env, m[1]);
+
+  if (p === '/a') return adminEntry(req, url, env);
+  if ((m = p.match(/^\/renew\/([A-Za-z0-9_-]{6,40})$/))) return renewPage(env, m[1]);
   if (p === '/api/admin-put' && req.method === 'POST') return adminPut(req, env);
 
   if (p === '/api/checkout' && req.method === 'POST') return checkout(req, url, env);
@@ -98,7 +132,6 @@ async function route(req, url, env, ctx) {
 
   return null;
 }
-
 /* ------------------------------------------------------------- store page */
 async function storePage(env, handle) {
   const st = await getStore(env, handle);
@@ -111,7 +144,19 @@ async function storePage(env, handle) {
   return html(page, 200, { 'Cache-Control': 'public, max-age=60, s-maxage=300' });
 }
 
-const getStore = async (env, handle) => (env.STORES ? await env.STORES.get('store:' + handle, 'json') : null);
+/**
+ * Loads a store and lands any held setting whose hold has expired. Applying on
+ * the read path means no timer to lose: the change takes effect the first time
+ * a buyer or the merchant looks, which is exactly when it matters.
+ */
+async function getStore(env, handle) {
+  if (!env.STORES) return null;
+  const st = await env.STORES.get('store:' + handle, 'json');
+  if (!st || !st.pending) return st;
+  const { applied } = applyPending(st, Date.now());
+  if (applied.length) await writeStore(env, st);
+  return st;
+}
 
 async function writeStore(env, st) {
   if (env.STORES) await env.STORES.put('store:' + st.handle, JSON.stringify(st));
@@ -186,6 +231,21 @@ async function placeOrder(req, url, env, ctx) {
     status: railKey === 'cash' ? 'cod' : 'awaiting_payment',
     risk_flags: [],
   };
+  /* Freeze the payment details onto the order. The merchant's dashboard, the
+   * WhatsApp handoff and the notification all read the slip, not the store — so
+   * a payout account changed afterwards can never rewrite what a buyer was
+   * already told to pay, and yesterday's customer is never sent to a new number. */
+  order.pay = payInstructions(st, order, pricing);
+
+  /* One-tap confirm, without a bearer credential in the URL: each link is a
+   * signed, 72-hour capability for THIS order and THIS action. Stored on the
+   * order so the merchant can also reach it from the dashboard later. */
+  const secret = env.ADMIN_SECRET || 'dev-secret';
+  const markCap = await issueCap(secret, { a: 'mark', h: st.handle, id, s: 'paid' }, MARK_TTL);
+  const cancelCap = await issueCap(secret, { a: 'mark', h: st.handle, id, s: 'cancelled' }, MARK_TTL);
+  order.confirm_url = `${url.origin}/c/${markCap}`;
+  order.cancel_url = `${url.origin}/c/${cancelCap}`;
+
   ctx.waitUntil((async () => {
     await persistOrder(env, st, order);
     await notify(env, st, order);
@@ -201,9 +261,10 @@ async function placeOrder(req, url, env, ctx) {
     wa_link: wa ? `https://wa.me/${wa}?text=${encodeURIComponent(summary)}` : null,
     trust: { orders_before: hist.count, unconfirmed_before: hist.unpaid },
     risk_flags: order.risk_flags,
-    // one-tap confirm for the merchant: no app, no key, no dashboard login
-    mark_url: `/api/mark?handle=${encodeURIComponent(st.handle)}&token=${encodeURIComponent(st.admin_token || '')}&id=${id}`,
-    cancel_url: `/api/mark?handle=${encodeURIComponent(st.handle)}&token=${encodeURIComponent(st.admin_token || '')}&id=${id}&status=cancelled`,
+    // tap once: the page posts it itself, so a link scanner can never pull the trigger
+    mark_url: `/c/${markCap}`,
+    confirm_url: order.confirm_url,
+    cancel_url: `/c/${cancelCap}`,
   }, 201);
 }
 
@@ -226,20 +287,21 @@ const MARK_BASE = '/api/mark?handle=';
 
 async function notify(env, st, order) {
   const tasks = [];
+  const body = JSON.stringify({ type: 'order.new', store: st.handle, order });
   if (st.notify_webhook) {
     tasks.push(fetch(st.notify_webhook, {
       method: 'POST',
       headers: {
-        'content-type': 'application/json', 'x-zimlink-token': st.admin_token || '',
+        'content-type': 'application/json',
+        // Integrity proof for the merchant's own tooling. Never send a
+        // credential in a header here: their webhook target is third-party
+        // software that logs what it receives.
+        'x-zimlink-body': await sign(env.ADMIN_SECRET || 'dev-secret', body),
         // workers.dev bot rules reject requests without a browser-ish UA, which
-        // would silently swallow a merchant's order webhook
+        // would silently swallow a merchant's order notification
         'user-agent': 'zimlink/1 (order notification)',
       },
-      body: JSON.stringify({
-        type: 'order.new', store: st.handle, order,
-        // tap-to-confirm: the merchant's tool is whatever can open a link
-        mark_url: `${MARK_BASE}${st.handle}&token=${st.admin_token}&id=${order.id}`,
-      }),
+      body,
     }).catch(() => {}));
   }
   if (env.EMAIL && st.notify_email) {
@@ -248,41 +310,89 @@ async function notify(env, st, order) {
         `${st.handle}@notify.zimlink`, st.notify_email,
         `New order ${order.code} — ${order.pricing.pay_now} ${st.currency || 'USD'}`,
         `Buyer: ${order.buyer.name} (${order.buyer.phone})\n${waSummary(st, order)}\nFlags: ${(order.risk_flags || []).join(', ') || 'none'}\n`
-        + `One tap when the money lands: ${MARK_BASE}${st.handle}&token=${st.admin_token}&id=${order.id}\n`
-        + `Or the dashboard: ${st.admin_url || ''}`
+        + `Open this to confirm (it needs your browser, nothing else): ${order.confirm_url || ''}\n`
+        + `Dashboard: ${st.admin_url || ''}`
       ));
     } catch (e) { /* email optional */ }
   }
   await Promise.all(tasks);
 }
+/** The only states a confirm/undo link may move an order into. */
+function markTarget(v) { return (v === 'cancelled' || v === 'awaiting_payment') ? v : 'paid'; }
 
 async function markPaid(req, url, env) {
-  // Works from the merchant dashboard (POST) and from a one-tap link in the
-  // notification (GET /api/mark?handle=..&token=..&id=..) — no app, no API key.
-  const b = (req.method === 'POST' ? await req.json().catch(() => null) : null) || {};
-  for (const k of ['handle', 'token', 'id', 'status']) if (b[k] == null) b[k] = url.searchParams.get(k);
-  const st = await getStore(env, String(b.handle || ''));
+  // POST only. A GET here would let a mail scanner or a link-preview crawler
+  // "confirm" an unpaid order simply by prefetching the link in the email.
+  if (req.method !== 'POST') {
+    /* Links handed out by the previous version were GETs with the store key in
+     * them. Tapping one should not dead-end, so a stale link is traded for a
+     * session instead of acted on: the redirect only ever lands on the login
+     * page, which changes nothing, so a prefetching crawler still cannot
+     * confirm an order. */
+    const legacy = url.searchParams.get('token');
+    const lh = slug(String(url.searchParams.get('handle') || ''));
+    if (legacy && lh) {
+      const lst = await getStore(env, lh);
+      if (lst && lst.admin_token && timingSafeEq(String(lst.admin_token), String(legacy))) {
+        return redirect(`/a?handle=${lh}&token=${encodeURIComponent(legacy)}`);
+      }
+      if (lst) await authFail(env, lh);   // guessing at an old-style link is a credential failure
+    }
+    return json({ ok: false, error: 'method_not_allowed', why: 'Confirm links are opened, not fetched. Open the link in a browser and it posts itself, and the page shows you the money first.' }, 405, { Allow: 'POST' });
+  }
+  const b = await readBody(req);
+  const secret = env.ADMIN_SECRET || 'dev-secret';
+  const p = b.cap ? await verifyCap(secret, String(b.cap)) : null;
+  const viaCap = !!(p && p.a === 'mark');
+  // A `cap` that is present but not valid is the interesting case: say so, and
+  // say it the same way whether it expired, was edited or came from a copy.
+  if (b.cap && !viaCap) {
+    return json({ ok: false, error: 'link_expired', why: 'Confirm links last 72 hours and work once per state. Open your dashboard and tap Confirm on the order for a fresh one.' }, 401);
+  }
+
+  const handle = viaCap ? p.h : slug(String(b.handle || ''));
+  const want = markTarget(viaCap ? p.s : b.status);
+  const st = await getStore(env, handle);
   if (!st) return json({ ok: false, error: 'no store' }, 404);
-  if (!st.admin_token || String(b.token) !== st.admin_token) return json({ ok: false, error: 'bad token' }, 403);
-  if (!b.id) return json({ ok: false, error: 'id required' }, 422);
-  const key = `order:${st.handle}:${b.id}`;
+  if (await lockedOut(env, handle)) return json({ ok: false, error: 'too many failed attempts, wait 10 minutes' }, 429);
+
+  let id = viaCap ? p.id : String(b.id || '');
+  if (!viaCap) {
+    const who = await identify(req, env, handle);
+    if (!who || who.anonymous) return json({ ok: false, error: 'not signed in', need_login: true }, 401);
+    if (who.bad) { await authFail(env, handle); return json({ ok: false, error: 'bad key or revoked session' }, 403); }
+    if (who.via === 'sess' && (req.headers.get('x-zimlink-confirm') || '') !== '1') {
+      return json({ ok: false, error: 'confirm header missing' }, 403);
+    }
+    if (!id) return json({ ok: false, error: 'id required' }, 422);
+  }
+  const key = `order:${handle}:${id}`;
   const o = await env.ORDERS.get(key, 'json');
   if (!o) return json({ ok: false, error: 'no such order' }, 404);
-  o.status = b.status === 'cancelled' ? 'cancelled' : 'paid';
+  if (o.status === want) {
+    // replay (double click, retry) is a no-op, not a second state change
+    return json({ ok: true, id: o.id, status: o.status, already: true });
+  }
+  const prev = o.status;
+  o.status = want;
   o.marked_at = new Date().toISOString();
   if (o.status === 'paid') {
-    const hk = `buyer:${st.handle}:${o.buyer_hash}`;
+    const hk = `buyer:${handle}:${o.buyer_hash}`;
     const rec = (await env.STORES.get(hk, 'json')) || { count: 0, unpaid: 0 };
     rec.unpaid = Math.max(0, (rec.unpaid || 0) - 1);
     await env.STORES.put(hk, JSON.stringify(rec), { expirationTtl: 180 * 86400 });
   }
   await env.ORDERS.put(key, JSON.stringify(o));
-  const list = (await env.ORDERS.get('list:' + st.handle, 'json')) || [];
+  const list = (await env.ORDERS.get('list:' + handle, 'json')) || [];
   const row = list.find(x => x.id === o.id);
-  if (row) { row.status = o.status; await env.ORDERS.put('list:' + st.handle, JSON.stringify(list)); }
-  return json({ ok: true, id: o.id, status: o.status });
+  if (row) { row.status = o.status; await env.ORDERS.put('list:' + handle, JSON.stringify(list)); }
+  await pushAudit(env, st, { act: 'mark', via: viaCap ? 'link' : 'session', fields: [o.code + ' → ' + want], ip: ipOf(req) });
+  // an undo link for 15 minutes, same shape, opposite action
+  // undo returns the order to whatever it was before this tap
+  const undo = await issueCap(secret, { a: 'mark', h: handle, id, s: prev }, UNDO_TTL);
+  const label = { paid: 'Marked paid', cancelled: 'Cancelled', awaiting_payment: 'Reopened' }[o.status];
+  return json({ ok: true, id: o.id, code: o.code, status: o.status, label, amount: o.pricing && o.pricing.pay_now, undo_url: '/c/' + undo });
 }
-
 /* -------------------------------------------------------------- register */
 async function register(req, url, env) {
   const b = await req.json().catch(() => null);
@@ -294,7 +404,8 @@ async function register(req, url, env) {
   if (!digits(b.whatsapp || b.phone || '')) return json({ ok: false, error: 'WhatsApp number required (with country code)' }, 422);
   if (await getStore(env, handle)) return json({ ok: false, error: 'handle already taken — try another, or use your renew link' }, 409);
 
-  const token = rand(10);
+  const adminKey = randomKey(16);
+  const renewToken = alnumToken(14);   // path-safe: base64url -/_ would break the /renew/ route
   const st = {
     handle,
     shop_name: String(b.shop_name).slice(0, 60),
@@ -323,15 +434,16 @@ async function register(req, url, env) {
     notify_email: isEmail(b.notify_email) ? b.notify_email : '',
     owner_email: isEmail(b.owner_email) ? b.owner_email : '',
     created_at: new Date().toISOString(),
-    admin_token: token,
+    admin_token: adminKey,          // API key for the merchant's own tooling; never in a URL
+    auth_gen: '0',                  // bump to invalidate every link, key and cookie
     paid_until: Date.now() + FREE_DAYS * 864e5,
     plan: 'free60',
     term_days: FREE_DAYS,
   };
-  st.admin_url = `${url.origin}/a?handle=${handle}&token=${token}`;
-  st.renew_url = `${url.origin}/renew/${token}`;
+  st.renew_url = `${url.origin}/renew/${renewToken}`;
+  st.admin_url = await issueLogin(env, st, url.origin);
   await env.STORES.put('store:' + handle, JSON.stringify(st));
-  await env.STORES.put('renew:' + token, JSON.stringify({ handle, made: Date.now() }));
+  await env.STORES.put('renew:' + renewToken, JSON.stringify({ handle, made: Date.now() }));
   const products = await loadProducts(st, env, true);
   const err = st.feed_cache && st.feed_cache.error;
   if (st.owner_email) {
@@ -353,6 +465,9 @@ async function register(req, url, env) {
 }
 
 async function lookup(url, env) {
+  // Public storefront health only. This endpoint used to return admin_url and
+  // renew_url, which meant anyone who knew a shop handle could read the master
+  // dashboard link (and with it every buyer name and number) from a shell.
   const handle = slug(url.searchParams.get('handle') || '');
   const st = await getStore(env, handle);
   if (!st) return json({ ok: false, error: 'not found' }, 404);
@@ -364,26 +479,33 @@ async function lookup(url, env) {
       products: st.feed_cache ? st.feed_cache.count : 0, feed_error: st.feed_cache ? st.feed_cache.error : null,
       orders_today: ((await env.ORDERS.get('list:' + handle, 'json')) || []).length,
     },
-    admin_url: st.admin_url, renew_url: st.renew_url,
   });
 }
-
-async function adminView(url, env) {
-  const handle = slug(url.searchParams.get('handle') || ''), token = url.searchParams.get('token') || '';
-  const st = await getStore(env, handle);
-  if (!st) return json({ ok: false, error: 'no store' }, 404);
-  if (!timingSafeEq(String(st.admin_token), token)) return json({ ok: false, error: 'bad token' }, 403);
+async function adminView(req, url, env) {
+  const handle = slug(url.searchParams.get('handle') || '');
+  const who = await identify(req, env, handle);
+  if (!who || !who.st) return json({ ok: false, error: 'no store' }, 404);
+  if (who.anonymous) return json({ ok: false, error: 'unauthorised', need_login: true }, 401);
+  if (who.bad) { await authFail(env, handle); return json({ ok: false, error: 'bad key or revoked session' }, 403); }
+  const st = who.st;
   const rows = (await env.ORDERS.get('list:' + handle, 'json')) || [];
   const orders = [];
   for (const r of rows.slice(0, 40)) orders.push(await env.ORDERS.get(`order:${handle}:${r.id}`, 'json'));
   return json({
     ok: true,
-    store: { ...publicStore(st), feed_url: st.feed_url, admin_url: st.admin_url, renew_url: st.renew_url },
+    via: who.via,
+    // No admin_url here on purpose: a login code inside a JSON body turns any
+    // XSS on the dashboard into a saved 7-day credential. The session cookie is
+    // HttpOnly, so the page itself cannot read it back.
+    store: { ...publicStore(st), feed_url: st.feed_url, renew_url: st.renew_url, dashboard_path: '/a' },
     orders: orders.filter(Boolean),
+    pending: st.pending ? { keys: Object.keys(st.pending.fields), apply_at: st.pending.apply_at, in_ms: Math.max(0, st.pending.apply_at - Date.now()), fields: maskPending(st.pending.fields) } : null,
+    editable: EDITABLE_FIELDS,
+    soft_fields: SOFT_FIELDS,
+    audit: await getAudit(env, handle),
     stats: { total: rows.length, cod: rows.filter(r => r.status === 'cod').length, flags: rows.filter(r => (r.flags || []).length).length },
-  });
+  }, 200, { 'Cache-Control': 'no-store' });
 }
-
 /* ------------------------------------------- payment → auto activation */
 async function checkout(req, url, env) {
   const b = await req.json().catch(() => null) || {};
@@ -521,7 +643,7 @@ document.getElementById('pay').onclick=async()=>{
 async function adminPut(req, env) {
   const b = await req.json().catch(() => null) || {};
   if (!env.ADMIN_SECRET || b.secret !== env.ADMIN_SECRET) return json({ ok: false, error: 'unauthorised' }, 403);
-  if (!/^tpl:(store|onboard|admin)$/.test(String(b.key || ''))) return json({ ok: false, error: 'bad key' }, 422);
+  if (!/^tpl:(store|onboard|admin|fees|index|sample-menu)$/.test(String(b.key || ''))) return json({ ok: false, error: 'bad key' }, 422);
   if (String(b.value || '').length < 200 || String(b.value || '').length > 400000) return json({ ok: false, error: 'bad size' }, 422);
   await env.STORES.put(b.key, b.value);
   return json({ ok: true, key: b.key, bytes: b.value.length });
@@ -570,7 +692,25 @@ async function selftest(env) {
   t.csv = parseProducts('id,name,category,price,options,addons\np1,Chicken,Main,5.50,Size:S,L|Spice:hot,Cheese:1.5\nHELP,,,,,,,,\n', { currency: 'USD' });
   t.feed_url_sheet = normalizeFeedUrl('https://docs.google.com/spreadsheets/d/abc123DEF456ghi789JKL012mno345PQR/edit#gid=123');
   t.slug = slug('Mama Too Catering!');
-  t.secret_leak_check = !JSON.stringify(publicStore({ ...fake, admin_token: 'x', notify_email: 'a@b.c', feed_cache: {} })).includes('admin_token');
+  t.secret_leak_check = !JSON.stringify(publicStore({ ...fake, admin_token: 'x', notify_email: 'a@b.c', owner_email: 'a@b.c', notify_webhook: 'https://x', feed_cache: {}, feed_url: 'https://y' })).includes('admin_token');
+  const k = 'selftest-secret';
+  const cap = await issueCap(k, { a: 'mark', h: 'shop', id: 'o1', s: 'paid' }, 600);
+  const back = await verifyCap(k, cap);
+  t.cap_roundtrip = !!(back && back.a === 'mark' && back.h === 'shop' && back.id === 'o1');
+  t.cap_rejects_tamper = !(await verifyCap(k, cap.slice(0, -4) + 'AAAA'));
+  t.cap_rejects_other_secret = !(await verifyCap('other', cap));
+  t.cap_rejects_expired = !(await verifyCap(k, cap, Math.floor(Date.now() / 1000) + 3600));
+  const v = validateSettings({ rail: 'nope', tax_pct: 999, hours: '8-5' }, Date.now());
+  t.settings_rejects_bad = !v.ok && !!(v.errors.rail && v.errors.tax_pct) && v.soft.hours === '8-5';
+  const st2 = { rail: 'cash', pay_account: 'A1', hours: 'x' };
+  stageSettings(st2, { hours: '9-6' }, { pay_account: 'EVIL' }, 9e5, 1000);
+  t.money_change_is_held = st2.pay_account === 'A1' && st2.hours === '9-6' && st2.pending.apply_at === 901000;
+  applyPending(st2, 902000);
+  t.money_change_lands_late = st2.pay_account === 'EVIL' && !st2.pending;
+  t.masking_hides_values = maskField('pay_account', '0771234567') === '•••4567'
+    && maskField('notify_email', 'secret@example.com') === 's***@example.com'
+    && maskField('whatsapp', '263771234567') === '•••4567'
+    && maskField('feed_url', 'https://docs.google.com/spreadsheets/d/abcdef/edit').indexOf('abcdef') === -1;
   return t;
 }
 
@@ -589,6 +729,12 @@ async function sendMail(env, to, subject, text) {
 }
 
 const nowId = () => Date.now().toString(36) + rand(4);
+/** Tokens that must survive a path segment untouched: unambiguous lowercase alnum. */
+function alnumToken(n) {
+  const A = 'abcdefghijkmnpqrstuvwxyz23456789';   // no l/o/0/1/i — dictated over the phone
+  const b = new Uint8Array(n); crypto.getRandomValues(b);
+  return [...b].map((x) => A[x % A.length]).join('');
+}
 function rand(n) { const b = new Uint8Array(n); crypto.getRandomValues(b); return [...b].map(x => x.toString(36).padStart(2, '0')).join('').slice(0, n); }
 function timingSafeEq(a, b) {
   a = String(a); b = String(b);
@@ -596,21 +742,333 @@ function timingSafeEq(a, b) {
   let r = 0; for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return r === 0;
 }
-function json(obj, status = 200) {
-  return cors(new Response(JSON.stringify(obj), { status, headers: { 'content-type': 'application/json; charset=utf-8' } }));
+const SEC_HEADERS = {
+  'Referrer-Policy': 'no-referrer',
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  // 'unsafe-inline' stays because the templates are single-file documents with
+  // inline scripts; everything remote is what this actually blocks.
+  'Content-Security-Policy': "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; referrer no-referrer",
+};
+
+/**
+ * Only genuinely public surfaces get `Access-Control-Allow-Origin: *`. The
+ * admin, settings, mark and login endpoints deliberately do not, so no foreign
+ * page can read a ledger or fire a mutation from a visitor's browser.
+ */
+const OPEN_RE = /^\/s\/|^\/rails\b|^\/fees\b|^\/data\/|^\/onboard\b|^\/__ping\b|^\/api\/(order|register|lookup|hook\/)|^\/renew\//;
+function isOpenPath(pathname) { return OPEN_RE.test(pathname); }
+const KILL_COOKIE = 'zl_sess=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict; Secure';
+
+/** Merge per-route headers over the defaults, lower-cased, so callers that
+ *  write `Cache-Control` cannot end up with `no-store, no-store`. */
+function hdr(extra) {
+  const h = { 'cache-control': 'no-store', 'x-zimlink': VERSION, ...SEC_HEADERS };
+  for (const k of Object.keys(extra || {})) h[k.toLowerCase()] = extra[k];
+  return h;
+}
+function json(obj, status = 200, extra = {}) {
+  return new Response(JSON.stringify(obj), {
+    status,
+    headers: { 'content-type': 'application/json; charset=utf-8', ...hdr(extra) },
+  });
 }
 function html(s, status = 200, extra = {}) {
-  return cors(new Response(s, { status, headers: { 'content-type': 'text/html; charset=utf-8', ...extra } }));
+  return new Response(s, {
+    status,
+    headers: { 'content-type': 'text/html; charset=utf-8', ...hdr(extra) },
+  });
 }
-function redirect(loc) { return new Response(null, { status: 302, headers: { location: loc } }); }
-function cors(r) {
+function redirect(loc, status = 302) {
+  return new Response(null, { status, headers: { location: loc, 'cache-control': 'no-store' } });
+}
+function withCookie(res, cookie) { res.headers.append('set-cookie', cookie); return res; }
+function openCors(r) {
   r.headers.set('Access-Control-Allow-Origin', '*');
-  r.headers.set('Access-Control-Allow-Headers', 'content-type');
+  r.headers.set('Access-Control-Allow-Headers', 'content-type, x-zimlink-confirm');
   r.headers.set('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   r.headers.set('X-ZimLink', VERSION);
   return r;
 }
-function notFoundPage(handle) {
+
+/* ---------------------------------------------------------------- authority */
+function ipOf(req) {
+  return (req.headers.get('cf-connecting-ip') || req.headers.get('x-forwarded-for') || 'na').split(',')[0].trim();
+}
+async function readBody(req) {
+  const ct = (req.headers.get('content-type') || '').toLowerCase();
+  if (ct.indexOf('json') >= 0) return await req.json().catch(() => ({}));
+  if (ct.indexOf('form') >= 0) {
+    const fd = await req.formData().catch(() => null);
+    const out = {};
+    if (fd) for (const [k, v] of fd.entries()) out[k] = v;
+    return out;
+  }
+  const t = await req.text().catch(() => '');
+  if (t && t[0] === '{') { try { return JSON.parse(t); } catch (e) { return {}; } }
+  return {};
+}
+async function lockedOut(env, handle) {
+  if (!env.STORES) return false;
+  return Number((await env.STORES.get('lock:' + handle)) || 0) >= LOCK_MAX;
+}
+async function authFail(env, handle) {
+  if (!env.STORES) return 0;
+  const n = Number((await env.STORES.get('lock:' + handle)) || 0) + 1;
+  await env.STORES.put('lock:' + handle, String(n), { expirationTtl: LOCK_TTL });
+  return n;
+}
+async function authClear(env, handle) {
+  if (!env.STORES) return;
+  // Only touch KV when a counter actually exists: an unconditional delete on
+  // every authenticated request would burn the 1,000 free writes/day on a
+  // dashboard that polls. Reads are 100k/day, so checking first is free.
+  const n = await env.STORES.get('lock:' + handle);
+  if (n && Number(n) > 0) await env.STORES.delete('lock:' + handle);
+}
+
+/** Who is asking? Cookie session, or the store's API key. Never a URL token. */
+async function identify(req, env, handle) {
+  handle = slug(String(handle || ''));
+  const st = await getStore(env, handle);
+  if (!st) return null;
+  const raw = (req.headers.get('cookie') || '').match(/(?:^|;\s*)zl_sess=([^;]+)/);
+  if (raw) {
+    const p = await verifyCap(env.ADMIN_SECRET || 'dev-secret', decodeURIComponent(raw[1]));
+    if (p && p.a === 'sess' && p.h === handle && String(p.g) === String(st.auth_gen || '0')) {
+      await authClear(env, handle);
+      return { via: 'sess', st, handle };
+    }
+    return { bad: true, st, handle };
+  }
+  const key = req.headers.get('x-zimlink-admin');
+  if (key) {
+    if (st.admin_token && timingSafeEq(String(key), String(st.admin_token))) {
+      await authClear(env, handle);
+      return { via: 'key', st, handle };
+    }
+    return { bad: true, st, handle };
+  }
+  return { anonymous: true, st, handle };
+}
+
+async function issueLogin(env, st, origin) {
+  const cap = await issueCap(env.ADMIN_SECRET || 'dev-secret',
+    { a: 'login', h: st.handle, g: String(st.auth_gen || '0') }, CODE_TTL);
+  return `${origin}/a?code=${cap}`;
+}
+
+async function loginExchange(req, env) {
+  const b = await readBody(req);
+  const p = await verifyCap(env.ADMIN_SECRET || 'dev-secret', String(b.code || ''));
+  if (!p || p.a !== 'login') return json({ ok: false, error: 'that sign-in link has expired — open a fresh one from your notification, or use "Lost your link?"' }, 401);
+  const st = await getStore(env, p.h);
+  if (!st) return json({ ok: false, error: 'no store' }, 404);
+  if (String(p.g) !== String(st.auth_gen || '0')) return json({ ok: false, error: 'this link was revoked' }, 401);
+  const sess = await issueCap(env.ADMIN_SECRET || 'dev-secret',
+    { a: 'sess', h: st.handle, g: String(st.auth_gen || '0') }, SESS_TTL);
+  await authClear(env, st.handle);
+  return withCookie(json({ ok: true, handle: st.handle, valid_for_sec: SESS_TTL }),
+    `zl_sess=${encodeURIComponent(sess)}; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=${SESS_TTL}`);
+}
+
+/** Legacy `?handle=..&token=..` links still work, but trade down to a code. */
+async function adminEntry(req, url, env) {
+  const legacy = url.searchParams.get('token');
+  if (legacy && !url.searchParams.get('code')) {
+    const handle = slug(url.searchParams.get('handle') || '');
+    const st = await getStore(env, handle);
+    if (await lockedOut(env, handle)) return json({ ok: false, error: 'too many failed attempts — wait 10 minutes' }, 429);
+    if (st && st.admin_token && timingSafeEq(String(st.admin_token), String(legacy))) {
+      await authClear(env, handle);
+      return redirect(await issueLogin(env, st, url.origin));
+    }
+    if (st) await authFail(env, handle);
+    return redirect('/a');
+  }
+  return html(await tpl(env, 'admin'));
+}
+
+/* ------------------------------------------------------- self-service settings */
+async function settingsEdit(req, url, env) {
+  const b = await readBody(req);
+  const who = await identify(req, env, b.handle || url.searchParams.get('handle'));
+  if (!who || !who.st) return json({ ok: false, error: 'no store' }, 404);
+  if (who.anonymous) return json({ ok: false, error: 'sign in from your dashboard link first', need_login: true }, 401);
+  if (who.bad) { await authFail(env, who.handle); return json({ ok: false, error: 'bad key or revoked session' }, 403); }
+  // A cookie is ambient authority, so require a header a cross-site form
+  // cannot set. SameSite=Strict already blocks most of that; this is the belt.
+  if (who.via === 'sess' && (req.headers.get('x-zimlink-confirm') || '') !== '1') {
+    return json({ ok: false, error: 'missing x-zimlink-confirm header' }, 403);
+  }
+  const st = who.st;
+  const patch = (b.settings && typeof b.settings === 'object') ? b.settings : b;
+  const v = validateSettings(patch, Date.now());
+  if (!v.ok) return json({ ok: false, error: 'some fields need a different format', fields: v.errors, ignored: v.ignored }, 422);
+  const keys = Object.keys(v.soft).concat(Object.keys(v.money));
+  if (!keys.length) {
+    return json({ ok: false, error: 'nothing to change', unknown: v.ignored, fields: v.errors,
+      note: 'Send only the fields you want changed, with their current names.' }, v.ignored.length ? 422 : 200);
+  }
+  const before = {};
+  for (const k of keys) before[k] = maskField(k, st[k]);
+  const { changed, staged } = stageSettings(st, v.soft, v.money, HOLD_MS, Date.now());
+  const after = {};
+  for (const k of keys) {
+    const held = st.pending && st.pending.fields && k in st.pending.fields;
+    after[k] = maskField(k, held ? st.pending.fields[k] : st[k]);
+  }
+  if (changed || staged) await writeStore(env, st);
+  if (changed || staged) await pushAudit(env, st, { act: 'settings', via: who.via, changed, staged, before, after, ip: ipOf(req) });
+  const held = Object.keys(v.money);
+  return json({
+    ok: true, applied_now: changed ? Object.keys(v.soft) : [],
+    held, hold_until: st.pending ? st.pending.apply_at : null,
+    unchanged: !changed && !staged,
+    note: held.length
+      ? 'Payment, menu and contact changes take effect after 15 minutes and you can cancel them in that window. Anyone already ordering pays the account printed on their slip, so a stolen link cannot quietly reroute today’s takings.'
+      : 'Saved.',
+  });
+}
+
+async function revertPending(req, url, env) {
+  const b = await readBody(req);
+  const who = await identify(req, env, b.handle || url.searchParams.get('handle'));
+  if (!who || !who.st) return json({ ok: false, error: 'no store' }, 404);
+  if (who.anonymous || who.bad) return json({ ok: false, error: 'sign in first' }, 401);
+  const was = who.st.pending ? Object.keys(who.st.pending.fields) : [];
+  if (was.length) { delete who.st.pending; await writeStore(env, who.st); }
+  await pushAudit(env, who.st, { act: 'revert', via: who.via, fields: was, ip: ipOf(req) });
+  return json({ ok: true, cancelled: was });
+}
+
+/** One write that kills every outstanding link, key and cookie for a store. */
+async function revokeKeys(req, url, env) {
+  const b = await readBody(req);
+  const who = await identify(req, env, b.handle || url.searchParams.get('handle'));
+  if (!who || !who.st) return json({ ok: false, error: 'no store' }, 404);
+  if (who.anonymous || who.bad) return json({ ok: false, error: 'sign in first' }, 401);
+  const st = who.st;
+  st.auth_gen = Date.now().toString(36);
+  st.admin_token = randomKey(16);
+  delete st.pending;
+  await writeStore(env, st);
+  await pushAudit(env, st, { act: 'revoke', via: who.via, ip: ipOf(req) });
+  const res = json({
+    ok: true, dashboard_url: await issueLogin(env, st, url.origin), api_key: st.admin_token,
+    note: 'Every older link, session and API key for this store is dead. Save the new ones; the old key stops working immediately.',
+  });
+  return withCookie(res, KILL_COOKIE);
+}
+
+/**
+ * "Lost your link" without an operator. Proof of ownership = the two values
+ * that are on no public page: the owner email and the payment account. With a
+ * mail binding it also arrives by email; without one it is shown once here.
+ */
+async function recoverLink(req, url, env) {
+  const b = await readBody(req);
+  const handle = slug(String(b.handle || ''));
+  const st = await getStore(env, handle);
+  if (!st) return json({ ok: false, error: 'no store with that name' }, 404);
+  if (await lockedOut(env, handle)) return json({ ok: false, error: 'too many attempts — wait 10 minutes' }, 429);
+  /* Two things only the owner holds. The first is whichever contact exists on
+   * the store (email, else the WhatsApp buyers use); the second is the payout
+   * account — or, for a cash shop that has none, the menu sheet link. Neither
+   * appears in any public response any more, so the pair is a real secret and
+   * the reset needs no operator. */
+  const email = String(b.owner_email || '').toLowerCase().trim();
+  const wa = digits(String(b.whatsapp || '')).replace(/\D/g, '');
+  const okEmail = !!st.owner_email && isEmail(email) && timingSafeEq(String(st.owner_email).toLowerCase(), email);
+  const okWa = !!st.whatsapp && !!wa && timingSafeEq(String(st.whatsapp).replace(/\D/g, ''), wa);
+  const secretField = st.pay_account ? 'pay_account' : 'feed_url';
+  const proof = String(b[secretField] || b.pay_account || b.feed_url || '').trim();
+  const okProof = !!st[secretField] && !!proof && timingSafeEq(String(st[secretField]), proof);
+  if (!(okEmail || okWa) || !okProof) {
+    const n = await authFail(env, handle);
+    return json({ ok: false, error: 'those details do not match this store', tries_left: Math.max(0, LOCK_MAX - n) }, 403);
+  }
+  await authClear(env, handle);
+  const link = await issueLogin(env, st, url.origin);
+  let sent = false;
+  if (env.EMAIL && (st.owner_email || st.notify_email)) {
+    try {
+      await sendMail(env, st.owner_email || st.notify_email, 'Your ZimLink dashboard link',
+        `A fresh dashboard link (valid 7 days):\n${link}\n\nIf you did not ask for this, open it and press "Revoke links & API key" at once.`);
+      sent = true;
+    } catch (e) { /* shown here instead */ }
+  }
+  return json({
+    ok: true, dashboard_url: link, emailed: sent,
+    proved_by: okEmail ? 'owner_email' : 'whatsapp', second_factor: secretField,
+    note: sent ? 'Emailed, and shown once here.' : 'Copy it now — it is not shown again. A lost link never needs anyone’s help: the same two details always remake it.',
+  });
+}
+
+/* ------------------------------------------------------------------ audit */
+async function pushAudit(env, st, row) {
+  if (!env.ORDERS || !st) return;
+  const k = 'audit:' + st.handle;
+  const cur = (await env.ORDERS.get(k, 'json')) || [];
+  cur.unshift({
+    at: new Date().toISOString(), act: row.act, via: row.via || '', ip: row.ip || '',
+    changed: row.changed || 0, staged: row.staged || 0,
+    fields: row.fields || Object.keys(row.before || {}),
+    before: row.before || undefined, after: row.after || undefined,
+  });
+  await env.ORDERS.put(k, JSON.stringify(cur.slice(0, 40)));
+}
+async function getAudit(env, handle) {
+  if (!env.ORDERS) return [];
+  return (await env.ORDERS.get('audit:' + handle, 'json')) || [];
+}
+function maskPending(fields) {
+  const out = {};
+  for (const k of Object.keys(fields || {})) out[k] = maskField(k, fields[k]);
+  return out;
+}
+
+/* -------------------------------------------------- inert, self-posting page */
+function js(v) { return JSON.stringify(v).replace(/</g, '\\u003c').replace(/\u2028/g, '').replace(/\u2029/g, ''); }
+function shell(title, body) {
+  return '<!doctype html><html lang=en><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">'
+    + '<title>' + esc(title) + '</title><style>body{font:16px/1.6 -apple-system,Segoe UI,Roboto,sans-serif;background:#0b0f14;color:#101418;margin:0;padding:1.2rem}'
+    + '.c{background:#fff;border-radius:16px;padding:1.1rem;max-width:26rem;margin:6vh auto}'
+    + 'b{font-variant-numeric:tabular-nums}button{font:inherit;background:#0b0f14;color:#fff;border:0;border-radius:10px;padding:.7rem .9rem;width:100%;font-weight:600}'
+    + '.t{color:#65788b;font-size:.85rem}</style><div class=c>' + body + '</div></body></html>';
+}
+
+/**
+ * The page a confirm link opens. It changes nothing by itself: it shows the
+ * money context, then the browser POSTs. A crawler that fetches and never runs
+ * the script leaves the order exactly as it was.
+ */
+async function confirmPage(env, cap) {
+  const p = await verifyCap(env.ADMIN_SECRET || 'dev-secret', cap);
+  if (!p || p.a !== 'mark') {
+    return html(shell('Link expired', '<h2>This link has expired</h2><p class=t>Confirm links last 72 hours. Open your dashboard and use the Confirm button on the order — it does exactly the same thing.</p>'));
+  }
+  const st = await getStore(env, p.h);
+  const o = st ? await env.ORDERS.get('order:' + p.h + ':' + p.id, 'json') : null;
+  if (!o) return html(shell('Order not found', '<h2>Order not found</h2><p class=t>It may have been archived.</p>'), 404);
+  const want = markTarget(p.s);
+  if (o.status === want) {
+    return html(shell('Already confirmed', '<h2>Already ' + esc(want) + '</h2><p class=t>' + esc(o.code) + ' was confirmed on ' + esc(String(o.marked_at || '').slice(0, 16).replace('T', ' ')) + ' UTC. Nothing changed.</p>'));
+  }
+  const amt = (o.pricing && (o.pricing.pay_now || o.pricing.total)) || 0;
+  const body = '<h2 style="margin:.1rem 0 .4rem">' + esc({ paid: 'Mark ' + o.code + ' paid?', cancelled: 'Cancel ' + o.code + '?', awaiting_payment: 'Reopen ' + o.code + ' as unpaid?' }[want]) + '</h2>'
+    + '<p><b>' + esc(String(amt)) + ' ' + esc(st.currency || 'USD') + '</b> from ' + esc((o.buyer && o.buyer.name) || 'buyer')
+    + '<br><span class=t>ref ' + esc(o.code) + ' · ' + esc((o.pricing && o.pricing.rail && o.pricing.rail.label) || '') + '</span></p>'
+    + '<p id=s class=t>Confirming…</p>'
+    + '<form method="post" action="/api/mark" style="margin:.6rem 0 0"><input type="hidden" name="cap" value="' + esc(cap) + '">'
+    + '<button type="submit">Tap if this is not automatic</button></form>'
+    + '<script>var f=new FormData();f.set("cap",' + js(cap) + ');'
+    + 'fetch("/api/mark",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({cap:' + js(cap) + '})})'
+    + '.then(function(r){return r.json()}).then(function(j){document.getElementById("s").innerHTML=j.ok'
+    + '?("<b style=color:#0b5b34>✓ " + (j.label||"Done") + "</b>"):"<span style=color:#b00020>"+(j.error||"failed")+"</span>"})'
+    + '.catch(function(){document.getElementById("s").textContent="Could not reach the server — use the button.";});</script>';
+  return html(shell('Confirm order', body));
+}function notFoundPage(handle) {
   return `<!doctype html><meta charset=utf-8><title>No store here</title>
 <body style="font:16px/1.6 system-ui;max-width:34rem;margin:14vh auto;padding:0 1.2rem">
 <h1>No store at /s/${esc(handle)}</h1>

@@ -225,3 +225,169 @@ export async function hash(input) {
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(input)));
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
+
+/* ============================================================================
+ * Capability tokens, sessions and self-service settings.
+ *
+ * The rule this whole section exists to enforce: a URL that a mail scanner,
+ * a chat link-preview bot or a crawler can fetch must never be able to move
+ * money or change a store. So authority is carried by short-lived signed
+ * tokens (never stored, never guessed, scoped to one store + one action + one
+ * expiry), and every one of them is *spent* by a POST the browser initiates.
+ * A GET can only ever return a page.
+ * ==========================================================================*/
+
+const b64u = (buf) => btoa(String.fromCharCode.apply(null, new Uint8Array(buf)))
+  .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const unb64u = (s) => {
+  const t = String(s).replace(/-/g, '+').replace(/_/g, '/');
+  const bin = atob(t + '==='.slice((t.length + 3) % 4));
+  const u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  return u;
+};
+
+async function hmacSig(secret, msg) {
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(String(secret)),
+    { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  return b64u(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(String(msg)))).slice(0, 43);
+}
+
+/** 128-bit url-safe random, for revocable API keys. */
+export function randomKey(bytes = 16) {
+  const b = new Uint8Array(bytes);
+  crypto.getRandomValues(b);
+  return b64u(b);
+}
+
+/** Signed, stateless capability: `v1.<expiry>.<payload>.<tag>`. */
+export async function issueCap(secret, payload, ttlSec) {
+  const exp = Math.floor(Date.now() / 1000) + Math.max(300, Math.floor(ttlSec || 3600));
+  const body = b64u(new TextEncoder().encode(JSON.stringify(payload)));
+  return `v1.${exp}.${body}.${await hmacSig(secret, exp + '.' + body)}`;
+}
+
+/** Returns the payload with `exp` attached, or null for any forgery/expiry. */
+export async function verifyCap(secret, cap, nowSec) {
+  const parts = String(cap || '').split('.');
+  if (parts.length !== 4 || parts[0] !== 'v1') return null;
+  const exp = Number(parts[1]);
+  if (!Number.isFinite(exp) || exp < (nowSec || Math.floor(Date.now() / 1000))) return null;
+  const want = await hmacSig(secret, exp + '.' + parts[2]);
+  const got = parts[3];
+  if (want.length !== got.length) return null;
+  let d = 0;
+  for (let i = 0; i < want.length; i++) d |= want.charCodeAt(i) ^ got.charCodeAt(i);
+  if (d) return null;
+  try {
+    const p = JSON.parse(new TextDecoder().decode(unb64u(parts[2])));
+    p.exp = exp;
+    return p;
+  } catch (e) { return null; }
+}
+
+/** Detached signature over an arbitrary message (outbound webhook bodies). */
+export async function sign(secret, msg) { return hmacSig(secret, String(msg || '')); }
+
+/* ------------------------------------------------------------ settings model */
+
+/** Fields a merchant may change instantly: nothing here moves money or PII. */
+export const SOFT_FIELDS = ['tagline', 'logo', 'location', 'hours', 'closed'];
+
+/** Every editable field and its validator; null = rejected, undefined-safe. */
+const SET = {
+  shop_name: (v) => { const s = String(v || '').trim().slice(0, 60); return s.length >= 2 ? s : null; },
+  tagline: (v) => String(v || '').trim().slice(0, 140),
+  logo: (v) => (!v ? '' : /^https?:\/\/\S+$/.test(String(v)) ? String(v).slice(0, 300) : null),
+  location: (v) => String(v || '').trim().slice(0, 90),
+  hours: (v) => String(v || '').trim().slice(0, 60),
+  closed: (v) => v === true || v === 'true' || v === 1 || v === '1',
+  whatsapp: (v) => { const d = digits(v).replace(/\D/g, ''); return d.length >= 9 && d.length <= 15 ? d : null; },
+  pay_account: (v) => String(v || '').trim().slice(0, 60),
+  rail: (v) => (RAILS[v] ? v : null),
+  surcharge_mode: (v) => (v === 'pass' || v === 'absorb' ? v : null),
+  currency: (v) => { const s = String(v || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3); return s.length === 3 ? s : null; },
+  zig_rate: (v) => { const n = Number(v); return n >= 0 && n < 1e7 ? n : null; },
+  tax_pct: (v) => { const n = Number(v); return n >= 0 && n <= 40 ? round2(n) : null; },
+  delivery_fee: (v) => { const n = Number(v); return n >= 0 && n <= 10000 ? round2(n) : null; },
+  free_over: (v) => { const n = Number(v); return n >= 0 && n <= 1e7 ? round2(n) : null; },
+  max_order_value: (v) => { const n = Number(v || 0); return n >= 0 && n <= 1e7 ? round2(n) : null; },
+  cod_review_above: (v) => { const n = Number(v || 0); return n >= 0 && n <= 1e7 ? round2(n) : null; },
+  cache_seconds: (v) => { const n = Number(v); return n >= 15 && n <= 3600 ? Math.floor(n) : null; },
+  feed_url: (v) => (/^https?:\/\/\S+$/.test(String(v || '')) ? String(v).slice(0, 400) : null),
+  notify_webhook: (v) => (!v ? '' : /^https:\/\/\S+$/.test(String(v)) ? String(v).slice(0, 300) : null),
+  notify_email: (v) => (!v ? '' : isEmail(v) ? String(v).toLowerCase().slice(0, 120) : null),
+  owner_email: (v) => (!v ? '' : isEmail(v) ? String(v).toLowerCase().slice(0, 120) : null),
+  unique_change: (v) => !(v === false || v === 'false' || v === 0 || v === '0'),
+  require_optin: (v) => v === true || v === 'true' || v === 1 || v === '1',
+  reference_format: (v) => { const s = String(v || '{code}'); return /^[{ }A-Za-z0-9_-]{1,30}$/.test(s) ? s : null; },
+  order_prefix: (v) => { const s = String(v || '').replace(/[^A-Za-z0-9-]/g, '').slice(0, 6); return s || null; },
+};
+
+export const EDITABLE_FIELDS = Object.keys(SET);
+
+/**
+ * Split a settings POST into what applies now and what is held back.
+ * `money` fields are the ones an attacker would use to redirect payments or
+ * exfiltrate buyer details, so they are staged, not applied.
+ */
+export function validateSettings(body, now) {
+  const soft = {}, money = {}, errors = {}, ignored = [];
+  const src = body && typeof body === 'object' ? body : {};
+  for (const k of Object.keys(src)) {
+    if (!SET[k]) { ignored.push(k); continue; }
+    let v;
+    try { v = SET[k](src[k]); } catch (e) { v = null; }
+    if (v === null) { errors[k] = 'check the format of this field'; continue; }
+    if (SOFT_FIELDS.indexOf(k) >= 0) soft[k] = v; else money[k] = v;
+  }
+  return { ok: !Object.keys(errors).length, soft, money, errors, ignored, at: now || Date.now() };
+}
+
+/** Apply the harmless fields, stage the rest. Returns counts for the response. */
+export function stageSettings(st, soft, money, holdMs, now) {
+  const t = now || Date.now();
+  let changed = 0;
+  for (const k of Object.keys(soft || {})) if (st[k] !== soft[k]) { st[k] = soft[k]; changed++; }
+  const pend = (st.pending && st.pending.fields) || {};
+  let staged = 0;
+  for (const k of Object.keys(money || {})) {
+    if (st[k] === money[k] && !(k in pend)) continue;
+    pend[k] = money[k]; staged++;
+  }
+  if (staged) st.pending = { fields: pend, set_at: t, apply_at: t + Math.max(60e3, holdMs) };
+  else if (Object.keys(pend).length) st.pending = { fields: pend, set_at: st.pending.set_at, apply_at: st.pending.apply_at };
+  else delete st.pending;
+  return { changed, staged };
+}
+
+/**
+ * Fold a due pending change into the store. Called from the read path, so a
+ * held change lands the moment anyone (a buyer or the merchant) next looks —
+ * no cron dependency, no timer to lose.
+ */
+export function applyPending(st, now) {
+  const p = st && st.pending;
+  if (!p || !p.fields || !Object.keys(p.fields).length) return { applied: [], pending: null };
+  const t = now || Date.now();
+  if (t < (p.apply_at || 0)) {
+    return { applied: [], pending: { keys: Object.keys(p.fields), in_ms: p.apply_at - t, apply_at: p.apply_at } };
+  }
+  const applied = [];
+  for (const k of Object.keys(p.fields)) { st[k] = p.fields[k]; applied.push(k); }
+  delete st.pending;
+  return { applied, pending: null };
+}
+
+/** Audit-friendly rendering: enough to recognise a change, never the value. */
+export function maskField(k, v) {
+  const s = String(v == null ? '' : v);
+  if (!s) return '(blank)';
+  if (k === 'notify_webhook' || k === 'feed_url' || k === 'logo') {
+    try { return new URL(s).host; } catch (e) { return s.slice(0, 8) + '…'; }
+  }
+  if (k.indexOf('email') >= 0) return (s[0] || '') + '***@' + (s.split('@')[1] || '?');
+  if (k === 'pay_account' || k === 'whatsapp') return '•••' + s.slice(-4);
+  if (k === 'pay' || k === 'secret') return '••••';
+  return s.length > 8 ? s.slice(0, 4) + '…' + s.slice(-2) : s;
+}

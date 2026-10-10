@@ -52,6 +52,37 @@ Workers & Pages → zimlink → Settings → Triggers → `15 6,12,18,0 * * *`.
 Nothing else breaks if it is missing — expiry checks also run whenever a merchant
 renews, and orders are never lost.
 
+## Merchant authority — this round (2026-10-10, v0.3.0)
+
+Why it happened: adding self-serve `POST /api/settings` would have handed the
+existing all-powerful `admin_token` the ability to rewrite a payout account.
+Instead the credential model was rebuilt first, then the feature was added on
+top. Both are in this release.
+
+| Change | Proof |
+|---|---|
+| `core.js`: `issueCap`/`verifyCap` (HMAC-SHA256, 43-char tag), `validateSettings`, `stageSettings`, `applyPending`, `maskField`, `sign` | unit tests, and `/__selftest` re-runs the same assertions inside the Worker's own runtime |
+| Confirm links are `/c/<cap>` pages that POST; `GET /api/mark` → 405 with `Allow: POST` | live test: fetch the page as a crawler would, order still `awaiting_payment` |
+| `auth_gen` bump = every link, cookie and key dead in one write; `POST /api/revoke` also mints replacements | live test: old session 403, old code 401 "revoked", new link 200 |
+| 12-hour `HttpOnly SameSite=Strict Secure` cookie; codes 7 d (login) / 72 h (mark) / 15 min (undo) | live test asserts the `Set-Cookie` attributes, not just the redirect |
+| Money/PII settings held 15 min and applied lazily on the read path; cosmetic fields instant; `POST /api/settings/revert` cancels | live test fast-forwards `apply_at`, then reads `config.json` |
+| `order.pay` snapshot freezes what a buyer was told to pay | live test: after the new account lands, the old order's slip still names the old one |
+| `/api/lookup` stripped of `admin_url`/`renew_url`; outbound webhook stripped of the credential (now `x-zimlink-body: sign(body)`) | live test greps the public payload for each field name |
+| CORS split: `*` on buyer paths, none on admin/mutation paths; CSP, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `no-store` | live test on both halves |
+| Self-serve link recovery with 12-per-10-min lockout per store | live test, including a no-email cash shop |
+| Settings panel, pending countdown + Revert, masked change log, Revoke and Sign out in `/a` | `pages/admin.html`, served from KV as `tpl:admin` |
+
+Two real bugs the suite caught while it was being written, both now fixed and
+asserted: `/renew/<token>` used `randomKey` (base64url), so a `-` or `_` — about
+1 shop in 8 — produced a renew link the route's own regex rejected with 404;
+and `^\/{1,2}` in the CORS path test made *every* path public, so `ACAO: *` was
+still on the ledger endpoint.
+
+Old links are not dead: a v0.2 `?handle=…&token=…` link still authenticates
+against the stored key and is redirected to a fresh code, and `GET` on such a
+link is answered the same way — never by marking anything paid. Guessing at
+either path counts as a failed attempt against the store's lock counter.
+
 ## Known limits (deliberate, not TODO)
 
 1. **No instant mobile-money confirmation** — none exists at $0 in ZW/SA. The

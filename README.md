@@ -89,19 +89,61 @@ curl -X PUT --data-binary @pages/store.html \
 2. Buyer opens `/s/<handle>`, picks options/add-ons, sees the exact amount to
    send, the rail's dial string and the reference. `POST /api/order` → code,
    `pay_now`, instructions, `wa_link`, and a `mark_url` for the merchant.
-3. Merchant taps `/api/mark?handle=…&token=…&id=…` (link arrives in the
-   notification, GET works, no app, no key) → order is `paid`.
+3. Merchant taps the confirm link in the notification (`/c/<capability>`) →
+   the page shows buyer, amount and rail, then *the browser* POSTs it. No app,
+   no key, no login — and no way for a link-scanner to pull the trigger.
 4. Menu changes are the merchant's own sheet edit; `feed_cache` re-reads after
    `cache_seconds` (default 120). No one re-deploys anything.
 5. Free for 60 days, then the cron warns at T-7d, and suspends at expiry (order
    endpoint answers 503 with a reason). `/renew/<token>` → `/api/checkout` →
    payment → the webhook extends `paid_until` and the next cron tick
    reinstates. Nobody sends an invoice.
-6. `/api/admin?handle=…&token=…` is the whole ledger: status, flags, buyer,
-   amounts. The dashboard renders a day-sheet and a CSV from the same payload.
+6. `…/a` is the whole ledger: status, flags, buyer, amounts, plus the settings
+   panel and the change log. The dashboard opens from a code that becomes a
+   12-hour `HttpOnly` cookie; the ledger endpoint answers 401 to anyone else.
+   The merchant renders a day-sheet and a CSV from the same payload.
+7. A payout detail is wrong (typo'd EcoCash number, new sheet link, closed for
+   a day): the merchant fixes it themselves in Store settings. Cosmetic fields
+   land instantly; fields that move money or buyer data queue for 15 minutes,
+   are cancellable inside that window, and every confirmation reply carries a
+   15-minute undo link.
+
+## Merchant authority (why a shared link cannot burn the shop down)
+
+Everything the merchant does is authorised by a **stateless HMAC capability**,
+`v1.<expiry>.<payload>.<signature>`, signed with the `ADMIN_SECRET` and bound to
+`{action, store, order, target status, auth_gen}`. Nothing about it is stored,
+so nothing is searchable, and one KV write (`auth_gen`) invalidates every link,
+key and cookie a store has ever issued.
+
+| Surface | Before | Now |
+|---|---|---|
+| Dashboard | `?handle=x&token=<40-bit key>` in every URL, in logs, in the merchant's own notification text | one-time code → `HttpOnly SameSite=Strict` cookie (12 h) |
+| Confirm an order | `GET /api/mark?token=…` — a prefetching bot could mark it paid | `GET /c/<cap>` renders an inert page that POSTs; `GET /api/mark` → 405 |
+| Lifetime of a link | forever | 72 h confirm · 15 min undo · 7 d login code |
+| Read a store's dashboard link from a handle | `/api/lookup` handed it out | `/api/lookup` returns public health only |
+| Payout details | no self-serve path at all (`409 handle already taken`) | `POST /api/settings`, 15-minute hold on money fields, masked audit, self-serve "lost your link" |
+| Cross-origin | `Access-Control-Allow-Origin: *` on every response | `*` on buyer/public paths only; admin/mutation paths send none |
+
+Two rules hold the design together: **a GET can only ever return a page, never
+move money**, and **the buyer's slip is frozen at order time** (`order.pay`), so
+a payout account that does change can never retroactively redirect money a
+buyer was already told to send.
+
+The friction budget was spent deliberately: one tap for the merchant, exactly as
+before. A stolen or shared link still cannot take the ledger or reroute today's
+takings, because the state it would need is behind a 15-minute hold the owner can
+see and cancel, and because revoking takes one press.
 
 ## What is deliberately not here
 
+* **A password.** The store's `admin_token` is an API key for the merchant's own
+  tooling (`x-zimlink-admin`), not something a human types. Losing a device is
+  answered by sign-out and `POST /api/revoke`; losing the link is answered by
+  knowledge recovery (`owner_email` *or* the store's WhatsApp, plus the payout
+  account, or the sheet link for a cash shop) — 12 tries per 10 minutes per
+  store, so the answer space is not searchable. There is no second factor, and
+  no support queue either, which is the point of a $0 product.
 * **Instant mobile-money confirmation.** No $0 API exists for EcoCash/InnBucks/
   OnePay in Zimbabwe. Unique-cents matching plus one-tap confirmation is the
   honest answer; a bank/rail API would change nothing about the design.
@@ -121,7 +163,8 @@ curl -X PUT --data-binary @pages/store.html \
 |---|---|
 | Onboarding (give this to merchants) | `https://zimlink.simalidudu.workers.dev/onboard` |
 | A store | `…/s/<handle>` · its config `…/s/<handle>/config.json` · its menu `…/s/<handle>/feed.json` |
-| Merchant dashboard | `…/a` (the link is returned at sign-up and emailed/webhooked with each order) |
+| Merchant dashboard | `…/a` — opened by the code returned at sign-up and sent with each order; `POST /api/login`, `POST /api/logout`, `POST /api/recover`, `POST /api/revoke` |
+| Self-service settings | `POST /api/settings` · `POST /api/settings/revert` (fields from `GET /api/admin` → `editable`) |
 | Rate calculator | `…/fees` (also on Pages, shareable with query-string state) |
 | Health / diagnostics | `…/__ping`, `…/__selftest`, `…/__selftest?scheduled=1` |
 | Rail table | `…/rails` |
@@ -132,7 +175,10 @@ waiting on a clock (the cron heartbeat), and the deliberate limits.
 
 ## Verified
 
-`node --test tests/` → 30 pass. Deployed and exercised on the real Worker:
+`node --test tests/` → 51 pass (27 unit on `core.js`, 24 driving the real
+bundled Worker against an in-memory KV: the full journey plus the authority
+model — forged/expired/revoked codes, inert GETs, the 15-minute hold, masked
+audit, cross-origin refusal). Deployed and exercised on the real Worker:
 two tenants (Harare/USD/EcoCash, Durban/ZAR/PayShap), order → one-tap paid,
 cross-tenant isolation, expiry → cron suspension → 503 → webhook → reinstated
 (`plan: annual`, 746 days). `/__selftest` reports bindings, all five templates,
