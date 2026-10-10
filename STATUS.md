@@ -15,7 +15,7 @@ anybody anything they had already:
 
 | Carried by | How |
 |---|---|
-| Every link already sent (`/s/<handle>`, `/a?code=`, `/c/<cap>`, `/renew/<token>`) | the old Worker is deployed too, from the same code and the same KV, with `REDIRECT_TO` set: page GETs 301 to the canonical origin, everything with a body is still served there, so a browser mid-order never loses it. Its cron is off — two Workers on one KV must not sweep twice. |
+| Every link already sent (`/s/<handle>`, `/a?code=`, `/c/<cap>`, `/renew/<token>`) | the old Worker is deployed too, from the same code and the same KV, with `REDIRECT_TO` set: page GETs 301 to the canonical origin, everything with a body is still served there, so a browser mid-order never loses it. Its inherited cron still exists (the API refuses to delete it with this token: `PUT /schedules` → `success:false`), but a Worker with `REDIRECT_TO` returns from `scheduled()` before the sweep and `/__selftest` says `cron_owner:false` — so two Workers on one KV never sweep twice, and the deploy reads that flag instead of hoping a dashboard click happened. |
 | Merchant and operator sessions | cookies are written as `tp_sess`/`tp_ops`, read as either. `auth_gen`/`ops_gen` still govern validity, so revocation works under both spellings; signing in clears the old name so "sign out" cannot be defeated by a cookie we accept on purpose. |
 | Pages cached in a phone | they post `x-zimlink-confirm`/`x-zimlink-admin`; both are accepted, and CORS allows both. |
 | Templates still in KV | `fillPage()` replaces `/*__TAPSTALL_*__*/null` **and** `/*__ZIMLINK_*__*/null` in one pass, so the Worker does not have to be deployed in the same second as the pages (and today it cannot be: no KV writes left). |
@@ -132,7 +132,7 @@ proof on its own. Proof is a timestamp that moves at 06:15/12:15/18:15/00:15 UTC
 with **no** deploy in between.
 
 ```
-curl -s https://zimlink.simalidudu.workers.dev/__selftest | jq .cron_heartbeat
+curl -s https://tapstall.simalidudu.workers.dev/__selftest | jq .cron_heartbeat
 ```
 
 `minutes_ago` should be under ~365 after 06:15 UTC and never reset by a deploy.
