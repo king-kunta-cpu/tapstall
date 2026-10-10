@@ -20,7 +20,12 @@ die() { printf '\033[31mx\033[0m %s\n' "$*" >&2; exit 1; }
 require_cmd() { local c; for c in "$@"; do command -v "$c" >/dev/null 2>&1 || die "missing command: $c"; done; }
 
 load_secrets() {
-  local var file
+  local var file alt
+  # CI supplies CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID (the conventional
+  # secret names); locally they live in .secrets/. Either is fine, and the
+  # names must not be a reason for a deploy to stop.
+  : "${CF_TOKEN:=${CLOUDFLARE_API_TOKEN:-}}" "${CF_ACCOUNT:=${CLOUDFLARE_ACCOUNT_ID:-}}"
+  export CF_TOKEN CF_ACCOUNT
   for pair in "CF_TOKEN:cf_token" "CF_ACCOUNT:cf_account"; do
     var="${pair%%:*}"; file="${pair##*:}"
     if [[ -z "${!var:-}" && -f ".secrets/$file" ]]; then read -r "$var" < ".secrets/$file"; fi

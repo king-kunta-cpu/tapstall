@@ -29,7 +29,18 @@ jobs:
           CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
           WORKER_NAME: zimlink
-        run: ./scripts/deploy.sh
+        run: |
+          set +e
+          bash -x ./scripts/deploy.sh 2>&1 | tee /tmp/deploy.log
+          code=${PIPESTATUS[0]}
+          echo "---- tools ----"; for c in node jq curl openssl python3; do printf '%s=%s ' "$c" "$(command -v $c || echo MISSING)"; done; echo
+          echo "---- env ----"; for v in CF_TOKEN CF_ACCOUNT ADMIN_SECRET WORKER_NAME; do printf '%s:len=%s ' "$v" "${!#v:+set}"; done; echo
+          mkdir -p "$RUNNER_TEMP/artifact" && cp /tmp/deploy.log "$RUNNER_TEMP/artifact/deploy.log"
+          exit $code
+      - name: upload deploy log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: deploy-log, path: '${{ runner.temp }}/artifact/' , if-no-files-found: ignore }
   pages:
     needs: worker
     runs-on: ubuntu-latest
