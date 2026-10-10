@@ -1,237 +1,504 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Create your WhatsApp store — ZimLink</title>
-<meta name="description" content="A storefront link for your WhatsApp business. No monthly subscription, no foreign card charge, no order cap. Free in about 90 seconds.">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b0f14">
+<title>ZimLink — set up your WhatsApp order desk</title>
+<meta name="description" content="A store link for your WhatsApp orders. Menu from your Google Sheet, payment references that identify themselves, changes you make yourself. Free for 60 days.">
 <style>
-*{box-sizing:border-box}body{margin:0;font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#101418;background:#0b0f14}
-.hero{color:#fff;padding:2.2rem 1.1rem 1.6rem;max-width:40rem;margin:0 auto}
-.hero h1{font-size:1.65rem;line-height:1.15;margin:0 0 .5rem;letter-spacing:-.02em}
-.hero p{margin:.4rem 0;color:#aebbc7;font-size:.95rem}
-.pill{display:inline-block;background:#16202b;border:1px solid #26333f;border-radius:999px;padding:.2rem .6rem;font-size:.75rem;color:#cfe0ee;margin:.3rem .3rem 0 0}
-main{background:#f4f6f8;border-radius:18px 18px 0 0;padding:1rem 1rem 3rem;margin-top:.6rem}
-section{max-width:40rem;margin:0 auto;background:#fff;border:1px solid #e6ebf0;border-radius:14px;padding:1rem 1rem 1.1rem;margin-bottom:.8rem}
-h2{font-size:.95rem;margin:.1rem 0 .7rem;display:flex;gap:.5rem;align-items:baseline}
-h2 i{font-style:normal;background:#101418;color:#fff;width:1.35rem;height:1.35rem;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:.75rem;flex:0 0 auto}
-label{display:block;font-size:.78rem;font-weight:600;color:#42566a;margin:.65rem 0 .2rem}
-label small{font-weight:400;color:#7b8b9b}
-input,select,textarea{width:100%;padding:.62rem .7rem;border:1px solid #dde3e9;border-radius:10px;font:inherit;font-size:.92rem;background:#fff}
-textarea{min-height:4.5rem;font-family:ui-monospace,Menlo,monospace;font-size:.8rem}
-.two{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}
-button.go{width:100%;background:#0b0f14;color:#fff;border:0;border-radius:12px;padding:.9rem;font:inherit;font-weight:600;font-size:1rem}
-button.gh{background:#fff;border:1px solid #cfd8e0;border-radius:9px;padding:.4rem .6rem;font:inherit;font-size:.8rem;color:#333}
-.hint{font-size:.76rem;color:#65788b;margin:.35rem 0 0}
-.out{background:#0b0f14;color:#e8eef4;border-radius:14px;padding:1rem;font-size:.9rem;display:none}
-.out.on{display:block}
-.out a{color:#8fd4ff;word-break:break-all}
-.kv{display:flex;gap:.5rem;justify-content:space-between;border-top:1px solid #1e2a36;padding:.4rem 0;font-size:.82rem}
-.kv span:last-child{text-align:right;font-weight:600;word-break:break-all}
-.warn{background:#fff7e6;border:1px solid #f0d9a8;color:#6b4d09;border-radius:10px;padding:.55rem .6rem;font-size:.8rem;margin-top:.6rem}
-.ok{background:#e8f7ef;border:1px solid #bfe6d0;color:#0b5b34;border-radius:10px;padding:.55rem .6rem;font-size:.8rem;margin-top:.6rem}
-details{margin-top:.6rem;font-size:.85rem}
-summary{cursor:pointer;font-weight:600;font-size:.82rem;color:#42566a}
-table{border-collapse:collapse;width:100%;font-size:.75rem;margin-top:.4rem}
-th,td{border:1px solid #e6ebf0;padding:.25rem .35rem;text-align:left}
-th{background:#f7f9fb}
-.foot{color:#8194a5;font-size:.72rem;text-align:center;padding:1.2rem}
-.poster{position:fixed;inset:0;background:#fff;z-index:50;padding:1.4rem;overflow:auto;display:none}
-.poster.on{display:block}
-.poster .p{text-align:center;max-width:22rem;margin:0 auto}
-.poster .p h3{font-size:1.4rem;margin:.2rem 0}
-.poster .u{background:#f1f5f8;border-radius:10px;padding:.5rem;font-family:ui-monospace,Menlo,monospace;font-size:.85rem;word-break:break-all}
-@media print{body{background:#fff}.no-print{display:none!important}.poster{position:static;padding:0}}
+/* ZimLink UI kit — one visual language for both suites (merchant pages and the
+ * operator console). Every shipped page inlines this block instead of linking to
+ * it: a page that arrives as one file survives the KV template store, a mail
+ * preview, a sandboxed viewer and a 2G reconnect, none of which can be counted
+ * on to fetch a stylesheet. scripts/ui_kit.py regenerates the inlined copies,
+ * and a test fails if a page drifts from this file. */
+:root {
+  --ink: #101418;
+  --ink-2: #33404d;
+  --ink-3: #65788b;
+  --bg: #f4f6f8;
+  --card: #ffffff;
+  --line: #e6ebf0;
+  --line-2: #dde3e9;
+  --chrome: #0b0f14;
+  --chrome-2: #1a2530;
+  --chrome-ink: #aebbc7;
+  --accent: #0b5b34;
+  --accent-bg: #e8f7ef;
+  --warn: #8a5b00;
+  --warn-bg: #fff6e0;
+  --warn-line: #f0d9a8;
+  --bad: #b00020;
+  --bad-bg: #fffafa;
+  --bad-line: #f3c3c9;
+  --link: #8fd4ff;
+  --r-sm: 8px;
+  --r: 12px;
+  --r-lg: 16px;
+  --tap: 44px;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --shadow: 0 1px 2px rgba(16, 20, 24, .04), 0 8px 24px -18px rgba(16, 20, 24, .35);
+}
+* { box-sizing: border-box }
+html { -webkit-text-size-adjust: 100% }
+body {
+  margin: 0;
+  font: 16px/1.5 var(--sans);
+  color: var(--ink);
+  background: var(--bg);
+}
+h1, h2, h3 { line-height: 1.25; margin: 0 0 .5rem }
+h1 { font-size: 1.25rem }
+h2 { font-size: 1.08rem }
+h3 { font-size: .92rem }
+a { color: inherit }
+.num, b, td.n { font-variant-numeric: tabular-nums }
+.muted { color: var(--ink-3); font-size: .78rem }
+.tiny { font-size: .72rem }
+.mono { font-family: var(--mono); font-size: .8rem; word-break: break-all }
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: .9rem;
+  margin-bottom: .8rem;
+  box-shadow: var(--shadow);
+}
+.card.flat { box-shadow: none }
+.card > :last-child { margin-bottom: 0 }
+.stack > * + * { margin-top: .6rem }
+.row { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center }
+.row.between { justify-content: space-between }
+.row.end { justify-content: flex-end }
+.grid { display: grid; gap: .5rem }
+.grid.c2 { grid-template-columns: 1fr 1fr }
+.grid.c3 { grid-template-columns: repeat(3, 1fr) }
+.grid.c4 { grid-template-columns: repeat(4, 1fr) }
+@media (max-width: 30rem) { .grid.c3, .grid.c4 { grid-template-columns: 1fr 1fr } }
+label { display: block; font-size: .74rem; font-weight: 600; color: #42566a; margin-bottom: .2rem }
+input, select, textarea {
+  font: inherit;
+  width: 100%;
+  padding: .62rem .7rem;
+  min-height: var(--tap);
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+}
+textarea { min-height: 6rem; font-family: var(--mono); font-size: .8rem; line-height: 1.45 }
+input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible, a:focus-visible {
+  outline: 2px solid #1d6fd0;
+  outline-offset: 1px;
+}
+input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--bad-line); background: var(--bad-bg) }
+button {
+  font: inherit;
+  font-weight: 600;
+  min-height: var(--tap);
+  padding: .6rem .9rem;
+  color: #fff;
+  background: var(--chrome);
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+}
+button:disabled { opacity: .55; cursor: progress }
+button.sec, .sm { color: var(--ink); background: #fff; border: 1px solid #cfd8e0; font-weight: 500 }
+button.ok { background: var(--accent) }
+button.danger { color: var(--bad); background: #fff; border: 1px solid var(--bad-line) }
+button.link { color: #2a5f9e; background: none; border: 0; text-decoration: underline; min-height: 0; padding: .2rem }
+.sm { font-size: .78rem; padding: .35rem .6rem; min-height: 0; border-radius: 8px }
+.badge {
+  display: inline-block;
+  font-size: .7rem;
+  padding: .12rem .45rem;
+  border-radius: 999px;
+  border: 1px solid #cfd8e0;
+  background: #f4f7fa;
+  color: #42566a;
+}
+.badge.ok { background: var(--accent-bg); border-color: #bfe6d0; color: var(--accent) }
+.badge.warn { background: var(--warn-bg); border-color: var(--warn-line); color: var(--warn) }
+.badge.bad { background: #fdecec; border-color: var(--bad-line); color: var(--bad) }
+.notice { border-radius: 10px; padding: .6rem .7rem; font-size: .82rem; border: 1px solid var(--line) }
+.notice.warn { background: var(--warn-bg); border-color: var(--warn-line); color: var(--warn) }
+.notice.bad { background: var(--bad-bg); border-color: var(--bad-line); color: var(--bad) }
+.notice.ok { background: var(--accent-bg); border-color: #bfe6d0; color: var(--accent) }
+.notice.info { background: #eef3f8; border-color: #cfdcea; color: #33526f }
+.tabs { display: flex; gap: .3rem; overflow-x: auto; scrollbar-width: none; padding-bottom: .1rem }
+.tabs::-webkit-scrollbar { display: none }
+.tabs button {
+  flex: 0 0 auto; min-height: 0; padding: .4rem .7rem; font-size: .8rem;
+  color: var(--ink-2); background: #fff; border: 1px solid var(--line-2); border-radius: 999px;
+}
+.tabs button[aria-selected="true"] { color: #fff; background: var(--chrome); border-color: var(--chrome) }
+.stat { background: var(--card); border: 1px solid var(--line); border-radius: var(--r); padding: .55rem .65rem }
+.stat b { display: block; font-size: 1.18rem }
+.stat span { font-size: .66rem; color: var(--ink-3); text-transform: uppercase; letter-spacing: .04em }
+.bar { display: flex; gap: .2rem; margin-top: .35rem }
+.bar i { height: 5px; flex: 1; border-radius: 999px; background: var(--line-2) }
+.bar i.on { background: var(--chrome) }
+table { width: 100%; border-collapse: collapse; font-size: .84rem }
+th, td { text-align: left; padding: .45rem .4rem; border-bottom: 1px solid var(--line) }
+th { font-size: .66rem; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-3) }
+tbody tr { cursor: pointer }
+tbody tr:hover td { background: #fbfcfd }
+.empty { text-align: center; color: var(--ink-3); padding: 1.6rem 1rem; font-size: .88rem }
+.skel { background: linear-gradient(90deg, #eef1f4 25%, #f7f9fa 50%, #eef1f4 75%); background-size: 200% 100%; animation: sk 1.2s infinite; border-radius: 8px; height: 2.6rem }
+@keyframes sk { to { background-position: -200% 0 } }
+@media (prefers-reduced-motion: reduce) { .skel { animation: none } }
+.sheet { position: fixed; inset: 0; background: rgba(11, 15, 20, .45); display: none; align-items: flex-end; z-index: 20 }
+.sheet.on { display: flex }
+.sheet > div {
+  background: var(--card); width: 100%; max-height: 88vh; overflow: auto;
+  padding: 1rem .95rem calc(1rem + env(safe-area-inset-bottom));
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+}
+@media (min-width: 44rem) { .sheet { align-items: center; justify-content: center } .sheet > div { max-width: 40rem; border-radius: var(--r-lg) } }
+.toast {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: 1rem; z-index: 30;
+  background: var(--chrome); color: #fff; font-size: .82rem; padding: .55rem .8rem; border-radius: 999px;
+  box-shadow: 0 10px 30px -12px rgba(0, 0, 0, .6); max-width: 92vw;
+}
+.chrome { background: var(--chrome); color: #fff; padding: .8rem 1rem; position: sticky; top: 0; z-index: 10 }
+.chrome .in { max-width: 60rem; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; gap: .6rem; flex-wrap: wrap }
+.chrome b { font-size: .95rem }
+.chrome a, .chrome button.sec { color: var(--link); font-size: .78rem; background: none; border: 0; text-decoration: none; min-height: 0; padding: .2rem }
+main { padding: 1rem; border-radius: var(--r-lg) var(--r-lg) 0 0; margin-top: .4rem; background: var(--bg) }
+main > .wrap { max-width: 60rem; margin: 0 auto }
+main > .wrap.narrow { max-width: 34rem }
+.hide { display: none !important }
+.only-mobile { display: initial }
+@media (min-width: 44rem) { .only-mobile { display: none } }
+/* operator console is read a lot at night and on a laptop: it may go dark */
+@media (prefers-color-scheme: dark) {
+  body.dark { --bg: #0b0f14; --card: #131b23; --line: #22303c; --line-2: #2c3d4c; --ink: #e7edf3; --ink-2: #c2cfd9; --ink-3: #8fa0af; --warn-bg: #2a2410; --bad-bg: #2a1416; --accent-bg: #10291e }
+  body.dark input, body.dark select, body.dark textarea { background: #0e151b; color: var(--ink); border-color: var(--line-2) }
+  body.dark .badge { background: #182430; border-color: #2c3d4c; color: #c2cfd9 }
+  body.dark tbody tr:hover td { background: #16202a }
+  body.dark button.sec, body.dark .sm { background: #182430; color: var(--ink); border-color: #2c3d4c }
+  body.dark button { background: #e7edf3; color: #0b0f14 }
+  body.dark button.ok { background: var(--accent); color: #fff }
+}
+main { background: var(--bg) }
+.steps { display: flex; gap: .3rem; margin: .1rem 0 .8rem }
+.steps i { flex: 1; height: 4px; border-radius: 999px; background: var(--line-2) }
+.steps i.on { background: var(--chrome) }
+.steps i.now { background: var(--accent) }
+.f { margin: .55rem 0 }
+.f .help { font-size: .72rem; color: var(--ink-3); margin-top: .2rem }
+.f.err input, .f.err select { border-color: var(--bad-line); background: var(--bad-bg) }
+.f .msg { color: var(--bad); font-size: .72rem; margin-top: .2rem; display: none }
+.f.err .msg { display: block }
+h1 small { display: block; font-size: .8rem; font-weight: 500; color: var(--ink-3); margin-top: .25rem }
+.nav { display: flex; gap: .5rem; margin-top: .9rem; align-items: center }
+.nav .grow { flex: 1 }
+.opt { display: grid; gap: .3rem; margin: .3rem 0 }
+.opt label { display: flex; gap: .5rem; align-items: flex-start; font: inherit; color: inherit; font-weight: 500; padding: .5rem .6rem; border: 1px solid var(--line-2); border-radius: 10px; cursor: pointer; margin: 0 }
+.opt label.on { border-color: var(--chrome); background: #fff; box-shadow: var(--shadow) }
+.opt input { width: auto; margin-top: .2rem }
+.opt span { font-size: .82rem }
+.opt em { display: block; font-style: normal; color: var(--ink-3); font-size: .72rem }
+.switch { display: flex; align-items: center; justify-content: space-between; gap: .6rem; border: 1px solid var(--line-2); border-radius: 10px; padding: .5rem .6rem; font-size: .84rem }
+.live { text-align: center; padding: 1rem .4rem .3rem }
+.live svg { width: 56px; height: 56px }
+.kv { display: grid; grid-template-columns: 1fr auto; gap: .3rem .6rem; font-size: .85rem }
+.kv div:nth-child(even) { text-align: right; font-variant-numeric: tabular-nums }
+.link { display: block; text-align: center; border: 1px dashed var(--line-2); border-radius: 10px; padding: .55rem; font-family: var(--mono); font-size: .8rem; text-decoration: none; margin-top: .4rem }
+.preview { border: 1px solid var(--line); border-radius: var(--r); padding: .7rem; background: linear-gradient(180deg, #fff, #fbfcfd) }
+.preview .ph { height: 2.4rem; border-radius: 10px; background: var(--chrome); color: #fff; display: flex; align-items: center; padding: 0 .6rem; font-weight: 600; font-size: .9rem; margin-bottom: .5rem }
+.preview .row2 { display: flex; justify-content: space-between; font-size: .82rem; padding: .3rem 0; border-bottom: 1px solid var(--line) }
+@media (max-width: 26rem) { .grid.c2 { grid-template-columns: 1fr } }
 </style>
 </head>
 <body>
-<div class="hero">
-  <h1>Your WhatsApp orders, finally in one clean list.</h1>
-  <p>A store link your customers tap, pick from, and pay for — with the order, the name and the number landing in a dashboard you own. Built for Zimbabwe and South African micro-businesses.</p>
-  <div>
-    <span class="pill">Free for 60 days</span><span class="pill">No order cap</span><span class="pill">No USD subscription</span><span class="pill">EcoCash · InnBucks · PayShap</span><span class="pill">Setup in ~90 s</span>
-  </div>
-  <p style="font-size:.8rem;color:#7e8fa0;margin-top:.7rem">You update your menu in a Google Sheet. Your store updates itself. Nobody has to do anything for you, ever.</p>
-</div>
+<div class="chrome"><div class="in"><b>ZimLink</b><span><a href="/fees">what it costs you</a> · <a href="#" id="restoreLn">I already have a store</a></span></div></div>
+<main><div class="wrap narrow">
+<form id="w" novalidate>
+  <div class="steps"><i class="on"></i><i></i><i></i><i></i></div>
+  <p class="muted" id="stepLbl" style="margin:0 0 .5rem">Step 1 of 4 · who you are</p>
 
-<main>
-<section>
-  <h2><i>1</i> Your menu, in a Google Sheet</h2>
-  <p class="hint" style="margin-top:0">Do this first: open Google Sheets (free, in any browser or on your phone), paste the template below, edit it, then <b>Share → anyone with the link → Viewer</b> and copy the link.</p>
-  <div style="display:flex;gap:.5rem;margin-top:.5rem">
-    <button class="gh" id="copyTpl">Copy template</button>
-    <button class="gh" id="newSheet">Open a new Google Sheet</button>
+  <!-- 1 · identity -->
+  <div class="card step" data-s="0">
+    <h1>Put your orders on one link<small>Type the shop’s name. Everything else on this page you can change yourself later, from the dashboard — no one has to do it for you.</small></h1>
+    <div class="f" data-f="shop_name"><label for="shop_name">Shop name</label><input id="shop_name" name="shop_name" autocomplete="organization" placeholder="Mama Too Catering"><p class="msg">Two characters or more.</p></div>
+    <div class="f" data-f="handle"><label for="handle">Your link</label>
+      <div class="row"><input id="handle" name="handle" pattern="[a-z0-9-]{2,30}" autocomplete="off" spellcheck="false" placeholder="mamatoe" style="flex:1"><span class="mono" id="handleHost">zimlink…workers.dev/s/</span></div>
+      <p class="help">2–30 characters, lowercase, digits and dashes. This is what you paste in your WhatsApp bio.</p><p class="msg">Taken, or not allowed — try another.</p></div>
+    <div class="f" data-f="whatsapp"><label for="whatsapp">WhatsApp buyers reach you on</label><input id="whatsapp" name="whatsapp" inputmode="tel" autocomplete="tel" placeholder="263771234567"><p class="help">Country code, digits only. Order summaries are addressed to it.</p><p class="msg">Needs 9–15 digits including the country code.</p></div>
+    <div class="grid c2">
+      <div class="f" data-f="location"><label for="location">Where you are <span class="muted" style="font-weight:400">(optional)</span></label><input id="location" name="location" placeholder="Avondale, Harare"></div>
+      <div class="f" data-f="hours"><label for="hours">Hours <span class="muted" style="font-weight:400">(optional)</span></label><input id="hours" name="hours" placeholder="Tue–Sat 9–6"></div>
+    </div>
+    <div class="f" data-f="owner_email"><label for="owner_email">Owner email <span class="muted" style="font-weight:400">(recommended)</span></label><input id="owner_email" name="owner_email" type="email" autocomplete="email" placeholder="you@example.com">
+      <p class="help">Used for two things only: your welcome note, and proving it is you if you lose your dashboard link. Never shown to buyers.</p><p class="msg">That does not look like an email.</p></div>
+    <div class="nav"><span class="grow"></span><button type="button" data-next>Next</button></div>
   </div>
-  <details><summary>what each column does</summary>
-    <table><tr><th>column</th><th>meaning</th></tr>
-    <tr><td>name</td><td>what the customer sees</td></tr>
-    <tr><td>category</td><td>groups the menu into sections</td></tr>
-    <tr><td>price</td><td>number only</td></tr>
-    <tr><td>image</td><td>direct image URL (see hint below the form)</td></tr>
-    <tr><td>options</td><td><code>Size:Small,Medium,Large</code> — separate multiple with <code>|</code></td></tr>
-    <tr><td>addons</td><td><code>Add cheese:2</code> — name:extra price</td></tr>
-    <tr><td>stock</td><td>blank/yes = available, <code>no</code> = sold out</td></tr>
-    <tr><td>popular</td><td>yes = pinned to the top</td></tr></table>
-    <p class="hint">Images: upload a photo to your Sheet (Insert → Image → image in cell) won't give a URL. Easiest free way: post the photo to a Google Drive folder set to “anyone with the link”, or use the file's direct link. No image is fine too — the store still works.</p>
-  </details>
-</section>
 
-<section>
-  <h2><i>2</i> Store details</h2>
-  <div class="two">
-    <div><label>Shop name *</label><input id="f_name" placeholder="Mama Tunde Kitchen"></div>
-    <div><label>Store link name * <small>(lowercase)</small></label><input id="f_handle" placeholder="mamatunde"></div>
+  <!-- 2 · menu -->
+  <div class="card step hide" data-s="1">
+    <h1>Your menu, in your sheet<small>One row per item. Prices change when you edit the sheet — about two minutes, no one in the middle, no app to install.</small></h1>
+    <div class="f" data-f="feed_url"><label for="feed_url">Google Sheet link (shared as “Anyone with the link — Viewer”)</label><input id="feed_url" name="feed_url" spellcheck="false" placeholder="https://docs.google.com/spreadsheets/d/…/edit#gid=0">
+      <p class="help">A direct <span class="mono">.csv</span> URL works too — including a raw GitHub file, which is the free option if you would rather keep the menu in a repo.</p><p class="msg">Must start with http:// or https://</p></div>
+    <div class="notice info" style="margin:.5rem 0">
+      <b>Columns</b> — first row, in this order, extras left blank:
+      <p class="mono" style="margin:.3rem 0 0">id,name,category,price,currency,options,addons,stock,popular</p>
+      <p class="tiny" style="margin:.3rem 0 0">options: <span class="mono">Size:Small,Large:2|Spice:mild,hot</span> · addons: <span class="mono">Cheese:1.5|Fried egg:0.5</span> · stock: <span class="mono">yes/no</span> · popular: <span class="mono">1</span></p>
+    </div>
+    <div class="row" style="margin-top:.5rem">
+      <button type="button" class="sec" id="dlSample">Download the sample CSV</button>
+      <button type="button" class="sec" id="useSample">Use it, I’ll edit later</button>
+    </div>
+    <p class="muted" id="sheetHint" style="margin-top:.4rem">No sheet yet? Grab the sample and paste its link in — it loads 4 items so you can see the store working, then swap it for your own whenever you like.</p>
+    <h3 style="margin-top:.9rem">How buyers pay</h3>
+    <div class="f" data-f="rail"><label for="rail">Rail</label><select id="rail" name="rail"></select>
+      <p class="help" id="railHelp"></p></div>
+    <div class="f hide" data-f="pay_account" id="acctRow"><label for="pay_account">The number or account they send to</label><input id="pay_account" name="pay_account" placeholder="0771234567" autocomplete="off">
+      <p class="help">This is what appears on the buyer’s slip. If it is wrong, fix it yourself in the dashboard — changes to it take 15 minutes and can be cancelled, so a copied link cannot reroute your money quietly.</p></div>
+    <div class="nav"><button type="button" class="sec" data-back>Back</button><span class="grow"></span><button type="button" data-next>Next</button></div>
   </div>
-  <label>One line customers see under your name</label><input id="f_tag" placeholder="Wood-fired pizza · Glen Osborn · delivery till 8pm">
-  <div class="two">
-    <div><label>WhatsApp number for orders * <small>(with country code)</small></label><input id="f_wa" inputmode="tel" placeholder="263771234567"></div>
-    <div><label>Logo image URL <small>(optional)</small></label><input id="f_logo" placeholder="https://…"></div>
-  </div>
-  <div class="two">
-    <div><label>Area / suburb</label><input id="f_loc" placeholder="Harare, Glen Osborn"></div>
-    <div><label>Opening hours text</label><input id="f_hours" placeholder="Mon-Sat 09:00-20:00"></div>
-  </div>
-</section>
 
-<section>
-  <h2><i>3</i> Menu link</h2>
-  <label>Public Google Sheet link *</label>
-  <input id="f_feed" placeholder="https://docs.google.com/spreadsheets/d/1AbC…/edit#gid=0">
-  <p class="hint">Any change you make in the Sheet shows on your store in about 2 minutes. No one touches it for you.</p>
-</section>
-
-<section>
-  <h2><i>4</i> Money</h2>
-  <div class="two">
-    <div><label>Currency</label><select id="f_cur"><option>USD</option><option>ZAR</option><option>BW P</option></select></div>
-    <div><label>Payment your customers use</label><select id="f_rail">
-      <option value="cash">Cash on delivery / pickup</option>
-      <option value="ecocash_usd">EcoCash USD</option>
-      <option value="ecocash_zig">EcoCash ZiG</option>
-      <option value="innbucks">InnBucks</option>
-      <option value="onepay">OnePay / OneMoney</option>
-      <option value="zipit">Bank ZIPIT / RTGS</option>
-      <option value="payshap">PayShap (SA)</option>
-      <option value="ozow">Ozow (SA)</option>
-      <option value="payfast">PayFast card (SA)</option>
-    </select></div>
+  <!-- 3 · money -->
+  <div class="card step hide" data-s="2">
+    <h1>Money rules<small>Every one of these is yours to change later, from the dashboard, in the same place.</small></h1>
+    <div class="grid c2">
+      <div class="f" data-f="currency"><label for="currency">Currency</label><input id="currency" name="currency" maxlength="3" value="USD" placeholder="USD"></div>
+      <div class="f" data-f="tax_pct"><label for="tax_pct">VAT / tax %</label><input id="tax_pct" name="tax_pct" inputmode="decimal" value="15.5" placeholder="15.5"></div>
+      <div class="f" data-f="zig_rate"><label for="zig_rate">ZiG per USD <span class="muted" style="font-weight:400">(0 = hide)</span></label><input id="zig_rate" name="zig_rate" inputmode="decimal" placeholder="27.5"></div>
+      <div class="f" data-f="surcharge_mode"><label for="surcharge_mode">Payment cost</label><select id="surcharge_mode" name="surcharge_mode"><option value="absorb">You absorb it</option><option value="pass">Add it to the order</option></select></div>
+      <div class="f" data-f="delivery_fee"><label for="delivery_fee">Delivery fee</label><input id="delivery_fee" name="delivery_fee" inputmode="decimal" value="2" placeholder="0"></div>
+      <div class="f" data-f="free_over"><label for="free_over">Free delivery over</label><input id="free_over" name="free_over" inputmode="decimal" placeholder="20"></div>
+    </div>
+    <div class="switch"><span>Add odd cents so a payment identifies itself<b class="muted" style="display:block;font-weight:400;font-size:.72rem">R13.47 not R13.50 — you can match a transfer without asking “was that you?”</b></span><input type="checkbox" id="unique_change" checked style="width:auto"></div>
+    <div class="switch" style="margin-top:.4rem"><span>Ask buyers before keeping their number<b class="muted" style="display:block;font-weight:400;font-size:.72rem">POPIA / Zim data-practice: a tick they can leave alone, and you lose nothing.</b></span><input type="checkbox" id="require_optin" style="width:auto"></div>
+    <div class="f" data-f="tagline" style="margin-top:.6rem"><label for="tagline">Line under your shop name <span class="muted" style="font-weight:400">(optional)</span></label><input id="tagline" name="tagline" placeholder="Food for weddings and funerals, Harare"></div>
+    <div class="f" data-f="logo"><label for="logo">Logo image URL <span class="muted" style="font-weight:400">(optional)</span></label><input id="logo" name="logo" placeholder="https://…"></div>
+    <div class="preview" style="margin-top:.7rem">
+      <div class="ph" id="pvName">Your shop</div>
+      <div class="row2"><span id="pvTag">—</span><span id="pvCur">USD</span></div>
+      <div class="row2"><span>2 items · delivery</span><b id="pvTot">—</b></div>
+      <div class="row2" style="border:0"><span id="pvRail">—</span><b id="pvPay">—</b></div>
+    </div>
+    <div class="nav"><button type="button" class="sec" data-back>Back</button><span class="grow"></span><button type="button" data-next>Next</button></div>
   </div>
-  <label>Number / account they pay to</label><input id="f_pay" placeholder="077 123 4567 (EcoCash) or your ShapID">
-  <p class="hint">Why the odd cents: every order gets a unique amount (e.g. $14.87 not $15). Your payment is matched by the amount alone — so <b>no more chasing screenshots, and fake proof stops working on you.</b></p>
-  <div class="two">
-    <div><label>Fee: who pays it?</label><select id="f_sur"><option value="absorb">I absorb it (menu price = final)</option><option value="pass">Add it to the order</option></select></div>
-    <div><label>VAT % <small>(Zim 15.5 if registered)</small></label><input id="f_tax" inputmode="decimal" placeholder="0"></div>
-  </div>
-  <div class="two">
-    <div><label>ZiG rate <small>0 = hide</small></label><input id="f_zig" inputmode="decimal" placeholder="27.5"></div>
-    <div><label>Delivery fee</label><input id="f_del" inputmode="decimal" placeholder="2"></div>
-  </div>
-  <div class="two">
-    <div><label>Free delivery over <small>0 = never</small></label><input id="f_free" inputmode="decimal" placeholder="0"></div>
-    <div><label>Max order value <small>0 = no cap</small></label><input id="f_max" inputmode="decimal" placeholder="0"></div>
-  </div>
-</section>
 
-<section>
-  <h2><i>5</i> Where you want orders to land</h2>
-  <div class="two">
-    <div><label>Your email <small>(welcome link + renewal)</small></label><input id="f_email" placeholder="you@example.com"></div>
-    <div><label>Order alert to a webhook <small>(optional)</small></label><input id="f_hook" placeholder="https://hooks.zapier.com/…"></div>
-  </div>
-  <p class="hint">Orders are always in your dashboard and exportable — the webhook is only if you want a ping elsewhere.</p>
-  <label style="font-weight:400;display:flex;gap:.5rem;margin-top:.7rem"><input type="checkbox" id="f_opt" style="width:auto;margin-top:.3rem"> Require customers to tick before ordering (recommended if you market on WhatsApp — POPIA/DPA consent)</label>
-  <button class="go" id="go">Create my store</button>
-  <p class="hint">No card. No approval. You get the link immediately.</p>
-</section>
-
-<section class="out" id="out"></section>
-
-<div class="foot">ZimLink · runs on free infrastructure, priced once a year in cash. Not affiliated with take.app, Meta or EcoCash.</div>
-</main>
-
-<div class="poster" id="poster">
-  <div class="p">
-    <h3 id="pName">Shop</h3>
-    <p id="pTag" style="color:#54677a;margin:.2rem 0 1rem"></p>
-    <div id="qr" style="display:flex;justify-content:center"></div>
-    <div class="u" id="pUrl">…</div>
-    <p style="font-size:1.1rem;font-weight:700;margin:.9rem 0 .2rem">Order here 👆</p>
-    <p style="font-size:.8rem;color:#54677a">No app to download · pay EcoCash / InnBucks / cash on delivery</p>
-    <div class="no-print" style="display:flex;gap:.5rem;margin-top:1rem">
-      <button class="gh" onclick="window.print()">Print</button>
-      <button class="gh" id="pClose">Close</button>
+  <!-- 4 · live -->
+  <div class="card step hide" data-s="3">
+    <div id="before">
+      <h1>Ready when you are</h1>
+      <div class="kv" id="summary"></div>
+      <p class="muted" style="margin-top:.6rem">Nothing is charged and nothing is scheduled. Your store goes live the moment you press the button; if the menu does not parse, it still goes live and tells you exactly why, so you can fix the sheet and reload.</p>
+      <div class="nav"><button type="button" class="sec" data-back>Back</button><span class="grow"></span><button type="submit" class="ok" id="go">Open my store</button></div>
+    </div>
+    <div id="after" class="hide">
+      <div class="live" id="liveIcon"></div>
+      <h1 id="doneHead" style="text-align:center">Your store is live</h1>
+      <p class="muted" id="doneNote" style="text-align:center"></p>
+      <a class="link" id="storeLink" href="#" target="_blank">—</a>
+      <div class="grid c2" style="margin-top:.6rem">
+        <button type="button" id="cpStore">Copy store link</button>
+        <button type="button" class="sec" id="openDash">Open dashboard</button>
+      </div>
+      <div class="grid c2" style="margin-top:.4rem">
+        <button type="button" class="sec" id="poster">QR poster for the counter</button>
+        <button type="button" class="sec" id="waShare">WhatsApp status text</button>
+      </div>
+      <div class="notice warn hide" id="feedWarn" style="margin-top:.7rem"></div>
+      <h3 style="margin-top:1rem">Save these two</h3>
+      <p class="muted" style="margin-top:0">The dashboard link opens a session on this device and expires after 7 days — by design, so a screenshot of it is not a permanent key to your shop. Lost it? “Lost your link?” on the dashboard remakes it from your email and payment details, with no one to ask.</p>
+      <a class="link" id="adminLink" href="#" >—</a>
+      <a class="link" id="renewLink" href="#">—</a>
+      <p class="muted" style="margin-top:.6rem">Free until <b id="freeUntil">—</b>. After that it is <b>60 USD a year</b>, once, and the store keeps the menu and history it already has.</p>
     </div>
   </div>
-</div>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" crossorigin="anonymous" onerror="window.__noQR=1"></script>
+</form>
+</div></main>
 <script>
-var TPL = ['id','name','category','price','currency','image','description','options','addons','stock','popular'].join('\t') + '\n' +
-['1','2-litre Coca-Cola','Drinks',2.50,'USD','','','','','','yes'].join('\t') + '\n' +
-['2','Braai box (2 people)','Meals',12,'USD','','Chops, pap, salad, vetkoek','Size:Regular,Large:2','Extra meat:3;Django:1.5','','yes'].join('\t') + '\n' +
-['3','Sadza + beef','Meals',6,'USD','','','Portion:Small,Medium:1.5,Large:2.5','','','' ].join('\t') + '\n' +
-['4','Vanilla ice cream','Desserts',2,'USD','','','','sold out',''].join('\t');
-document.getElementById('copyTpl').onclick = function () {
-  var t = document.getElementById('f_feed');
-  if (navigator.clipboard) navigator.clipboard.writeText(TPL).then(function(){ document.getElementById('copyTpl').textContent = 'Copied — paste into A1 in Sheets ✓'; });
-  else document.getElementById('copyTpl').textContent = 'Copy failed — use the “open Sheet” button and type it in';
-};
-document.getElementById('newSheet').onclick = function () { window.open('https://sheets.new', '_blank'); };
+var q = function (s) { return document.querySelector(s); };
+var qa = function (s) { return Array.prototype.slice.call(document.querySelectorAll(s)); };
+function esc(x) { return String(x == null ? '' : x).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
+var RAILS = {}, step = 0, last = null;
 
-var F = function (id) { return document.getElementById(id); };
-F('f_name').oninput = function () {
-  if (F('f_handle').dataset.auto !== '0') F('f_handle').value = F('f_name').value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 26);
-};
-F('f_handle').oninput = function () { F('f_handle').dataset.auto = '0'; };
+fetch('/rails').then(function (r) { return r.json(); }).then(function (j) {
+  RAILS = (j && j.rails) || {};
+  var sel = q('#rail');
+  sel.innerHTML = Object.keys(RAILS).map(function (k) { return '<option value="' + k + '">' + esc(RAILS[k].label) + '</option>'; }).join('');
+  sel.onchange = function () { railHelp(); paint(); };
+  railHelp(); paint();
+}).catch(function () { q('#railHelp').textContent = 'Could not load the rail list — the default (cash) is still fine.'; });
 
-F('go').onclick = function () {
-  var b = F('go'); b.disabled = true; b.textContent = 'Creating…';
-  var payload = {
-    shop_name: F('f_name').value, handle: F('f_handle').value, tagline: F('f_tag').value, logo: F('f_logo').value,
-    whatsapp: F('f_wa').value, location: F('f_loc').value, hours: F('f_hours').value,
-    feed_url: F('f_feed').value, currency: F('f_cur').value, rail: F('f_rail').value, pay_account: F('f_pay').value,
-    surcharge_mode: F('f_sur').value, tax_pct: F('f_tax').value, zig_rate: F('f_zig').value,
-    delivery_fee: F('f_del').value, free_over: F('f_free').value, max_order_value: F('f_max').value,
-    notify_email: F('f_email').value, notify_webhook: F('f_hook').value, require_optin: F('f_opt').checked
+function railHelp() {
+  var r = RAILS[q('#rail').value];
+  q('#acctRow').classList.toggle('hide', !!r && r.type === 'cod');
+  q('#railHelp').innerHTML = r ? esc(r.label) + (r.dial ? ' · dial ' + esc(r.dial) : '') + ' · costs you about '
+    + (((r.pct || 0) * 100).toFixed(1) + '% + ' + ((r.imtt || 0) * 100).toFixed(1) + '% tax on cash out')
+    + (r.type === 'auto' ? ' · confirms itself' : ' · you tick it off (a 15-second tap, and we make the odd cents identify the payer)') : '';
+}
+function val(k) { var e = q('[name="' + k + '"]'); return e ? e.value.trim() : ''; }
+function setErr(k, on, msg) {
+  var f = q('[data-f="' + k + '"]'); if (!f) return;
+  f.classList.toggle('err', !!on);
+  var i = f.querySelector('input,select'); if (i) i.setAttribute('aria-invalid', on ? 'true' : 'false');
+  if (msg) { var m = f.querySelector('.msg'); if (m) { m.textContent = msg; m.style.display = 'block'; } }
+}
+function slug(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30); }
+var CHECK = {
+  shop_name: function (v) { return v.length >= 2 || 'Two characters or more.'; },
+  handle: function (v) { return /^[a-z0-9][a-z0-9-]{1,29}$/.test(v) || 'Use 2–30 lowercase letters, digits or dashes.'; },
+  whatsapp: function (v) { var d = v.replace(/\D/g, ''); return (d.length >= 9 && d.length <= 15) || 'Digits with the country code, e.g. 263771234567 or 27821234567.'; },
+  feed_url: function (v) { return /^https?:\/\/\S+$/.test(v) || 'Paste the sheet link (or a direct .csv link).'; },
+  owner_email: function (v) { return !v || /^[^@\s]+@[^@\s]+\.[a-zA-Z]{2,}$/.test(v) || 'Blank is allowed, but an email is how you get a lost link back without asking anyone.'; },
+  currency: function (v) { return /^[A-Za-z]{3}$/.test(v) || 'Three letters, e.g. USD or ZAR.'; },
+  tax_pct: function (v) { return !v || (Number(v) >= 0 && Number(v) <= 40) || '0–40.'; },
+  pay_account: function (v) { return !v || v.length <= 60 || 'Too long.'; },
+  logo: function (v) { return !v || /^https?:\/\/\S+$/.test(v) || 'A full image URL, or leave it blank.'; }
+};
+var STEPS = [['shop_name', 'handle', 'whatsapp', 'owner_email'], ['feed_url', 'pay_account', 'logo'], ['currency', 'tax_pct', 'pay_account'], []];
+
+function paint() {
+  qa('.step').forEach(function (el) { el.classList.toggle('hide', Number(el.dataset.s) !== step); });
+  qa('.steps i').forEach(function (el, i) { el.className = i < step ? 'on' : (i === step ? 'on now' : ''); });
+  q('#stepLbl').textContent = ['Step 1 of 4 · who you are', 'Step 2 of 4 · your menu and how you get paid', 'Step 3 of 4 · money rules', 'Step 4 of 4 · open it'][step];
+  q('#handleHost').textContent = location.host + '/s/';
+  // live preview of the buyer card, so the money rules are not abstract
+  q('#pvName').textContent = val('shop_name') || 'Your shop';
+  q('#pvTag').textContent = val('tagline') || ((RAILS[q('#rail').value] || {}).label || 'Order ahead') + ' · order ahead';
+  var cur = (val('currency') || 'USD').toUpperCase();
+  q('#pvCur').textContent = cur;
+  var sub = 5.5 * 2, tax = Number(val('tax_pct')) || 0;
+  var taxA = Math.round(sub * tax) / 100, fee = Number(val('delivery_fee')) || 0;
+  var tot = Math.round((sub + taxA + fee) * 100) / 100;
+  var r = RAILS[q('#rail').value] || {};
+  var cost = q('#surcharge_mode').value === 'pass' ? Math.round(tot * ((r.pct || 0) + (r.imtt || 0)) * 100) / 100 : 0;
+  var cents = q('#unique_change').checked ? (Math.round(tot * 100) % 97) / 100 : 0;
+  q('#pvTot').textContent = tot.toFixed(2) + ' ' + cur;
+  q('#pvPay').textContent = (tot + cents + cost).toFixed(2) + ' ' + cur;
+  q('#pvRail').textContent = (r.label || 'cash') + (cents ? ' · odd cents ' + cents.toFixed(2) : '') + (cost ? ' · + ' + cost.toFixed(2) + ' fee' : ' · fee absorbed');
+  if (step === 3) summary();
+  if (!q('#storeLink').dataset.set) q('#storeLink').href = location.protocol + '//' + location.host + '/s/' + (val('handle') || '...');
+}
+function checkStep() {
+  var ok = true;
+  (STEPS[step] || []).forEach(function (k) {
+    var f = CHECK[k]; if (!f) return;
+    var r = f(val(k)); if (r !== true) { setErr(k, true, typeof r === 'string' ? r : ''); ok = false; } else setErr(k, false);
+  });
+  if (step === 0 && val('handle')) {
+    fetch('/api/lookup?handle=' + encodeURIComponent(val('handle'))).then(function (r) {
+      if (r.status === 200) { setErr('handle', true, 'That link is taken. If it is yours, open your dashboard instead.'); }
+    }).catch(function () { });
+  }
+  return ok;
+}
+qa('[data-next]').forEach(function (b) { b.onclick = function () { if (checkStep()) { step = Math.min(3, step + 1); paint(); } }; });
+qa('[data-back]').forEach(function (b) { b.onclick = function () { step = Math.max(0, step - 1); paint(); }; });
+qa('input[name], select[name]').forEach(function (i) {
+  i.addEventListener('input', function () { var k = i.getAttribute('name'); if (CHECK[k] && q('[data-f="' + k + '"]').classList.contains('err')) CHECK[k](val(k)) === true && setErr(k, false); paint2(); });
+  i.addEventListener('change', paint2);
+});
+function paint2() {
+  var h = q('#handle'); if (h.value && step === 0) { h.value = slug(h.value); }
+  q('#handleHost').textContent = location.host + '/s/';
+  paint();
+}
+function summary() {
+  var rows = [
+    ['Link', location.host + '/s/' + (val('handle') || '…')],
+    ['Menu', val('feed_url') ? 'from your sheet' : 'not set'],
+    ['Rail', (RAILS[q('#rail').value] || {}).label || '—'],
+    ['Payout', val('pay_account') || 'not set — you can add it in the dashboard'],
+    ['Currency', (val('currency') || 'USD') + (Number(val('tax_pct')) ? ' · tax ' + val('tax_pct') + '%' : '')],
+    ['Delivery', (Number(val('delivery_fee')) || 0).toFixed(2) + (Number(val('free_over')) ? ' · free over ' + val('free_over') : '')],
+    ['Identify payments', q('#unique_change').checked ? 'yes — odd cents per order' : 'no'],
+    ['Buyer number', q('#require_optin').checked ? 'asked first' : 'kept by default'],
+  ];
+  q('#summary').innerHTML = rows.map(function (r) { return '<div>' + esc(r[0]) + '</div><div>' + esc(r[1]) + '</div>'; }).join('');
+}
+q('#dlSample').onclick = function () { location.href = '/data/sample-menu.csv'; };
+q('#useSample').onclick = function () {
+  q('#feed_url').value = location.origin + '/data/sample-menu.csv';
+  setErr('feed_url', false);
+  q('#sheetHint').innerHTML = 'Loaded the sample. Note: a sheet pointed at <i>this</i> host works for a demo; when you paste your own Google Sheet link in the dashboard, that becomes the menu and nothing else changes.';
+  paint2();
+};
+q('#restoreLn').onclick = function (e) { e.preventDefault(); location.href = '/a'; };
+
+q('#w').onsubmit = function (e) {
+  e.preventDefault();
+  if (!checkStep()) return;
+  var body = {
+    shop_name: val('shop_name'), handle: val('handle'), whatsapp: val('whatsapp').replace(/\D/g, ''),
+    location: val('location'), hours: val('hours'), tagline: val('tagline'), logo: val('logo'),
+    feed_url: val('feed_url'), rail: q('#rail').value, pay_account: val('pay_account'),
+    currency: (val('currency') || 'USD').toUpperCase(), tax_pct: Number(val('tax_pct')) || 0,
+    zig_rate: Number(val('zig_rate')) || 0, surcharge_mode: q('#surcharge_mode').value,
+    delivery_fee: Number(val('delivery_fee')) || 0, free_over: Number(val('free_over')) || 0,
+    unique_change: q('#unique_change').checked, require_optin: q('#require_optin').checked,
+    owner_email: val('owner_email')
   };
-  fetch('/api/register', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) })
-    .then(function (r) { return r.json().then(function (j) { return { s: r.status, j: j }; }); })
+  var b = q('#go'); b.disabled = true; b.textContent = 'Opening…';
+  fetch('/api/register', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+    .then(function (r) { return r.text().then(function (t) { var j = null; try { j = JSON.parse(t); } catch (e) {} return { s: r.status, j: j }; }); })
     .then(function (res) {
-      b.disabled = false; b.textContent = 'Create my store';
-      var out = F('out'); out.classList.add('on');
-      if (!res.j.ok) { out.innerHTML = '<div class="warn"><b>Not created:</b> ' + esc(res.j.error || res.s) + (res.j.hint ? '<br>' + esc(res.j.hint) : '') + '</div>'; out.scrollIntoView(); return; }
-      var j = res.j;
-      var n = j.products_loaded;
-      out.innerHTML = '<div class="' + (n > 0 ? 'ok' : 'warn') + '">' + (n > 0
-        ? 'Live. <b>' + n + ' products</b> loaded from your Sheet. Nobody approved this, nobody has to maintain it.'
-        : 'Created — but <b>0 products</b> found. Check the Sheet is shared as “anyone with the link” and that row 1 is the header. Fix the Sheet and reload your store; it re-reads itself every 2 minutes.') + '</div>' +
-        '<div style="margin-top:.8rem">' +
-        row('Your store link', '<a href="' + j.store_url + '" target="_blank">' + j.store_url + '</a>') +
-        row('Your orders dashboard', '<a href="' + j.admin_url + '" target="_blank">open dashboard</a>') +
-        row('Renew link (save it)', '<a href="' + j.renew_url + '" target="_blank">' + j.renew_url + '</a>') +
-        row('Free until', new Date(j.free_until).toDateString()) +
-        '</div>' +
-        '<div style="display:flex;gap:.5rem;margin-top:.8rem">' +
-        '<button class="gh" id="cpLink">Copy store link</button><button class="gh" id="posterBtn">Print QR poster</button>' +
-        '<button class="gh" id="testBtn">Test order flow</button></div>' +
-        '<p class="hint">Put the link in your WhatsApp business profile, your Instagram bio, and on your packaging. The dashboard link is the only thing to keep private.</p>';
-      out.scrollIntoView();
-      F('cpLink').onclick = function () { if (navigator.clipboard) navigator.clipboard.writeText(j.store_url).then(function () { F('cpLink').textContent = 'Copied ✓'; }); };
-      F('testBtn').onclick = function () { window.open(j.store_url, '_blank'); };
-      F('posterBtn').onclick = function () {
-        F('pName').textContent = payload.shop_name || 'Your shop';
-        F('pTag').textContent = payload.tagline || '';
-        F('pUrl').textContent = j.store_url;
-        var box = F('qr'); box.innerHTML = '';
-        if (window.QRCode && !window.__noQR) { new QRCode(box, { text: j.store_url, width: 200, height: 200, correctLevel: QRCode.CorrectLevel.M }); }
-        else { box.innerHTML = '<p style="font-size:.8rem;color:#54677a">QR script unavailable offline — print the page anyway and share the link.</p>'; }
-        F('poster').classList.add('on');
+      b.disabled = false; b.textContent = 'Open my store';
+      var j = res.j || {};
+      if (!(res.s >= 200 && res.s < 300) || !j.ok) {   // register answers 201, not 200
+        if (j.handle || /handle/.test(String(j.error || ''))) setErr('handle', true, j.error || 'taken');
+        if (/feed/.test(String(j.error || ''))) setErr('feed_url', true, j.error);
+        if (/WhatsApp/i.test(String(j.error || ''))) setErr('whatsapp', true, j.error);
+        step = j.error && /handle/.test(j.error) ? 0 : (j.error && /feed/.test(j.error) ? 1 : 3); paint();
+        q('#feedWarn').classList.remove('hide'); q('#feedWarn').textContent = j.error || ('could not create the store (HTTP ' + res.s + ')');
+        return;
+      }
+      last = j;
+      q('#before').classList.add('hide'); q('#after').classList.remove('hide');
+      q('#doneHead').textContent = (j.products_loaded ? 'Your store is live' : 'Live, but the menu is empty');
+      q('#liveIcon').innerHTML = j.products_loaded
+        ? '<svg viewBox="0 0 48 48" fill="none" stroke="#0b5b34" stroke-width="3" stroke-linecap="round"><circle cx="24" cy="24" r="21" stroke-opacity=".22"/><path d="M15 24l6 6 12-13"/></svg>'
+        : '<svg viewBox="0 0 48 48" fill="none" stroke="#8a5b00" stroke-width="3" stroke-linecap="round"><circle cx="24" cy="24" r="21" stroke-opacity=".22"/><path d="M24 15v12M24 32v1"/></svg>';
+      q('#doneNote').textContent = j.note || '';
+      q('#storeLink').textContent = j.store_url; q('#storeLink').href = j.store_url; q('#storeLink').dataset.set = '1';
+      q('#adminLink').textContent = 'dashboard link — tap to open'; q('#adminLink').href = j.admin_url;
+      q('#renewLink').textContent = 'renew link (save it): ' + j.renew_url; q('#renewLink').href = j.renew_url;
+      q('#openDash').onclick = function () { location.href = j.admin_url; };
+      q('#cpStore').onclick = function () { navigator.clipboard && navigator.clipboard.writeText(j.store_url); this.textContent = 'Copied ✓'; };
+      q('#waShare').onclick = function () {
+        var txt = 'Order ' + (j.store_url) + ' — ' + val('shop_name') + '. Pick what you want, send the exact amount to ' + (val('pay_account') || 'my number on the page') + ', and the odd cents tell me it is you. No app, no login.';
+        if (navigator.clipboard) navigator.clipboard.writeText(txt).then(function () { q('#waShare').textContent = 'Copied — paste into your status ✓'; });
       };
-      F('pClose').onclick = function () { F('poster').classList.remove('on'); };
+      q('#poster').onclick = function () { poster(j.store_url, val('shop_name') || 'ZimLink store'); };
+      if (!j.products_loaded) {
+        q('#feedWarn').classList.remove('hide');
+        q('#feedWarn').innerHTML = '0 products. ' + esc(j.feed_error || 'Check the sheet is shared as “anyone with the link” and that row 1 is the header row.') + ' Fix the sheet, then press “Reload my menu” in the dashboard — the store keeps working meanwhile.';
+      }
+      q('#freeUntil').textContent = j.free_until ? new Date(j.free_until).toDateString() : '60 days';
+      qa('.steps i').forEach(function (el) { el.className = 'on'; });
+      q('#stepLbl').textContent = 'Done · yours to run';
+      history.replaceState({}, '', location.pathname);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     })
-    .catch(function (e) { b.disabled = false; b.textContent = 'Create my store'; var out = F('out'); out.classList.add('on'); out.innerHTML = '<div class="warn">Network error: ' + esc(e.message || e) + '</div>'; });
+    .catch(function () { b.disabled = false; b.textContent = 'Open my store'; q('#feedWarn').classList.remove('hide'); q('#feedWarn').textContent = 'No reply from the server — nothing was half-created, press again when the signal is back.'; });
 };
-function row(k, v) { return '<div class="kv"><span>' + k + '</span><span>' + v + '</span></div>'; }
-function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
+
+function poster(url, name) {
+  var w = window.open('', '_blank');
+  if (!w) { alert('Allow pop-ups to print the poster'); return; }
+  w.document.write('<!doctype html><meta charset=utf-8><title>' + esc(name) + ' — QR</title>'
+    + '<body style="font:16px system-ui;margin:0;padding:2rem;text-align:center">'
+    + '<h1 style="font-size:1.7rem;margin:.2rem 0">' + esc(name) + '</h1>'
+    + '<p style="color:#555;margin:.2rem 0 1rem">Order on WhatsApp — no app, no login</p>'
+    + '<img alt="QR" src="https://api.qrserver.com/v1/create-qr-code/?size=420x420&data=' + encodeURIComponent(url) + '" style="width:min(70vw,420px)">'
+    + '<p style="font-family:ui-monospace,monospace;word-break:break-all">' + esc(url) + '</p>'
+    + '<p style="color:#777;font-size:.85rem">Print it, tape it to the counter or the fridge door. When the menu changes you edit your sheet — this poster stays right.</p>'
+    + '<script>window.onload=function(){window.print()}<' + '/script>');
+  w.document.close();
+}
+try { var saved = JSON.parse(sessionStorage.getItem('zl_onboard') || 'null'); if (saved) { Object.keys(saved).forEach(function (k) { var e = q('[name="' + k + '"]'); if (e) e.value = saved[k]; }); } } catch (e) { }
+setInterval(function () { try { var o = {}; qa('input[name],select[name]').forEach(function (i) { o[i.getAttribute('name')] = i.value; }); sessionStorage.setItem('zl_onboard', JSON.stringify(o)); } catch (e) { } }, 4000);
+paint();
 </script>
 </body>
 </html>

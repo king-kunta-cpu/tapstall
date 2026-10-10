@@ -5,18 +5,194 @@
 <title>ZimLink — my store</title>
 <meta name="robots" content="noindex,nofollow">
 <style>
-*{box-sizing:border-box}body{margin:0;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#0b0f14;color:#101418}
+/* ZimLink UI kit — one visual language for both suites (merchant pages and the
+ * operator console). Every shipped page inlines this block instead of linking to
+ * it: a page that arrives as one file survives the KV template store, a mail
+ * preview, a sandboxed viewer and a 2G reconnect, none of which can be counted
+ * on to fetch a stylesheet. scripts/ui_kit.py regenerates the inlined copies,
+ * and a test fails if a page drifts from this file. */
+:root {
+  --ink: #101418;
+  --ink-2: #33404d;
+  --ink-3: #65788b;
+  --bg: #f4f6f8;
+  --card: #ffffff;
+  --line: #e6ebf0;
+  --line-2: #dde3e9;
+  --chrome: #0b0f14;
+  --chrome-2: #1a2530;
+  --chrome-ink: #aebbc7;
+  --accent: #0b5b34;
+  --accent-bg: #e8f7ef;
+  --warn: #8a5b00;
+  --warn-bg: #fff6e0;
+  --warn-line: #f0d9a8;
+  --bad: #b00020;
+  --bad-bg: #fffafa;
+  --bad-line: #f3c3c9;
+  --link: #8fd4ff;
+  --r-sm: 8px;
+  --r: 12px;
+  --r-lg: 16px;
+  --tap: 44px;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --shadow: 0 1px 2px rgba(16, 20, 24, .04), 0 8px 24px -18px rgba(16, 20, 24, .35);
+}
+* { box-sizing: border-box }
+html { -webkit-text-size-adjust: 100% }
+body {
+  margin: 0;
+  font: 16px/1.5 var(--sans);
+  color: var(--ink);
+  background: var(--bg);
+}
+h1, h2, h3 { line-height: 1.25; margin: 0 0 .5rem }
+h1 { font-size: 1.25rem }
+h2 { font-size: 1.08rem }
+h3 { font-size: .92rem }
+a { color: inherit }
+.num, b, td.n { font-variant-numeric: tabular-nums }
+.muted { color: var(--ink-3); font-size: .78rem }
+.tiny { font-size: .72rem }
+.mono { font-family: var(--mono); font-size: .8rem; word-break: break-all }
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: .9rem;
+  margin-bottom: .8rem;
+  box-shadow: var(--shadow);
+}
+.card.flat { box-shadow: none }
+.card > :last-child { margin-bottom: 0 }
+.stack > * + * { margin-top: .6rem }
+.row { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center }
+.row.between { justify-content: space-between }
+.row.end { justify-content: flex-end }
+.grid { display: grid; gap: .5rem }
+.grid.c2 { grid-template-columns: 1fr 1fr }
+.grid.c3 { grid-template-columns: repeat(3, 1fr) }
+.grid.c4 { grid-template-columns: repeat(4, 1fr) }
+@media (max-width: 30rem) { .grid.c3, .grid.c4 { grid-template-columns: 1fr 1fr } }
+label { display: block; font-size: .74rem; font-weight: 600; color: #42566a; margin-bottom: .2rem }
+input, select, textarea {
+  font: inherit;
+  width: 100%;
+  padding: .62rem .7rem;
+  min-height: var(--tap);
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+}
+textarea { min-height: 6rem; font-family: var(--mono); font-size: .8rem; line-height: 1.45 }
+input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible, a:focus-visible {
+  outline: 2px solid #1d6fd0;
+  outline-offset: 1px;
+}
+input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--bad-line); background: var(--bad-bg) }
+button {
+  font: inherit;
+  font-weight: 600;
+  min-height: var(--tap);
+  padding: .6rem .9rem;
+  color: #fff;
+  background: var(--chrome);
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+}
+button:disabled { opacity: .55; cursor: progress }
+button.sec, .sm { color: var(--ink); background: #fff; border: 1px solid #cfd8e0; font-weight: 500 }
+button.ok { background: var(--accent) }
+button.danger { color: var(--bad); background: #fff; border: 1px solid var(--bad-line) }
+button.link { color: #2a5f9e; background: none; border: 0; text-decoration: underline; min-height: 0; padding: .2rem }
+.sm { font-size: .78rem; padding: .35rem .6rem; min-height: 0; border-radius: 8px }
+.badge {
+  display: inline-block;
+  font-size: .7rem;
+  padding: .12rem .45rem;
+  border-radius: 999px;
+  border: 1px solid #cfd8e0;
+  background: #f4f7fa;
+  color: #42566a;
+}
+.badge.ok { background: var(--accent-bg); border-color: #bfe6d0; color: var(--accent) }
+.badge.warn { background: var(--warn-bg); border-color: var(--warn-line); color: var(--warn) }
+.badge.bad { background: #fdecec; border-color: var(--bad-line); color: var(--bad) }
+.notice { border-radius: 10px; padding: .6rem .7rem; font-size: .82rem; border: 1px solid var(--line) }
+.notice.warn { background: var(--warn-bg); border-color: var(--warn-line); color: var(--warn) }
+.notice.bad { background: var(--bad-bg); border-color: var(--bad-line); color: var(--bad) }
+.notice.ok { background: var(--accent-bg); border-color: #bfe6d0; color: var(--accent) }
+.notice.info { background: #eef3f8; border-color: #cfdcea; color: #33526f }
+.tabs { display: flex; gap: .3rem; overflow-x: auto; scrollbar-width: none; padding-bottom: .1rem }
+.tabs::-webkit-scrollbar { display: none }
+.tabs button {
+  flex: 0 0 auto; min-height: 0; padding: .4rem .7rem; font-size: .8rem;
+  color: var(--ink-2); background: #fff; border: 1px solid var(--line-2); border-radius: 999px;
+}
+.tabs button[aria-selected="true"] { color: #fff; background: var(--chrome); border-color: var(--chrome) }
+.stat { background: var(--card); border: 1px solid var(--line); border-radius: var(--r); padding: .55rem .65rem }
+.stat b { display: block; font-size: 1.18rem }
+.stat span { font-size: .66rem; color: var(--ink-3); text-transform: uppercase; letter-spacing: .04em }
+.bar { display: flex; gap: .2rem; margin-top: .35rem }
+.bar i { height: 5px; flex: 1; border-radius: 999px; background: var(--line-2) }
+.bar i.on { background: var(--chrome) }
+table { width: 100%; border-collapse: collapse; font-size: .84rem }
+th, td { text-align: left; padding: .45rem .4rem; border-bottom: 1px solid var(--line) }
+th { font-size: .66rem; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-3) }
+tbody tr { cursor: pointer }
+tbody tr:hover td { background: #fbfcfd }
+.empty { text-align: center; color: var(--ink-3); padding: 1.6rem 1rem; font-size: .88rem }
+.skel { background: linear-gradient(90deg, #eef1f4 25%, #f7f9fa 50%, #eef1f4 75%); background-size: 200% 100%; animation: sk 1.2s infinite; border-radius: 8px; height: 2.6rem }
+@keyframes sk { to { background-position: -200% 0 } }
+@media (prefers-reduced-motion: reduce) { .skel { animation: none } }
+.sheet { position: fixed; inset: 0; background: rgba(11, 15, 20, .45); display: none; align-items: flex-end; z-index: 20 }
+.sheet.on { display: flex }
+.sheet > div {
+  background: var(--card); width: 100%; max-height: 88vh; overflow: auto;
+  padding: 1rem .95rem calc(1rem + env(safe-area-inset-bottom));
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+}
+@media (min-width: 44rem) { .sheet { align-items: center; justify-content: center } .sheet > div { max-width: 40rem; border-radius: var(--r-lg) } }
+.toast {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: 1rem; z-index: 30;
+  background: var(--chrome); color: #fff; font-size: .82rem; padding: .55rem .8rem; border-radius: 999px;
+  box-shadow: 0 10px 30px -12px rgba(0, 0, 0, .6); max-width: 92vw;
+}
+.chrome { background: var(--chrome); color: #fff; padding: .8rem 1rem; position: sticky; top: 0; z-index: 10 }
+.chrome .in { max-width: 60rem; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; gap: .6rem; flex-wrap: wrap }
+.chrome b { font-size: .95rem }
+.chrome a, .chrome button.sec { color: var(--link); font-size: .78rem; background: none; border: 0; text-decoration: none; min-height: 0; padding: .2rem }
+main { padding: 1rem; border-radius: var(--r-lg) var(--r-lg) 0 0; margin-top: .4rem; background: var(--bg) }
+main > .wrap { max-width: 60rem; margin: 0 auto }
+main > .wrap.narrow { max-width: 34rem }
+.hide { display: none !important }
+.only-mobile { display: initial }
+@media (min-width: 44rem) { .only-mobile { display: none } }
+/* operator console is read a lot at night and on a laptop: it may go dark */
+@media (prefers-color-scheme: dark) {
+  body.dark { --bg: #0b0f14; --card: #131b23; --line: #22303c; --line-2: #2c3d4c; --ink: #e7edf3; --ink-2: #c2cfd9; --ink-3: #8fa0af; --warn-bg: #2a2410; --bad-bg: #2a1416; --accent-bg: #10291e }
+  body.dark input, body.dark select, body.dark textarea { background: #0e151b; color: var(--ink); border-color: var(--line-2) }
+  body.dark .badge { background: #182430; border-color: #2c3d4c; color: #c2cfd9 }
+  body.dark tbody tr:hover td { background: #16202a }
+  body.dark button.sec, body.dark .sm { background: #182430; color: var(--ink); border-color: #2c3d4c }
+  body.dark button { background: #e7edf3; color: #0b0f14 }
+  body.dark button.ok { background: var(--accent); color: #fff }
+}
+
 .top{background:#0b0f14;color:#fff;padding:.8rem 1rem;position:sticky;top:0;z-index:5}
 .top .in{max-width:44rem;margin:0 auto;display:flex;justify-content:space-between;align-items:center;gap:.6rem}
 .top b{font-size:.95rem}
 .top a{color:#8fd4ff;font-size:.8rem;text-decoration:none}
 main{background:#f4f6f8;min-height:80vh;padding:1rem;border-radius:16px 16px 0 0;margin-top:.4rem}
 .wrap{max-width:44rem;margin:0 auto}
-.card{background:#fff;border:1px solid #e6ebf0;border-radius:14px;padding:.9rem;margin-bottom:.8rem}
+
 .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:.5rem;margin-bottom:.8rem}
-.stat{background:#fff;border:1px solid #e6ebf0;border-radius:12px;padding:.55rem .6rem}
-.stat b{display:block;font-size:1.15rem;font-variant-numeric:tabular-nums}
-.stat span{font-size:.68rem;color:#65788b;text-transform:uppercase;letter-spacing:.03em}
+background:#fff;border:1px solid #e6ebf0;border-radius:12px;padding:.55rem .6rem}
+
+
 input,select{padding:.6rem .7rem;border:1px solid #dde3e9;border-radius:10px;font:inherit;width:100%;background:#fff}
 button{font:inherit;background:#0b0f14;color:#fff;border:0;border-radius:10px;padding:.6rem .8rem;font-weight:600}
 button.sm{background:#fff;color:#101418;border:1px solid #cfd8e0;font-size:.78rem;padding:.35rem .55rem;font-weight:500}
@@ -29,7 +205,7 @@ button.danger{background:#fff;color:#b00020;border:1px solid #e8c4c8}
 .o .t{font-size:.74rem;color:#65788b}
 .o .m{font-weight:700;font-variant-numeric:tabular-nums}
 .o .it{font-size:.84rem;margin:.4rem 0;color:#33404d;white-space:pre-wrap}
-.badge{font-size:.7rem;padding:.12rem .45rem;border-radius:999px;border:1px solid #cfd8e0;background:#f4f7fa;color:#42566a}
+
 .paid{background:#e8f7ef;border-color:#bfe6d0;color:#0b5b34}
 .new{background:#fff6e0;border-color:#f0d9a8;color:#8a5b00}
 .cod{background:#eef3f8;border-color:#cfdcea;color:#33526f}
@@ -37,10 +213,26 @@ button.danger{background:#fff;color:#b00020;border:1px solid #e8c4c8}
 .acts{display:flex;gap:.4rem;margin-top:.5rem;flex-wrap:wrap}
 .pay{font-size:.78rem;background:#f7f9fb;border-radius:8px;padding:.4rem .5rem;margin-top:.4rem;color:#33404d}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
-.hint{font-size:.75rem;color:#65788b}
-.empty{text-align:center;color:#65788b;padding:2rem 1rem;font-size:.9rem}
-h3{font-size:.85rem;margin:.1rem 0 .6rem}
-.hide{display:none}
+
+
+
+
+[data-tab]{display:none}
+body[data-tab="orders"] [data-tab~="orders"]{display:block}
+body[data-tab="menu"] [data-tab~="menu"]{display:block}
+body[data-tab="settings"] [data-tab~="settings"]{display:block}
+body[data-tab="plan"] [data-tab~="plan"]{display:block}
+body[data-tab="share"] [data-tab~="share"]{display:block}
+body[data-tab="log"] [data-tab~="log"]{display:block}
+body[data-tab="orders"] #list{display:block}
+.tabs{margin:.1rem 0 .7rem}
+.menuRow{display:flex;justify-content:space-between;gap:.5rem;border-top:1px solid var(--line);padding:.4rem 0;font-size:.84rem}
+.menuRow b{font-variant-numeric:tabular-nums}
+.qr{display:grid;grid-template-columns:1fr;gap:.5rem}
+.qr img{width:100%;max-width:15rem;border:1px solid var(--line);border-radius:var(--r)}
+.swatch{display:inline-block;width:.65rem;height:.65rem;border-radius:3px;background:var(--accent);margin-right:.3rem}
+.pill{display:inline-flex;gap:.35rem;align-items:center;font-size:.72rem;background:#eef3f8;border:1px solid #cfdcea;border-radius:999px;padding:.2rem .55rem;color:#33526f}
+
 .hold{background:#fff6e0;border:1px solid #f0d9a8;border-radius:12px;padding:.7rem;margin-bottom:.8rem}
 .hold b{font-variant-numeric:tabular-nums}
 .f{margin:.35rem 0}
@@ -49,6 +241,9 @@ h3{font-size:.85rem;margin:.1rem 0 .6rem}
 .aud{font-size:.75rem;border-top:1px solid #eef2f6;padding:.35rem 0;color:#33404d}
 .aud span{color:#65788b}
 .mono{font-family:ui-monospace,Menlo,monospace;word-break:break-all;background:#f4f7fa;border-radius:8px;padding:.4rem;font-size:.75rem}
+
+.hint{font-size:.75rem;color:#65788b}
+.stat{background:#fff;border:1px solid #e6ebf0;border-radius:12px;padding:.55rem .6rem}
 </style>
 </head>
 <body>
@@ -78,7 +273,7 @@ h3{font-size:.85rem;margin:.1rem 0 .6rem}
     <div class="stat"><b id="sF">0</b><span>flagged</span></div>
   </div>
 
-  <div class="card" id="storeCard">
+  <div class="card" id="storeCard" data-tab="orders">
     <div style="display:flex;justify-content:space-between;gap:.6rem;align-items:center;flex-wrap:wrap">
       <div><b id="sName"></b><div class="hint" id="sPlan"></div></div>
       <div style="display:flex;gap:.4rem;flex-wrap:wrap">
@@ -92,7 +287,7 @@ h3{font-size:.85rem;margin:.1rem 0 .6rem}
     <div class="hint" id="feedWarn" style="margin-top:.4rem"></div>
   </div>
 
-  <div class="card">
+  <div class="card" data-tab="settings">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem">
       <h3 style="margin:0">Store settings</h3>
       <button class="sm" id="tabs" data-open="0">Show</button>
@@ -108,19 +303,27 @@ h3{font-size:.85rem;margin:.1rem 0 .6rem}
     </div>
   </div>
 
-  <div class="card">
+  <div class="card" data-tab="log">
     <h3>Recent changes</h3>
     <div id="audit" class="hint">—</div>
   </div>
 
-  <div class="card">
+  <div class="card" data-tab="log">
     <h3>If this device or link falls into the wrong hands</h3>
     <p class="hint" style="margin-top:0">One press kills every outstanding dashboard link, every session on every device and the API key, then gives you brand-new ones. Orders keep working; nothing else breaks.</p>
     <div style="display:flex;gap:.5rem;flex-wrap:wrap"><button class="danger" id="revBtn">Revoke links &amp; API key</button><button class="sm" id="sgnOut">Sign out here</button></div>
     <div id="revOut"></div>
   </div>
 
-  <div class="card" style="padding:.6rem">
+  <nav class="tabs" id="viewTabs" role="tablist" aria-label="Which part of the shop">
+    <button role="tab" aria-selected="true" data-t="orders">Orders</button>
+    <button role="tab" aria-selected="false" data-t="menu">Menu</button>
+    <button role="tab" aria-selected="false" data-t="settings">Store settings</button>
+    <button role="tab" aria-selected="false" data-t="plan">Plan</button>
+    <button role="tab" aria-selected="false" data-t="share">Share</button>
+    <button role="tab" aria-selected="false" data-t="log">Log &amp; security</button>
+  </nav>
+  <div class="card flat" data-tab="orders">
     <div style="display:flex;gap:.4rem;flex-wrap:wrap" id="filters">
       <button class="sm on" data-f="all">All</button>
       <button class="sm" data-f="new">To confirm</button>
@@ -129,6 +332,54 @@ h3{font-size:.85rem;margin:.1rem 0 .6rem}
     </div>
   </div>
   <div id="list"></div>
+  <section class="card" data-tab="menu">
+    <h3>Menu</h3>
+    <p class="muted" style="margin-top:0">Your sheet is the menu. Save the row order, prices, stock and photos there and the store re-reads it on its own — this panel only tells you what is loaded and lets you force a look.</p>
+    <div class="grid c3" id="menuStats"></div>
+    <div class="row" style="margin-top:.6rem">
+      <button class="sm" id="menuReload">Re-read my sheet now</button>
+      <a class="sm" style="text-decoration:none" id="menuOpen" href="#" target="_blank">Open the sheet</a>
+      <button class="sm sec" id="menuCopy">Copy column layout</button>
+    </div>
+    <div id="menuList" style="margin-top:.5rem"></div>
+    <div class="notice warn hide" id="menuWarn" style="margin-top:.6rem"></div>
+    <details style="margin-top:.6rem">
+      <summary class="muted">Column layout, if you are building the sheet now</summary>
+      <p class="mono" style="margin:.4rem 0">id,name,category,price,currency,options,addons,stock,popular</p>
+      <p class="muted" style="font-size:.74rem">options: <span class="mono">Size:Small,Large:2|Spice:mild,hot</span> (colon = price bump, pipe = new group) · addons: <span class="mono">Cheese:1.5|Fried egg:0.5</span> · stock: <span class="mono">yes</span> or <span class="mono">no</span> · popular: <span class="mono">1</span>. A photo goes in the <span class="mono">image</span> column as a full URL.</p>
+      <a class="sm" style="text-decoration:none;display:inline-block;margin-top:.3rem" href="/data/sample-menu.csv" download>Download a CSV you can paste from</a>
+    </details>
+    <div class="f" style="margin-top:.6rem">
+      <label for="menuUrl">Menu source (this is a money-adjacent field: 15-minute hold, cancellable)</label>
+      <div class="row"><input id="menuUrl" placeholder="https://docs.google.com/spreadsheets/d/…"><button class="sm" id="menuUrlSave" style="flex:0 0 auto">Save</button></div>
+    </div>
+  </section>
+
+  <section class="card" data-tab="plan">
+    <h3>Plan</h3>
+    <div class="grid c3" id="planStats"></div>
+    <p class="muted" id="planNote" style="margin-top:.5rem"></p>
+    <div class="row" style="margin-top:.5rem">
+      <a class="sm" style="text-decoration:none" id="planRenew" href="#">Renew for 60 USD / year</a>
+      <button class="sm sec" id="planExport">Export my orders as CSV</button>
+    </div>
+    <div class="notice info hide" id="planPaused" style="margin-top:.6rem"><b>Paused.</b> Buyers see a clear reason instead of a dead button, and nothing is deleted. One payment switches it back within a minute — no approval, no ticket.</div>
+  </section>
+
+  <section class="card" data-tab="share">
+    <h3>Share</h3>
+    <p class="muted" style="margin-top:0">One link does the whole job: put it in your WhatsApp business profile, your Instagram bio, and print the QR for the counter.</p>
+    <a class="link" id="shareLn" href="#" target="_blank" style="text-align:center;border:1px dashed var(--line-2);border-radius:10px;padding:.55rem;font-family:var(--mono);font-size:.8rem;text-decoration:none;display:block">—</a>
+    <div class="row" style="margin-top:.5rem">
+      <button class="sm" id="shareCopy">Copy store link</button>
+      <button class="sm sec" id="shareStatus">WhatsApp status text</button>
+      <button class="sm sec" id="sharePoster">Print QR poster</button>
+    </div>
+    <div class="notice ok hide" id="shareOut" style="margin-top:.6rem"></div>
+    <h3 style="margin-top:1rem">What a buyer sees</h3>
+    <p class="muted" style="margin-top:0">They pick items, choose sizes or add-ons, see the exact amount including your payment cost, and get step-by-step instructions with a reference that matches their transfer to your order. Nothing to install, nothing to remember.</p>
+    <iframe id="shareFrame" title="your store" style="width:100%;height:22rem;border:1px solid var(--line);border-radius:var(--r);background:#fff;margin-top:.4rem"></iframe>
+  </section>
 </div>
 </div></main>
 <script>
@@ -213,10 +464,12 @@ function load() {
     q('#openStore').onclick = function () { window.open('/s/' + S.handle, '_blank'); };
     q('#reloadFeed').onclick = function () {
       api('/s/' + S.handle + '/feed.json').then(function (r) {
-        var n = r.j && r.j.products ? r.j.products.length : 0;
-        alert('Menu reloaded: ' + n + ' products. Your store shows changes within 2 minutes without anyone touching it.');
+        S.feed = (r.j && r.j.products) || [];
+        renderMenu();
+        alert('Menu reloaded: ' + S.feed.length + ' products. Your store shows changes within 2 minutes without anyone touching it.');
       });
     };
+    api('/s/' + S.handle + '/feed.json').then(function (r) { S.feed = (r.j && r.j.products) || []; });
     q('#exportCsv').onclick = exportCsv;
     q('#refresh').onclick = function () { this.textContent = 'Reloading…'; load(); };
     q('#printDay').onclick = printDay;
@@ -228,7 +481,13 @@ function load() {
     if (S.store.rail === 'cash') warns.push('Rail = cash/COD: no online payment is expected, and drivers must be reconciled by hand.');
     if ((S.orders || []).length > 45) warns.push('Dashboard keeps the last 200 orders in free storage — export older ones monthly.');
     q('#feedWarn').textContent = warns.join('  ·  '); q('#feedWarn').style.color = warns.length ? '#b00020' : '';
-    renderFields(); renderAudit(); renderPending(); render();
+    renderFields(); renderAudit(); renderPending(); render(); renderMenu(); renderPlan(); renderShare();
+    q('#viewTabs').onclick = function (e) {
+      var b = e.target.closest('button[data-t]'); if (!b) return;
+      document.body.setAttribute('data-tab', b.getAttribute('data-t'));
+      Array.prototype.forEach.call(this.querySelectorAll('button'), function (x) { x.setAttribute('aria-selected', String(x === b)); });
+    };
+    if (!document.body.getAttribute('data-tab')) document.body.setAttribute('data-tab', 'orders');
   }).catch(function () { q('#login').classList.remove('hide'); });
 }
 
@@ -379,6 +638,73 @@ function render() {
   qa('#filters .sm').forEach(function (b) {
     b.onclick = function () { S.filter = b.getAttribute('data-f'); qa('#filters .sm').forEach(function (x) { x.classList.toggle('on', x === b); x.style.background = x === b ? '#0b0f14' : '#fff'; x.style.color = x === b ? '#fff' : '#101418'; }); render(); };
   });
+}
+function renderMenu() {
+  var feed = S.feed || [];
+  q('#menuStats').innerHTML = '<div class="stat"><b>' + feed.length + '</b><span>items loaded</span></div>'
+    + '<div class="stat"><b>' + (feed.filter(function (p) { return p.out; }).length) + '</b><span>out of stock</span></div>'
+    + '<div class="stat"><b>' + (S.store.feed_cache_seconds || 120) + 's</b><span>re-read every</span></div>';
+  q('#menuOpen').href = S.store.feed_url || '#';
+  q('#menuUrl').value = S.store.feed_url || '';
+  q('#menuList').innerHTML = feed.slice(0, 40).map(function (p) {
+    return '<div class="menuRow"><span>' + esc(p.name) + (p.category ? ' <span class="muted">· ' + esc(p.category) + '</span>' : '')
+      + (p.out ? ' <span class="badge bad">out</span>' : '') + '</span><b>' + Number(p.price || 0).toFixed(2) + '</b></div>';
+  }).join('') || '<p class="muted">Nothing loaded yet.</p>';
+  var w = q('#menuWarn');
+  if (!feed.length) { w.classList.remove('hide'); w.innerHTML = '0 items. ' + esc(S.store.feed_error || 'Check the sheet is shared as “anyone with the link — Viewer”, and that row 1 is the header row.') + ' Then press Re-read.'; }
+  else if (S.store.feed_error) { w.classList.remove('hide'); w.textContent = 'Loaded, but: ' + S.store.feed_error; }
+  else w.classList.add('hide');
+  q('#menuReload').onclick = function () {
+    var b = this; b.textContent = 'reading…';
+    api('/s/' + S.handle + '/feed.json').then(function (r) {
+      S.feed = (r.j && r.j.products) || []; b.textContent = 'Re-read my sheet now'; renderMenu();
+      alert('Sheet re-read: ' + S.feed.length + ' items. Your store shows it within ' + (S.store.feed_cache_seconds || 120) + ' seconds, no one else needed.');
+    });
+  };
+  q('#menuCopy').onclick = function () {
+    var t = 'id,name,category,price,currency,options,addons,stock,popular';
+    if (navigator.clipboard) navigator.clipboard.writeText(t).then(function () { q('#menuCopy').textContent = 'Copied ✓'; });
+  };
+  q('#menuUrlSave').onclick = function () {
+    api('/api/settings', { handle: S.handle, feed_url: q('#menuUrl').value.trim() }).then(function (r) {
+      if (!r.j || !r.j.ok) { alert((r.j && r.j.error) || 'did not save'); return; }
+      alert((r.j.note || 'Saved.') + (r.j.held && r.j.held.length ? ' (menu source is queued: it goes live after the hold, and you can cancel it.)' : ''));
+      load();
+    });
+  };
+}
+function renderPlan() {
+  var left = Math.ceil(((S.store.paid_until || 0) - Date.now()) / 864e5);
+  var tot = S.orders.reduce(function (a, o) { return a + ((o && o.pricing && o.pricing.total) || 0); }, 0);
+  q('#planStats').innerHTML = '<div class="stat"><b>' + (left > 0 ? left : '0') + '</b><span>days left</span></div>'
+    + '<div class="stat"><b>' + (S.store.plan || 'free60') + '</b><span>plan</span></div>'
+    + '<div class="stat"><b>' + tot.toFixed(2) + '</b><span>' + esc(S.store.currency || 'USD') + ' on record</span></div>';
+  q('#planNote').textContent = left > 30
+    ? 'Nothing to do. Renewal is one payment a year, and the store keeps its menu, history and links exactly as they are.'
+    : (left > 0 ? 'Ends in ' + left + ' days. Renew whenever — it stacks, so paying early loses nothing.' : 'Expired: the store is answering buyers with a “renew” notice.');
+  q('#planRenew').href = S.store.renew_url || '/onboard';
+  q('#planPaused').classList.toggle('hide', !S.store.suspended);
+  q('#planExport').onclick = exportCsv;
+}
+function renderShare() {
+  var url = location.origin + '/s/' + S.handle;
+  q('#shareLn').textContent = url; q('#shareLn').href = url;
+  q('#shareFrame').src = url;
+  q('#shareCopy').onclick = function () { if (navigator.clipboard) navigator.clipboard.writeText(url).then(function () { q('#shareOut').classList.remove('hide'); q('#shareOut').textContent = 'Copied. Now: WhatsApp business profile → “Short description”, and your Instagram bio.'; }); };
+  q('#shareStatus').onclick = function () {
+    var txt = (S.store.shop_name || S.handle) + ' is taking orders here → ' + url + '\nPick what you want, send the exact amount, the odd cents tell me it is you. No app, no login.';
+    if (navigator.clipboard) navigator.clipboard.writeText(txt).then(function () { q('#shareOut').classList.remove('hide'); q('#shareOut').textContent = 'Status text copied — paste it into your WhatsApp status or broadcast list.'; });
+  };
+  q('#sharePoster').onclick = function () {
+    var w = window.open('', '_blank'); if (!w) { alert('Allow pop-ups to print'); return; }
+    w.document.write('<!doctype html><meta charset=utf-8><title>' + esc(S.store.shop_name || S.handle) + '</title><body style="font:16px system-ui;margin:0;padding:2rem;text-align:center">'
+      + '<h1 style="font-size:1.7rem;margin:.2rem 0">' + esc(S.store.shop_name || S.handle) + '</h1><p style="color:#555;margin:.2rem 0 1rem">Order ahead — no app, no login</p>'
+      + '<img alt="QR" src="https://api.qrserver.com/v1/create-qr-code/?size=420x420&data=' + encodeURIComponent(url) + '" style="width:min(70vw,420px)">'
+      + '<p style="font-family:ui-monospace,monospace;word-break:break-all">' + esc(url) + '</p>'
+      + '<p style="color:#777;font-size:.85rem">Tape it on the counter. When the menu changes, you edit your sheet — this poster stays correct.</p>'
+      + '<scr' + 'ipt>window.onload=function(){window.print()}<' + '/scr' + 'ipt></body>');
+    w.document.close();
+  };
 }
 function byId(id) { for (var i = 0; i < S.orders.length; i++) if (S.orders[i] && S.orders[i].id === id) return S.orders[i]; return null; }
 function mark(id, status) {

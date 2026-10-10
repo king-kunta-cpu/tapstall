@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Production check for the merchant-authority release (v0.3.0).
+# Production check for the merchant-authority release and the two UI suites.
 #
 # Proves the four claims that matter on the live Worker:
 #   1. a leaked or shared link cannot read the ledger or rewrite the payout account
 #   2. a crawler that prefetches a confirm link changes nothing
 #   3. merchants who hold a v0.2 `?token=` link are not stranded by the upgrade
 #   4. the public surfaces still answer exactly as they did before
+#   5. both consoles (merchant pages, /ops) are live, gated, and say nothing
 #
 # It creates one throwaway order on $HANDLE and cancels it at the end. Nothing
 # else about that store is left changed.
@@ -33,7 +34,8 @@ echo "target: $ORIGIN"
 echo "store:  $HANDLE"
 
 echo "[1] version, and the security primitives inside the Worker's own runtime"
-ck "ping reports 0.3.0" '0\.3\.0' "$(curl -s -m 30 "$ORIGIN/__ping")"
+WANT_VER=$(grep -m1 "^const VERSION = " worker/worker.js | tr -dc '0-9.')
+ck "ping reports the version in this checkout ($WANT_VER)" "\"$WANT_VER\"" "$(curl -s -m 30 "$ORIGIN/__ping")"
 ST=$(curl -s -m 60 "$ORIGIN/__selftest")
 for k in cap_roundtrip cap_rejects_tamper cap_rejects_other_secret cap_rejects_expired \
          settings_rejects_bad money_change_is_held money_change_lands_late masking_hides_values \
@@ -186,7 +188,75 @@ else
   echo "  ! no second store found to test isolation against (set OTHER_HANDLE=)"
 fi
 
-echo "[8] tidy up"
+echo "[8] the two consoles: the merchant money pages, and /ops"
+# The platform secret is read from disk into a file curl consumes, and only its
+# *presence* is ever asserted: no ck/nk call is handed a header or a secret, so
+# a pasted CI log cannot leak a live operator session.
+umask 077
+BODY=$(mktemp)
+python3 -c "
+import json
+sec = open('/home/user/.secrets/admin_secret').read().strip()
+open('$BODY','w').write(json.dumps({'secret': sec}))"
+SELF=$(curl -s -m 60 "$ORIGIN/__selftest")
+ck "the confirm page is live from KV, not the inline fallback" '"tpl_confirm": ?true' "$SELF"
+ck "  · so is the renew page" '"tpl_renew": ?true' "$SELF"
+ck "  · and the operator console" '"tpl_ops": ?true' "$SELF"
+OPS=$(curl -s -m 30 "$ORIGIN/ops")
+ck "the console page is public as an empty shell" 'Operator console' "$OPS"
+ck "  · and it knows it is not signed in" '"signed_in":false' "$OPS"
+ck "  · no crawler finds it" 'noindex' "$OPS"
+nk "no secret, key or payout detail in that HTML" 'admin_token|secret_hash|"pay_account":' "$OPS"
+for ep in state health audit templates; do
+  ck "/ops/api/$ep refuses an anonymous reader" '^401$' "$(code "$ORIGIN/ops/api/$ep")"
+done
+ck "a lever without the confirm header is refused" '^401$' "$(code -X POST -H 'content-type: application/json' -d '{"handle":"'"$HANDLE"'","action":"suspend"}' "$ORIGIN/ops/api/store")"
+HDR=$(mktemp)
+curl -s -m 30 -D "$HDR" -o /dev/null -X POST -H 'content-type: application/json' --data-binary "@$BODY" "$ORIGIN/ops/login"
+# only derived yes/no strings are passed to ck from here on
+HAVE=$(grep -ic '^set-cookie: *zl_ops=' "$HDR")
+FLAGS=$(awk 'tolower($0) ~ /^set-cookie: *zl_ops/ {print}' "$HDR" | grep -c 'HttpOnly' || true)
+SAMESITE=$(awk 'tolower($0) ~ /^set-cookie: *zl_ops/ {print}' "$HDR" | grep -cE 'SameSite=Strict' || true)
+SECURE=$(awk 'tolower($0) ~ /^set-cookie: *zl_ops/ {print}' "$HDR" | grep -cE '; *Secure' || true)
+TTL=$(awk 'tolower($0) ~ /^set-cookie: *zl_ops/ {print}' "$HDR" | grep -oE 'Max-Age=[0-9]+' | head -1 | cut -d= -f2)
+ck "the secret exchanges for a cookie, not a token in a URL" '^1$' "$HAVE"
+ck "  · HttpOnly" '^1$' "$FLAGS"
+ck "  · SameSite=Strict" '^1$' "$SAMESITE"
+ck "  · Secure" '^1$' "$SECURE"
+ck "  · and a 12-hour lifetime, not forever" '^43200$' "$TTL"
+OC=$(awk 'tolower($0) ~ /^set-cookie: *zl_ops/ {sub(/\r$/,""); print $2}' "$HDR" | cut -d; -f1)
+ST2=$(curl -s -m 60 -b "zl_ops=$OC" "$ORIGIN/ops/api/state")
+ck "the estate reads back as data the console can render" '"totals":\{' "$ST2"
+ck "  · with an attention queue that names its reasons" '"attention":\[' "$ST2"
+ck "  · and a per-refresh KV cost, so polling is a choice" '"reads_used_estimate":' "$ST2"
+nk "  · holding no credential, masked or not" 'admin_token|secret_hash|fw_secret|auth_gen|"admin_url":' "$ST2"
+HL=$(curl -s -m 60 -b "zl_ops=$OC" "$ORIGIN/ops/api/health")
+ck "health carries the runtime self-check" '"selftest":\{' "$HL"
+ck "  · and the Pages mirror it is served beside" '"pages":' "$HL"
+TPLS=$(curl -s -m 30 -b "zl_ops=$OC" "$ORIGIN/ops/api/templates")
+ck "every page the Worker serves is in KV" '"live": ?true' "$TPLS"
+nk "  · none missing" '"live": ?false' "$TPLS"
+LL=$(curl -s -m 30 -b "zl_ops=$OC" -H 'x-zimlink-confirm: 1' -X POST -H 'content-type: application/json' \
+  -d '{"handle":"'"$HANDLE"'","action":"link"}' "$ORIGIN/ops/api/store")
+ck "the link lever hands out a capability, not a key" '/a?code=v1' "$LL"
+ck "  · notify and link are real actions, not dead buttons" '"ok": ?true' "$LL"
+ck "  · and the write lands in the operator log" '"ops":\[' "$(curl -s -m 30 -b "zl_ops=$OC" "$ORIGIN/ops/api/audit")"
+nk "  · the log line does not carry a secret" 'admin_token' "$(curl -s -m 30 -b "zl_ops=$OC" "$ORIGIN/ops/api/audit")"
+LO=$(curl -s -m 30 -o /dev/null -w '%{http_code}' -X POST -b "zl_ops=$OC" "$ORIGIN/ops/logout")
+AFTER=$(curl -s -m 30 -o /dev/null -w '%{http_code}' -b "zl_ops=$OC" "$ORIGIN/ops/api/state")
+ck "signing out answers" '^200$' "$LO"
+ck "  · and the cookie is worth nothing afterwards" '^401$' "$AFTER"
+# an expired cookie must not spend the lockout budget (three probes, then a
+# wrong secret still shows a full-steps-remaining counter, not a lockout)
+code -b "zl_ops=$OC" "$ORIGIN/ops/api/state" >/dev/null; code -b "zl_ops=$OC" "$ORIGIN/ops/api/state" >/dev/null
+TRY=$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"secret":"not-the-platform-secret"}' "$ORIGIN/ops/login" | grep -oE '"tries_left": ?[0-9]+' | grep -oE '[0-9]+' | head -1)
+ck "  · dead-cookie probes did not lock anybody out" '^(9|10|11|12)$' "$TRY"
+# and the two guesses this check just made are wiped from the counter, so
+# running prod_check a dozen times can never freeze the operator's own console
+curl -s -m 30 -o /dev/null -X POST -H 'content-type: application/json' --data-binary "@$BODY" "$ORIGIN/ops/login"
+rm -f "$BODY" "$HDR"
+
+echo "[9] tidy up"
 CK2=$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-zimlink-admin: $ADMIN_KEY" \
   -d '{"handle":"'"$HANDLE"'","id":"'"$ID"'","status":"cancelled"}' "$ORIGIN/api/mark")
 ck "probe order cancelled" '"status":"cancelled"' "$CK2"

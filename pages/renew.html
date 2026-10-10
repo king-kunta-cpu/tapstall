@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#0b0f14">
+<title>ZimLink — plan and renewal</title>
+<style>
+/* ZimLink UI kit — one visual language for both suites (merchant pages and the
+ * operator console). Every shipped page inlines this block instead of linking to
+ * it: a page that arrives as one file survives the KV template store, a mail
+ * preview, a sandboxed viewer and a 2G reconnect, none of which can be counted
+ * on to fetch a stylesheet. scripts/ui_kit.py regenerates the inlined copies,
+ * and a test fails if a page drifts from this file. */
+:root {
+  --ink: #101418;
+  --ink-2: #33404d;
+  --ink-3: #65788b;
+  --bg: #f4f6f8;
+  --card: #ffffff;
+  --line: #e6ebf0;
+  --line-2: #dde3e9;
+  --chrome: #0b0f14;
+  --chrome-2: #1a2530;
+  --chrome-ink: #aebbc7;
+  --accent: #0b5b34;
+  --accent-bg: #e8f7ef;
+  --warn: #8a5b00;
+  --warn-bg: #fff6e0;
+  --warn-line: #f0d9a8;
+  --bad: #b00020;
+  --bad-bg: #fffafa;
+  --bad-line: #f3c3c9;
+  --link: #8fd4ff;
+  --r-sm: 8px;
+  --r: 12px;
+  --r-lg: 16px;
+  --tap: 44px;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --shadow: 0 1px 2px rgba(16, 20, 24, .04), 0 8px 24px -18px rgba(16, 20, 24, .35);
+}
+* { box-sizing: border-box }
+html { -webkit-text-size-adjust: 100% }
+body {
+  margin: 0;
+  font: 16px/1.5 var(--sans);
+  color: var(--ink);
+  background: var(--bg);
+}
+h1, h2, h3 { line-height: 1.25; margin: 0 0 .5rem }
+h1 { font-size: 1.25rem }
+h2 { font-size: 1.08rem }
+h3 { font-size: .92rem }
+a { color: inherit }
+.num, b, td.n { font-variant-numeric: tabular-nums }
+.muted { color: var(--ink-3); font-size: .78rem }
+.tiny { font-size: .72rem }
+.mono { font-family: var(--mono); font-size: .8rem; word-break: break-all }
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: .9rem;
+  margin-bottom: .8rem;
+  box-shadow: var(--shadow);
+}
+.card.flat { box-shadow: none }
+.card > :last-child { margin-bottom: 0 }
+.stack > * + * { margin-top: .6rem }
+.row { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center }
+.row.between { justify-content: space-between }
+.row.end { justify-content: flex-end }
+.grid { display: grid; gap: .5rem }
+.grid.c2 { grid-template-columns: 1fr 1fr }
+.grid.c3 { grid-template-columns: repeat(3, 1fr) }
+.grid.c4 { grid-template-columns: repeat(4, 1fr) }
+@media (max-width: 30rem) { .grid.c3, .grid.c4 { grid-template-columns: 1fr 1fr } }
+label { display: block; font-size: .74rem; font-weight: 600; color: #42566a; margin-bottom: .2rem }
+input, select, textarea {
+  font: inherit;
+  width: 100%;
+  padding: .62rem .7rem;
+  min-height: var(--tap);
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+}
+textarea { min-height: 6rem; font-family: var(--mono); font-size: .8rem; line-height: 1.45 }
+input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible, a:focus-visible {
+  outline: 2px solid #1d6fd0;
+  outline-offset: 1px;
+}
+input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--bad-line); background: var(--bad-bg) }
+button {
+  font: inherit;
+  font-weight: 600;
+  min-height: var(--tap);
+  padding: .6rem .9rem;
+  color: #fff;
+  background: var(--chrome);
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+}
+button:disabled { opacity: .55; cursor: progress }
+button.sec, .sm { color: var(--ink); background: #fff; border: 1px solid #cfd8e0; font-weight: 500 }
+button.ok { background: var(--accent) }
+button.danger { color: var(--bad); background: #fff; border: 1px solid var(--bad-line) }
+button.link { color: #2a5f9e; background: none; border: 0; text-decoration: underline; min-height: 0; padding: .2rem }
+.sm { font-size: .78rem; padding: .35rem .6rem; min-height: 0; border-radius: 8px }
+.badge {
+  display: inline-block;
+  font-size: .7rem;
+  padding: .12rem .45rem;
+  border-radius: 999px;
+  border: 1px solid #cfd8e0;
+  background: #f4f7fa;
+  color: #42566a;
+}
+.badge.ok { background: var(--accent-bg); border-color: #bfe6d0; color: var(--accent) }
+.badge.warn { background: var(--warn-bg); border-color: var(--warn-line); color: var(--warn) }
+.badge.bad { background: #fdecec; border-color: var(--bad-line); color: var(--bad) }
+.notice { border-radius: 10px; padding: .6rem .7rem; font-size: .82rem; border: 1px solid var(--line) }
+.notice.warn { background: var(--warn-bg); border-color: var(--warn-line); color: var(--warn) }
+.notice.bad { background: var(--bad-bg); border-color: var(--bad-line); color: var(--bad) }
+.notice.ok { background: var(--accent-bg); border-color: #bfe6d0; color: var(--accent) }
+.notice.info { background: #eef3f8; border-color: #cfdcea; color: #33526f }
+.tabs { display: flex; gap: .3rem; overflow-x: auto; scrollbar-width: none; padding-bottom: .1rem }
+.tabs::-webkit-scrollbar { display: none }
+.tabs button {
+  flex: 0 0 auto; min-height: 0; padding: .4rem .7rem; font-size: .8rem;
+  color: var(--ink-2); background: #fff; border: 1px solid var(--line-2); border-radius: 999px;
+}
+.tabs button[aria-selected="true"] { color: #fff; background: var(--chrome); border-color: var(--chrome) }
+.stat { background: var(--card); border: 1px solid var(--line); border-radius: var(--r); padding: .55rem .65rem }
+.stat b { display: block; font-size: 1.18rem }
+.stat span { font-size: .66rem; color: var(--ink-3); text-transform: uppercase; letter-spacing: .04em }
+.bar { display: flex; gap: .2rem; margin-top: .35rem }
+.bar i { height: 5px; flex: 1; border-radius: 999px; background: var(--line-2) }
+.bar i.on { background: var(--chrome) }
+table { width: 100%; border-collapse: collapse; font-size: .84rem }
+th, td { text-align: left; padding: .45rem .4rem; border-bottom: 1px solid var(--line) }
+th { font-size: .66rem; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-3) }
+tbody tr { cursor: pointer }
+tbody tr:hover td { background: #fbfcfd }
+.empty { text-align: center; color: var(--ink-3); padding: 1.6rem 1rem; font-size: .88rem }
+.skel { background: linear-gradient(90deg, #eef1f4 25%, #f7f9fa 50%, #eef1f4 75%); background-size: 200% 100%; animation: sk 1.2s infinite; border-radius: 8px; height: 2.6rem }
+@keyframes sk { to { background-position: -200% 0 } }
+@media (prefers-reduced-motion: reduce) { .skel { animation: none } }
+.sheet { position: fixed; inset: 0; background: rgba(11, 15, 20, .45); display: none; align-items: flex-end; z-index: 20 }
+.sheet.on { display: flex }
+.sheet > div {
+  background: var(--card); width: 100%; max-height: 88vh; overflow: auto;
+  padding: 1rem .95rem calc(1rem + env(safe-area-inset-bottom));
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+}
+@media (min-width: 44rem) { .sheet { align-items: center; justify-content: center } .sheet > div { max-width: 40rem; border-radius: var(--r-lg) } }
+.toast {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: 1rem; z-index: 30;
+  background: var(--chrome); color: #fff; font-size: .82rem; padding: .55rem .8rem; border-radius: 999px;
+  box-shadow: 0 10px 30px -12px rgba(0, 0, 0, .6); max-width: 92vw;
+}
+.chrome { background: var(--chrome); color: #fff; padding: .8rem 1rem; position: sticky; top: 0; z-index: 10 }
+.chrome .in { max-width: 60rem; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; gap: .6rem; flex-wrap: wrap }
+.chrome b { font-size: .95rem }
+.chrome a, .chrome button.sec { color: var(--link); font-size: .78rem; background: none; border: 0; text-decoration: none; min-height: 0; padding: .2rem }
+main { padding: 1rem; border-radius: var(--r-lg) var(--r-lg) 0 0; margin-top: .4rem; background: var(--bg) }
+main > .wrap { max-width: 60rem; margin: 0 auto }
+main > .wrap.narrow { max-width: 34rem }
+.hide { display: none !important }
+.only-mobile { display: initial }
+@media (min-width: 44rem) { .only-mobile { display: none } }
+/* operator console is read a lot at night and on a laptop: it may go dark */
+@media (prefers-color-scheme: dark) {
+  body.dark { --bg: #0b0f14; --card: #131b23; --line: #22303c; --line-2: #2c3d4c; --ink: #e7edf3; --ink-2: #c2cfd9; --ink-3: #8fa0af; --warn-bg: #2a2410; --bad-bg: #2a1416; --accent-bg: #10291e }
+  body.dark input, body.dark select, body.dark textarea { background: #0e151b; color: var(--ink); border-color: var(--line-2) }
+  body.dark .badge { background: #182430; border-color: #2c3d4c; color: #c2cfd9 }
+  body.dark tbody tr:hover td { background: #16202a }
+  body.dark button.sec, body.dark .sm { background: #182430; color: var(--ink); border-color: #2c3d4c }
+  body.dark button { background: #e7edf3; color: #0b0f14 }
+  body.dark button.ok { background: var(--accent); color: #fff }
+}
+.price { font-size: 2rem; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.02em }
+.old { color: var(--ink-3); text-decoration: line-through; font-size: .9rem; font-weight: 500 }
+.big { border: 1px solid var(--line); border-radius: var(--r); padding: .8rem; margin-top: .5rem }
+ul.why { margin: .4rem 0 0; padding-left: 1.1rem; font-size: .84rem; color: var(--ink-2) }
+ul.why li { margin: .25rem 0 }
+.receipt { display: grid; grid-template-columns: 1fr auto; gap: .2rem .6rem; font-size: .84rem }
+.receipt div:nth-child(even) { font-variant-numeric: tabular-nums; text-align: right }
+.paid { background: var(--accent-bg); border-color: #bfe6d0 }
+input[type=number] { max-width: 8rem }
+</style>
+</head>
+<body>
+<div class="chrome"><div class="in"><b id="brand">ZimLink · plan</b><span><a href="/a">orders</a> · <a href="/s/" id="storeLn">my store</a></span></div></div>
+<main><div class="wrap narrow">
+  <div class="card" id="state">
+    <p class="muted" id="status" style="margin:0">Loading your store</p>
+    <h1 id="head">…</h1>
+    <div class="grid c3" id="facts"></div>
+    <div id="extra"></div>
+  </div>
+
+  <div class="card" id="buy">
+    <h3 id="buyHead">Renew for a year</h3>
+    <p class="price" id="price">—</p>
+    <p class="muted" style="margin-top:.1rem">Once a year. No monthly billing, no card-on-file with a foreign processor — in Zimbabwe that path costs 15% DST + 2% IMTT before it even reaches them, which is why the plan is bought in one go or not at all.</p>
+    <div class="row" style="margin-top:.6rem">
+      <button id="payBtn" style="flex:1 1 12rem">Pay and switch on</button>
+      <button class="sec" id="daysBtn" title="Choose another length">Custom</button>
+    </div>
+    <div class="hide" id="daysRow" style="margin-top:.5rem">
+      <label for="days">Days to buy (30–1460)</label>
+      <div class="row"><input id="days" type="number" value="365" min="30" max="1460"><button class="sec" id="daysGo">Price it</button></div>
+    </div>
+    <div class="big">
+      <b style="font-size:.85rem">Paid by EcoCash, ZIPIT or cash instead?</b>
+      <p class="muted" style="margin:.25rem 0 .5rem">Send the amount, then paste the payment reference here. The store is extended as soon as the payment lands — an activation is not waiting on a person reading this page.</p>
+      <input id="ref" placeholder="your payment reference, e.g. EcoCash 0771234567 → ABC123" autocomplete="off">
+      <div class="row" style="margin-top:.4rem"><button class="sec" id="refBtn">Send reference</button><span class="muted" id="refOut"></span></div>
+    </div>
+    <p class="muted" id="note">If a payment gateway is configured on this platform, the button above goes straight to it; the webhook does the rest. If it is not yet, this page tells you what to send and where, and the renewal rides on the reference.</p>
+  </div>
+
+  <div class="card flat" id="receipts">
+    <h3>What a year covers</h3>
+    <ul class="why">
+      <li>Unlimited products, images, options, add-ons, stock and modifiers — no per-item or per-order quota.</li>
+      <li>Your own link <span class="mono" id="myUrl">/s/…</span> with the menu reading itself from your Google Sheet, so a price change is yours to make and takes about two minutes.</li>
+      <li>Order confirmations, payment references with unique cents so a transfer identifies itself, flags on risky cash orders, a CSV you can hand to anyone.</li>
+      <li>Reversible changes to your payout details and a log of who changed what.</li>
+    </ul>
+  </div>
+</div></main>
+
+<script>
+var R = /*__ZIMLINK_RENEW__*/null || { known: false };
+var q = function (s) { return document.querySelector(s); };
+function esc(x) { return String(x == null ? '' : x).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
+function stat(b, s, cls) { return '<div class="stat ' + (cls || '') + '"><b>' + b + '</b><span>' + s + '</span></div>'; }
+
+(function boot() {
+  if (!R.known) {
+    q('#head').textContent = 'That renew link is old';
+    q('#facts').innerHTML = stat('0', 'days left');
+    q('#extra').innerHTML = '<p class="notice warn" style="margin-top:.6rem">Renew links are minted once per store and this one is no longer on the books. Open your <a href="/a">dashboard</a> — the renew link is inside it — or <a href="/onboard">create a store</a> if you never did.</p>';
+    q('#buy').classList.add('hide');
+    return;
+  }
+  q('#brand').textContent = 'ZimLink · ' + (R.shop || R.handle);
+  q('#storeLn').href = R.store_url || '/onboard';
+  q('#myUrl').textContent = R.store_url || '';
+  var left = Number(R.left || 0);
+  q('#status').textContent = R.suspended ? 'Paused' : (left > 30 ? 'Running' : 'Running — ends soon');
+  q('#head').textContent = left > 0 ? R.shop + ' is paid until ' + new Date(Date.now() + left * 864e5).toLocaleDateString() : R.shop + ' expired';
+  q('#facts').innerHTML = stat('<span style="color:' + (left <= 7 ? 'var(--bad)' : 'inherit') + '">' + left + '</span>', 'days left')
+    + stat(R.orders || 0, 'orders on record')
+    + stat(Number(R.gmv || 0).toFixed(2), (R.currency || 'USD') + ' through it');
+  q('#extra').innerHTML = (R.suspended
+    ? '<p class="notice bad" style="margin-top:.6rem">The store is paused: buyers see a “renew” notice and new orders are refused with a clear reason. Renewing switches it back within a minute — no one has to approve it.</p>'
+    : (left <= 7 ? '<p class="notice warn" style="margin-top:.6rem">Seven days or fewer. Nothing breaks at midnight: the storefront keeps working until the next scheduled check, and reinstating is automatic the moment payment clears.</p>' : ''))
+    + (R.plan && R.plan !== 'free60' ? '<p class="muted" style="margin-top:.5rem">Current plan: <b>' + esc(R.plan) + '</b>.</p>' : '<p class="muted" style="margin-top:.5rem">You are on the free launch period. Keep it running for a year, or let it sleep — your orders and menu stay put either way, and nothing is deleted behind your back.</p>');
+  q('#price').textContent = Number(R.price || 60).toFixed(2) + ' USD';
+  payFor(365);
+})();
+
+function payFor(days) {
+  var price = Math.round(((Number(R.price || 60)) * days / 365) * 100) / 100;
+  q('#buyHead').textContent = days === 365 ? 'Renew for a year' : 'Buy ' + days + ' days';
+  q('#price').textContent = price.toFixed(2) + ' USD';
+  q('#payBtn').dataset.days = days;
+}
+q('#daysBtn').onclick = function () { q('#daysRow').classList.toggle('hide'); };
+q('#daysGo').onclick = function () {
+  var d = Math.max(30, Math.min(1460, Number(q('#days').value) || 365));
+  q('#days').value = d; payFor(d);
+};
+q('#payBtn').onclick = function () {
+  var b = this; b.disabled = true; b.textContent = 'opening payment…';
+  fetch('/api/checkout', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: R.token, days: Number(b.dataset.days || 365) }) })
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      b.disabled = false; b.textContent = 'Pay and switch on';
+      if (j.ok && j.pay_url) {
+        q('#note').innerHTML = 'Send <b>' + Number(j.amount).toFixed(2) + ' USD</b> — <a href="' + esc(j.pay_url) + '">open the payment page</a>. When it clears, the store renews itself; this page re-reads the plan every 20 seconds while you have it open.';
+        var t = setInterval(function () { location.reload(); }, 20000);
+        window.addEventListener('pagehide', function () { clearInterval(t); });
+      } else {
+        q('#note').innerHTML = '<span style="color:var(--bad)">' + esc(j.error || 'the gateway is not configured on this platform yet') + '</span> — use the reference box below. Nothing about the store changes until payment is recognised.';
+      }
+    })
+    .catch(function () { b.disabled = false; b.textContent = 'Pay and switch on'; q('#note').textContent = 'Could not reach the server. Try again in a moment — the link stays valid.'; });
+};
+q('#refBtn').onclick = function () {
+  var ref = String(q('#ref').value || '').trim();
+  if (!ref) { q('#refOut').textContent = 'type the reference first'; return; }
+  q('#refOut').textContent = 'sending…';
+  fetch('/api/renew-ref', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: R.token, reference: ref }) })
+    .then(function (r) { return r.json(); })
+    .then(function (j) { q('#refOut').innerHTML = j.ok ? '<b style="color:var(--accent)">' + esc(j.note || 'recorded') + '</b>' : esc(j.error || 'failed'); })
+    .catch(function () { q('#refOut').textContent = 'no reply — keep the reference, it is on your payment too'; });
+};
+</script>
+</body>
+</html>

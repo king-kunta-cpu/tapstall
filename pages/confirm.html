@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#0b0f14">
+<title>ZimLink — confirm</title>
+<style>
+/* ZimLink UI kit — one visual language for both suites (merchant pages and the
+ * operator console). Every shipped page inlines this block instead of linking to
+ * it: a page that arrives as one file survives the KV template store, a mail
+ * preview, a sandboxed viewer and a 2G reconnect, none of which can be counted
+ * on to fetch a stylesheet. scripts/ui_kit.py regenerates the inlined copies,
+ * and a test fails if a page drifts from this file. */
+:root {
+  --ink: #101418;
+  --ink-2: #33404d;
+  --ink-3: #65788b;
+  --bg: #f4f6f8;
+  --card: #ffffff;
+  --line: #e6ebf0;
+  --line-2: #dde3e9;
+  --chrome: #0b0f14;
+  --chrome-2: #1a2530;
+  --chrome-ink: #aebbc7;
+  --accent: #0b5b34;
+  --accent-bg: #e8f7ef;
+  --warn: #8a5b00;
+  --warn-bg: #fff6e0;
+  --warn-line: #f0d9a8;
+  --bad: #b00020;
+  --bad-bg: #fffafa;
+  --bad-line: #f3c3c9;
+  --link: #8fd4ff;
+  --r-sm: 8px;
+  --r: 12px;
+  --r-lg: 16px;
+  --tap: 44px;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --shadow: 0 1px 2px rgba(16, 20, 24, .04), 0 8px 24px -18px rgba(16, 20, 24, .35);
+}
+* { box-sizing: border-box }
+html { -webkit-text-size-adjust: 100% }
+body {
+  margin: 0;
+  font: 16px/1.5 var(--sans);
+  color: var(--ink);
+  background: var(--bg);
+}
+h1, h2, h3 { line-height: 1.25; margin: 0 0 .5rem }
+h1 { font-size: 1.25rem }
+h2 { font-size: 1.08rem }
+h3 { font-size: .92rem }
+a { color: inherit }
+.num, b, td.n { font-variant-numeric: tabular-nums }
+.muted { color: var(--ink-3); font-size: .78rem }
+.tiny { font-size: .72rem }
+.mono { font-family: var(--mono); font-size: .8rem; word-break: break-all }
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: .9rem;
+  margin-bottom: .8rem;
+  box-shadow: var(--shadow);
+}
+.card.flat { box-shadow: none }
+.card > :last-child { margin-bottom: 0 }
+.stack > * + * { margin-top: .6rem }
+.row { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center }
+.row.between { justify-content: space-between }
+.row.end { justify-content: flex-end }
+.grid { display: grid; gap: .5rem }
+.grid.c2 { grid-template-columns: 1fr 1fr }
+.grid.c3 { grid-template-columns: repeat(3, 1fr) }
+.grid.c4 { grid-template-columns: repeat(4, 1fr) }
+@media (max-width: 30rem) { .grid.c3, .grid.c4 { grid-template-columns: 1fr 1fr } }
+label { display: block; font-size: .74rem; font-weight: 600; color: #42566a; margin-bottom: .2rem }
+input, select, textarea {
+  font: inherit;
+  width: 100%;
+  padding: .62rem .7rem;
+  min-height: var(--tap);
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+}
+textarea { min-height: 6rem; font-family: var(--mono); font-size: .8rem; line-height: 1.45 }
+input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible, a:focus-visible {
+  outline: 2px solid #1d6fd0;
+  outline-offset: 1px;
+}
+input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--bad-line); background: var(--bad-bg) }
+button {
+  font: inherit;
+  font-weight: 600;
+  min-height: var(--tap);
+  padding: .6rem .9rem;
+  color: #fff;
+  background: var(--chrome);
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+}
+button:disabled { opacity: .55; cursor: progress }
+button.sec, .sm { color: var(--ink); background: #fff; border: 1px solid #cfd8e0; font-weight: 500 }
+button.ok { background: var(--accent) }
+button.danger { color: var(--bad); background: #fff; border: 1px solid var(--bad-line) }
+button.link { color: #2a5f9e; background: none; border: 0; text-decoration: underline; min-height: 0; padding: .2rem }
+.sm { font-size: .78rem; padding: .35rem .6rem; min-height: 0; border-radius: 8px }
+.badge {
+  display: inline-block;
+  font-size: .7rem;
+  padding: .12rem .45rem;
+  border-radius: 999px;
+  border: 1px solid #cfd8e0;
+  background: #f4f7fa;
+  color: #42566a;
+}
+.badge.ok { background: var(--accent-bg); border-color: #bfe6d0; color: var(--accent) }
+.badge.warn { background: var(--warn-bg); border-color: var(--warn-line); color: var(--warn) }
+.badge.bad { background: #fdecec; border-color: var(--bad-line); color: var(--bad) }
+.notice { border-radius: 10px; padding: .6rem .7rem; font-size: .82rem; border: 1px solid var(--line) }
+.notice.warn { background: var(--warn-bg); border-color: var(--warn-line); color: var(--warn) }
+.notice.bad { background: var(--bad-bg); border-color: var(--bad-line); color: var(--bad) }
+.notice.ok { background: var(--accent-bg); border-color: #bfe6d0; color: var(--accent) }
+.notice.info { background: #eef3f8; border-color: #cfdcea; color: #33526f }
+.tabs { display: flex; gap: .3rem; overflow-x: auto; scrollbar-width: none; padding-bottom: .1rem }
+.tabs::-webkit-scrollbar { display: none }
+.tabs button {
+  flex: 0 0 auto; min-height: 0; padding: .4rem .7rem; font-size: .8rem;
+  color: var(--ink-2); background: #fff; border: 1px solid var(--line-2); border-radius: 999px;
+}
+.tabs button[aria-selected="true"] { color: #fff; background: var(--chrome); border-color: var(--chrome) }
+.stat { background: var(--card); border: 1px solid var(--line); border-radius: var(--r); padding: .55rem .65rem }
+.stat b { display: block; font-size: 1.18rem }
+.stat span { font-size: .66rem; color: var(--ink-3); text-transform: uppercase; letter-spacing: .04em }
+.bar { display: flex; gap: .2rem; margin-top: .35rem }
+.bar i { height: 5px; flex: 1; border-radius: 999px; background: var(--line-2) }
+.bar i.on { background: var(--chrome) }
+table { width: 100%; border-collapse: collapse; font-size: .84rem }
+th, td { text-align: left; padding: .45rem .4rem; border-bottom: 1px solid var(--line) }
+th { font-size: .66rem; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-3) }
+tbody tr { cursor: pointer }
+tbody tr:hover td { background: #fbfcfd }
+.empty { text-align: center; color: var(--ink-3); padding: 1.6rem 1rem; font-size: .88rem }
+.skel { background: linear-gradient(90deg, #eef1f4 25%, #f7f9fa 50%, #eef1f4 75%); background-size: 200% 100%; animation: sk 1.2s infinite; border-radius: 8px; height: 2.6rem }
+@keyframes sk { to { background-position: -200% 0 } }
+@media (prefers-reduced-motion: reduce) { .skel { animation: none } }
+.sheet { position: fixed; inset: 0; background: rgba(11, 15, 20, .45); display: none; align-items: flex-end; z-index: 20 }
+.sheet.on { display: flex }
+.sheet > div {
+  background: var(--card); width: 100%; max-height: 88vh; overflow: auto;
+  padding: 1rem .95rem calc(1rem + env(safe-area-inset-bottom));
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+}
+@media (min-width: 44rem) { .sheet { align-items: center; justify-content: center } .sheet > div { max-width: 40rem; border-radius: var(--r-lg) } }
+.toast {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: 1rem; z-index: 30;
+  background: var(--chrome); color: #fff; font-size: .82rem; padding: .55rem .8rem; border-radius: 999px;
+  box-shadow: 0 10px 30px -12px rgba(0, 0, 0, .6); max-width: 92vw;
+}
+.chrome { background: var(--chrome); color: #fff; padding: .8rem 1rem; position: sticky; top: 0; z-index: 10 }
+.chrome .in { max-width: 60rem; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; gap: .6rem; flex-wrap: wrap }
+.chrome b { font-size: .95rem }
+.chrome a, .chrome button.sec { color: var(--link); font-size: .78rem; background: none; border: 0; text-decoration: none; min-height: 0; padding: .2rem }
+main { padding: 1rem; border-radius: var(--r-lg) var(--r-lg) 0 0; margin-top: .4rem; background: var(--bg) }
+main > .wrap { max-width: 60rem; margin: 0 auto }
+main > .wrap.narrow { max-width: 34rem }
+.hide { display: none !important }
+.only-mobile { display: initial }
+@media (min-width: 44rem) { .only-mobile { display: none } }
+/* operator console is read a lot at night and on a laptop: it may go dark */
+@media (prefers-color-scheme: dark) {
+  body.dark { --bg: #0b0f14; --card: #131b23; --line: #22303c; --line-2: #2c3d4c; --ink: #e7edf3; --ink-2: #c2cfd9; --ink-3: #8fa0af; --warn-bg: #2a2410; --bad-bg: #2a1416; --accent-bg: #10291e }
+  body.dark input, body.dark select, body.dark textarea { background: #0e151b; color: var(--ink); border-color: var(--line-2) }
+  body.dark .badge { background: #182430; border-color: #2c3d4c; color: #c2cfd9 }
+  body.dark tbody tr:hover td { background: #16202a }
+  body.dark button.sec, body.dark .sm { background: #182430; color: var(--ink); border-color: #2c3d4c }
+  body.dark button { background: #e7edf3; color: #0b0f14 }
+  body.dark button.ok { background: var(--accent); color: #fff }
+}
+main { padding-top: 0 }
+.sheet-in { padding: 1.1rem }
+.amount { font-size: 2.1rem; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; margin: .1rem 0 0 }
+.who { font-size: .95rem; margin: .1rem 0 0 }
+.state { text-align: center; padding: 1.4rem .4rem .2rem }
+.state svg { width: 52px; height: 52px }
+.post { font-size: .78rem; color: var(--ink-3); margin-top: .55rem }
+.acts { display: grid; gap: .45rem; margin-top: .8rem }
+@media (min-width: 30rem) { .acts { grid-template-columns: 1fr 1fr } }
+.spin { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.4); border-top-color: #fff; border-radius: 50%; animation: sp .8s linear infinite; vertical-align: -2px }
+@keyframes sp { to { transform: rotate(1turn) } }
+</style>
+</head>
+<body>
+<div class="chrome"><div class="in"><b id="brand">ZimLink</b><a href="/a">dashboard</a></div></div>
+<main><div class="wrap narrow">
+<div class="card sheet-in">
+  <p class="muted" id="doing" style="margin:0">Confirming an order</p>
+  <h1 id="head">Working it out…</h1>
+  <p class="amount hide" id="amt"></p>
+  <p class="who hide" id="who"></p>
+  <div id="body"></div>
+  <div class="acts hide" id="acts"></div>
+  <p class="post" id="post"></p>
+</div>
+<p class="muted" style="text-align:center">This page changes nothing on its own — your browser sends the confirmation. Opening, previewing or scanning the link cannot mark anything paid, which is why it is safe to paste anywhere.</p>
+</div></main>
+
+<noscript>
+  <div class="wrap narrow" style="padding:0 1rem">
+    <div class="card">
+      <h3>JavaScript is off</h3>
+      <p class="muted">Press the button to confirm this order. It does exactly what the automatic step would have done.</p>
+      <form method="post" action="/api/mark">
+        <input type="hidden" name="cap" id="nscap" value="">
+        <button class="ok" type="submit" style="width:100%">Confirm by button</button>
+      </form>
+    </div>
+  </div>
+</noscript>
+
+<script>
+var S = /*__ZIMLINK_CONFIRM__*/null || { state: 'expired' };
+var q = function (s) { return document.querySelector(s); };
+function esc(x) { return String(x == null ? '' : x).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
+var ICON = {
+  ok: '<svg viewBox="0 0 48 48" fill="none" stroke="#0b5b34" stroke-width="3" stroke-linecap="round"><circle cx="24" cy="24" r="21" stroke-opacity=".25"/><path d="M15 24l6 6 12-13"/></svg>',
+  wait: '<svg viewBox="0 0 48 48" fill="none" stroke="#8a5b00" stroke-width="3" stroke-linecap="round"><circle cx="24" cy="24" r="21" stroke-opacity=".25"/><path d="M24 14v11l7 4"/></svg>',
+  bad: '<svg viewBox="0 0 48 48" fill="none" stroke="#b00020" stroke-width="3" stroke-linecap="round"><circle cx="24" cy="24" r="21" stroke-opacity=".25"/><path d="M18 18l12 12M30 18L18 30"/></svg>'
+};
+function done(icon, head, body, badge) {
+  q('#doing').innerHTML = badge || 'Result';
+  q('#head').textContent = head;
+  q('#body').innerHTML = '<div class="state">' + ICON[icon] + '</div><p class="muted">' + body + '</p>';
+}
+function post(mark) {
+  q('#post').innerHTML = '<span class="spin"></span> sending to your store…';
+  fetch('/api/mark', {
+    method: 'POST', credentials: 'same-origin',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ cap: S.cap })
+  }).then(function (r) { return r.text().then(function (t) { var j = null; try { j = JSON.parse(t); } catch (e) {} return { s: r.status, j: j }; }); })
+    .then(function (res) {
+      var j = res.j || {};
+      if (!j.ok) { q('#post').innerHTML = '<span style="color:var(--bad)">' + esc(j.error || 'could not reach the server') + '</span>' + (mark ? ' — <a href="' + mark + '">open the dashboard instead</a>' : ''); return; }
+      q('#amt').classList.add('hide'); q('#who').classList.add('hide');
+      done('ok', j.label || (j.status === 'paid' ? 'Marked paid' : 'Done'),
+        esc(S.code || '') + ' is now <b>' + esc(j.status || S.want) + '</b>. The buyer keeps the payment details printed on their slip, so nothing you just did can change what they were told to pay.',
+        'Confirmed');
+      if (j.undo_url) {
+        q('#acts').classList.remove('hide');
+        q('#acts').innerHTML = '<button class="sec" id="undo">That was a mistake — undo</button>';
+        q('#undo').onclick = function () {
+          this.disabled = true;
+          fetch('/api/mark', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ cap: j.undo_url.split('/c/')[1] }) })
+            .then(function (r) { return r.json(); }).then(function (u) {
+              if (u.ok) done('wait', 'Reopened', 'The order is back to <b>' + esc(u.status) + '</b>, and you have 15 minutes to change your mind again.', 'Undone');
+              else { alert(u.error || 'could not undo'); }
+              q('#acts').classList.add('hide');
+            });
+        };
+      } else q('#acts').classList.add('hide');
+      setTimeout(function () { try { navigator.vibrate && navigator.vibrate(30); } catch (e) {} }, 60);
+    })
+    .catch(function () { q('#post').innerHTML = '<span style="color:var(--bad)">No reply from the server — the button below still works.</span>'; });
+}
+
+(function boot() {
+  var ns = q('#nscap'); if (ns) ns.value = S.cap || '';
+  if (S.shop) q('#brand').textContent = S.shop;
+  if (S.state === 'expired') {
+    done('bad', 'This link has expired', 'Confirm links live for 72 hours and each state can only be confirmed once. Open <a href="/a">your dashboard</a> and tap Confirm on the order — it does exactly the same thing, and it never expires.', 'Nothing to do');
+    q('#post').textContent = 'Nothing was changed.';
+    return;
+  }
+  if (S.state === 'missing') {
+    done('bad', 'Order not found', 'It may have been archived with the store’s older records. If the buyer paid, they are looking at their own slip with your number on it, so the money is not lost — check your account.', 'Nothing to do');
+    return;
+  }
+  q('#amt').classList.remove('hide');
+  q('#amt').textContent = (Number(S.amount) || 0).toFixed(2) + ' ' + (S.currency || 'USD');
+  q('#who').classList.remove('hide');
+  q('#who').innerHTML = esc(S.buyer || 'buyer') + (S.rail ? ' · via ' + esc(S.rail) : '') + ' · <span class="mono">' + esc(S.code || '') + '</span>';
+  if (S.state === 'already') {
+    done('ok', 'Already ' + (S.want === 'cancelled' ? 'cancelled' : 'paid'), 'This order was settled on ' + esc(String(S.marked_at || '').slice(0, 16).replace('T', ' ')) + ' UTC. Tapping again changes nothing, so nothing was changed now.', 'No change');
+    return;
+  }
+  q('#doing').textContent = S.want === 'cancelled' ? 'Cancelling an order' : 'Confirming an order';
+  q('#head').textContent = S.want === 'cancelled' ? 'Cancel ' + (S.code || 'this order') + '?' : 'Mark ' + (S.code || 'this order') + ' paid?';
+  q('#acts').classList.remove('hide');
+  q('#acts').innerHTML = '<button class="ok" id="yes">Yes — ' + (S.want === 'cancelled' ? 'cancel it' : 'mark paid') + '</button>'
+    + '<button class="sec" id="no">Not now</button>';
+  q('#post').innerHTML = 'Your browser can send it now, or you can press the button — same request, one tap either way.';
+  q('#yes').onclick = function () { this.disabled = true; post(S.store_url); };
+  q('#no').onclick = function () { done('wait', 'Left as it was', 'Nothing was sent. The order stays ' + esc(S.want === 'cancelled' ? 'live' : 'awaiting payment') + ' and this link still works for ' + 'the rest of its 72 hours.', 'Skipped'); q('#acts').innerHTML = '<a class="sm" href="/a" style="text-align:center;text-decoration:none;padding:.6rem;border:1px solid var(--line-2);border-radius:10px;display:block">Open my dashboard</a>'; };
+  // one tap total: fire it automatically unless the merchant just arrived with
+  // the page open in a preview (visibilitychange covers the scanned-bot case,
+  // and the button is there if the auto-send is refused)
+  if (!document.hidden) setTimeout(function () { var b = q('#yes'); if (b && !b.disabled) { b.textContent = 'Sent ✓ — undo below if wrong'; b.disabled = true; post(S.store_url); } }, 260);
+})();
+</script>
+</body>
+</html>

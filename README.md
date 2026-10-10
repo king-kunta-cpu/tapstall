@@ -46,10 +46,14 @@ queue, no invoice to send.
 ```
 worker/core.js        price + menu parsing, the single source of truth (unit-tested)
 worker/worker.js      the Worker: routes, KV, cron, webhooks
-pages/*.html          storefront, onboarding, dashboard, fees calculator, landing
+pages/kit.css         the one design language both suites are drawn from
+pages/src/*.html      authored pages (onboard, admin, confirm, renew, ops)
+pages/*.html          the shipped ones: storefront, onboarding, dashboard, fees, landing
 pages/public/         static mirror for GitHub Pages (+ _headers, _redirects, sample CSV)
-tests/core.test.mjs   18 unit tests on the money and the parser
-tests/live.test.mjs   12 tests that run the real handler + cron against a stub KV
+scripts/ui_kit.py     inlines kit.css into every page; `check` is the drift gate
+tests/core.test.mjs   28 unit tests on the money and the parser
+tests/live.test.mjs   34 tests that run the real handler + cron against a stub KV
+tests/pages.test.mjs  14 tests on the shipped HTML itself (no browser needed)
 scripts/deploy.sh     one command: tests → KV → templates → bundle → deploy → triggers → self-check
 scripts/build_bundle.sh   inlines core.js into .build/worker.js, ESM syntax check
 scripts/cf_publish.py     dependency-free publisher (fallback when wrangler is absent)
@@ -107,6 +111,63 @@ curl -X PUT --data-binary @pages/store.html \
    land instantly; fields that move money or buyer data queue for 15 minutes,
    are cancellable inside that window, and every confirmation reply carries a
    15-minute undo link.
+
+## The two suites
+
+Both are plain HTML files with the kit inlined and their own inline script. No
+framework, no build, no CDN — a page has to survive a 2G reconnect, a WhatsApp
+in-app browser, a sandboxed link preview and a KV read, and 6 KB gzipped does
+that. The Worker serves them out of KV (`tpl:*`), so re-skinning a screen is one
+`PUT` instead of a deploy.
+
+**Merchant side** — `/onboard` (4 steps, validated field by field, showing the
+odd-cents and surcharge arithmetic on a live buyer card *before* the merchant
+commits to it) · `/s/<handle>` (the buyer's storefront) · `/c/<capability>` (the
+one-tap confirm page) · `/renew/<token>` (plan, price, pay-by-EcoCash reference
+box) · `…/a` (the dashboard: Orders · Menu · Store settings · Plan · Share ·
+Log & security).
+
+**Operator side** — `/ops`, same origin, same Worker, cookie session. One screen
+per job: KPI strip and attention queue (nothing is blocked, here is what wants a
+look); a searchable tenant table with a per-tenant drawer carrying every lever
+(+7d, +30d, grant a year, reset to free, pause, reinstate, clear a queued
+settings change, clear filed references, issue a dashboard link, revoke every
+link and key); the template editor, which publishes to KV at once and restores
+from `git main` in one press; the health panel (the Worker's own self-test, the
+cron heartbeat, the Pages mirror, the last CI line); and a change log that shows
+merchant writes masked next to operator writes attributed.
+
+Three rules hold it together, and each is tested:
+
+* **Nothing on either suite is required for a customer to be onboarded, to order,
+  or to be paid.** The console is oversight. A merchant's own recovery path
+  ("Lost your link?") never routes through the operator, which is what keeps the
+  no-participation rule true.
+* **Every lever needs a second click.** `POST /ops/api/*` mutations refuse
+  without `x-zimlink-confirm: 1`, which a stray `<img>` cannot send, and each one
+  writes both the operator log and the store's own log — so "was that us?" has an
+  answer in the merchant's dashboard.
+* **A sign-in is a cookie, never a URL.** `/ops/login` exchanges the platform
+  secret for a 12-hour `HttpOnly SameSite=Strict` session cap; signing out bumps a
+  generation number in KV, which ends every console session on the platform,
+  because a stateless cap would otherwise stay valid until it expired. Rotating
+  `ADMIN_SECRET` still kills them instantly.
+
+The confirm page is the friction compromise: a GET on `/c/…` renders an inert
+document and *the browser* POSTs it once, only if the tab is actually visible
+(`document.hidden` is false), so link-preview bots and headless fetches cannot
+pull the trigger, and the merchant still taps exactly one thing.
+
+`tests/pages.test.mjs` exists because nothing else looks at these files: no
+bundler, no linter, and a typo in an element id only appears as a blank panel on
+a merchant's phone. It compiles each page's script, proves every `#id` the script
+reaches for is defined, proves every endpoint a page calls is a route the Worker
+serves, and proves every console button names an action the Worker implements. It
+caught four real bugs on its first run — a `await hash(x).slice()` precedence
+mistake that 500-ed the Templates panel, `notify`/`link` falling through the lever
+dispatch to `unknown action` (dead buttons), a lost `<div id="list">` (the orders
+list would not have rendered at all), and a duplicate `id="tabs"` that hung the
+tab bar's handler off a Show/Hide button.
 
 ## Merchant authority (why a shared link cannot burn the shop down)
 
@@ -180,17 +241,23 @@ waiting on a clock (the cron heartbeat), and the deliberate limits.
 
 ## Verified
 
-`node --test tests/` → 52 pass (28 unit on `core.js`, 24 driving the real
-bundled Worker against an in-memory KV: the full journey plus the authority
-model — forged/expired/revoked codes, inert GETs, the 15-minute hold, masked
-audit, cross-origin refusal). Deployed and exercised on the real Worker:
+`node --test tests/` → **76 pass** (28 unit on `core.js`, 34 driving the real
+bundled Worker against an in-memory KV — the full journey plus the authority
+model: forged/expired/revoked codes, inert GETs, the 15-minute hold, masked
+audit, cross-origin refusal, and now every `/ops` gate, lever and template rule;
+14 on the shipped HTML — script compiles, ids resolve, endpoints routed, console
+buttons backed by Worker actions). Deployed and exercised on the real Worker:
 two tenants (Harare/USD/EcoCash, Durban/ZAR/PayShap), order → one-tap paid,
 cross-tenant isolation, expiry → cron suspension → 503 → webhook → reinstated
 (`plan: annual`, 746 days). `/__selftest` reports bindings, all five templates,
-pricing, and a `secret_leak_check`. `scripts/prod_check.sh` → 88 assertions
-against the live Worker per tenant (88/88 on both demo tenants), covering the
-crawler prefetch, the 405s, the CORS split, the 15-minute hold, masked audit,
-revocation, self-serve recovery and cross-tenant refusal.
+pricing, and a `secret_leak_check`. `scripts/prod_check.sh` → 100 assertions
+across nine sections against the live Worker (88/88 on both demo tenants at
+v0.3.0), covering the crawler prefetch, the 405s, the CORS split, the
+15-minute hold, masked audit, revocation, self-serve recovery, cross-tenant
+refusal and — from v0.4.0 — the two consoles: money pages present in KV, `/ops`
+refusing an anonymous reader, the cookie's flags, a lever needing the confirm
+header, and sign-out actually ending the session. The version assertion reads
+`VERSION` out of `worker/worker.js`, so it can never go stale again.
 
 Known gaps: the Flutterwave hosted-link slug `zimlink` is a placeholder until
 an account exists (renewal works through the webhook and manual reference

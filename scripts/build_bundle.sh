@@ -29,7 +29,7 @@ open(sys.argv[1], "w", encoding="utf-8").write(out + "\n")
 print("bundle: worker.js + core.js inlined (%d lines, %d bytes)" % (len(out.splitlines()), len(out)))
 PYEOF
 
-for f in store.html onboard.html admin.html; do cp "pages/$f" "$OUT/assets/$f"; done
+for f in store.html onboard.html admin.html confirm.html renew.html ops.html; do cp "pages/$f" "$OUT/assets/$f"; done
 for f in index.html fees.html _headers; do [[ -f "pages/public/$f" ]] && cp "pages/public/$f" "$OUT/assets/$f" || true; done
 if ls pages/public/data/*.csv >/dev/null 2>&1; then
   mkdir -p "$OUT/assets/data" && cp pages/public/data/*.csv "$OUT/assets/data/"

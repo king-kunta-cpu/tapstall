@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b0f14">
+<title>ZimLink — set up your WhatsApp order desk</title>
+<meta name="description" content="A store link for your WhatsApp orders. Menu from your Google Sheet, payment references that identify themselves, changes you make yourself. Free for 60 days.">
+<style>
+/*__KIT__*/
+main { background: var(--bg) }
+.steps { display: flex; gap: .3rem; margin: .1rem 0 .8rem }
+.steps i { flex: 1; height: 4px; border-radius: 999px; background: var(--line-2) }
+.steps i.on { background: var(--chrome) }
+.steps i.now { background: var(--accent) }
+.f { margin: .55rem 0 }
+.f .help { font-size: .72rem; color: var(--ink-3); margin-top: .2rem }
+.f.err input, .f.err select { border-color: var(--bad-line); background: var(--bad-bg) }
+.f .msg { color: var(--bad); font-size: .72rem; margin-top: .2rem; display: none }
+.f.err .msg { display: block }
+h1 small { display: block; font-size: .8rem; font-weight: 500; color: var(--ink-3); margin-top: .25rem }
+.nav { display: flex; gap: .5rem; margin-top: .9rem; align-items: center }
+.nav .grow { flex: 1 }
+.opt { display: grid; gap: .3rem; margin: .3rem 0 }
+.opt label { display: flex; gap: .5rem; align-items: flex-start; font: inherit; color: inherit; font-weight: 500; padding: .5rem .6rem; border: 1px solid var(--line-2); border-radius: 10px; cursor: pointer; margin: 0 }
+.opt label.on { border-color: var(--chrome); background: #fff; box-shadow: var(--shadow) }
+.opt input { width: auto; margin-top: .2rem }
+.opt span { font-size: .82rem }
+.opt em { display: block; font-style: normal; color: var(--ink-3); font-size: .72rem }
+.switch { display: flex; align-items: center; justify-content: space-between; gap: .6rem; border: 1px solid var(--line-2); border-radius: 10px; padding: .5rem .6rem; font-size: .84rem }
+.live { text-align: center; padding: 1rem .4rem .3rem }
+.live svg { width: 56px; height: 56px }
+.kv { display: grid; grid-template-columns: 1fr auto; gap: .3rem .6rem; font-size: .85rem }
+.kv div:nth-child(even) { text-align: right; font-variant-numeric: tabular-nums }
+.link { display: block; text-align: center; border: 1px dashed var(--line-2); border-radius: 10px; padding: .55rem; font-family: var(--mono); font-size: .8rem; text-decoration: none; margin-top: .4rem }
+.preview { border: 1px solid var(--line); border-radius: var(--r); padding: .7rem; background: linear-gradient(180deg, #fff, #fbfcfd) }
+.preview .ph { height: 2.4rem; border-radius: 10px; background: var(--chrome); color: #fff; display: flex; align-items: center; padding: 0 .6rem; font-weight: 600; font-size: .9rem; margin-bottom: .5rem }
+.preview .row2 { display: flex; justify-content: space-between; font-size: .82rem; padding: .3rem 0; border-bottom: 1px solid var(--line) }
+@media (max-width: 26rem) { .grid.c2 { grid-template-columns: 1fr } }
+</style>
+</head>
+<body>
+<div class="chrome"><div class="in"><b>ZimLink</b><span><a href="/fees">what it costs you</a> · <a href="#" id="restoreLn">I already have a store</a></span></div></div>
+<main><div class="wrap narrow">
+<form id="w" novalidate>
+  <div class="steps"><i class="on"></i><i></i><i></i><i></i></div>
+  <p class="muted" id="stepLbl" style="margin:0 0 .5rem">Step 1 of 4 · who you are</p>
+
+  <!-- 1 · identity -->
+  <div class="card step" data-s="0">
+    <h1>Put your orders on one link<small>Type the shop’s name. Everything else on this page you can change yourself later, from the dashboard — no one has to do it for you.</small></h1>
+    <div class="f" data-f="shop_name"><label for="shop_name">Shop name</label><input id="shop_name" name="shop_name" autocomplete="organization" placeholder="Mama Too Catering"><p class="msg">Two characters or more.</p></div>
+    <div class="f" data-f="handle"><label for="handle">Your link</label>
+      <div class="row"><input id="handle" name="handle" pattern="[a-z0-9-]{2,30}" autocomplete="off" spellcheck="false" placeholder="mamatoe" style="flex:1"><span class="mono" id="handleHost">zimlink…workers.dev/s/</span></div>
+      <p class="help">2–30 characters, lowercase, digits and dashes. This is what you paste in your WhatsApp bio.</p><p class="msg">Taken, or not allowed — try another.</p></div>
+    <div class="f" data-f="whatsapp"><label for="whatsapp">WhatsApp buyers reach you on</label><input id="whatsapp" name="whatsapp" inputmode="tel" autocomplete="tel" placeholder="263771234567"><p class="help">Country code, digits only. Order summaries are addressed to it.</p><p class="msg">Needs 9–15 digits including the country code.</p></div>
+    <div class="grid c2">
+      <div class="f" data-f="location"><label for="location">Where you are <span class="muted" style="font-weight:400">(optional)</span></label><input id="location" name="location" placeholder="Avondale, Harare"></div>
+      <div class="f" data-f="hours"><label for="hours">Hours <span class="muted" style="font-weight:400">(optional)</span></label><input id="hours" name="hours" placeholder="Tue–Sat 9–6"></div>
+    </div>
+    <div class="f" data-f="owner_email"><label for="owner_email">Owner email <span class="muted" style="font-weight:400">(recommended)</span></label><input id="owner_email" name="owner_email" type="email" autocomplete="email" placeholder="you@example.com">
+      <p class="help">Used for two things only: your welcome note, and proving it is you if you lose your dashboard link. Never shown to buyers.</p><p class="msg">That does not look like an email.</p></div>
+    <div class="nav"><span class="grow"></span><button type="button" data-next>Next</button></div>
+  </div>
+
+  <!-- 2 · menu -->
+  <div class="card step hide" data-s="1">
+    <h1>Your menu, in your sheet<small>One row per item. Prices change when you edit the sheet — about two minutes, no one in the middle, no app to install.</small></h1>
+    <div class="f" data-f="feed_url"><label for="feed_url">Google Sheet link (shared as “Anyone with the link — Viewer”)</label><input id="feed_url" name="feed_url" spellcheck="false" placeholder="https://docs.google.com/spreadsheets/d/…/edit#gid=0">
+      <p class="help">A direct <span class="mono">.csv</span> URL works too — including a raw GitHub file, which is the free option if you would rather keep the menu in a repo.</p><p class="msg">Must start with http:// or https://</p></div>
+    <div class="notice info" style="margin:.5rem 0">
+      <b>Columns</b> — first row, in this order, extras left blank:
+      <p class="mono" style="margin:.3rem 0 0">id,name,category,price,currency,options,addons,stock,popular</p>
+      <p class="tiny" style="margin:.3rem 0 0">options: <span class="mono">Size:Small,Large:2|Spice:mild,hot</span> · addons: <span class="mono">Cheese:1.5|Fried egg:0.5</span> · stock: <span class="mono">yes/no</span> · popular: <span class="mono">1</span></p>
+    </div>
+    <div class="row" style="margin-top:.5rem">
+      <button type="button" class="sec" id="dlSample">Download the sample CSV</button>
+      <button type="button" class="sec" id="useSample">Use it, I’ll edit later</button>
+    </div>
+    <p class="muted" id="sheetHint" style="margin-top:.4rem">No sheet yet? Grab the sample and paste its link in — it loads 4 items so you can see the store working, then swap it for your own whenever you like.</p>
+    <h3 style="margin-top:.9rem">How buyers pay</h3>
+    <div class="f" data-f="rail"><label for="rail">Rail</label><select id="rail" name="rail"></select>
+      <p class="help" id="railHelp"></p></div>
+    <div class="f hide" data-f="pay_account" id="acctRow"><label for="pay_account">The number or account they send to</label><input id="pay_account" name="pay_account" placeholder="0771234567" autocomplete="off">
+      <p class="help">This is what appears on the buyer’s slip. If it is wrong, fix it yourself in the dashboard — changes to it take 15 minutes and can be cancelled, so a copied link cannot reroute your money quietly.</p></div>
+    <div class="nav"><button type="button" class="sec" data-back>Back</button><span class="grow"></span><button type="button" data-next>Next</button></div>
+  </div>
+
+  <!-- 3 · money -->
+  <div class="card step hide" data-s="2">
+    <h1>Money rules<small>Every one of these is yours to change later, from the dashboard, in the same place.</small></h1>
+    <div class="grid c2">
+      <div class="f" data-f="currency"><label for="currency">Currency</label><input id="currency" name="currency" maxlength="3" value="USD" placeholder="USD"></div>
+      <div class="f" data-f="tax_pct"><label for="tax_pct">VAT / tax %</label><input id="tax_pct" name="tax_pct" inputmode="decimal" value="15.5" placeholder="15.5"></div>
+      <div class="f" data-f="zig_rate"><label for="zig_rate">ZiG per USD <span class="muted" style="font-weight:400">(0 = hide)</span></label><input id="zig_rate" name="zig_rate" inputmode="decimal" placeholder="27.5"></div>
+      <div class="f" data-f="surcharge_mode"><label for="surcharge_mode">Payment cost</label><select id="surcharge_mode" name="surcharge_mode"><option value="absorb">You absorb it</option><option value="pass">Add it to the order</option></select></div>
+      <div class="f" data-f="delivery_fee"><label for="delivery_fee">Delivery fee</label><input id="delivery_fee" name="delivery_fee" inputmode="decimal" value="2" placeholder="0"></div>
+      <div class="f" data-f="free_over"><label for="free_over">Free delivery over</label><input id="free_over" name="free_over" inputmode="decimal" placeholder="20"></div>
+    </div>
+    <div class="switch"><span>Add odd cents so a payment identifies itself<b class="muted" style="display:block;font-weight:400;font-size:.72rem">R13.47 not R13.50 — you can match a transfer without asking “was that you?”</b></span><input type="checkbox" id="unique_change" checked style="width:auto"></div>
+    <div class="switch" style="margin-top:.4rem"><span>Ask buyers before keeping their number<b class="muted" style="display:block;font-weight:400;font-size:.72rem">POPIA / Zim data-practice: a tick they can leave alone, and you lose nothing.</b></span><input type="checkbox" id="require_optin" style="width:auto"></div>
+    <div class="f" data-f="tagline" style="margin-top:.6rem"><label for="tagline">Line under your shop name <span class="muted" style="font-weight:400">(optional)</span></label><input id="tagline" name="tagline" placeholder="Food for weddings and funerals, Harare"></div>
+    <div class="f" data-f="logo"><label for="logo">Logo image URL <span class="muted" style="font-weight:400">(optional)</span></label><input id="logo" name="logo" placeholder="https://…"></div>
+    <div class="preview" style="margin-top:.7rem">
+      <div class="ph" id="pvName">Your shop</div>
+      <div class="row2"><span id="pvTag">—</span><span id="pvCur">USD</span></div>
+      <div class="row2"><span>2 items · delivery</span><b id="pvTot">—</b></div>
+      <div class="row2" style="border:0"><span id="pvRail">—</span><b id="pvPay">—</b></div>
+    </div>
+    <div class="nav"><button type="button" class="sec" data-back>Back</button><span class="grow"></span><button type="button" data-next>Next</button></div>
+  </div>
+
+  <!-- 4 · live -->
+  <div class="card step hide" data-s="3">
+    <div id="before">
+      <h1>Ready when you are</h1>
+      <div class="kv" id="summary"></div>
+      <p class="muted" style="margin-top:.6rem">Nothing is charged and nothing is scheduled. Your store goes live the moment you press the button; if the menu does not parse, it still goes live and tells you exactly why, so you can fix the sheet and reload.</p>
+      <div class="nav"><button type="button" class="sec" data-back>Back</button><span class="grow"></span><button type="submit" class="ok" id="go">Open my store</button></div>
+    </div>
+    <div id="after" class="hide">
+      <div class="live" id="liveIcon"></div>
+      <h1 id="doneHead" style="text-align:center">Your store is live</h1>
+      <p class="muted" id="doneNote" style="text-align:center"></p>
+      <a class="link" id="storeLink" href="#" target="_blank">—</a>
+      <div class="grid c2" style="margin-top:.6rem">
+        <button type="button" id="cpStore">Copy store link</button>
+        <button type="button" class="sec" id="openDash">Open dashboard</button>
+      </div>
+      <div class="grid c2" style="margin-top:.4rem">
+        <button type="button" class="sec" id="poster">QR poster for the counter</button>
+        <button type="button" class="sec" id="waShare">WhatsApp status text</button>
+      </div>
+      <div class="notice warn hide" id="feedWarn" style="margin-top:.7rem"></div>
+      <h3 style="margin-top:1rem">Save these two</h3>
+      <p class="muted" style="margin-top:0">The dashboard link opens a session on this device and expires after 7 days — by design, so a screenshot of it is not a permanent key to your shop. Lost it? “Lost your link?” on the dashboard remakes it from your email and payment details, with no one to ask.</p>
+      <a class="link" id="adminLink" href="#" >—</a>
+      <a class="link" id="renewLink" href="#">—</a>
+      <p class="muted" style="margin-top:.6rem">Free until <b id="freeUntil">—</b>. After that it is <b>60 USD a year</b>, once, and the store keeps the menu and history it already has.</p>
+    </div>
+  </div>
+</form>
+</div></main>
+<script>
+var q = function (s) { return document.querySelector(s); };
+var qa = function (s) { return Array.prototype.slice.call(document.querySelectorAll(s)); };
+function esc(x) { return String(x == null ? '' : x).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
+var RAILS = {}, step = 0, last = null;
+
+fetch('/rails').then(function (r) { return r.json(); }).then(function (j) {
+  RAILS = (j && j.rails) || {};
+  var sel = q('#rail');
+  sel.innerHTML = Object.keys(RAILS).map(function (k) { return '<option value="' + k + '">' + esc(RAILS[k].label) + '</option>'; }).join('');
+  sel.onchange = function () { railHelp(); paint(); };
+  railHelp(); paint();
+}).catch(function () { q('#railHelp').textContent = 'Could not load the rail list — the default (cash) is still fine.'; });
+
+function railHelp() {
+  var r = RAILS[q('#rail').value];
+  q('#acctRow').classList.toggle('hide', !!r && r.type === 'cod');
+  q('#railHelp').innerHTML = r ? esc(r.label) + (r.dial ? ' · dial ' + esc(r.dial) : '') + ' · costs you about '
+    + (((r.pct || 0) * 100).toFixed(1) + '% + ' + ((r.imtt || 0) * 100).toFixed(1) + '% tax on cash out')
+    + (r.type === 'auto' ? ' · confirms itself' : ' · you tick it off (a 15-second tap, and we make the odd cents identify the payer)') : '';
+}
+function val(k) { var e = q('[name="' + k + '"]'); return e ? e.value.trim() : ''; }
+function setErr(k, on, msg) {
+  var f = q('[data-f="' + k + '"]'); if (!f) return;
+  f.classList.toggle('err', !!on);
+  var i = f.querySelector('input,select'); if (i) i.setAttribute('aria-invalid', on ? 'true' : 'false');
+  if (msg) { var m = f.querySelector('.msg'); if (m) { m.textContent = msg; m.style.display = 'block'; } }
+}
+function slug(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 30); }
+var CHECK = {
+  shop_name: function (v) { return v.length >= 2 || 'Two characters or more.'; },
+  handle: function (v) { return /^[a-z0-9][a-z0-9-]{1,29}$/.test(v) || 'Use 2–30 lowercase letters, digits or dashes.'; },
+  whatsapp: function (v) { var d = v.replace(/\D/g, ''); return (d.length >= 9 && d.length <= 15) || 'Digits with the country code, e.g. 263771234567 or 27821234567.'; },
+  feed_url: function (v) { return /^https?:\/\/\S+$/.test(v) || 'Paste the sheet link (or a direct .csv link).'; },
+  owner_email: function (v) { return !v || /^[^@\s]+@[^@\s]+\.[a-zA-Z]{2,}$/.test(v) || 'Blank is allowed, but an email is how you get a lost link back without asking anyone.'; },
+  currency: function (v) { return /^[A-Za-z]{3}$/.test(v) || 'Three letters, e.g. USD or ZAR.'; },
+  tax_pct: function (v) { return !v || (Number(v) >= 0 && Number(v) <= 40) || '0–40.'; },
+  pay_account: function (v) { return !v || v.length <= 60 || 'Too long.'; },
+  logo: function (v) { return !v || /^https?:\/\/\S+$/.test(v) || 'A full image URL, or leave it blank.'; }
+};
+var STEPS = [['shop_name', 'handle', 'whatsapp', 'owner_email'], ['feed_url', 'pay_account', 'logo'], ['currency', 'tax_pct', 'pay_account'], []];
+
+function paint() {
+  qa('.step').forEach(function (el) { el.classList.toggle('hide', Number(el.dataset.s) !== step); });
+  qa('.steps i').forEach(function (el, i) { el.className = i < step ? 'on' : (i === step ? 'on now' : ''); });
+  q('#stepLbl').textContent = ['Step 1 of 4 · who you are', 'Step 2 of 4 · your menu and how you get paid', 'Step 3 of 4 · money rules', 'Step 4 of 4 · open it'][step];
+  q('#handleHost').textContent = location.host + '/s/';
+  // live preview of the buyer card, so the money rules are not abstract
+  q('#pvName').textContent = val('shop_name') || 'Your shop';
+  q('#pvTag').textContent = val('tagline') || ((RAILS[q('#rail').value] || {}).label || 'Order ahead') + ' · order ahead';
+  var cur = (val('currency') || 'USD').toUpperCase();
+  q('#pvCur').textContent = cur;
+  var sub = 5.5 * 2, tax = Number(val('tax_pct')) || 0;
+  var taxA = Math.round(sub * tax) / 100, fee = Number(val('delivery_fee')) || 0;
+  var tot = Math.round((sub + taxA + fee) * 100) / 100;
+  var r = RAILS[q('#rail').value] || {};
+  var cost = q('#surcharge_mode').value === 'pass' ? Math.round(tot * ((r.pct || 0) + (r.imtt || 0)) * 100) / 100 : 0;
+  var cents = q('#unique_change').checked ? (Math.round(tot * 100) % 97) / 100 : 0;
+  q('#pvTot').textContent = tot.toFixed(2) + ' ' + cur;
+  q('#pvPay').textContent = (tot + cents + cost).toFixed(2) + ' ' + cur;
+  q('#pvRail').textContent = (r.label || 'cash') + (cents ? ' · odd cents ' + cents.toFixed(2) : '') + (cost ? ' · + ' + cost.toFixed(2) + ' fee' : ' · fee absorbed');
+  if (step === 3) summary();
+  if (!q('#storeLink').dataset.set) q('#storeLink').href = location.protocol + '//' + location.host + '/s/' + (val('handle') || '...');
+}
+function checkStep() {
+  var ok = true;
+  (STEPS[step] || []).forEach(function (k) {
+    var f = CHECK[k]; if (!f) return;
+    var r = f(val(k)); if (r !== true) { setErr(k, true, typeof r === 'string' ? r : ''); ok = false; } else setErr(k, false);
+  });
+  if (step === 0 && val('handle')) {
+    fetch('/api/lookup?handle=' + encodeURIComponent(val('handle'))).then(function (r) {
+      if (r.status === 200) { setErr('handle', true, 'That link is taken. If it is yours, open your dashboard instead.'); }
+    }).catch(function () { });
+  }
+  return ok;
+}
+qa('[data-next]').forEach(function (b) { b.onclick = function () { if (checkStep()) { step = Math.min(3, step + 1); paint(); } }; });
+qa('[data-back]').forEach(function (b) { b.onclick = function () { step = Math.max(0, step - 1); paint(); }; });
+qa('input[name], select[name]').forEach(function (i) {
+  i.addEventListener('input', function () { var k = i.getAttribute('name'); if (CHECK[k] && q('[data-f="' + k + '"]').classList.contains('err')) CHECK[k](val(k)) === true && setErr(k, false); paint2(); });
+  i.addEventListener('change', paint2);
+});
+function paint2() {
+  var h = q('#handle'); if (h.value && step === 0) { h.value = slug(h.value); }
+  q('#handleHost').textContent = location.host + '/s/';
+  paint();
+}
+function summary() {
+  var rows = [
+    ['Link', location.host + '/s/' + (val('handle') || '…')],
+    ['Menu', val('feed_url') ? 'from your sheet' : 'not set'],
+    ['Rail', (RAILS[q('#rail').value] || {}).label || '—'],
+    ['Payout', val('pay_account') || 'not set — you can add it in the dashboard'],
+    ['Currency', (val('currency') || 'USD') + (Number(val('tax_pct')) ? ' · tax ' + val('tax_pct') + '%' : '')],
+    ['Delivery', (Number(val('delivery_fee')) || 0).toFixed(2) + (Number(val('free_over')) ? ' · free over ' + val('free_over') : '')],
+    ['Identify payments', q('#unique_change').checked ? 'yes — odd cents per order' : 'no'],
+    ['Buyer number', q('#require_optin').checked ? 'asked first' : 'kept by default'],
+  ];
+  q('#summary').innerHTML = rows.map(function (r) { return '<div>' + esc(r[0]) + '</div><div>' + esc(r[1]) + '</div>'; }).join('');
+}
+q('#dlSample').onclick = function () { location.href = '/data/sample-menu.csv'; };
+q('#useSample').onclick = function () {
+  q('#feed_url').value = location.origin + '/data/sample-menu.csv';
+  setErr('feed_url', false);
+  q('#sheetHint').innerHTML = 'Loaded the sample. Note: a sheet pointed at <i>this</i> host works for a demo; when you paste your own Google Sheet link in the dashboard, that becomes the menu and nothing else changes.';
+  paint2();
+};
+q('#restoreLn').onclick = function (e) { e.preventDefault(); location.href = '/a'; };
+
+q('#w').onsubmit = function (e) {
+  e.preventDefault();
+  if (!checkStep()) return;
+  var body = {
+    shop_name: val('shop_name'), handle: val('handle'), whatsapp: val('whatsapp').replace(/\D/g, ''),
+    location: val('location'), hours: val('hours'), tagline: val('tagline'), logo: val('logo'),
+    feed_url: val('feed_url'), rail: q('#rail').value, pay_account: val('pay_account'),
+    currency: (val('currency') || 'USD').toUpperCase(), tax_pct: Number(val('tax_pct')) || 0,
+    zig_rate: Number(val('zig_rate')) || 0, surcharge_mode: q('#surcharge_mode').value,
+    delivery_fee: Number(val('delivery_fee')) || 0, free_over: Number(val('free_over')) || 0,
+    unique_change: q('#unique_change').checked, require_optin: q('#require_optin').checked,
+    owner_email: val('owner_email')
+  };
+  var b = q('#go'); b.disabled = true; b.textContent = 'Opening…';
+  fetch('/api/register', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+    .then(function (r) { return r.text().then(function (t) { var j = null; try { j = JSON.parse(t); } catch (e) {} return { s: r.status, j: j }; }); })
+    .then(function (res) {
+      b.disabled = false; b.textContent = 'Open my store';
+      var j = res.j || {};
+      if (!(res.s >= 200 && res.s < 300) || !j.ok) {   // register answers 201, not 200
+        if (j.handle || /handle/.test(String(j.error || ''))) setErr('handle', true, j.error || 'taken');
+        if (/feed/.test(String(j.error || ''))) setErr('feed_url', true, j.error);
+        if (/WhatsApp/i.test(String(j.error || ''))) setErr('whatsapp', true, j.error);
+        step = j.error && /handle/.test(j.error) ? 0 : (j.error && /feed/.test(j.error) ? 1 : 3); paint();
+        q('#feedWarn').classList.remove('hide'); q('#feedWarn').textContent = j.error || ('could not create the store (HTTP ' + res.s + ')');
+        return;
+      }
+      last = j;
+      q('#before').classList.add('hide'); q('#after').classList.remove('hide');
+      q('#doneHead').textContent = (j.products_loaded ? 'Your store is live' : 'Live, but the menu is empty');
+      q('#liveIcon').innerHTML = j.products_loaded
+        ? '<svg viewBox="0 0 48 48" fill="none" stroke="#0b5b34" stroke-width="3" stroke-linecap="round"><circle cx="24" cy="24" r="21" stroke-opacity=".22"/><path d="M15 24l6 6 12-13"/></svg>'
+        : '<svg viewBox="0 0 48 48" fill="none" stroke="#8a5b00" stroke-width="3" stroke-linecap="round"><circle cx="24" cy="24" r="21" stroke-opacity=".22"/><path d="M24 15v12M24 32v1"/></svg>';
+      q('#doneNote').textContent = j.note || '';
+      q('#storeLink').textContent = j.store_url; q('#storeLink').href = j.store_url; q('#storeLink').dataset.set = '1';
+      q('#adminLink').textContent = 'dashboard link — tap to open'; q('#adminLink').href = j.admin_url;
+      q('#renewLink').textContent = 'renew link (save it): ' + j.renew_url; q('#renewLink').href = j.renew_url;
+      q('#openDash').onclick = function () { location.href = j.admin_url; };
+      q('#cpStore').onclick = function () { navigator.clipboard && navigator.clipboard.writeText(j.store_url); this.textContent = 'Copied ✓'; };
+      q('#waShare').onclick = function () {
+        var txt = 'Order ' + (j.store_url) + ' — ' + val('shop_name') + '. Pick what you want, send the exact amount to ' + (val('pay_account') || 'my number on the page') + ', and the odd cents tell me it is you. No app, no login.';
+        if (navigator.clipboard) navigator.clipboard.writeText(txt).then(function () { q('#waShare').textContent = 'Copied — paste into your status ✓'; });
+      };
+      q('#poster').onclick = function () { poster(j.store_url, val('shop_name') || 'ZimLink store'); };
+      if (!j.products_loaded) {
+        q('#feedWarn').classList.remove('hide');
+        q('#feedWarn').innerHTML = '0 products. ' + esc(j.feed_error || 'Check the sheet is shared as “anyone with the link” and that row 1 is the header row.') + ' Fix the sheet, then press “Reload my menu” in the dashboard — the store keeps working meanwhile.';
+      }
+      q('#freeUntil').textContent = j.free_until ? new Date(j.free_until).toDateString() : '60 days';
+      qa('.steps i').forEach(function (el) { el.className = 'on'; });
+      q('#stepLbl').textContent = 'Done · yours to run';
+      history.replaceState({}, '', location.pathname);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    })
+    .catch(function () { b.disabled = false; b.textContent = 'Open my store'; q('#feedWarn').classList.remove('hide'); q('#feedWarn').textContent = 'No reply from the server — nothing was half-created, press again when the signal is back.'; });
+};
+
+function poster(url, name) {
+  var w = window.open('', '_blank');
+  if (!w) { alert('Allow pop-ups to print the poster'); return; }
+  w.document.write('<!doctype html><meta charset=utf-8><title>' + esc(name) + ' — QR</title>'
+    + '<body style="font:16px system-ui;margin:0;padding:2rem;text-align:center">'
+    + '<h1 style="font-size:1.7rem;margin:.2rem 0">' + esc(name) + '</h1>'
+    + '<p style="color:#555;margin:.2rem 0 1rem">Order on WhatsApp — no app, no login</p>'
+    + '<img alt="QR" src="https://api.qrserver.com/v1/create-qr-code/?size=420x420&data=' + encodeURIComponent(url) + '" style="width:min(70vw,420px)">'
+    + '<p style="font-family:ui-monospace,monospace;word-break:break-all">' + esc(url) + '</p>'
+    + '<p style="color:#777;font-size:.85rem">Print it, tape it to the counter or the fridge door. When the menu changes you edit your sheet — this poster stays right.</p>'
+    + '<script>window.onload=function(){window.print()}<' + '/script>');
+  w.document.close();
+}
+try { var saved = JSON.parse(sessionStorage.getItem('zl_onboard') || 'null'); if (saved) { Object.keys(saved).forEach(function (k) { var e = q('[name="' + k + '"]'); if (e) e.value = saved[k]; }); } } catch (e) { }
+setInterval(function () { try { var o = {}; qa('input[name],select[name]').forEach(function (i) { o[i.getAttribute('name')] = i.value; }); sessionStorage.setItem('zl_onboard', JSON.stringify(o)); } catch (e) { } }, 4000);
+paint();
+</script>
+</body>
+</html>

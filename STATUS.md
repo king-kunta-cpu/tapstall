@@ -136,6 +136,66 @@ then a *valid* key also `429` — and now asserted in the suite: the correct key
 (or a correct legacy `?token=` link) always gets in and clears the counter, and
 the lock only ever changes the answer given to a credential that is wrong.
 
+## The two UI suites — this round (2026-10-10, v0.4.0)
+
+The product sold itself fine and looked like three different products. Now there
+is one design language (`pages/kit.css`), five authored pages (`pages/src/`),
+and one generator (`scripts/ui_kit.py`) that inlines the kit into each shipped
+file — because a page must render with no network, in a sandboxed preview, on a
+2G handset, and the ~9 KB of kit is cheaper than any of those failure modes.
+`ui_kit.py check` is the drift gate: it runs in `deploy.sh --check`, in the real
+deploy before templates are published, and as a test.
+
+What is new:
+
+* `/onboard` — four steps (identity → menu + rail → money rules → live), per
+  field validation, a handle-taken check against `/api/lookup`, and a buyer card
+  that shows the odd-cents and surcharge arithmetic before anything is committed.
+  The success screen carries the store link, the dashboard link, the renew link,
+  a printable QR poster and the WhatsApp status text — the whole distribution
+  motion, at the moment of highest motivation. Draft state lives in
+  `sessionStorage`, so a dropped connection is not a lost form.
+* `/c/<capability>` — the one-tap page. Renders buyer, amount, rail; auto-POSTs
+  once, and only when `document.hidden` is false, so bots that prefetch links
+  still cannot confirm an order. `<noscript>` posts the same cap to the same
+  endpoint; `undo_url` gives 15 minutes; `already` / `expired` / `missing` are
+  three distinct states, not one error string.
+* `/renew/<token>` — days left, orders, GMV, the price for 365 days or a custom
+  term, `POST /api/checkout`, and a box for "I paid by EcoCash/cash — here is the
+  reference" that files against the store (`POST /api/renew-ref`, IP-throttled,
+  last 10 kept, 30-day TTL) and appears in the operator's attention queue as
+  `awaiting_ref`. Filing a reference switches nothing on by itself — the page
+  says so.
+* `/ops` — the console: KPI strip, attention queue, tenant table with a drawer
+  carrying the levers, template editor (publish to KV at once, restore from
+  `git main`), health (Worker self-test + cron heartbeat + Pages + last CI line),
+  and the change log. Every mutation needs `x-zimlink-confirm: 1`; every lever
+  writes the store's own log as well as the operator's.
+
+Four bugs the page tests caught before anything shipped — none of them visible
+to `node --test` as it stood:
+
+1. `await hash(x).slice(0, 8)` parses as `await (hash(x).slice(0, 8))` → the
+   Templates panel 500-ed.
+2. `notify` and `link` were handled *after* the lever dispatch chain, so they
+   matched its final `else` and answered `unknown action`: two dead buttons.
+3. Patching `admin.html` dropped `<div id="list"></div>`: the orders list would
+   not have rendered at all in the new dashboard.
+4. The new tab bar reused `id="tabs"`, which the pending-panel Show/Hide button
+   already owned: both handlers landed on the button, and the tabs did nothing.
+
+Two design changes that came out of testing rather than taste:
+
+* **`/ops/logout` revokes.** The session is a stateless signed cap, so deleting
+  the cookie was cosmetic — the cap stayed valid for 12 hours. Sign-out now bumps
+  `ops_gen` in KV (one write), which ends every console session on the platform.
+* **A dead cookie costs nothing.** An expired session cap hitting a gate used to
+  increment the same 12-try counter as a wrong secret, so twelve refreshes — or
+  twelve `prod_check` runs — would freeze the operator's own console for ten
+  minutes. The counter now only follows secret guesses at `/ops/login`; forging a
+  cookie is hopeless anyway, and the proof of the fix is six dead-cookie probes
+  followed by a wrong guess that still shows a full counter minus one.
+
 ## Also fixed on the way (found by the new tests, not by a customer)
 
 * **`publicStore` was a denylist and leaked the queued change.** Once `pending`

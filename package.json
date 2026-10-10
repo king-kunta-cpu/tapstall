@@ -1,16 +1,16 @@
 {
-  "name": "zimlink",
-  "private": true,
-  "version": "0.2.0",
-  "type": "module",
   "description": "Zero-touch WhatsApp storefront for Zimbabwe and South Africa (Cloudflare Worker + KV, $0 stack)",
-  "scripts": {
-    "test": "node --test tests/",
-    "build": "scripts/build_bundle.sh .build",
-    "deploy": "scripts/deploy.sh",
-    "check": "scripts/deploy.sh --check"
-  },
   "devDependencies": {
     "wrangler": "^3.100.0"
-  }
+  },
+  "name": "zimlink",
+  "private": true,
+  "scripts": {
+    "build": "scripts/build_bundle.sh .build",
+    "check": "scripts/deploy.sh --check",
+    "deploy": "scripts/deploy.sh",
+    "test": "node --test tests/"
+  },
+  "type": "module",
+  "version": "0.4.0"
 }

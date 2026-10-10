@@ -23,7 +23,8 @@ require_cmd curl jq python3 node
 if [[ "$MODE" == "--check" ]]; then
   check_workflows
   run_tests
-  ./scripts/build_bundle.sh /tmp/zl-dryrun >/dev/null && ok "dry run: tests pass, bundle builds"
+  ./scripts/ui_kit.py check
+  ./scripts/build_bundle.sh /tmp/zl-dryrun >/dev/null && ok "dry run: tests pass, ui kit inlined, bundle builds"
   exit 0
 fi
 load_secrets
@@ -52,8 +53,11 @@ STORES_ID=$(kv_id "$KV_STORES" STORES | tail -1 | tr -dc "a-f0-9")
 ORDERS_ID=$(kv_id "$KV_ORDERS" ORDERS | tail -1 | tr -dc "a-f0-9")
 say "stores=$STORES_ID  orders=$ORDERS_ID"
 
+# the shipped pages must be the generated ones, or KV would publish a stale UI
+./scripts/ui_kit.py check || die "pages/*.html are out of date with pages/src/ — run ./scripts/ui_kit.py and commit"
+
 say "templates → KV (hot-swappable: HTML edits need no redeploy)"
-kv_put_tpl "$STORES_ID" store onboard admin fees index sample-menu.csv
+kv_put_tpl "$STORES_ID" store onboard admin fees index confirm renew ops sample-menu.csv
 
 say "building bundle"
 ./scripts/build_bundle.sh .build
@@ -132,9 +136,9 @@ done
 curl -sf -A "Mozilla/5.0" --max-time 15 "$BASE/__ping" >/dev/null || die "worker did not answer /__ping"
 ok "worker live: $BASE"
 echo "--- /__selftest ---"
-curl -s -A "Mozilla/5.0" --max-time 30 "$BASE/__selftest" | jq '{version, kv_stores, kv_roundtrip, templates: {store: .tpl_store, onboard: .tpl_onboard, admin: .tpl_admin, fees: .tpl_fees, index: .tpl_index}, pricing_absorb: .pricing.fee_absorbed_by_merchant, products: (.csv|length), feed_url_ok: (.feed_url_sheet != null), secret_leak_check}'
+curl -s -A "Mozilla/5.0" --max-time 30 "$BASE/__selftest" | jq '{version, kv_stores, kv_roundtrip, templates: {store: .tpl_store, onboard: .tpl_onboard, admin: .tpl_admin, fees: .tpl_fees, index: .tpl_index, confirm: .tpl_confirm, renew: .tpl_renew, ops: .tpl_ops}, pricing_absorb: .pricing.fee_absorbed_by_merchant, products: (.csv|length), feed_url_ok: (.feed_url_sheet != null), secret_leak_check}'
 echo "--- routes ---"
-for r in / /onboard /fees /rails /data/sample-menu.csv; do
+for r in / /onboard /fees /rails /ops /data/sample-menu.csv; do
   printf '  %-9s %s\n' "$r" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$BASE$r")"
 done
 [[ "$MODE" == "--push" ]] && push_github

@@ -21,7 +21,7 @@ import {
   EDITABLE_FIELDS, SOFT_FIELDS, sign, adminStore,
 } from './core.js';
 
-const VERSION = '0.3.0';
+const VERSION = '0.4.0';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 const MAX_ORDERS_KEPT = 200;
@@ -123,10 +123,35 @@ async function route(req, url, env, ctx) {
   if ((m = p.match(/^\/c\/([A-Za-z0-9._-]{20,400})$/))) return confirmPage(env, m[1]);
 
   if (p === '/a') return adminEntry(req, url, env);
+
+  /* Platform operator console. Same-origin, cookie-session, and deliberately
+   * outside the public path set: no CORS, no caching, no links in it that move
+   * money without a POST. */
+  if (p === '/ops' || p === '/ops/') return opsPage(req, env);
+  if (p === '/ops/login') return req.method === 'POST' ? opsLogin(req, env) : json({ ok: false, error: 'method_not_allowed' }, 405, { Allow: 'POST' });
+  if (p === '/ops/logout') {
+    if (req.method !== 'POST') return json({ ok: false, error: 'method_not_allowed' }, 405, { Allow: 'POST' });
+    await endOpsSessions(env);
+    return withCookie(json({ ok: true, note: 'Every console session on this platform is ended now, not just this tab.' }), opsKillCookie());
+  }
+  if (p === '/ops/api/state') return opsGate(req, env, () => opsState(env));
+  if (p === '/ops/api/health') return opsGate(req, env, () => opsHealth(env));
+  if (p === '/ops/api/audit') return opsGate(req, env, () => opsAudit(req, url, env));
+  if (p === '/ops/api/store') {
+    if (req.method === 'POST') return opsGate(req, env, () => opsStoreAction(req, env));
+    return opsGate(req, env, () => opsStoreDetail(url, env));
+  }
+  if (p === '/ops/api/templates') return opsGate(req, env, () => opsTemplates(env));
+  if (p === '/ops/api/template') {
+    if (req.method === 'POST') return opsGate(req, env, () => opsTemplateWrite(req, env));
+    return opsGate(req, env, () => opsTemplateRead(url, env));
+  }
+  if (p === '/ops/api/link') return req.method === 'POST' ? opsGate(req, env, () => opsIssueLink(req, env)) : json({ ok: false, error: 'method_not_allowed' }, 405, { Allow: 'POST' });
   if ((m = p.match(/^\/renew\/([A-Za-z0-9_-]{6,40})$/))) return renewPage(env, m[1]);
   if (p === '/api/admin-put' && req.method === 'POST') return adminPut(req, env);
 
   if (p === '/api/checkout' && req.method === 'POST') return checkout(req, url, env);
+  if (p === '/api/renew-ref' && req.method === 'POST') return renewRef(req, env);
   if (p === '/api/hook/flutterwave' && req.method === 'POST') return hookFlutterwave(req, url, env);
   if (p === '/api/hook/payfast' && req.method === 'POST') return hookPayfast(url, env);
 
@@ -528,6 +553,30 @@ async function checkout(req, url, env) {
   });
 }
 
+/**
+ * "I paid by EcoCash, here is the reference." No email thread, no support
+ * ticket: it is filed against the store, it shows up in the operator console,
+ * and the payment itself — not the note — is what extends the plan. Public, so
+ * rate-limited and write-cheap on purpose.
+ */
+async function renewRef(req, env) {
+  const ip = ipOf(req);
+  if (await rateLimited(env, ip)) return json({ ok: false, error: 'too many attempts — wait a minute' }, 429);
+  const b = await readBody(req);
+  const rec = await env.STORES.get('renew:' + String(b.token || ''), 'json');
+  if (!rec) return json({ ok: false, error: 'that renew link is not on the books any more — the current one is inside your dashboard' }, 404);
+  const ref = String(b.reference || '').trim().slice(0, 80);
+  if (ref.length < 3) return json({ ok: false, error: 'paste the payment reference (at least 3 characters)' }, 422);
+  const key = 'ref:' + rec.handle;
+  const cur = (await env.STORES.get(key, 'json')) || [];
+  cur.unshift({ at: new Date().toISOString(), ref, amount: clamp(Number(b.amount), 0, 100000) || 0, phone: String(b.phone || '').replace(/\D/g, '').slice(0, 15) });
+  await env.STORES.put(key, JSON.stringify(cur.slice(0, 10)), { expirationTtl: 30 * 86400 });
+  return json({
+    ok: true, filed: cur.length,
+    note: 'Filed against ' + rec.handle + '. This note alone switches nothing on — the plan extends when the payment itself is recognised (webhook, or the operator ticking it off), and you will not be chased for it.',
+  });
+}
+
 async function hookFlutterwave(req, url, env) {
   if (url.searchParams.get('done')) {
     return html(`<!doctype html><meta charset=utf-8><title>Payment received</title>
@@ -610,7 +659,23 @@ async function runCron(env) {
 
 /* ------------------------------------------------------------ renew page */
 async function renewPage(env, token) {
+  const custom = await env.STORES.get('tpl:renew');
   const rec = await env.STORES.get('renew:' + token, 'json');
+  if (custom && custom.length > 200) {
+    const st = rec ? await getStore(env, rec.handle) : null;
+    const rows = st ? ((await env.ORDERS.get('list:' + st.handle, 'json')) || []) : [];
+    const data = {
+      known: !!(st), token,
+      shop: st ? st.shop_name : null, handle: st ? st.handle : null,
+      plan: st ? (st.plan || 'free60') : null, currency: st ? (st.currency || 'USD') : 'USD',
+      left: st ? Math.ceil(((st.paid_until || 0) - Date.now()) / 864e5) : 0,
+      suspended: st ? !!st.suspended : false,
+      orders: rows.length, gmv: Math.round(rows.reduce((a, r) => a + (Number(r.total) || 0), 0) * 100) / 100,
+      price: PRICE_USD, store_url: st ? '/s/' + st.handle : '/onboard',
+      pay_url: st ? (st.admin_url || '/a') : '/onboard',
+    };
+    return html(custom.replace('/*__ZIMLINK_RENEW__*/null', JSON.stringify(data)));
+  }
   if (!rec) return html(`<h1 style="font:16px system-ui;padding:2rem">That renew link is old. Use the one from your welcome email, or <a href="/onboard">create a store</a>.</h1>`, 404);
   const st = await getStore(env, rec.handle);
   if (!st) return html('<h1 style="font:16px system-ui;padding:2rem">Store not found.</h1>', 404);
@@ -690,7 +755,7 @@ async function selftest(env) {
     await env.STORES.put(k, '1');
     t.kv_roundtrip = (await env.STORES.get(k)) === '1';
     await env.STORES.delete(k);
-    for (const tplName of ['store', 'onboard', 'admin', 'fees', 'index']) t['tpl_' + tplName] = ((await tpl(env, tplName)) || '').length > 200;
+    for (const tplName of ['store', 'onboard', 'admin', 'fees', 'index', 'confirm', 'renew', 'ops']) t['tpl_' + tplName] = ((await tpl(env, tplName)) || '').length > 200;
   }
   const fake = { handle: 'selftest', currency: 'USD', tax_pct: 15.5, delivery_fee: 2, rail: 'ecocash_usd', surcharge_mode: 'absorb', unique_change: true, pay_account: '0771234567' };
   t.pricing = priceOrder(fake, [{ name: 'Test', price: 12.5, qty: 2, addons: [4], options: [{ name: 'L', up: 2 }] }], 'delivery', 'ecocash_usd');
@@ -1061,6 +1126,29 @@ function shell(title, body) {
  */
 async function confirmPage(env, cap) {
   const p = await verifyCap(env.ADMIN_SECRET || 'dev-secret', cap);
+  const custom = env.STORES ? await env.STORES.get('tpl:confirm') : null;
+  if (custom && custom.length > 200) {
+    // same state machine, markup from KV so the page can be re-skinned without
+    // a redeploy; the inline builder below is the floor if the template is gone
+    let state = 'expired';
+    let data = { cap, state };
+    if (p && p.a === 'mark') {
+      const st = await getStore(env, p.h);
+      const o = st ? await env.ORDERS.get('order:' + p.h + ':' + p.id, 'json') : null;
+      if (!st || !o) state = data.state = 'missing';
+      else {
+        const want = markTarget(p.s);
+        data = {
+          cap, state: o.status === want ? 'already' : 'confirm', want,
+          shop: st.shop_name, handle: st.handle, code: o.code, amount: (o.pricing && (o.pricing.pay_now || o.pricing.total)) || 0,
+          currency: st.currency || 'USD', buyer: (o.buyer && o.buyer.name) || 'buyer',
+          rail: (o.pricing && o.pricing.rail && o.pricing.rail.label) || '', marked_at: o.marked_at || null,
+          store_url: '/s/' + st.handle,
+        };
+      }
+    }
+    return html(custom.replace('/*__ZIMLINK_CONFIRM__*/null', JSON.stringify(data)));
+  }
   if (!p || p.a !== 'mark') {
     return html(shell('Link expired', '<h2>This link has expired</h2><p class=t>Confirm links last 72 hours. Open your dashboard and use the Confirm button on the order — it does exactly the same thing.</p>'));
   }
@@ -1102,3 +1190,352 @@ function feesIcs() {
 }
 const nextJan = (y) => `${Number(y) + 1}0115`;
 function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+/* ============================================================ operator suite
+ *
+ * A control panel for whoever runs the platform: how every tenant is doing,
+ * whether the feed/cron/deploy are healthy, and a handful of levers for when a
+ * merchant is stuck. It exists so that NOTHING in the normal customer journey
+ * ever needs a human: those pages are for exceptions and for reading, not for
+ * onboarding anyone.
+ *
+ * Auth: paste the platform secret once -> a 12-hour HttpOnly cookie. The secret
+ * never goes in a URL, never goes in the page, and is never sent to the browser.
+ * Guessing is throttled per-platform, and a correct secret always works — the
+ * lock exists to stop a stranger, not to lock the owner out of their own shop.
+ */
+const OPS_COOKIE = 'zl_ops';
+const OPS_TPL_NAMES = ['store', 'onboard', 'admin', 'fees', 'index', 'confirm', 'renew', 'ops', 'sample-menu'];
+const PAGES_URL = 'https://king-kunta-cpu.github.io/zimlink/';
+
+function opsKillCookie() { return OPS_COOKIE + '=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict; Secure'; }
+
+/** The console session is a stateless signed cap — nothing to look up, which
+ *  is why it costs no KV write to sign in from a hotel laptop. It also means
+ *  a cookie would outlive "sign out" unless a generation number is carried in
+ *  it, so one tiny KV read is the price of a logout that actually logs out.
+ *  Bumping it ends every console session on the platform at once. */
+async function endOpsSessions(env) {
+  try { if (env.STORES) await env.STORES.put('ops_gen', Date.now().toString(36)); } catch (e) {}
+}
+async function opsGen(env) {
+  if (!env.STORES) return '0';
+  try { return (await env.STORES.get('ops_gen')) || '0'; } catch (e) { return '0'; }
+}
+
+async function opsIssue(env) {
+  return issueCap(env.ADMIN_SECRET || 'dev-secret', { a: 'ops', g: VERSION, n: await opsGen(env) }, SESS_TTL);
+}
+
+async function opsAuthed(req, env) {
+  const raw = (req.headers.get('cookie') || '').match(new RegExp('(?:^|;\\s*)' + OPS_COOKIE + '=([^;]+)'));
+  if (!raw) return { anon: true };
+  const p = await verifyCap(env.ADMIN_SECRET || 'dev-secret', decodeURIComponent(raw[1]));
+  if (p && p.a === 'ops' && String(p.n) === String(await opsGen(env))) return { ok: true };
+  return { bad: true };
+}
+
+async function opsGate(req, env, fn) {
+  const who = await opsAuthed(req, env);
+  if (who.ok) {
+    try { return await fn(); }
+    catch (e) { return json({ ok: false, error: String((e && e.message) || e), stage: 'ops' }, 500); }
+  }
+  // A stale or forged *cookie* is refused but does not feed the lock counter:
+  // the counter exists to slow somebody guessing the secret at /ops/login, and
+  // a cookie is unguessable by construction (HMAC over the payload). Counting
+  // cookies instead let a refresh on an expired session walk the operator's own
+  // door toward a 10-minute freeze — the same self-inflicted DoS the per-store
+  // lockout had, found by the prod check hammering this endpoint.
+  return json({ ok: false, error: 'session expired — paste the platform secret again', need_login: who.anon === true }, 401);
+}
+
+async function opsLogin(req, env) {
+  if (!env.ADMIN_SECRET) return json({ ok: false, error: 'ADMIN_SECRET is not bound on this Worker, so the console stays shut' }, 503);
+  const b = await readBody(req);
+  if (await lockedOut(env, '__ops')) return json({ ok: false, error: 'too many attempts — wait 10 minutes' }, 429);
+  const given = String(b.secret || b.token || '').trim();
+  if (given && timingSafeEq(given, String(env.ADMIN_SECRET))) {
+    await authClear(env, '__ops');
+    const cap = await opsIssue(env);
+    await pushOpsLog(env, { act: 'login', ip: ipOf(req) });
+    return withCookie(json({ ok: true, valid_for_sec: SESS_TTL, note: 'This console is oversight only — no customer flow waits on it.' }),
+      `${OPS_COOKIE}=${encodeURIComponent(cap)}; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=${SESS_TTL}`);
+  }
+  const n = await authFail(env, '__ops');
+  return json({ ok: false, error: 'not the platform secret', tries_left: Math.max(0, LOCK_MAX - n) }, 403);
+}
+
+async function opsPage(req, env) {
+  const who = await opsAuthed(req, env);
+  const page = await tpl(env, 'ops');
+  const signed = who.ok ? 'true' : 'false';
+  return html(page.replace('/*__ZIMLINK_OPS__*/null', JSON.stringify({ signed_in: who.ok === true, version: VERSION })));
+}
+
+function opsSummarise(st, rows) {
+  const now = Date.now();
+  const left = Math.ceil(((st.paid_until || 0) - now) / 864e5);
+  const today = rows.filter(r => String(r.at || '').slice(0, 10) === new Date(now).toISOString().slice(0, 10));
+  return {
+    handle: st.handle, shop_name: st.shop_name, currency: st.currency || 'USD', rail: st.rail,
+    plan: st.plan || 'free60', left, suspended: !!st.suspended, created_at: st.created_at,
+    paid_until: st.paid_until || 0, feed_products: st.feed_cache ? (st.feed_cache.count || 0) : 0,
+    feed_error: st.feed_cache ? (st.feed_cache.error || null) : 'never fetched',
+    notify_email: !!st.notify_email, owner_email: st.owner_email ? maskField('notify_email', st.owner_email) : null,
+    pay_account_set: !!st.pay_account, whatsapp_set: !!st.whatsapp,
+    has_pending: !!(st.pending && st.pending.fields && Object.keys(st.pending.fields).length),
+    pending_apply_at: st.pending ? st.pending.apply_at : null,
+    orders: rows.length, orders_today: today.length,
+    unpaid: rows.filter(r => r.status === 'awaiting_payment').length,
+    cod: rows.filter(r => r.status === 'cod').length,
+    gmv: rows.reduce((a, r) => a + (Number(r.total) || 0), 0),
+    last_order_at: rows.length ? rows[0].at : null,
+    store_url: '/s/' + st.handle,
+  };
+}
+async function opsRefs(env, handle) {
+  return ((await env.STORES.get('ref:' + handle, 'json')) || []).slice(0, 5);
+}
+
+async function opsState(env) {
+  const t0 = Date.now();
+  const listed = await env.STORES.list({ prefix: 'store:', limit: 1000 });
+  const handles = (listed.keys || []).map(k => String(k.name).slice('store:'.length)).filter(Boolean);
+  const stores = [];
+  for (const h of handles) {
+    const st = await getStore(env, h);
+    if (!st) continue;
+    const rows = (await env.ORDERS.get('list:' + h, 'json')) || [];
+    const sum = opsSummarise(st, rows);
+    sum.awaiting_reference = await opsRefs(env, h);
+    sum.awaiting_ref = sum.awaiting_reference.length;
+    stores.push(sum);
+  }
+  stores.sort((a, b) => (b.orders_today - a.orders_today) || String(a.handle).localeCompare(b.handle));
+  const due = stores.filter(s => !s.suspended && s.left <= 7);
+  return json({
+    ok: true, at: new Date().toISOString(), ms: Date.now() - t0,
+    version: VERSION, stores,
+    totals: {
+      stores: stores.length,
+      live: stores.filter(s => !s.suspended).length,
+      suspended: stores.filter(s => s.suspended).length,
+      expiring_7d: due.length,
+      expired: stores.filter(s => s.left <= 0).length,
+      feeds_broken: stores.filter(s => !s.feed_products || s.feed_error).length,
+      orders_today: stores.reduce((a, s) => a + s.orders_today, 0),
+      orders_all: stores.reduce((a, s) => a + s.orders, 0),
+      unpaid: stores.reduce((a, s) => a + s.unpaid, 0),
+      pending_settings: stores.filter(s => s.has_pending).length,
+      gmv: Math.round(stores.reduce((a, s) => a + s.gmv, 0) * 100) / 100,
+      awaiting_reference: stores.reduce((a, s) => a + (s.awaiting_ref || 0), 0),
+      on_free: stores.filter(s => s.plan === 'free60').length,
+      paying: stores.filter(s => s.plan !== 'free60').length,
+    },
+    attention: stores.filter(s => s.suspended || s.left <= 7 || !s.feed_products || s.feed_error || s.has_pending || s.awaiting_ref)
+      .map(s => ({ handle: s.handle, why: [s.suspended ? 'suspended' : '', s.left <= 0 ? 'expired' : (s.left <= 7 ? s.left + 'd left' : ''), (!s.feed_products || s.feed_error) ? 'menu' : '', s.has_pending ? 'queued settings' : '', s.awaiting_ref ? s.awaiting_ref + ' payment ref(s)' : ''].filter(Boolean).join(' · '), left: s.left })),
+    free_plan: { kv_reads_day: 100000, kv_writes_day: 1000, kv_list_day: 1000, requests_day: 100000, cron_runs_day: 5 },
+    reads_used_estimate: stores.length * 2 + 1,
+  }, 200, { 'Cache-Control': 'no-store' });
+}
+
+async function opsHealth(env) {
+  const t = await selftest(env);
+  let pages = 'unreachable';
+  try {
+    const r = await fetch(PAGES_URL, { headers: { 'user-agent': 'zimlink/1 (operator health check)' } });
+    pages = r.status === 200 ? 'ok' : 'http ' + r.status;
+  } catch (e) { pages = 'unreachable'; }
+  let ci = null;
+  try {
+    const r = await fetch('https://raw.githubusercontent.com/king-kunta-cpu/zimlink/main/ci-deploy.log', { headers: { 'user-agent': 'zimlink/1 (operator health check)' } });
+    if (r.ok) { const txt = await r.text(); ci = txt.split('\n').filter(l => /==== exit|tests |pass |fail /.test(l)).slice(-6); }
+  } catch (e) { ci = null; }
+  return json({ ok: true, selftest: t, pages, ci, cron: t.cron_heartbeat || null, version: VERSION, templates: OPS_TPL_NAMES }, 200, { 'Cache-Control': 'no-store' });
+}
+
+async function opsAudit(req, url, env) {
+  const handle = slug(url.searchParams.get('handle') || '');
+  if (handle) return json({ ok: true, handle, entries: await getAudit(env, handle) }, 200, { 'Cache-Control': 'no-store' });
+  const listed = await env.STORES.list({ prefix: 'store:', limit: 1000 });
+  const out = [];
+  for (const k of (listed.keys || [])) {
+    const h = String(k.name).slice('store:'.length);
+    const rows = await getAudit(env, h);
+    for (const r of rows.slice(0, 5)) out.push({ handle: h, at: r.at, act: r.act, via: r.via, fields: r.fields });
+  }
+  out.sort((a, b) => String(b.at).localeCompare(String(a.at)));
+  const ops = await getOpsLog(env);
+  return json({ ok: true, entries: out.slice(0, 60), ops }, 200, { 'Cache-Control': 'no-store' });
+}
+
+async function getOpsLog(env) {
+  if (!env.ORDERS) return [];
+  return (await env.ORDERS.get('audit:ops', 'json')) || [];
+}
+async function pushOpsLog(env, row) {
+  if (!env.ORDERS) return;
+  const cur = await getOpsLog(env);
+  cur.unshift({ at: new Date().toISOString(), act: row.act, handle: row.handle || '', note: row.note || '', ip: row.ip || '' });
+  await env.ORDERS.put('audit:ops', JSON.stringify(cur.slice(0, 60)));
+}
+
+/**
+ * The levers, all of them reversible and all of them logged. None of them is on
+ * a customer's critical path; they exist so a stuck merchant can be un-stuck in
+ * one click instead of one support conversation.
+ */
+async function opsStoreAction(req, env) {
+  const b = await readBody(req);
+  if ((req.headers.get('x-zimlink-confirm') || '') !== '1') return json({ ok: false, error: 'missing x-zimlink-confirm header' }, 403);
+  const handle = slug(String(b.handle || ''));
+  const st = await getStore(env, handle);
+  if (!st) return json({ ok: false, error: 'no store' }, 404);
+  const act = String(b.action || '');
+
+  // the two levers that change nothing on the plan answer here and return,
+  // before the state-writing chain below — they used to fall through it and
+  // come back as `unknown action`, which made them dead buttons
+  if (act === 'notify') {
+    const sent = [];
+    const failed = [];
+    if (st.notify_webhook) {
+      try {
+        await fetch(st.notify_webhook, {
+          method: 'POST', headers: { 'content-type': 'application/json', 'user-agent': 'zimlink/1 (operator notice)' },
+          body: JSON.stringify({ type: 'store.notice', store: handle, text: b.message || 'A note from your ZimLink store: your store is fine, nothing is needed from you.' }),
+        });
+        sent.push('webhook');
+      } catch (e) { failed.push('webhook'); }
+    }
+    if (env.EMAIL && (st.owner_email || st.notify_email)) {
+      try {
+        await sendMail(env, st.owner_email || st.notify_email, 'A note about your ZimLink store', String(b.message || 'Your store is running normally. No action needed.'));
+        sent.push('email');
+      } catch (e) { failed.push('email'); }
+    }
+    // a channel that threw is not a delivery: saying "Sent." when the POST
+    // failed would leave the operator believing the merchant had been told
+    await pushOpsLog(env, { act: 'notify', handle, note: (sent.join('+') || 'none') + (failed.length ? ' (failed: ' + failed.join(',') + ')' : ''), ip: ipOf(req) });
+    return json({
+      ok: true, delivered: sent, failed,
+      note: sent.length && !failed.length ? 'Sent.'
+        : sent.length ? 'Sent on ' + sent.join(' + ') + ', but ' + failed.join(' and ') + ' did not go through — the store can still see it in their log.'
+        : failed.length ? 'The channel on file is there but did not answer (' + failed.join(', ') + '). Nothing was delivered.'
+        : 'This store has no webhook or email on file, so there is no channel to it. That is a gap in the merchant setup, not an outage.',
+    });
+  }
+  if (act === 'link') {
+    const link = await issueLogin(env, st, new URL(req.url).origin);
+    await pushOpsLog(env, { act: 'link', handle, note: 'issued a dashboard link for the merchant', ip: ipOf(req) });
+    return json({ ok: true, dashboard_url: link, note: 'Paste this to them once; it opens a 12-hour session and dies in 7 days.' });
+  }
+
+  const before = { plan: st.plan, paid_until: st.paid_until, suspended: !!st.suspended };
+  let done = act;
+  if (act === 'suspend') st.suspended = true;
+  else if (act === 'reinstate') { st.suspended = false; st.warned_at = null; await env.STORES.delete('term:' + handle); }
+  else if (act === 'extend7') st.paid_until = Math.max(Date.now(), st.paid_until || 0) + 7 * 864e5;
+  else if (act === 'extend30') st.paid_until = Math.max(Date.now(), st.paid_until || 0) + 30 * 864e5;
+  else if (act === 'grant_year') { st.paid_until = Math.max(Date.now(), st.paid_until || 0) + 365 * 864e5; st.plan = 'annual'; st.suspended = false; }
+  else if (act === 'reset_free') { st.paid_until = Date.now() + FREE_DAYS * 864e5; st.plan = 'free60'; st.suspended = false; }
+  else if (act === 'clear_pending') { delete st.pending; done = 'reverted a queued settings change'; }
+  else if (act === 'clear_refs') { await env.STORES.delete('ref:' + handle); delete st.pending_ref_note; done = 'cleared the payment references the merchant filed'; }
+  else if (act === 'revoke') { st.auth_gen = Date.now().toString(36); st.admin_token = randomKey(16); delete st.pending; done = 'revoked every link, key and cookie'; }
+  else return json({ ok: false, error: 'unknown action', actions: ['suspend', 'reinstate', 'extend7', 'extend30', 'grant_year', 'reset_free', 'clear_pending', 'clear_refs', 'revoke', 'notify', 'link'] }, 422);
+
+  await writeStore(env, st);
+  const after = { plan: st.plan, paid_until: st.paid_until, suspended: !!st.suspended };
+  await pushOpsLog(env, { act, handle, note: JSON.stringify(after), ip: ipOf(req) });
+  await pushAudit(env, st, { act: 'operator:' + act, via: 'ops', fields: Object.keys(after), before: opsMaskTerm(before), after: opsMaskTerm(after) });
+  return json({ ok: true, handle, action: done, before, after, undo: act === 'reinstate' ? 'suspend' : 'reinstate', note: 'Logged in this store’s change log too, so the merchant can see that it was us, not them.' });
+}
+
+function opsMaskTerm(o) { return { plan: o.plan, suspended: o.suspended, paid_until: o.paid_until ? new Date(o.paid_until).toISOString().slice(0, 10) : null }; }
+
+async function opsIssueLink(req, env) {
+  const b = await readBody(req);
+  const st = await getStore(env, slug(String(b.handle || '')));
+  if (!st) return json({ ok: false, error: 'no store' }, 404);
+  return json({ ok: true, dashboard_url: await issueLogin(env, st, new URL(req.url).origin) });
+}
+
+/** Everything the operator might need to see about one store, and nothing
+ *  that would let a browser session become a credential (no admin_token, no
+ *  raw admin_url — the link is issued deliberately, via the link lever). */
+async function opsStoreDetail(url, env) {
+  const handle = slug(url.searchParams.get('handle') || '');
+  const st = await getStore(env, handle);
+  if (!st) return json({ ok: false, error: 'no store' }, 404);
+  const rows = (await env.ORDERS.get('list:' + handle, 'json')) || [];
+  const orders = [];
+  for (const r of rows.slice(0, 15)) { const o = await env.ORDERS.get('order:' + handle + ':' + r.id, 'json'); if (o) orders.push(opsOrderLite(o)); }
+  return json({
+    ok: true,
+    summary: Object.assign(opsSummarise(st, rows), { awaiting_reference: await opsRefs(env, handle) }),
+    store: adminStore(st),
+    feed_url: st.feed_url, renew_url: st.renew_url,
+    editable: EDITABLE_FIELDS,
+    orders,
+    audit: await getAudit(env, handle),
+    queued: st.pending ? { keys: Object.keys(st.pending.fields), apply_at: st.pending.apply_at, in_ms: Math.max(0, st.pending.apply_at - Date.now()), fields: st.pending.fields } : null,
+  }, 200, { 'Cache-Control': 'no-store' });
+}
+function opsOrderLite(o) {
+  return {
+    id: o.id, code: o.code, at: o.at, status: o.status, service: o.service,
+    total: o.pricing && o.pricing.total, pay_now: o.pricing && o.pricing.pay_now,
+    currency: o.pricing && o.pricing.currency, rail: o.pricing && o.pricing.rail && o.pricing.rail.label,
+    buyer: o.buyer ? { name: o.buyer.name, phone: o.buyer.phone } : null,
+    items: (o.items || []).length, flags: o.risk_flags || [], marked_at: o.marked_at || null,
+    pay_account: o.pay && o.pay.account, reference: o.pay && o.pay.reference,
+  };
+}
+
+const REPO_RAW = 'https://raw.githubusercontent.com/king-kunta-cpu/zimlink/main/';
+
+async function opsTemplates(env) {
+  const out = [];
+  for (const name of OPS_TPL_NAMES) {
+    const v = await env.STORES.get('tpl:' + name);
+    out.push({ name, bytes: v ? v.length : 0, live: !!(v && v.length > 200), sha: v ? (await hash(name + ':' + v.length + ':' + v.slice(0, 64))).slice(0, 8) : null });
+  }
+  return json({ ok: true, templates: out }, 200, { 'Cache-Control': 'no-store' });
+}
+async function opsTemplateRead(url, env) {
+  const name = safeTplName(url.searchParams.get('name'));
+  if (!name) return json({ ok: false, error: 'bad template name' }, 422);
+  const v = await env.STORES.get('tpl:' + name);
+  return json({ ok: true, name, bytes: v ? v.length : 0, html: v || '' }, 200, { 'Cache-Control': 'no-store' });
+}
+function safeTplName(n) { const x = String(n || ''); return OPS_TPL_NAMES.indexOf(x) >= 0 ? x : null; }
+async function opsTemplateWrite(req, env) {
+  const b = await readBody(req);
+  if ((req.headers.get('x-zimlink-confirm') || '') !== '1') return json({ ok: false, error: 'missing x-zimlink-confirm header' }, 403);
+  const name = safeTplName(b.name);
+  if (!name) return json({ ok: false, error: 'not a template this console may write', allowed: OPS_TPL_NAMES }, 422);
+  const html = String(b.html || '');
+  if (html.length < 200) return json({ ok: false, error: 'refusing to publish a page shorter than 200 bytes' }, 422);
+  if (!/^<!doctype html>/i.test(html.trim().slice(0, 40))) return json({ ok: false, error: 'must start with <!doctype html>' }, 422);
+  if (/<script[^>]+src\s*=\s*["']?http/i.test(html)) return json({ ok: false, error: 'no remote scripts: these pages are single-file by design' }, 422);
+  const key = name === 'sample-menu' ? 'tpl:sample-menu' : 'tpl:' + name;
+  const was = await env.STORES.get(key);
+  if (b.restore) {
+    // the committed copy is the safety net: a hand-edit that goes wrong in the
+    // console is one press from being undone, with nothing to redeploy
+    const raw = await fetch(REPO_RAW + (name === 'sample-menu' ? 'pages/sample-menu.csv' : 'pages/' + name + '.html'),
+      { headers: { 'user-agent': 'zimlink/1 (template restore)' } });
+    if (!raw.ok) return json({ ok: false, error: 'could not read the committed copy (HTTP ' + raw.status + ')' }, 502);
+    const text = await raw.text();
+    if (text.length < 200) return json({ ok: false, error: 'committed copy looks truncated; refusing to publish it' }, 502);
+    await env.STORES.put(key, text);
+    await pushOpsLog(env, { act: 'template-restore', handle: name, note: (was ? was.length : 0) + ' -> ' + text.length + ' bytes from main', ip: ipOf(req) });
+    return json({ ok: true, restored: name, bytes: text.length, was: was ? was.length : 0, source: 'git main' });
+  }
+  await env.STORES.put(key, html);
+  const now = await env.STORES.get(key);
+  await pushOpsLog(env, { act: 'template', handle: name, note: (was ? was.length : 0) + ' -> ' + now.length + ' bytes', ip: ipOf(req) });
+  return json({ ok: true, name, bytes: now.length, was: was ? was.length : 0, matches: now === html, hot: 'no redeploy needed — this is the live copy', note: name === 'sample-menu' ? 'CSV published.' : 'Live for the next request.' });
+}
+

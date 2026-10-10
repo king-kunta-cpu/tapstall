@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#0b0f14">
+<title>ZimLink — plan and renewal</title>
+<style>
+/*__KIT__*/
+.price { font-size: 2rem; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.02em }
+.old { color: var(--ink-3); text-decoration: line-through; font-size: .9rem; font-weight: 500 }
+.big { border: 1px solid var(--line); border-radius: var(--r); padding: .8rem; margin-top: .5rem }
+ul.why { margin: .4rem 0 0; padding-left: 1.1rem; font-size: .84rem; color: var(--ink-2) }
+ul.why li { margin: .25rem 0 }
+.receipt { display: grid; grid-template-columns: 1fr auto; gap: .2rem .6rem; font-size: .84rem }
+.receipt div:nth-child(even) { font-variant-numeric: tabular-nums; text-align: right }
+.paid { background: var(--accent-bg); border-color: #bfe6d0 }
+input[type=number] { max-width: 8rem }
+</style>
+</head>
+<body>
+<div class="chrome"><div class="in"><b id="brand">ZimLink · plan</b><span><a href="/a">orders</a> · <a href="/s/" id="storeLn">my store</a></span></div></div>
+<main><div class="wrap narrow">
+  <div class="card" id="state">
+    <p class="muted" id="status" style="margin:0">Loading your store</p>
+    <h1 id="head">…</h1>
+    <div class="grid c3" id="facts"></div>
+    <div id="extra"></div>
+  </div>
+
+  <div class="card" id="buy">
+    <h3 id="buyHead">Renew for a year</h3>
+    <p class="price" id="price">—</p>
+    <p class="muted" style="margin-top:.1rem">Once a year. No monthly billing, no card-on-file with a foreign processor — in Zimbabwe that path costs 15% DST + 2% IMTT before it even reaches them, which is why the plan is bought in one go or not at all.</p>
+    <div class="row" style="margin-top:.6rem">
+      <button id="payBtn" style="flex:1 1 12rem">Pay and switch on</button>
+      <button class="sec" id="daysBtn" title="Choose another length">Custom</button>
+    </div>
+    <div class="hide" id="daysRow" style="margin-top:.5rem">
+      <label for="days">Days to buy (30–1460)</label>
+      <div class="row"><input id="days" type="number" value="365" min="30" max="1460"><button class="sec" id="daysGo">Price it</button></div>
+    </div>
+    <div class="big">
+      <b style="font-size:.85rem">Paid by EcoCash, ZIPIT or cash instead?</b>
+      <p class="muted" style="margin:.25rem 0 .5rem">Send the amount, then paste the payment reference here. The store is extended as soon as the payment lands — an activation is not waiting on a person reading this page.</p>
+      <input id="ref" placeholder="your payment reference, e.g. EcoCash 0771234567 → ABC123" autocomplete="off">
+      <div class="row" style="margin-top:.4rem"><button class="sec" id="refBtn">Send reference</button><span class="muted" id="refOut"></span></div>
+    </div>
+    <p class="muted" id="note">If a payment gateway is configured on this platform, the button above goes straight to it; the webhook does the rest. If it is not yet, this page tells you what to send and where, and the renewal rides on the reference.</p>
+  </div>
+
+  <div class="card flat" id="receipts">
+    <h3>What a year covers</h3>
+    <ul class="why">
+      <li>Unlimited products, images, options, add-ons, stock and modifiers — no per-item or per-order quota.</li>
+      <li>Your own link <span class="mono" id="myUrl">/s/…</span> with the menu reading itself from your Google Sheet, so a price change is yours to make and takes about two minutes.</li>
+      <li>Order confirmations, payment references with unique cents so a transfer identifies itself, flags on risky cash orders, a CSV you can hand to anyone.</li>
+      <li>Reversible changes to your payout details and a log of who changed what.</li>
+    </ul>
+  </div>
+</div></main>
+
+<script>
+var R = /*__ZIMLINK_RENEW__*/null || { known: false };
+var q = function (s) { return document.querySelector(s); };
+function esc(x) { return String(x == null ? '' : x).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
+function stat(b, s, cls) { return '<div class="stat ' + (cls || '') + '"><b>' + b + '</b><span>' + s + '</span></div>'; }
+
+(function boot() {
+  if (!R.known) {
+    q('#head').textContent = 'That renew link is old';
+    q('#facts').innerHTML = stat('0', 'days left');
+    q('#extra').innerHTML = '<p class="notice warn" style="margin-top:.6rem">Renew links are minted once per store and this one is no longer on the books. Open your <a href="/a">dashboard</a> — the renew link is inside it — or <a href="/onboard">create a store</a> if you never did.</p>';
+    q('#buy').classList.add('hide');
+    return;
+  }
+  q('#brand').textContent = 'ZimLink · ' + (R.shop || R.handle);
+  q('#storeLn').href = R.store_url || '/onboard';
+  q('#myUrl').textContent = R.store_url || '';
+  var left = Number(R.left || 0);
+  q('#status').textContent = R.suspended ? 'Paused' : (left > 30 ? 'Running' : 'Running — ends soon');
+  q('#head').textContent = left > 0 ? R.shop + ' is paid until ' + new Date(Date.now() + left * 864e5).toLocaleDateString() : R.shop + ' expired';
+  q('#facts').innerHTML = stat('<span style="color:' + (left <= 7 ? 'var(--bad)' : 'inherit') + '">' + left + '</span>', 'days left')
+    + stat(R.orders || 0, 'orders on record')
+    + stat(Number(R.gmv || 0).toFixed(2), (R.currency || 'USD') + ' through it');
+  q('#extra').innerHTML = (R.suspended
+    ? '<p class="notice bad" style="margin-top:.6rem">The store is paused: buyers see a “renew” notice and new orders are refused with a clear reason. Renewing switches it back within a minute — no one has to approve it.</p>'
+    : (left <= 7 ? '<p class="notice warn" style="margin-top:.6rem">Seven days or fewer. Nothing breaks at midnight: the storefront keeps working until the next scheduled check, and reinstating is automatic the moment payment clears.</p>' : ''))
+    + (R.plan && R.plan !== 'free60' ? '<p class="muted" style="margin-top:.5rem">Current plan: <b>' + esc(R.plan) + '</b>.</p>' : '<p class="muted" style="margin-top:.5rem">You are on the free launch period. Keep it running for a year, or let it sleep — your orders and menu stay put either way, and nothing is deleted behind your back.</p>');
+  q('#price').textContent = Number(R.price || 60).toFixed(2) + ' USD';
+  payFor(365);
+})();
+
+function payFor(days) {
+  var price = Math.round(((Number(R.price || 60)) * days / 365) * 100) / 100;
+  q('#buyHead').textContent = days === 365 ? 'Renew for a year' : 'Buy ' + days + ' days';
+  q('#price').textContent = price.toFixed(2) + ' USD';
+  q('#payBtn').dataset.days = days;
+}
+q('#daysBtn').onclick = function () { q('#daysRow').classList.toggle('hide'); };
+q('#daysGo').onclick = function () {
+  var d = Math.max(30, Math.min(1460, Number(q('#days').value) || 365));
+  q('#days').value = d; payFor(d);
+};
+q('#payBtn').onclick = function () {
+  var b = this; b.disabled = true; b.textContent = 'opening payment…';
+  fetch('/api/checkout', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: R.token, days: Number(b.dataset.days || 365) }) })
+    .then(function (r) { return r.json(); })
+    .then(function (j) {
+      b.disabled = false; b.textContent = 'Pay and switch on';
+      if (j.ok && j.pay_url) {
+        q('#note').innerHTML = 'Send <b>' + Number(j.amount).toFixed(2) + ' USD</b> — <a href="' + esc(j.pay_url) + '">open the payment page</a>. When it clears, the store renews itself; this page re-reads the plan every 20 seconds while you have it open.';
+        var t = setInterval(function () { location.reload(); }, 20000);
+        window.addEventListener('pagehide', function () { clearInterval(t); });
+      } else {
+        q('#note').innerHTML = '<span style="color:var(--bad)">' + esc(j.error || 'the gateway is not configured on this platform yet') + '</span> — use the reference box below. Nothing about the store changes until payment is recognised.';
+      }
+    })
+    .catch(function () { b.disabled = false; b.textContent = 'Pay and switch on'; q('#note').textContent = 'Could not reach the server. Try again in a moment — the link stays valid.'; });
+};
+q('#refBtn').onclick = function () {
+  var ref = String(q('#ref').value || '').trim();
+  if (!ref) { q('#refOut').textContent = 'type the reference first'; return; }
+  q('#refOut').textContent = 'sending…';
+  fetch('/api/renew-ref', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token: R.token, reference: ref }) })
+    .then(function (r) { return r.json(); })
+    .then(function (j) { q('#refOut').innerHTML = j.ok ? '<b style="color:var(--accent)">' + esc(j.note || 'recorded') + '</b>' : esc(j.error || 'failed'); })
+    .catch(function () { q('#refOut').textContent = 'no reply — keep the reference, it is on your payment too'; });
+};
+</script>
+</body>
+</html>

@@ -108,7 +108,7 @@ let store = {};
 // Serve the real templates through the stub, exactly as KV does in production,
 // so the storefront test exercises injection rather than the fallback page.
 before(async () => {
-  for (const name of ['store', 'onboard', 'admin', 'fees', 'index']) {
+  for (const name of ['store', 'onboard', 'admin', 'fees', 'index', 'confirm', 'renew', 'ops']) {
     const html = readFileSync(join(root, 'pages', name + '.html'), 'utf8');
     await env.STORES.put('tpl:' + name, html);
   }
@@ -626,6 +626,266 @@ test('cron suspends an expired store, blocks orders, then reinstates on payment'
   const back = JSON.parse(env.STORES._map.get(key).value);
   assert.equal(back.suspended, false, 'paying reinstates the store with no human step');
   assert.equal(await env.STORES.get('term:mamatoe'), null, 'term marker cleared');
+});
+
+
+/* ── the two UI suites, measured at the API they are built on ─────────────
+ * The merchant pages (confirm, renew) and the operator console are plain
+ * static HTML over these endpoints, so every rule the interfaces depend on —
+ * inert-until-posted, confirm-header on every lever, no credential in a
+ * response the browser could log — is assertible here without a browser.
+ */
+const SECRET = 'test-secret';
+const LOCKMAX = 12;
+let opsCookie = null;
+const renewToken = () => (store.renew_url || '').split('/').pop();
+
+test('the money pages are generated from the same kit and carry their data hook', () => {
+  for (const name of ['confirm', 'renew', 'onboard', 'admin', 'ops']) {
+    const html = readFileSync(join(root, 'pages', name + '.html'), 'utf8');
+    assert.match(html, /--chrome:\s*#0b0f14/, name + ' has the shared design kit inlined');
+    assert.ok(!/\/\*__KIT__\*\//.test(html), name + ' shipped, not source');
+    assert.ok(!/<script[^>]+src=["']?http/i.test(html), name + ' pulls no remote script');
+    assert.ok(!/<link[^>]+stylesheet/i.test(html), name + ' pulls no remote stylesheet');
+    assert.match(html, /--tap:\s*44px/, name + ' keeps the 44px touch target rule');
+    assert.match(html, /min-height:\s*var\(--tap\)/, name + ' applies it to controls');
+    assert.match(html, /prefers-reduced-motion/, name + ' respects reduced motion');
+  }
+  assert.ok(readFileSync(join(root, 'pages', 'ops.html'), 'utf8').includes('/*__ZIMLINK_OPS__*/'), 'ops page has the server hook');
+});
+
+test('the confirm page stays inert and keeps the one tap it promises', async () => {
+  const placed = await call('/api/order', {
+    method: 'POST',
+    body: { handle: 'mamatoe', buyer: { name: 'Tapiwa', phone: '0781234567' }, items: [{ name: 'Chicken & rice', price: 5.5, qty: 2 }] },
+  });
+  assert.equal(placed.status, 201, placed.text);
+  const link = placed.json.mark_url;
+  assert.ok(link && link.startsWith('/c/v1.'), 'order response still carries a one-tap link');
+  assert.ok(!/admin|token=/.test(link), 'and that link carries no store credential');
+  const page = await call(link);
+  assert.equal(page.status, 200);
+  assert.match(page.text, /var S = \{"cap":"v1\./, 'payload injected into the served page');
+  assert.match(page.text, /"state":"confirm"/, 'the page is told there is something to confirm');
+  assert.match(page.text, /"amount":/, 'and what it is worth');
+  assert.ok(!/\/\*__ZIMLINK_/.test(page.text), 'no unreplaced placeholder left');
+  assert.ok(!page.text.includes('admin_token'), 'the confirm page cannot be used to read the store key');
+  assert.match(page.text, /<noscript>/, 'a browser with no JavaScript still gets a button');
+  // what makes this page safe to send to a merchant by WhatsApp: a bot that
+  // prefetches links sees markup only, and the auto-POST is gated on a real
+  // visible tab; the human still gets one button, and one undo
+  assert.match(page.text, /document\.hidden/, 'auto-confirm is gated on the tab actually being visible');
+  assert.match(page.text, /name="cap"/, 'the no-JavaScript form posts the same scoped cap');
+  assert.ok(page.text.includes('action="/api/mark"'), 'and posts it to the same endpoint, once');
+  assert.match(page.text, /undo_url/, 'undo is offered from the server payload, not guessed in the page');
+  assert.ok(!/pay_account|admin_token|owner_email|feed_url/.test(page.text), 'the page shows the amount, not the ledger');
+});
+
+test('the renew page prices the plan and refuses a stale token', async () => {
+  assert.ok(renewToken(), 'register handed out a renew link');
+  const page = await call('/renew/' + renewToken());
+  assert.equal(page.status, 200);
+  assert.match(page.text, /60|annual|per year/i, 'the price is on the page: a merchant should not have to ask');
+  assert.ok(!/\/\*__ZIMLINK_RENEW__\*\/null/.test(page.text), 'renew payload was filled');
+  assert.ok(!page.text.includes('admin_token') && !page.text.includes('secret_hash'), 'no key material on a link-borne page');
+  const gone = await call('/renew/' + 'zz'.repeat(7));
+  assert.ok(gone.status === 404 || gone.status === 400 || /expired|not on the books|unknown/i.test(gone.text), 'a token nobody issued gets a clear no, got ' + gone.status);
+});
+
+test('a merchant can file an EcoCash reference without talking to anybody', async () => {
+  const tok = renewToken();
+  const bad = await call('/api/renew-ref', { method: 'POST', body: { token: tok, reference: 'x' } });
+  assert.equal(bad.status, 422, 'a one-character reference is refused');
+  const unknown = await call('/api/renew-ref', { method: 'POST', body: { token: 'nope', reference: 'ECOCASH-77123' } });
+  assert.equal(unknown.status, 404, 'a token not on the books is not a way in');
+  const ok = await call('/api/renew-ref', { method: 'POST', body: { token: tok, reference: 'ECOCASH-77123', amount: 60, phone: '0771234567' } });
+  assert.equal(ok.status, 200, ok.text);
+  assert.match(ok.json.note, /switches nothing on/, 'the page says out loud that a note is not a payment');
+  const raw = JSON.parse(env.STORES._map.get('ref:mamatoe').value);
+  assert.equal(raw[0].ref, 'ECOCASH-77123');
+  assert.equal(raw[0].at.slice(0, 4), String(new Date().getFullYear()));
+  assert.ok(env.STORES._map.get('ref:mamatoe').exp, 'references expire on their own — no litter in KV');
+});
+
+test('/ops is a locked door to everyone but the operator, and never a credential', async () => {
+  const anon = await call('/ops');
+  assert.equal(anon.status, 200, 'the sign-in card itself is public so a bookmark is not a 404');
+  assert.match(anon.text, /Operator console/);
+  assert.match(anon.text, /"signed_in":false/, 'the page is told it is not signed in');
+  assert.ok(!anon.text.includes(SECRET), 'the secret is never echoed into HTML');
+  assert.match(anon.text, /noindex/, 'the console must not be indexed');
+  for (const ep of ['/ops/api/state', '/ops/api/health', '/ops/api/audit', '/ops/api/store?handle=mamatoe', '/ops/api/templates']) {
+    const r = await call(ep);
+    assert.equal(r.status, 401, ep + ' must refuse an anonymous reader');
+    assert.equal(r.json.need_login, true, ep + ' says a login is what is missing');
+  }
+  const wrong = await call('/ops/login', { method: 'POST', body: { secret: 'hunter2' } });
+  assert.equal(wrong.status, 403);
+  assert.equal(wrong.json.tries_left, 11, 'the counter starts at 12 and a wrong guess costs one');
+  const wrong2 = await call('/ops/login', { method: 'POST', body: { secret: 'x'.repeat(40) } });
+  assert.equal(wrong2.json.tries_left, 10);
+  const good = await call('/ops/login', { method: 'POST', body: { secret: SECRET } });
+  assert.equal(good.status, 200, good.text);
+  assert.match(good.cookie, /zl_ops=/, 'a cookie, not a token in a URL');
+  assert.ok(!/Max-Age=0/.test(good.cookie) && /HttpOnly/.test(good.cookie) && /SameSite=Strict/.test(good.cookie), good.cookie);
+  opsCookie = (good.cookie.match(/zl_ops=([^;]+)/) || [])[1];
+  const afterGood = await call('/ops/login', { method: 'POST', body: { secret: 'hunter2' } });
+  assert.equal(afterGood.json.tries_left, LOCKMAX - 1, 'a success resets the counter, so a typo spiral cannot lock the operator out');
+});
+
+test('the console sees the whole estate but not the keys', async () => {
+  const st = await call('/ops/api/state', { cookie: 'zl_ops=' + opsCookie });
+  assert.equal(st.status, 200, st.text);
+  assert.equal(st.json.ok, true);
+  const me = st.json.stores.find((s) => s.handle === 'mamatoe');
+  assert.ok(me, 'the demo store is listed');
+  assert.equal(me.orders >= 1, true, 'order counts come from the list, not a scan');
+  assert.equal(me.awaiting_ref, 1, 'the filed reference shows up as an item of work');
+  assert.match(st.json.attention[0].why, /ref|menu|queued|left|suspended/, 'attention rows explain themselves');
+  assert.equal(st.json.totals.awaiting_reference, 1);
+  assert.equal(st.json.reads_used_estimate, st.json.stores.length * 2 + 1, 'the page tells the operator what a refresh costs');
+  const blob = JSON.stringify(st.json);
+  for (const leak of ['admin_token', 'secret_hash', 'auth_gen', 'fw_secret', 'feed_cache']) {
+    assert.ok(!blob.includes(leak), 'state leaked ' + leak);
+  }
+  assert.ok(!blob.includes(SECRET), 'state leaked the platform secret');
+
+  const one = await call('/ops/api/store?handle=mamatoe', { cookie: 'zl_ops=' + opsCookie });
+  assert.equal(one.status, 200, one.text);
+  assert.ok(one.json.store && one.json.store.shop_name, 'full record for one store');
+  assert.ok(one.json.orders.length >= 1 && one.json.orders[0].buyer.phone, 'the drawer needs the buyer to answer a complaint');
+  assert.ok(one.json.audit.length >= 1, 'the store log is in the drawer');
+  assert.equal(one.json.editable.includes('pay_account'), true, 'the page is told which fields the merchant may even queue');
+  assert.ok(!JSON.stringify(one.json).includes('admin_token'), 'the drawer leaks no key');
+  assert.ok(!('admin_token' in one.json.store), 'adminStore stripped it before it got here');
+
+  const h = await call('/ops/api/health', { cookie: 'zl_ops=' + opsCookie });
+  assert.equal(h.json.ok, true);
+  assert.equal(h.json.selftest.tpl_ops, true, 'the console proves its own template is live');
+  assert.equal(h.json.selftest.tpl_confirm, true);
+});
+
+test('every lever needs a deliberate second click, and each one is logged twice', async () => {
+  const c = 'zl_ops=' + opsCookie;
+  const naked = await call('/ops/api/store', { method: 'POST', cookie: c, body: { handle: 'mamatoe', action: 'suspend' } });
+  assert.equal(naked.status, 403, 'no x-zimlink-confirm header, no lever');
+  const junk = await call('/ops/api/store', { method: 'POST', cookie: c, confirm: true, body: { handle: 'mamatoe', action: 'delete_store' } });
+  assert.equal(junk.status, 422, 'there is no such thing as a destructive action by name');
+  assert.match(JSON.stringify(junk.json.actions), /reinstate/, 'and the page is told what is available');
+
+  const state = await call('/ops/api/state', { cookie: c });
+  const left0 = state.json.stores.find((s) => s.handle === 'mamatoe').left;
+  const plus = await call('/ops/api/store', { method: 'POST', cookie: c, confirm: true, body: { handle: 'mamatoe', action: 'extend7' } });
+  assert.equal(plus.status, 200, plus.text);
+  assert.equal(Math.abs(plus.json.after.paid_until / 864e5 - (state.json.stores.find((s) => s.handle === 'mamatoe').paid_until / 864e5 + 7)) < 0.01, true, '+7 days is exactly seven days');
+  assert.match(plus.json.note, /merchant can see that it was us/, 'the answer says the change is attributed');
+
+  const off = await call('/ops/api/store', { method: 'POST', cookie: c, confirm: true, body: { handle: 'mamatoe', action: 'suspend' } });
+  assert.equal(off.json.after.suspended, true);
+  const blocked = await call('/api/order', { method: 'POST', body: { handle: 'mamatoe', buyer: { name: 'x', phone: '0781234567' }, items: [{ name: 'a', price: 1 }] } });
+  assert.equal(blocked.status, 503, 'a paused store stops selling, so the lever means something');
+  const back = await call('/ops/api/store', { method: 'POST', cookie: c, confirm: true, body: { handle: 'mamatoe', action: 'reinstate' } });
+  assert.equal(back.json.undo, 'suspend', 'every lever names its own undo');
+  const open2 = await call('/api/order', { method: 'POST', body: { handle: 'mamatoe', buyer: { name: 'x', phone: '0781234567' }, items: [{ name: 'a', price: 1 }] } });
+  assert.equal(open2.status, 201, 'reinstate puts the shop back on air');
+
+  const refs = await call('/ops/api/store', { method: 'POST', cookie: c, confirm: true, body: { handle: 'mamatoe', action: 'clear_refs' } });
+  assert.equal(refs.json.ok, true, refs.text);
+  assert.equal(await env.STORES.get('ref:mamatoe'), null, 'the queue is empty again');
+
+  const log = await call('/ops/api/audit', { cookie: c });
+  const acts = (log.json.ops || []).map((o) => o.act);
+  for (const a of ['login', 'extend7', 'suspend', 'reinstate', 'clear_refs']) {
+    assert.ok(acts.includes(a), 'ops log is missing ' + a + ' (' + acts.join(',') + ')');
+  }
+
+  const note = await call('/ops/api/store', { method: 'POST', cookie: c, confirm: true, body: { handle: 'mamatoe', action: 'notify', message: 'Your reference arrived, thank you.' } });
+  assert.equal(note.status, 200, 'notify is a lever too, and it used to 422 as an unknown action: ' + note.text);
+  assert.ok(Array.isArray(note.json.delivered) && Array.isArray(note.json.failed), 'both outcomes come back as lists the page can render');
+  assert.ok(!(note.json.failed.length && /^Sent\./.test(note.json.note)), 'a channel that threw is never called a delivery: ' + note.json.note);
+  assert.match(note.json.note, /Sent|did not go through|did not answer|no channel/, 'and the note says plainly what happened');
+
+  const rev = await call('/ops/api/store', { method: 'POST', cookie: c, confirm: true, body: { handle: 'mamatoe', action: 'revoke' } });
+  assert.equal(rev.json.ok, true, rev.text);
+  // revoke's whole point: the link that was sitting in a WhatsApp thread is
+  // now a dead end, at one KV write, with no email needed from anybody
+  const sess = await loginWithCode(store.admin_url);
+  assert.notEqual(sess.r.status, 200, 'the code from before the revoke no longer opens a session');
+  assert.ok(!sess.cookie, 'and no session cookie is issued for it');
+  const withOld = await call('/api/settings', { method: 'POST', cookie: 'zl_sess=' + (store.code || '').slice(-20), confirm: true, body: { tagline: 'should not land' } });
+  assert.notEqual(withOld.status, 200, 'a made-up cookie does not reach settings either');
+  const fresh = await call('/ops/api/store', { method: 'POST', cookie: c, confirm: true, body: { handle: 'mamatoe', action: 'link' } });
+  assert.equal(fresh.json.ok, true, 'the link lever hands the merchant a working way back-in');
+  assert.match(fresh.json.dashboard_url, /\/a\?code=v1\./, 'a capability, not a token=');
+  const again = await loginWithCode(fresh.json.dashboard_url);
+  assert.ok(again.cookie, 'the new link works immediately, with nothing installed or approved');
+  const now = await call('/api/settings', { method: 'POST', cookie: again.cookie, confirm: true, body: { handle: 'mamatoe', tagline: 'Back in the saddle' } });
+  assert.equal(now.status, 200, JSON.stringify(now.json));
+  store.cookie = again.cookie;
+});
+
+test('the template editor publishes, validates, and can be undone from git', async () => {
+  const c = 'zl_ops=' + opsCookie;
+  const list = await call('/ops/api/templates', { cookie: c });
+  const names = (list.json.templates || []).map((t) => t.name);
+  for (const n of ['store', 'onboard', 'admin', 'fees', 'index', 'confirm', 'renew', 'ops', 'sample-menu']) {
+    assert.ok(names.includes(n), 'the console lists ' + n);
+  }
+  assert.equal(list.json.templates.every((t) => t.live), true, 'every page is present in KV');
+
+  const read = await call('/ops/api/template?name=renew', { cookie: c });
+  assert.match(read.json.html, /__KIT__|\.card/, 'the editor loads a real page');
+  const short = await call('/ops/api/template', { method: 'POST', cookie: c, confirm: true, body: { name: 'renew', html: '<!doctype html><p>x</p>' } });
+  assert.equal(short.status, 422, 'a stub would blank the live renewal page for every merchant');
+  const noDoc = await call('/ops/api/template', { method: 'POST', cookie: c, confirm: true, body: { name: 'renew', html: '<div>' + 'y'.repeat(400) + '</div>' } });
+  assert.equal(noDoc.status, 422, 'not a document, not published');
+  const remote = await call('/ops/api/template', { method: 'POST', cookie: c, confirm: true,
+    body: { name: 'renew', html: '<!doctype html>\n' + '<script src="http://evil/x.js"></script>' + 'z'.repeat(400) } });
+  assert.equal(remote.status, 422, 'these pages are single-file on purpose');
+  const wrongName = await call('/ops/api/template', { method: 'POST', cookie: c, confirm: true, body: { name: 'worker', html: '<!doctype html>' + 'q'.repeat(400) } });
+  assert.equal(wrongName.status, 422, 'the console cannot overwrite the runtime, only its pages');
+  const unconfirmed = await call('/ops/api/template', { method: 'POST', cookie: c, body: { name: 'renew', html: read.json.html } });
+  assert.equal(unconfirmed.status, 403, 'publishing needs the same deliberate click as a lever');
+
+  const edited = read.json.html.replace('</body>', '<!-- OPS-PUBLISHED --></body>');
+  const pub = await call('/ops/api/template', { method: 'POST', cookie: c, confirm: true, body: { name: 'renew', html: edited } });
+  assert.equal(pub.status, 200, pub.text);
+  assert.equal(pub.json.matches, true, 'the answer proves KV holds exactly what was sent');
+  const served = await call('/renew/' + renewToken());
+  assert.equal(served.status, 200);
+  assert.ok(served.text.includes('<!-- OPS-PUBLISHED -->'), 'a template edit is live at once — no deploy, no cache clear');
+  assert.ok(!/\/\*__ZIMLINK_RENEW__\*\/null/.test(served.text), 'and the payload still gets injected into a hand-edited page');
+
+  // deleting the KV copy must fall back to the builder, so a bad publish never
+  // leaves merchants staring at "Template missing"
+  await env.STORES.delete('tpl:renew');
+  const fb = await call('/renew/' + renewToken());
+  assert.equal(fb.status, 200, 'the renewal page still renders from code when KV has nothing');
+  assert.ok(fb.text.length > 1200 && /renew|plan|year/i.test(fb.text), 'fallback is the real page, not an error');
+  await call('/ops/api/template', { method: 'POST', cookie: c, confirm: true, body: { name: 'renew', html: read.json.html } });
+  assert.ok((await call('/ops/api/template?name=renew', { cookie: c })).json.bytes === read.json.bytes, 'the console can put the page back');
+});
+
+test('signing out ends the session for real', async () => {
+  const out = await call('/ops/logout', { method: 'POST', cookie: 'zl_ops=' + opsCookie });
+  assert.equal(out.status, 200);
+  assert.match(out.cookie, /zl_ops=;/, 'the cookie is expired, not just cleared client-side');
+  const after = await call('/ops/api/state', { cookie: 'zl_ops=' + opsCookie });
+  assert.equal(after.status, 401, 'signing out revokes the session server-side, not just the tab');
+  const page = await call('/ops');
+  assert.match(page.text, /"signed_in":false/, 'and the console page agrees');
+  // refusing a dead cookie must not spend the operator's lockout budget: one
+  // expired session refreshing used to walk the door toward a 10-minute freeze
+  const w1 = await call('/ops/login', { method: 'POST', body: { secret: 'still-wrong' } });
+  assert.equal(w1.status, 403);
+  for (let i = 0; i < 3; i++) await call('/ops/api/state', { cookie: 'zl_ops=' + opsCookie });
+  for (let i = 0; i < 3; i++) await call('/ops/api/store', { method: 'POST', cookie: 'zl_ops=' + opsCookie, body: { handle: 'mamatoe', action: 'link' } });
+  const w2 = await call('/ops/login', { method: 'POST', body: { secret: 'still-wrong' } });
+  assert.equal(w2.json.tries_left, w1.json.tries_left - 1,
+    'six dead-cookie probes cost nothing; only the two secret guesses did (' + w1.json.tries_left + ' -> ' + w2.json.tries_left + ')');
+  const re = await call('/ops/login', { method: 'POST', body: { secret: SECRET } });
+  assert.equal(re.status, 200, 'and signing in again works straight away, lock reset for whoever is next');
+  opsCookie = (re.cookie.match(/zl_ops=([^;]+)/) || [])[1];
 });
 
 test('selftest reports green bindings, templates and pricing', async () => {
