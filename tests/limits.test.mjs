@@ -48,10 +48,14 @@ function kvStub(failWrite) {
   };
 }
 
+// FLIP.all = the whole account is spent, not just the log rows: the one state in
+// which every write path (orders, settings, ops levers, rails) must still answer
+// in words instead of a stack trace.
+const FLIP = { all: false };
 const env = {
   // the lock counter and every order/audit row are unwritable; onboarding-era
   // store documents and the feed cache (also STORES) still are
-  STORES: kvStub((k) => k.startsWith('lock:')),
+  STORES: kvStub((k) => FLIP.all || k.startsWith('lock:')),
   ORDERS: kvStub(() => true),
   ADMIN_SECRET: 'test-secret',
 };
@@ -174,4 +178,33 @@ test('the operator can still sign in, read the estate, and pull a lever', async 
 
   const out = await call('/ops/logout', { method: 'POST', cookie: c });
   assert.equal(out.status, 200, 'and signing out still works while the write budget is gone');
+});
+
+test('a spent quota answers each reader in their own words', async () => {
+  const login = await call('/ops/login', { method: 'POST', body: { secret: 'test-secret' }, confirm: true });
+  const c = 'zl_ops=' + (login.cookie.match(/zl_ops=([^;]+)/) || [])[1];
+  FLIP.all = true;
+  try {
+    const rails = await call('/ops/api/rails', { method: 'POST', cookie: c, confirm: true, body: { rails: { gcbank: { label: 'GCB transfer', pct: 0.01 } } } });
+    assert.equal(rails.status, 503, 'adding a market on a quota day is "not now": ' + rails.text.slice(0, 160));
+    assert.equal(rails.json.who, 'operator');
+    assert.ok(rails.json.retry_in_sec > 0 && Number(rails.json.retry_in_sec) <= 86400, 'with a real number of seconds');
+    assert.match(rails.json.error, /1,000\/day|free storage writes/, 'and the operator is told the ceiling and the way round it');
+    assert.ok(!/\[object Object\]|undefined/.test(rails.text), rails.text.slice(0, 200));
+
+    const order = await call('/api/order', { method: 'POST', body: { handle: T, buyer: { name: 'A', phone: '263700000000' }, items: [{ name: 'x', price: 1, qty: 1 }] } });
+    assert.equal(order.status, 503);
+    assert.equal(order.json.who, 'buyer');
+    assert.match(order.json.error, /message the shop/, 'a buyer is pointed at the shop, not at a plan upgrade');
+    assert.ok(!/\$5|KV|wrangler|namespace/.test(order.json.error), 'no infra vocabulary in a buyer\u2019s face');
+
+    const set = await call('/api/settings', { method: 'POST', admin: KEY, body: { handle: T, pay_account: '0779998888' } });
+    assert.equal(set.status, 503, set.text.slice(0, 160));
+    assert.equal(set.json.who, 'merchant');
+    assert.match(set.json.error, /Nothing was saved/, 'a merchant needs to know nothing half-happened');
+  } finally {
+    FLIP.all = false;
+  }
+  const after = await call('/rails');
+  assert.equal(after.status, 200, 'and the moment the write budget is back, so is the lever');
 });

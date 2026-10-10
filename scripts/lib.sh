@@ -114,7 +114,19 @@ else:
     elif read() == body:
         print("  = %-14s write refused (%s) but KV already matches git: fine" % (name, str(err)[:60]))
     else:
-        raise SystemExit("  ! %-14s could not be published and KV differs from git: %s" % (name, str(err)[:160]))
+        # A spent quota is the one reason to keep going without this page. The
+        # Worker is forward-compatible with yesterday's HTML (the data hooks are
+        # null-tolerant by construction), so shipping the new API and letting the
+        # copy catch up on the next deploy beats shipping nothing for 12 hours.
+        # Any other failure mode is still fatal: a stale page from a real bug is
+        # exactly what this function exists to refuse.
+        txt = str(err)
+        if "10048" in txt or "free usage limit" in txt or "limit exceeded" in txt:
+            left = getattr(err, "hdrs", {}) and err.hdrs.get("x-cf-quota-remaining") or "?"
+            print("  ! %-14s NOT PUBLISHED — KV write budget spent (old copy still live, %d bytes in git). "
+                  "Goes out on the next deploy after 00:00 UTC. remaining=%s" % (name, len(body), left))
+        else:
+            raise SystemExit("  ! %-14s could not be published and KV differs from git: %s" % (name, txt[:160]))
 PYEOF
     [[ $? -eq 0 ]] || die "template publish failed: $name"
   done

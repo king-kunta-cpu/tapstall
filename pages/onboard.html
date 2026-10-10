@@ -256,6 +256,19 @@ h1 small { display: block; font-size: .8rem; font-weight: 500; color: var(--ink-
     <h3 style="margin-top:.9rem">How buyers pay</h3>
     <div class="f" data-f="rail"><label for="rail">Rail</label><select id="rail" name="rail"></select>
       <p class="help" id="railHelp"></p></div>
+    <div class="f hide" data-f="own_label" id="ownRow">
+      <label for="own_label">What the method is called</label>
+      <input id="own_label" name="own_label" placeholder="e.g. MTN MoMo, bKash, my bank app" autocomplete="off">
+      <div class="row" style="margin-top:.4rem">
+        <span class="grow" style="flex:1"><label for="own_dial">Dial code or how they pay</label>
+          <input id="own_dial" name="own_dial" placeholder="*151# or bank app" autocomplete="off"></span>
+        <span style="width:6.5rem"><label for="own_pct">Their fee %</label>
+          <input id="own_pct" name="own_pct" type="number" step="0.01" min="0" max="30" placeholder="3"></span>
+        <span style="width:6.5rem"><label for="own_fixed">+ fixed</label>
+          <input id="own_fixed" name="own_fixed" type="number" step="0.01" min="0" placeholder="0"></span>
+      </div>
+      <p class="help">For a method we have not verified a tariff for. Buyers are shown this wording and these numbers — nothing here is sent anywhere, and you can change it later from the dashboard. Leave it blank and orders simply say “pay on collection”.</p>
+    </div>
     <div class="f hide" data-f="pay_account" id="acctRow"><label for="pay_account">The number or account they send to</label><input id="pay_account" name="pay_account" placeholder="0771234567" autocomplete="off">
       <p class="help">This is what appears on the buyer’s slip. If it is wrong, fix it yourself in the dashboard — changes to it take 15 minutes and can be cancelled, so a copied link cannot reroute your money quietly.</p></div>
     <div class="nav"><button type="button" class="sec" data-back>Back</button><span class="grow"></span><button type="button" data-next>Next</button></div>
@@ -327,11 +340,22 @@ fetch('/rails').then(function (r) { return r.json(); }).then(function (j) {
   var sel = q('#rail');
   sel.innerHTML = Object.keys(RAILS).map(function (k) { return '<option value="' + k + '">' + esc(RAILS[k].label) + '</option>'; }).join('');
   sel.onchange = function () { railHelp(); paint(); };
+  ['own_label', 'own_dial', 'own_pct', 'own_fixed'].forEach(function (n) {
+    var e = q('[name="' + n + '"]'); if (e) e.oninput = function () { paint(); };
+  });
   railHelp(); paint();
 }).catch(function () { q('#railHelp').textContent = 'Could not load the rail list — the default (cash) is still fine.'; });
 
+function curRail() {
+  // the rail being priced right now: ours, or the one being typed in this box
+  var k = q('#rail').value;
+  if (k !== 'custom') return RAILS[k] || null;
+  return { label: val('own_label') || 'My own method', dial: val('own_dial'), type: 'manual',
+           pct: (Number(val('own_pct')) || 0) / 100, imtt: 0, fixed: Number(val('own_fixed')) || 0 };
+}
 function railHelp() {
-  var r = RAILS[q('#rail').value];
+  var k = q('#rail').value, r = RAILS[k];
+  q('#ownRow').classList.toggle('hide', k !== 'custom');
   q('#acctRow').classList.toggle('hide', !!r && r.type === 'cod');
   q('#railHelp').innerHTML = r ? esc(r.label) + (r.dial ? ' · dial ' + esc(r.dial) : '') + ' · costs you about '
     + (((r.pct || 0) * 100).toFixed(1) + '% + ' + ((r.imtt || 0) * 100).toFixed(1) + '% tax on cash out')
@@ -354,9 +378,10 @@ var CHECK = {
   currency: function (v) { return /^[A-Za-z]{3}$/.test(v) || 'Three letters, e.g. USD or ZAR.'; },
   tax_pct: function (v) { return !v || (Number(v) >= 0 && Number(v) <= 40) || '0–40.'; },
   pay_account: function (v) { return !v || v.length <= 60 || 'Too long.'; },
-  logo: function (v) { return !v || /^https?:\/\/\S+$/.test(v) || 'A full image URL, or leave it blank.'; }
+  logo: function (v) { return !v || /^https?:\/\/\S+$/.test(v) || 'A full image URL, or leave it blank.'; },
+  own_label: function (v) { return q('#rail').value !== 'custom' || v.length >= 2 || 'Name the method, or pick a listed one instead.'; }
 };
-var STEPS = [['shop_name', 'handle', 'whatsapp', 'owner_email'], ['feed_url', 'pay_account', 'logo'], ['currency', 'tax_pct', 'pay_account'], []];
+var STEPS = [['shop_name', 'handle', 'whatsapp', 'owner_email'], ['feed_url', 'pay_account', 'logo', 'own_label'], ['currency', 'tax_pct', 'pay_account'], []];
 
 function paint() {
   qa('.step').forEach(function (el) { el.classList.toggle('hide', Number(el.dataset.s) !== step); });
@@ -365,14 +390,14 @@ function paint() {
   q('#handleHost').textContent = location.host + '/s/';
   // live preview of the buyer card, so the money rules are not abstract
   q('#pvName').textContent = val('shop_name') || 'Your shop';
-  q('#pvTag').textContent = val('tagline') || ((RAILS[q('#rail').value] || {}).label || 'Order ahead') + ' · order ahead';
+  q('#pvTag').textContent = val('tagline') || ((curRail() || {}).label || 'Order ahead') + ' · order ahead';
   var cur = (val('currency') || 'USD').toUpperCase();
   q('#pvCur').textContent = cur;
   var sub = 5.5 * 2, tax = Number(val('tax_pct')) || 0;
   var taxA = Math.round(sub * tax) / 100, fee = Number(val('delivery_fee')) || 0;
   var tot = Math.round((sub + taxA + fee) * 100) / 100;
-  var r = RAILS[q('#rail').value] || {};
-  var cost = q('#surcharge_mode').value === 'pass' ? Math.round(tot * ((r.pct || 0) + (r.imtt || 0)) * 100) / 100 : 0;
+  var r = curRail() || {};
+  var cost = q('#surcharge_mode').value === 'pass' ? Math.round((tot * ((r.pct || 0) + (r.imtt || 0)) + (r.fixed || 0)) * 100) / 100 : 0;
   var cents = q('#unique_change').checked ? (Math.round(tot * 100) % 97) / 100 : 0;
   q('#pvTot').textContent = tot.toFixed(2) + ' ' + cur;
   q('#pvPay').textContent = (tot + cents + cost).toFixed(2) + ' ' + cur;
@@ -408,7 +433,7 @@ function summary() {
   var rows = [
     ['Link', location.host + '/s/' + (val('handle') || '…')],
     ['Menu', val('feed_url') ? 'from your sheet' : 'not set'],
-    ['Rail', (RAILS[q('#rail').value] || {}).label || '—'],
+    ['Rail', (curRail() || {}).label || '—'],
     ['Payout', val('pay_account') || 'not set — you can add it in the dashboard'],
     ['Currency', (val('currency') || 'USD') + (Number(val('tax_pct')) ? ' · tax ' + val('tax_pct') + '%' : '')],
     ['Delivery', (Number(val('delivery_fee')) || 0).toFixed(2) + (Number(val('free_over')) ? ' · free over ' + val('free_over') : '')],
@@ -433,6 +458,8 @@ q('#w').onsubmit = function (e) {
     shop_name: val('shop_name'), handle: val('handle'), whatsapp: val('whatsapp').replace(/\D/g, ''),
     location: val('location'), hours: val('hours'), tagline: val('tagline'), logo: val('logo'),
     feed_url: val('feed_url'), rail: q('#rail').value, pay_account: val('pay_account'),
+    rail_def: q('#rail').value === 'custom' ? { label: val('own_label'), dial: val('own_dial'),
+      pct: (Number(val('own_pct')) || 0) / 100, fixed: Number(val('own_fixed')) || 0, type: 'manual' } : null,
     currency: (val('currency') || 'USD').toUpperCase(), tax_pct: Number(val('tax_pct')) || 0,
     zig_rate: Number(val('zig_rate')) || 0, surcharge_mode: q('#surcharge_mode').value,
     delivery_fee: Number(val('delivery_fee')) || 0, free_over: Number(val('free_over')) || 0,

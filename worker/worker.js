@@ -18,10 +18,10 @@ import {
   RAILS, round2, clamp, slug, digits, isEmail, validHandle, parseCSV, normalizeFeedUrl,
   parseProducts, priceOrder, payInstructions, riskFlags, waSummary, publicStore, hash,
   issueCap, verifyCap, randomKey, validateSettings, stageSettings, applyPending, maskField,
-  EDITABLE_FIELDS, SOFT_FIELDS, sign, adminStore,
+  EDITABLE_FIELDS, SOFT_FIELDS, sign, adminStore, normaliseRail, resolveRail,
 } from './core.js';
 
-const VERSION = '0.4.1';
+const VERSION = '0.4.2';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 const MAX_ORDERS_KEPT = 200;
@@ -47,19 +47,8 @@ export default {
       return open ? openCors(res) : res;
     } catch (e) {
       const msg = String((e && e.message) || e);
-      // A spent quota is not a bug, and a 500 with `KV put() limit exceeded for
-      // the day.` in a buyer's face is both opaque and alarming. Cloudflare's
-      // free KV tier answers this once the 1,000 daily writes are gone (hit for
-      // real today after three prod_check runs and two CI deploys), so say what
-      // it is, say when it clears, and hand the raw text to the operator instead.
-      if (/put\(\) limit|write.*limit|CPU time exceeded|Memory limit/i.test(msg)) {
-        const secs = secsToMidnightUTC();
-        const errRes = json({
-          ok: false, retry_in_sec: secs, detail: msg,
-          error: 'This store is out of storage writes for the day. Nothing is lost and no order was taken — try again in a few hours, or message the shop directly.',
-        }, 503, { 'Retry-After': String(secs), 'Cache-Control': 'no-store' });
-        return open ? openCors(errRes) : errRes;
-      }
+      const spent = quotaAnswer(msg, url.pathname);
+      if (spent) return open ? openCors(spent) : spent;
       return json({ ok: false, error: msg, stage: 'worker' }, 500);
     }
   },
@@ -82,7 +71,12 @@ async function route(req, url, env, ctx) {
     }
     return json(t, 200, NOSTORE);
   }
-  if (p === '/rails') return json({ ok: true, rails: RAILS, price_usd: PRICE_USD, free_days: FREE_DAYS }, 200, { 'Cache-Control': 'public, max-age=300' });
+  if (p === '/rails') {
+    const cat = await railsCatalog(env);
+    return json({ ok: true, rails: cat, custom: true, price_usd: PRICE_USD, free_days: FREE_DAYS,
+      note: 'Any payment method works here, including one nobody has heard of outside your street. If yours is missing, ask us to add it — or pick "describe my own" and type it in.' },
+      200, { 'Cache-Control': 'public, max-age=60' });
+  }
   if (p === '/fees.ics') return feesIcs();
   if (p === '/fees' || p === '/fees.html') {
     const page = await tpl(env, 'fees');
@@ -104,7 +98,7 @@ async function route(req, url, env, ctx) {
   if ((m = p.match(/^\/s\/([a-z0-9][a-z0-9-]{1,30})$/))) return storePage(env, m[1]);
   if ((m = p.match(/^\/s\/([a-z0-9][a-z0-9-]{1,30})\/config\.json$/))) {
     const st = await getStore(env, m[1]);
-    return st ? json({ ok: true, store: publicStore(st) }) : json({ ok: false, error: 'no_store' }, 404);
+    return st ? json({ ok: true, store: publicStore(st, await railsCatalog(env)) }) : json({ ok: false, error: 'no_store' }, 404);
   }
   if ((m = p.match(/^\/s\/([a-z0-9][a-z0-9-]{1,30})\/feed\.json$/))) {
     const st = await getStore(env, m[1]);
@@ -160,6 +154,10 @@ async function route(req, url, env, ctx) {
     if (req.method === 'POST') return opsGate(req, env, () => opsTemplateWrite(req, env));
     return opsGate(req, env, () => opsTemplateRead(url, env));
   }
+  if (p === '/ops/api/rails') {
+    if (req.method === 'POST') return opsGate(req, env, () => opsRailsWrite(req, env));
+    return opsGate(req, env, () => opsRailsRead(env));
+  }
   if (p === '/ops/api/link') return req.method === 'POST' ? opsGate(req, env, () => opsIssueLink(req, env)) : json({ ok: false, error: 'method_not_allowed' }, 405, { Allow: 'POST' });
   if ((m = p.match(/^\/renew\/([A-Za-z0-9_-]{6,40})$/))) return renewPage(env, m[1]);
   if (p === '/api/admin-put' && req.method === 'POST') return adminPut(req, env);
@@ -178,7 +176,7 @@ async function storePage(env, handle) {
   const term = await env.STORES.get('term:' + handle, 'json');
   let page = await tpl(env, 'store');
   page = page
-    .replace('/*__ZIMLINK_CONFIG__*/null', JSON.stringify(publicStore(st)))
+    .replace('/*__ZIMLINK_CONFIG__*/null', JSON.stringify(publicStore(st, await railsCatalog(env))))
     .replace('/*__ZIMLINK_TERM__*/null', JSON.stringify(term || null));
   return html(page, 200, { 'Cache-Control': 'public, max-age=60, s-maxage=300' });
 }
@@ -252,7 +250,7 @@ async function placeOrder(req, url, env, ctx) {
   if (!items.length) return json({ ok: false, error: 'cart empty' }, 422);
 
   const railKey = st.rail || 'cash';
-  const pricing = priceOrder(st, items, service, railKey);
+  const pricing = priceOrder(st, items, service, railKey, await railsCatalog(env));
   const cap = Number(st.max_order_value) || 0;
   if (cap && pricing.total > cap) return json({ ok: false, error: `order over this shop's limit of ${cap} ${st.currency || 'USD'}` }, 422);
 
@@ -469,7 +467,8 @@ async function register(req, url, env) {
     currency: String(b.currency || 'USD').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3),
     zig_rate: Number(b.zig_rate) || 0,
     tax_pct: clamp(Number(b.tax_pct), 0, 40) || 0,
-    rail: RAILS[b.rail] ? b.rail : 'cash',
+    rail: await registerRail(b, env),
+    rail_def: String(b.rail || '') === 'custom' ? (normaliseRail(b.rail_def, 'custom') || null) || undefined : undefined,
     surcharge_mode: b.surcharge_mode === 'pass' ? 'pass' : 'absorb',
     delivery_fee: clamp(Number(b.delivery_fee), 0, 10000) || 0,
     free_over: Number(b.free_over) || 0,
@@ -513,6 +512,18 @@ async function register(req, url, env) {
       ? 'Live. Put the link in your WhatsApp/IG bio and status. Update your Google Sheet to change prices — no one needs to touch this for you.'
       : 'Store is live but 0 products loaded. Share your Sheet as "Anyone with the link — Viewer" and make sure row 1 is: id,name,category,price,currency,image,description,options,addons,stock,popular',
   }, 201);
+}
+
+/** A store's rail must exist in the catalogue; `custom` means "the merchant
+ *  described it" and is only honoured when the description is valid, because a
+ *  half-typed rail would silently price every order at 0% fee. An invalid one
+ *  falls back to cash — the buyer is still told to pay on delivery, which is a
+ *  wrong-but-safe instruction rather than a wrong amount. */
+async function registerRail(b, env) {
+  const key = String(b.rail || '');
+  if (key === 'custom') return normaliseRail(b.rail_def, 'custom') ? 'custom' : 'cash';
+  const cat = await railsCatalog(env);
+  return cat[key] ? key : 'cash';
 }
 
 async function lookup(url, env) {
@@ -794,7 +805,11 @@ async function selftest(env) {
   t.cap_rejects_tamper = !(await verifyCap(k, cap.slice(0, -4) + 'AAAA'));
   t.cap_rejects_other_secret = !(await verifyCap('other', cap));
   t.cap_rejects_expired = !(await verifyCap(k, cap, Math.floor(Date.now() / 1000) + 3600));
-  const v = validateSettings({ rail: 'nope', tax_pct: 999, hours: '8-5' }, Date.now());
+  const v = validateSettings({ rail: 'nope', tax_pct: 999, hours: '8-5' }, Date.now(), { rails: await railsCatalog(env) });
+  const vCat = validateSettings({ rail: 'cash' }, Date.now(), { rails: Object.assign(await railsCatalog(env), { test_momo: normaliseRail({ label: 'Test MoMo', pct: 0.01 }, 'test_momo') }) });
+  t.rail_catalogue_ok = vCat.ok && vCat.money.rail === 'test_momo';
+  t.rail_custom_ok = (() => { const r = resolveRail({ rail_def: { label: 'My Yape', dial: 'Yape app', pct: 0.012 } }, 'custom'); return r.label === 'My Yape' && r.pct === 0.012; })();
+  t.rail_price_with_own = (() => { const p = priceOrder({ currency: 'USD', rail: 'custom', rail_def: { label: 'My Yape', pct: 0.10, fixed: 0, type: 'manual' }, surcharge_mode: 'pass', unique_change: false }, [{ name: 'x', price: 100, qty: 1 }], 'pickup', 'custom'); return p.fee === 10 && p.pay_now === 110; })();
   t.settings_rejects_bad = !v.ok && !!(v.errors.rail && v.errors.tax_pct) && v.soft.hours === '8-5';
   const st2 = { rail: 'cash', pay_account: 'A1', hours: 'x' };
   stageSettings(st2, { hours: '9-6' }, { pay_account: 'EVIL' }, 9e5, 1000);
@@ -806,6 +821,25 @@ async function selftest(env) {
     && maskField('whatsapp', '263771234567') === '•••4567'
     && maskField('feed_url', 'https://docs.google.com/spreadsheets/d/abcdef/edit').indexOf('abcdef') === -1;
   return t;
+}
+
+/**
+ * The rails a store may price with: the built-in table (published tariffs for
+ * the two markets this was proven in) plus whatever the operator has added in
+ * KV under `rails:extra`. Adding Ghana or Pakistan is a KV write, not a deploy —
+ * which is the only way a $0 service can chase a list of excluded markets that
+ * changes every time a telco launches a wallet.
+ */
+async function railsCatalog(env) {
+  const out = Object.assign({}, RAILS);
+  let extra = null;
+  try { extra = env.STORES ? await env.STORES.get('rails:extra', 'json') : null; } catch (e) { extra = null; }
+  for (const k of Object.keys(extra || {})) {
+    const r = normaliseRail(extra[k], k);
+    if (r) out[k] = r;
+  }
+  out.custom = { key: 'custom', label: 'My own method (I describe it)', dial: 'as you describe', pct: 0, imtt: 0, fixed: 0, type: 'manual', own: true };
+  return out;
 }
 
 async function tpl(env, name) {
@@ -1012,8 +1046,20 @@ async function settingsEdit(req, url, env) {
   }
   const st = who.st;
   const patch = (b.settings && typeof b.settings === 'object') ? b.settings : b;
-  const v = validateSettings(patch, Date.now());
-  if (!v.ok) return json({ ok: false, error: 'some fields need a different format', fields: v.errors, ignored: v.ignored }, 422);
+  // validated against the live catalogue, so a rail the operator added this
+  // morning is accepted here in the same breath as the built-ins, and a
+  // misspelled one comes back as a field error instead of a mystery
+  const cat = await railsCatalog(env);
+  const v = validateSettings(patch, Date.now(), { rails: cat });
+  if (!v.ok) return json({ ok: false, error: 'some fields need a different format', fields: v.errors, ignored: v.ignored,
+    hint: v.errors.rail ? 'Pick one of: ' + Object.keys(cat).join(', ') + '. "custom" means you describe it below.' : undefined }, 422);
+  if (v.money.rail === 'custom') {
+    const def = v.money.rail_def !== undefined ? v.money.rail_def : st.rail_def;
+    if (!(def && def.label)) {
+      return json({ ok: false, error: 'a custom rail needs a name, what the buyer dials, and its fee',
+        fields: { rail_def: 'label, dial, pct (0-30), fixed, type' } }, 422);
+    }
+  }
   const keys = Object.keys(v.soft).concat(Object.keys(v.money));
   if (!keys.length) {
     return json({ ok: false, error: 'nothing to change', unknown: v.ignored, fields: v.errors,
@@ -1275,11 +1321,43 @@ async function opsAuthed(req, env) {
   return { bad: true };
 }
 
+/* The free Workers plan answers a spent KV write budget with
+   `KV put() limit exceeded for the day.` — hit for real on 2026-10-10 after a
+   few prod checks and two deploys. Two rules follow from it. (1) Never let it
+   surface as a 500 with internals in it: say what it is and when it clears.
+   (2) Say it in the reader's own terms, because the same exception reaches a
+   buyer placing an order, a merchant saving a setting and an operator pulling a
+   lever, and the message that comforts one alarms or confuses the others.
+   Anything that catches and reshapes an error (opsGate below) has to consult
+   this too, or the whole point is lost one layer down. */
+const QUOTA_RE = /put\(\) limit|write.*limit|CPU time exceeded|Memory limit/i;
+function quotaAnswer(msg, pathname) {
+  if (!QUOTA_RE.test(msg)) return null;
+  const secs = secsToMidnightUTC();
+  const buyerish = pathname === '/api/order' || pathname === '/api/lookup';
+  const merchantish = pathname.indexOf('/api/') === 0 || /^\/(a|c\/|renew\/)/.test(pathname);
+  const who = buyerish ? 'buyer' : merchantish ? 'merchant' : 'operator';
+  const line = who === 'buyer'
+    ? 'This store is out of storage writes for the day. Nothing is lost and no order was taken — try again in a few hours, or message the shop directly.'
+    : who === 'merchant'
+      ? 'Nothing was saved, and nothing was half-saved: your settings are exactly as they were. The account\u2019s storage writes are spent for today — try again in a few hours.'
+      : 'Nothing was written. The account has spent its free storage writes for today (1,000/day on the free Workers plan), so this lever will work again in a few hours. Upgrade to the $5 plan and the ceiling goes away.';
+  return json({ ok: false, retry_in_sec: secs, detail: msg, who, error: line },
+    503, { 'Retry-After': String(secs), 'Cache-Control': 'no-store' });
+}
+
 async function opsGate(req, env, fn) {
   const who = await opsAuthed(req, env);
   if (who.ok) {
     try { return await fn(); }
-    catch (e) { return json({ ok: false, error: String((e && e.message) || e), stage: 'ops' }, 500); }
+    catch (e) {
+      const msg = String((e && e.message) || e);
+      // a lever that cannot write is not a broken console, and this catch would
+      // otherwise turn the one explainable failure into a bare 500
+      const spent = quotaAnswer(msg, new URL(req.url).pathname);
+      if (spent) return spent;
+      return json({ ok: false, error: msg, stage: 'ops' }, 500);
+    }
   }
   // A stale or forged *cookie* is refused but does not feed the lock counter:
   // the counter exists to slow somebody guessing the secret at /ops/login, and
@@ -1523,6 +1601,75 @@ async function opsIssueLink(req, env) {
 /** Everything the operator might need to see about one store, and nothing
  *  that would let a browser session become a credential (no admin_token, no
  *  raw admin_url — the link is issued deliberately, via the link lever). */
+/**
+ * The rail catalogue, editable. `built_in` is what ships in code; the editor
+ * holds only the additions, so a mistake here can always be emptied back to the
+ * tariffs that were verified, and nothing a merchant is quoted can silently
+ * disappear mid-order (orders snapshot their own rail at placement).
+ */
+async function opsRailsRead(env) {
+  const extra = (await env.STORES.get('rails:extra', 'json')) || {};
+  return json({
+    ok: true, added: extra, built_in: RAILS, live: await railsCatalog(env),
+    price_usd: PRICE_USD, free_days: FREE_DAYS,
+  }, 200, { 'Cache-Control': 'no-store' });
+}
+async function opsRailsWrite(req, env) {
+  const b = await readBody(req);
+  if ((req.headers.get('x-zimlink-confirm') || '') !== '1') return json({ ok: false, error: 'missing x-zimlink-confirm header' }, 403);
+  if (b.restore) {
+    const prev = (await env.STORES.get('rails:extra', 'json')) || {};
+    if (Object.keys(prev).length) {
+      const listed = await env.STORES.list({ prefix: 'store:', limit: 1000 });
+      const still = [];
+      for (const kk of (listed.keys || [])) {
+        const h = String(kk.name).slice('store:'.length);
+        const doc = await getStore(env, h);
+        if (doc && prev[doc.rail]) still.push(h + ':' + doc.rail);
+      }
+      if (still.length) return json({ ok: false, error: 'cannot restore while an added rail is in use', used_by: still,
+        note: 'Switch those stores to a built-in rail first.' }, 422);
+    }
+    await env.STORES.delete('rails:extra');
+    await pushOpsLog(env, { act: 'rails-restore', handle: 'rails', note: 'removed every added rail, back to the built-in tariffs', ip: ipOf(req) });
+    return json({ ok: true, restored: 'built-in tariffs only', live: await railsCatalog(env) });
+  }
+  const input = b.rails && typeof b.rails === 'object' ? b.rails : null;
+  if (!input) return json({ ok: false, error: 'send { rails: { key: { label, dial, pct, fixed, type } } }' }, 422);
+  const out = {}, bad = {};
+  for (const k of Object.keys(input)) {
+    const key = String(k).toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 20);
+    const r = normaliseRail(input[k], key);
+    if (!key) bad[k] = 'key: lowercase letters, digits, dash';
+    else if (RAILS[key]) bad[k] = 'that key is a built-in tariff and cannot be overridden here — change core.js if the published rate moved';
+    else if (!r) bad[k] = 'needs a label of at least 2 characters';
+    else out[key] = r;
+  }
+  if (Object.keys(bad).length) return json({ ok: false, error: 'some rails need a different format', rails: bad }, 422);
+  const was = await env.STORES.get('rails:extra', 'json');
+  // removing a rail a store is still using would silently reprice that store as
+  // cash — no fee, no dial string, buyers told to pay on delivery. Refuse, and
+  // name the shops, so the fix is obvious instead of discovered by a merchant.
+  const removed = Object.keys(was || {}).filter((k) => !(k in out));
+  if (removed.length) {
+    const inUse = {};
+    const listed = await env.STORES.list({ prefix: 'store:', limit: 1000 });
+    for (const kk of (listed.keys || [])) {
+      const h = String(kk.name).slice('store:'.length);
+      const doc = await getStore(env, h);
+      if (doc && removed.indexOf(doc.rail) >= 0) (inUse[doc.rail] = inUse[doc.rail] || []).push(h);
+    }
+    if (Object.keys(inUse).length) {
+      return json({ ok: false, error: 'a rail in use cannot be removed', rails: Object.keys(inUse).reduce((a, k) => { a[k] = inUse[k].length + ' store(s): ' + inUse[k].join(', '); return a; }, {}),
+        note: 'Move those stores to another rail first, or leave the rail in place.' }, 422);
+    }
+  }
+  await env.STORES.put('rails:extra', JSON.stringify(out));
+  await pushOpsLog(env, { act: 'rails', handle: 'rails', note: (Object.keys(was || {}).length) + ' -> ' + Object.keys(out).length + ' added rails: ' + Object.keys(out).join(','), ip: ipOf(req) });
+  return json({ ok: true, added: Object.keys(out), live: await railsCatalog(env),
+    note: 'Live at once for new stores and new orders. Orders already placed keep the rail printed on their slip.' });
+}
+
 async function opsStoreDetail(url, env) {
   const handle = slug(url.searchParams.get('handle') || '');
   const st = await getStore(env, handle);

@@ -297,9 +297,22 @@ var TERM = /*__ZIMLINK_TERM__*/null;
     var tax = Math.round((st + dCharge) * taxP) / 100;
     var sub = Math.round((st + dCharge + tax) * 100) / 100;
     var railFee = 0, railNote = '';
-    var railName = (CFG.rail || 'cash').replace(/_/g, ' ');
-    if (CFG.surcharge_mode === 'pass' && CFG.rail !== 'cash') {
-      railFee = Math.round(sub * 3.4) / 100; railNote = 'payment cost added at checkout';
+    /* `rail_info` is the payment method this shop actually resolves to: one of
+       the built-in tariffs, one the operator added this morning, or one the
+       merchant described themselves. The receipt on the far side of "place
+       order" is computed from these same numbers, so previewing anything else
+       is a promise the order would break. Pages served from a cache older than
+       the field keep the old estimate. */
+    var R = CFG.rail_info || null;
+    var cod = !!R && R.type === 'cod';
+    var railName = R ? R.label : (CFG.rail || 'cash').replace(/_/g, ' ');
+    if (cod) railName = 'Cash on delivery';
+    var railCosts = R ? ((Number(R.pct) || 0) + (Number(R.imtt) || 0) + (Number(R.fixed) || 0)) > 0
+                      : !!CFG.rail && CFG.rail !== 'cash';
+    if (CFG.surcharge_mode === 'pass' && railCosts && !cod) {
+      railFee = R ? (Math.round((sub * ((Number(R.pct) || 0) + (Number(R.imtt) || 0)) + (Number(R.fixed) || 0)) * 100) / 100)
+                  : Math.round(sub * 3.4) / 100;
+      railNote = 'payment cost added at checkout';
     }
     var h = lines +
       '<div class="lines" style="border-top:1px solid #e6ebf0;padding-top:.4rem">' +
@@ -309,7 +322,7 @@ var TERM = /*__ZIMLINK_TERM__*/null;
       (railFee ? '<div><span>' + esc(railName) + ' fee</span><span>' + money(railFee) + '</span></div>' : '') +
       '<div class="tot"><span>Pay now</span><span>' + money(sub + railFee) + '</span></div></div>' +
       (ZIG ? '<p class="hint">ZiG estimate at ' + ZIG + ': ' + Math.round((sub + railFee) * ZIG).toLocaleString() + ' ZiG. Pay what the final receipt says.</p>' : '') +
-      '<p class="hint">Payment: <b>' + esc(railName) + '</b>' + (railNote ? ' — ' + railNote : '') + (CFG.surcharge_mode === 'absorb' && CFG.rail !== 'cash' ? ' — this shop covers the payment cost, you pay the menu price.' : '') + '</p>' +
+      '<p class="hint">Payment: <b>' + esc(railName) + '</b>' + (railNote ? ' — ' + railNote : '') + (CFG.surcharge_mode === 'absorb' && railCosts && !cod ? ' — this shop covers the payment cost, you pay the menu price.' : '') + '</p>' +
       '<label>Your name *</label><input id="fName" autocomplete="name" placeholder="e.g. Rudo M.">' +
       '<label>WhatsApp number * (with code, e.g. 26377...)</label><input id="fPhone" inputmode="tel" autocomplete="tel" placeholder="263771234567">' +
       '<label>Delivery or pickup?</label><select id="fService"><option value="pickup">Pickup at shop</option><option value="delivery">Delivery</option></select>' +

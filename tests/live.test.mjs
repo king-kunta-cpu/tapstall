@@ -78,9 +78,12 @@ async function load() {
   return worker;
 }
 
-async function call(path, { method = 'GET', body, cookie, confirm, headers } = {}) {
+// `ip` because POST /api/order is throttled 8/min/IP — the rail tests below
+// place a few more orders than that on purpose, and a 429 is not what they are
+// here to prove.
+async function call(path, { method = 'GET', body, cookie, confirm, headers, ip } = {}) {
   const w = await load();
-  const h = { 'content-type': 'application/json', 'cf-connecting-ip': '196.0.0.1', ...(headers || {}) };
+  const h = { 'content-type': 'application/json', 'cf-connecting-ip': ip || '196.0.0.1', ...(headers || {}) };
   if (cookie) h.cookie = cookie;
   if (confirm) h['x-zimlink-confirm'] = '1';
   const req = new Request('https://zimlink.test' + path, {
@@ -888,6 +891,141 @@ test('signing out ends the session for real', async () => {
   const re = await call('/ops/login', { method: 'POST', body: { secret: SECRET } });
   assert.equal(re.status, 200, 'and signing in again works straight away, lock reset for whoever is next');
   opsCookie = (re.cookie.match(/zl_ops=([^;]+)/) || [])[1];
+});
+
+test('a payment method nobody has heard of outside one street is a config change, not a deploy', async () => {
+  const c = 'zl_ops=' + opsCookie;
+  const rails = await call('/rails');
+  assert.equal(rails.json.ok, true);
+  assert.ok(rails.json.rails.ecocash_usd, 'the built-in tariffs are there');
+  assert.equal(rails.json.custom, true, 'and the page is told a rail can be self-described');
+  assert.ok(!rails.json.rails.gcbank, 'Ghana Card is not in the box yet');
+
+  const add = await call('/ops/api/rails', { method: 'POST', cookie: c, confirm: true,
+    body: { rails: { gcbank: { label: 'Ghana Card / GCB transfer', dial: 'bank app', pct: 0.004, fixed: 0.5, type: 'manual' } } } });
+  assert.equal(add.status, 200, add.text);
+  assert.deepEqual(add.json.added, ['gcbank']);
+  const seen = await call('/rails');
+  assert.equal(seen.json.rails.gcbank.label, 'Ghana Card / GCB transfer', 'live at once for the storefront, no redeploy');
+
+  const override = await call('/ops/api/rails', { method: 'POST', cookie: c, confirm: true,
+    body: { rails: { ecocash_usd: { label: 'EcoCash (changed)', pct: 0.5 } } } });
+  assert.equal(override.status, 422, 'a verified tariff cannot be quietly rewritten from the console');
+
+  const junk = await call('/ops/api/rails', { method: 'POST', cookie: c, confirm: true,
+    body: { rails: { nope: { label: 'x' } } } });
+  assert.equal(junk.status, 422, 'a rail needs a real name before it can price anything');
+  const noClick = await call('/ops/api/rails', { method: 'POST', cookie: c, body: { rails: {} } });
+  assert.equal(noClick.status, 403, 'same second click as every other lever');
+
+  // a merchant adopts it — money field, so it waits out the hold like any other
+  const set = await call('/api/settings', { method: 'POST', cookie: again_cookie_for('mamatoe'), confirm: true,
+    body: { handle: 'mamatoe', rail: 'gcbank' } });
+  assert.equal(set.status, 200, set.text);
+  assert.deepEqual(set.json.held, ['rail'], 'changing the rail changes what buyers are told, so it holds');
+  const key = 'store:mamatoe';
+  const st = JSON.parse(env.STORES._map.get(key).value);
+  st.pending.apply_at = Date.now() - 1000;
+  await env.STORES.put(key, JSON.stringify(st));
+  assert.equal((await call('/s/mamatoe/config.json')).json.store.rail, 'gcbank', 'and it lands on the next read');
+
+  const order = await call('/api/order', {
+    method: 'POST', ip: '41.9.7.7',
+    body: { handle: 'mamatoe', buyer: { name: 'Kofi', phone: '233201234567' }, items: [{ name: 'Jollof and chicken', price: 100, qty: 1 }] },
+  });
+  assert.equal(order.status, 201, order.text);
+  const p = order.json.pricing;
+  assert.equal(p.rail.label, 'Ghana Card / GCB transfer', 'the slip names the method the merchant chose');
+  assert.equal(p.rail.pct, 0.004, 'priced at the rate that was typed in, not a guess');
+  assert.equal(p.subtotal > 0, true);
+
+  // and it cannot be yanked out from under the store that is using it
+  const yank = await call('/ops/api/rails', { method: 'POST', cookie: c, confirm: true, body: { rails: {} } });
+  assert.equal(yank.status, 422, 'removing a rail in use would reprice the shop as cash, silently: ' + yank.text.slice(0, 160));
+  assert.match(JSON.stringify(yank.json.rails), /mamatoe/, 'and the answer says which store');
+  const back = await call('/api/settings', { method: 'POST', cookie: again_cookie_for('mamatoe'), confirm: true,
+    body: { handle: 'mamatoe', rail: 'ecocash_usd' } });
+  const st2 = JSON.parse(env.STORES._map.get(key).value);
+  if (st2.pending) { st2.pending.apply_at = Date.now() - 1000; await env.STORES.put(key, JSON.stringify(st2)); }
+  await call('/s/mamatoe/config.json');
+  const clean = await call('/ops/api/rails', { method: 'POST', cookie: c, confirm: true, body: { rails: {} } });
+  assert.equal(clean.status, 200, 'once nothing depends on it, the removal is allowed: ' + clean.text.slice(0, 160));
+  assert.ok(!back.json.error || back.json.ok, 'the merchant was never blocked from switching away');
+});
+
+test('a merchant can describe their own rail in the settings they already have', async () => {
+  const set = await call('/api/settings', { method: 'POST', cookie: again_cookie_for('mamatoe'), confirm: true,
+    body: { handle: 'mamatoe', rail: 'custom', rail_def: { label: 'My shop wallet', dial: '*999#', pct: 0.02, fixed: 1 } } });
+  assert.equal(set.status, 200, set.text);
+  const key = 'store:mamatoe';
+  const st = JSON.parse(env.STORES._map.get(key).value);
+  st.pending.apply_at = Date.now() - 1000;
+  await env.STORES.put(key, JSON.stringify(st));
+
+  const order = await call('/api/order', {
+    method: 'POST', ip: '41.9.7.8',
+    body: { handle: 'mamatoe', buyer: { name: 'Anop', phone: '233209998888' }, items: [{ name: 'Waakye', price: 50, qty: 2 }] },
+  });
+  assert.equal(order.status, 201, order.text);
+  const p = order.json.pricing;
+  assert.equal(p.rail.label, 'My shop wallet');
+  assert.equal(p.rail.dial, '*999#', 'the buyer is told the dial string the merchant typed');
+  assert.equal(p.rail.pct, 0.02);
+
+  const halfTyped = await call('/api/settings', { method: 'POST', cookie: again_cookie_for('mamatoe'), confirm: true,
+    body: { handle: 'mamatoe', rail: 'custom', rail_def: { label: '' } } });
+  assert.equal(halfTyped.status, 422, 'a half-described rail is refused, not priced at zero');
+  assert.ok(halfTyped.json.fields.rail_def, 'and it names the field');
+});
+
+function again_cookie_for(handle) { return store.cookie; }
+
+test('the numbers the storefront previews are the numbers the receipt will use', async () => {
+  const c = 'zl_ops=' + opsCookie;
+  const add = await call('/ops/api/rails', { method: 'POST', cookie: c, confirm: true,
+    body: { rails: { oddwallet: { label: 'Odd Wallet', dial: '*7#', pct: 0.013, imtt: 0.015, fixed: 0.2, type: 'manual' } } } });
+  assert.equal(add.status, 200, add.text);
+  const key = 'store:mamatoe';
+  await call('/api/settings', { method: 'POST', cookie: again_cookie_for('mamatoe'), confirm: true,
+    body: { handle: 'mamatoe', rail: 'oddwallet', surcharge_mode: 'pass' } });
+  const st = JSON.parse(env.STORES._map.get(key).value);
+  st.pending.apply_at = Date.now() - 1000;
+  await env.STORES.put(key, JSON.stringify(st));
+
+  const cfg = await call('/s/mamatoe/config.json');
+  const R = cfg.json.store.rail_info;
+  assert.ok(R, 'the page is handed the resolved rail, not a key it has to interpret');
+  assert.deepEqual([R.label, R.dial, R.pct, R.imtt, R.fixed], ['Odd Wallet', '*7#', 0.013, 0.015, 0.2]);
+
+  const order = await call('/api/order', {
+    method: 'POST', ip: '41.9.7.9',
+    body: { handle: 'mamatoe', buyer: { name: 'Ama', phone: '233205554444' }, items: [{ name: 'Waakye special', price: 12.5, qty: 4 }] },
+  });
+  assert.equal(order.status, 201, order.text);
+  const p = order.json.pricing;
+  // the page's arithmetic, written out here so a drift between the two is a red test
+  const expect = Math.round((p.subtotal * (R.pct + R.imtt) + R.fixed) * 100) / 100;
+  assert.equal(p.fee, Math.round(expect * 100) / 100, 'preview fee == receipt fee: ' + p.fee + ' vs ' + expect);
+  assert.equal(p.rail.label, R.label, 'the method is named the same on both sides');
+  assert.equal(p.pay_now >= p.total, true, 'the odd cents are on top, never taken off');
+
+  const back = await call('/api/settings', { method: 'POST', cookie: again_cookie_for('mamatoe'), confirm: true, body: { handle: 'mamatoe', rail: 'ecocash_usd' } });
+  assert.equal(back.status, 200, back.text);
+  const st2 = JSON.parse(env.STORES._map.get(key).value);
+  if (st2.pending) { st2.pending.apply_at = Date.now() - 1000; await env.STORES.put(key, JSON.stringify(st2)); }
+  await call('/s/mamatoe/config.json');
+  const clean = await call('/ops/api/rails', { method: 'POST', cookie: c, confirm: true, body: { rails: {} } });
+  assert.equal(clean.status, 200, 'the added rail goes back after the test: ' + clean.text.slice(0, 160));
+});
+
+test('the rails console is behind the operator session, the rail list is not', async () => {
+  const open = await call('/rails');
+  assert.equal(open.status, 200, 'a merchant choosing a rail must not have to ask anyone');
+  assert.equal(open.headers.get('access-control-allow-origin'), '*', 'the pickers live on other origins');
+  assert.match(open.json.note || '', /describe/i, 'and the list explains that an unlisted method can be described');
+  const peek = await call('/ops/api/rails');
+  assert.equal(peek.status, 401, 'the console side is not public');
+  assert.ok(!/rails:extra/.test(open.text), 'the public list does not announce the KV key behind it');
 });
 
 test('selftest reports green bindings, templates and pricing', async () => {

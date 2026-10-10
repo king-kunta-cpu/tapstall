@@ -16,6 +16,43 @@ export const RAILS = {
   payfast: { label: 'PayFast card (SA)', dial: 'hosted', pct: 0.029, imtt: 0, fixed: 1.0, type: 'auto' },
 };
 
+/**
+ * The rails above are the ones with published tariffs I could verify. The
+ * market is not those two countries: it is every seller take.app excludes, and
+ * in most of those places the method is one this table has never heard of —
+ * M-Pesa, GCash, bKash, Paystack transfer, Yape, Nequi, Tigo Pasa. So a rail is
+ * data, not code: the operator can add one to KV (`rails:extra`) and a merchant
+ * can describe the one their buyers already use. We never touch the money, so a
+ * rail only has to answer two questions — what does the buyer dial, and what does
+ * it cost them to move a rand/dollar/kyat through it.
+ */
+export function normaliseRail(def, key) {
+  const d = def && typeof def === 'object' ? def : {};
+  const label = String(d.label || '').trim().slice(0, 40);
+  if (label.length < 2) return null;
+  const pct = clamp(Number(d.pct), 0, 0.30) || 0;
+  const imtt = clamp(Number(d.imtt), 0, 0.30) || 0;
+  const fixed = clamp(Number(d.fixed), 0, 1000) || 0;
+  const type = ['manual', 'auto', 'cod'].indexOf(d.type) >= 0 ? d.type : 'manual';
+  const dial = String(d.dial || '').trim().slice(0, 40);
+  return { key: key || 'custom', label, dial: dial || (type === 'auto' ? 'link' : 'wallet app'), pct, imtt, fixed, type, added: true };
+}
+
+/** The rail a store actually prices with: operator-added catalogue, then the
+ *  built-in table, then the store's own description, then cash. */
+export function resolveRail(st, railKey, catalog) {
+  // 'custom' is answered by the store document, not the catalogue: the
+  // catalogue's `custom` entry is only a placeholder for pickers, and letting
+  // it win would price every self-described method at 0% with a label the
+  // merchant never wrote
+  if (railKey === 'custom') {
+    return normaliseRail((st || {}).rail_def, 'custom') || (catalog && catalog.custom) || RAILS.cash;
+  }
+  if (catalog && catalog[railKey]) return catalog[railKey];
+  if (RAILS[railKey]) return RAILS[railKey];
+  return RAILS.cash;
+}
+
 export const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 export const clamp = (n, lo, hi) => { n = Number(n); return isNaN(n) ? 0 : Math.max(lo, Math.min(hi, n)); };
 export const slug = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -123,8 +160,8 @@ export function parseProducts(csv, st = {}) {
  *  2) every order gets unique odd cents so a payment is identifiable by amount
  *     alone, which is what kills proof-of-payment screenshots as a dependency.
  */
-export function priceOrder(st = {}, items = [], service = 'pickup', railKey = 'cash') {
-  const rail = RAILS[railKey] || RAILS.cash;
+export function priceOrder(st = {}, items = [], service = 'pickup', railKey = 'cash', catalog) {
+  const rail = resolveRail(st, railKey, catalog);
   const lines = [];
   let itemsTotal = 0;
   for (const raw of items) {
@@ -221,11 +258,21 @@ export const PUBLIC_KEYS = [
   'handle', 'shop_name', 'tagline', 'logo', 'location', 'hours', 'closed',
   'currency', 'zig_rate', 'tax_pct', 'rail', 'surcharge_mode', 'delivery_fee', 'free_over',
   'pay_account', 'whatsapp', 'require_optin', 'unique_change', 'order_prefix', 'reference_format',
+  'rail_def',   // a merchant-described rail is buyer-facing by definition: label, dial string, fee
 ];
-export function publicStore(st) {
+// `catalog` is optional and only ever widens what a store is allowed to mean;
+// a page rendered without it still prices correctly for the built-in tariffs.
+export function publicStore(st, catalog) {
   if (!st) return null;
   const out = {};
   for (const k of PUBLIC_KEYS) if (st[k] !== undefined) out[k] = st[k];
+  // The storefront previews the total before the buyer commits, so it has to do
+  // the same arithmetic the worker will do on the receipt. Handing it the
+  // resolved rail (label, dial, rates) is what stops a page built for Zim's
+  // 3.4% quoting a Ghanaian or Bangladeshi shop a number nothing will match.
+  const r = resolveRail(st, st.rail || 'cash', catalog);
+  out.rail_info = { key: r.key, label: r.label, dial: r.dial, type: r.type,
+                    pct: r.pct, imtt: r.imtt, fixed: r.fixed, added: !!r.added };
   return out;
 }
 
@@ -320,7 +367,16 @@ const SET = {
   closed: (v) => v === true || v === 'true' || v === 1 || v === '1',
   whatsapp: (v) => { const d = digits(v).replace(/\D/g, ''); return d.length >= 9 && d.length <= 15 ? d : null; },
   pay_account: (v) => String(v || '').trim().slice(0, 60),
-  rail: (v) => (RAILS[v] ? v : null),
+  // the catalogue a caller knows about decides what a valid rail is; without
+  // one we can only check syntax, which is why this takes opts.rails
+  rail: (v, opts) => {
+    const key = String(v || '');
+    if (!/^[a-z0-9][a-z0-9_-]{1,19}$/.test(key)) return null;
+    const cat = opts && opts.rails;
+    if (cat) return cat[key] || key === 'custom' ? key : null;
+    return RAILS[key] || key === 'custom' ? key : null;
+  },
+  rail_def: (v) => (v === '' || v === null ? {} : normaliseRail(v, 'custom') || null),
   surcharge_mode: (v) => (v === 'pass' || v === 'absorb' ? v : null),
   currency: (v) => { const s = String(v || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3); return s.length === 3 ? s : null; },
   zig_rate: (v) => { const n = Number(v); return n >= 0 && n < 1e7 ? n : null; },
@@ -347,13 +403,14 @@ export const EDITABLE_FIELDS = Object.keys(SET);
  * `money` fields are the ones an attacker would use to redirect payments or
  * exfiltrate buyer details, so they are staged, not applied.
  */
-export function validateSettings(body, now) {
+export function validateSettings(body, now, opts) {
   const soft = {}, money = {}, errors = {}, ignored = [];
   const src = body && typeof body === 'object' ? body : {};
+  const options = opts || {};
   for (const k of Object.keys(src)) {
     if (!SET[k]) { ignored.push(k); continue; }
     let v;
-    try { v = SET[k](src[k]); } catch (e) { v = null; }
+    try { v = SET[k](src[k], options); } catch (e) { v = null; }
     if (v === null) { errors[k] = 'check the format of this field'; continue; }
     if (SOFT_FIELDS.indexOf(k) >= 0) soft[k] = v; else money[k] = v;
   }

@@ -23,8 +23,8 @@ require_cmd curl jq python3 node
 if [[ "$MODE" == "--check" ]]; then
   check_workflows
   run_tests
-  ./scripts/ui_kit.py check
-  ./scripts/build_bundle.sh /tmp/zl-dryrun >/dev/null && ok "dry run: tests pass, ui kit inlined, bundle builds"
+  python3 scripts/ui_kit.py check
+  bash scripts/build_bundle.sh /tmp/zl-dryrun >/dev/null && ok "dry run: tests pass, ui kit inlined, bundle builds"
   exit 0
 fi
 load_secrets
@@ -54,13 +54,13 @@ ORDERS_ID=$(kv_id "$KV_ORDERS" ORDERS | tail -1 | tr -dc "a-f0-9")
 say "stores=$STORES_ID  orders=$ORDERS_ID"
 
 # the shipped pages must be the generated ones, or KV would publish a stale UI
-./scripts/ui_kit.py check || die "pages/*.html are out of date with pages/src/ — run ./scripts/ui_kit.py and commit"
+python3 scripts/ui_kit.py check || die "pages/*.html are out of date with pages/src/ — run python3 scripts/ui_kit.py and commit"
 
 say "templates → KV (hot-swappable: HTML edits need no redeploy)"
 kv_put_tpl "$STORES_ID" store onboard admin fees index confirm renew ops sample-menu.csv
 
 say "building bundle"
-./scripts/build_bundle.sh .build
+bash scripts/build_bundle.sh .build
 
 # wrangler.toml is generated, never hand-edited, so the KV ids can not drift
 WORKER_NAME="$WORKER_NAME" STORES_ID="$STORES_ID" ORDERS_ID="$ORDERS_ID" python3 - <<'PYEOF'

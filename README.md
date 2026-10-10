@@ -1,4 +1,4 @@
-# ZimLink — a WhatsApp order desk for Zimbabwe and South Africa
+# ZimLink — a WhatsApp order desk for markets a global platform will not serve
 
 Merchants on WhatsApp lose money in the last five minutes before the money
 moves: buyers send screenshots instead of payments, mobile-money rails cost
@@ -7,6 +7,11 @@ only ledger. ZimLink gives each merchant a real storefront link that runs
 itself. The whole stack is on free tiers, and **no operator touches it** —
 sign-up, provisioning, menu updates, payment confirmation and renewal are all
 self-serve.
+
+Zimbabwe and South Africa are where the payment tariffs are verified, because
+that is where the incumbent refuses to work. The product is not limited to
+those two: a payment method or a country we have not priced is a config entry,
+not a release. See *Markets are data, not code*.
 
 **Live:** `https://zimlink.simalidudu.workers.dev/onboard`
 Storefront `…/s/<handle>` · dashboard `…/a` · rate calculator `…/fees`
@@ -118,6 +123,40 @@ curl -X PUT --data-binary @pages/store.html \
    land instantly; fields that move money or buyer data queue for 15 minutes,
    are cancellable inside that window, and every confirmation reply carries a
    15-minute undo link.
+
+## Markets are data, not code
+
+The one thing that made this a Zimbabwe-shaped product was a table of payment
+methods in the source. It still exists (`RAILS` in `worker/core.js`, nine
+verified ZW/SA tariffs) but it is now a **default, not the whole answer**:
+
+- `GET /rails` is public and returns built-ins ⊕ whatever the operator has
+  published in KV (`rails:extra`), plus a `custom` entry. Storefront, onboarding
+  and the dashboard all build their pickers from it, so a new method is live for
+  the next buyer within the 60-second cache and no page is redeployed.
+- **Operator:** Ops console → *Templates* → *Markets & rails* (`POST
+  /ops/api/rails`, same session and same `x-zimlink-confirm: 1` click as every
+  other lever). A rail is `{label, dial, pct, imtt, fixed, type}`; label must be
+  ≥ 2 characters, `pct`/`imtt` are clamped to 0–30% and `fixed` to ≤ 1000 so a
+  fat-fingered percentage cannot quote a 300% surcharge. Keys that already exist
+  in the built-in table are **refused** — verified tariffs change in `core.js`
+  when a published rate moves, not in a text box. Removing a rail, or restoring
+  the built-in table, is refused while any store still uses it, and the answer
+  names the shops, because silently repricing a live merchant as cash is the one
+  edit that would cost them money.
+- **Merchant:** pick `My own method (I describe it)` and type the label, the dial
+  string and the rate — in onboarding and in the dashboard. `rail_def` is a
+  money-class field, so it waits out the same 15-minute reversible hold as the
+  payment account, and it is public by design: it is what the buyer is shown.
+- Pricing is arithmetic on whatever rail resolves
+  (`fee = subtotal × (pct + imtt) + fixed`, zero for cash-on-delivery), the
+  worker snapshots it into `order.pay`, and `/s/<handle>/config.json` hands the
+  storefront the resolved rail as `rail_info` so the cart preview and the receipt
+  cannot disagree. A rail removed later cannot change a slip already sent.
+
+An invalid description at sign-up becomes `cash` rather than a rejected
+registration: a merchant who never opens the shop is worse than one whose slip
+says "pay on collection" until they fix it.
 
 ## The two suites
 

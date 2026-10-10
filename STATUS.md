@@ -273,6 +273,60 @@ the constraint. The fix when it bites for real is the $5/mo Workers plan (100k
 writes), which is exactly the trade the pricing page should make once revenue
 clears it; nothing else in the stack needs to change.
 
+## Rails became data, not code (2026-10-10, v0.4.2)
+
+The market question came back a third time — "everyone using WhatsApp for
+business who cannot reach take.app: geography, payment methods, the lot". A
+name does not fix that; a table in `core.js` was the thing making the product
+Zimbabwe-shaped. So the table stopped being the answer.
+
+Now true:
+
+* `GET /rails` = built-ins ⊕ `rails:extra` in KV ⊕ `custom`. Pickers read it,
+  so a method is live for the next buyer without a deploy.
+* Ops console → *Templates* → **Markets & rails**: add/edit/remove through
+  `GET|POST /ops/api/rails` behind the same session and the same second click as
+  every other lever. Refuses to override a built-in key; refuses to remove (or
+  restore away) a rail a store is still using and names the handles.
+* A merchant can describe their own method in onboarding or in Store settings
+  (`rail: custom` + `rail_def`), which is a money-class field: 15-minute hold,
+  cancellable, public by design because the buyer reads it.
+* Validation is shared (`normaliseRail`): label ≥ 2 chars, `pct`/`imtt` clamped
+  to 30%, `fixed` ≤ 1000, `type ∈ manual|auto|cod`. An invalid description at
+  sign-up degrades to `cash` — wrong-but-safe beats a wrong amount.
+* `/s/<handle>/config.json` now carries `rail_info` (the *resolved* rail) and the
+  storefront prices from it, so the cart preview and the printed slip cannot
+  drift apart. Orders still snapshot the rail into `pay`, so deleting a rail
+  never changes a receipt already sent.
+
+What the new tests caught, in order of embarrassment:
+
+1. The catalogue's `custom` placeholder shadowed the store's own description, so
+   every self-described rail priced at 0% under the label *we* invented.
+   Resolution order is now store-document-first for `custom`.
+2. `Math.round(subtotal * rate + fixed * 100) / 100` — precedence. It divided
+   every per-payment fixed fee by 100 in the storefront preview and the
+   onboarding estimate. Written as a test against the worker's own `priceOrder`
+   before it could ship.
+3. Moving the unknown-rail rule from `SET.rail` into the caller kept the product
+   correct and broke two contracts: the per-field `422 {fields}` shape the
+   dashboard renders and the `/__selftest` assertion. Membership is now checked
+   inside `validateSettings` via `opts.rails`.
+
+`node --test tests/` is 85 (was 81): +1 rails catalogue/merchant path, +1
+self-described rail, +1 preview-matches-receipt, +1 who-can-see-what. `scripts/
+deploy.sh --check` also stopped depending on exec bits (`python3 scripts/ui_kit.py`,
+`bash scripts/build_bundle.sh`) because a checkout can lose them and a dry-run
+gate must not be the thing that breaks.
+
+The name is still ZimLink, deliberately: the human-visible strings are catalogued
+(page titles and chrome on five pages, `/fees`, `/`, one mail subject, one ICS
+`PRODID`, one store notice) but `WORKER_NAME`, `PAGES_URL`, `REPO_RAW`, the
+`zl_*` cookies and the five `/*__ZIMLINK_*__*/` markers are load-bearing across a
+deploy boundary and stored absolute in every tenant document. Renaming the brand
+and renaming the hostname are two different operations and the second one strands
+every link already sent to every merchant. Say the word and it is an afternoon.
+
 ## Known limits (deliberate, not TODO)
 
 1. **No instant mobile-money confirmation** — none exists at $0 in ZW/SA. The

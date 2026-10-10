@@ -299,6 +299,19 @@ input[type=search] { max-width: 16rem }
         <pre class="out hide" id="edOut"></pre>
       </div>
     </div>
+    <div class="card flat" style="margin-top:.8rem">
+      <h3>Markets &amp; rails</h3>
+      <p class="muted" style="margin-top:0">What a payment method costs. The built-in table is the handful of tariffs we verified for Zimbabwe and South Africa; anything typed here is live for new orders in seconds and nothing is redeployed. That is the whole point — a merchant on a method we have never heard of should still be quoted the right number, and we should not have to ship code to serve a new country.</p>
+      <table><thead><tr><th>Key</th><th>Label buyers see</th><th class="n">Fee</th><th class="n">Fixed</th><th>Confirm</th><th>Source</th></tr></thead><tbody id="railRows"></tbody></table>
+      <label for="railJson" style="margin-top:.6rem;display:block">Added rails (this is <span class="mono">rails:extra</span> in KV — publishing replaces it)</label>
+      <textarea id="railJson" spellcheck="false" placeholder='{"mtn_momo": {"label":"MTN MoMo","dial":"*151#","pct":0.01,"fixed":0,"type":"manual"}}'></textarea>
+      <div class="bar" style="margin-top:.4rem">
+        <button id="railSave" class="ok" style="flex:1">Publish to KV</button>
+        <button id="railRestore" class="sec">Restore built-in table</button>
+      </div>
+      <p class="muted tiny" style="margin:.4rem 0 0">Percent is the buyer-side fee, plus IMTT-style cash-out where a tariff has it, capped at 30% so a typo cannot quote a 300% surcharge. Keys already in the built-in table are refused here — those change in <span class="mono">core.js</span> when a published tariff actually moves. A rail a store is still using cannot be removed or restored away: the answer names the shop.</p>
+      <pre class="out hide" id="railOut"></pre>
+    </div>
   </section>
 
   <section id="v-deploys" class="hide">
@@ -330,7 +343,7 @@ input[type=search] { max-width: 16rem }
 <script>
 var q = function (s) { return document.querySelector(s); };
 function esc(x) { return String(x == null ? '' : x).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
-var D = { stores: [], totals: {}, attention: [], sel: null, filter: 'all', q: '', tpl: [], timer: null, at: 0 };
+var D = { stores: [], totals: {}, attention: [], sel: null, filter: 'all', q: '', tpl: [], timer: null, at: 0, rails: null };
 
 function api(path, body) {
   var init = body === undefined ? { method: 'GET', credentials: 'same-origin' }
@@ -432,7 +445,52 @@ function health() {
       });
     };
   });
+  railsLoad();
 }
+function railRow(k, r, src) {
+  return '<tr><td class="mono">' + esc(k) + '</td><td>' + esc(r.label) + (r.dial ? ' <span class="muted tiny">' + esc(r.dial) + '</span>' : '')
+    + '</td><td class="n">' + (((r.pct || 0) + (r.imtt || 0)) * 100).toFixed(1) + '%' + (r.imtt ? ' <span class="muted tiny">(+' + (r.imtt * 100).toFixed(1) + ' tax)</span>' : '')
+    + '</td><td class="n">' + (r.fixed ? Number(r.fixed).toFixed(2) : '—') + '</td>'
+    + '<td>' + (r.type === 'auto' ? '<span class="badge ok">auto</span>' : '<span class="badge">manual</span>') + '</td>'
+    + '<td>' + src + '</td></tr>';
+}
+function railsLoad() {
+  api('/ops/api/rails').then(function (r) {
+    if (!r.j || !r.j.ok) return;
+    D.rails = r.j;
+    var added = r.j.added || {}, built = r.j.built_in || {};
+    var rows = Object.keys(built).map(function (k) { return railRow(k, built[k], '<span class="muted tiny">built-in</span>'); })
+      .concat(Object.keys(added).map(function (k) { return railRow(k, added[k], '<span class="badge warn">added</span>'); }));
+    rows.push('<tr><td class="mono">custom</td><td>My own method (I describe it) <span class="muted tiny">typed by the merchant, held 15 min</span></td>'
+      + '<td class="n">as typed</td><td class="n">as typed</td><td><span class="badge">manual</span></td><td><span class="muted tiny">store document</span></td></tr>');
+    q('#railRows').innerHTML = rows.join('');
+    q('#railJson').value = Object.keys(added).length ? JSON.stringify(added, null, 2) : '';
+    q('#railSave').onclick = function () {
+      var out = q('#railOut'), raw = q('#railJson').value.trim();
+      var obj = null;
+      try { obj = raw ? JSON.parse(raw) : {}; } catch (e) { show(out, 'that is not JSON: ' + e.message, 1); return; }
+      out.classList.add('hide');
+      api('/ops/api/rails', { rails: obj }).then(function (r2) {
+        if (r2.j && r2.j.ok) {
+          show(out, 'published — ' + (r2.j.added || []).length + ' added rail(s). ' + (r2.j.note || ''), 0);
+          railsLoad(); toast('rails live at once');
+        } else {
+          var m = (r2.j && r2.j.error) || ('HTTP ' + r2.s);
+          if (r2.j && r2.j.rails) m += ' · ' + Object.keys(r2.j.rails).map(function (k) { return k + ': ' + r2.j.rails[k]; }).join(' · ');
+          show(out, m, 1);
+        }
+      });
+    };
+    q('#railRestore').onclick = function () {
+      if (!confirm('Remove every added rail and go back to the built-in table? A store still using one of them will be refused rather than silently repriced as cash.')) return;
+      api('/ops/api/rails', { restore: true }).then(function (r2) {
+        if (r2.j && r2.j.ok) { railsLoad(); toast('back to the built-in tariffs'); show(q('#railOut'), 'restored — the built-in table only.', 0); }
+        else show(q('#railOut'), (r2.j && (r2.j.note ? r2.j.error + ' — ' + r2.j.note : r2.j.error)) || ('HTTP ' + r2.s), 1);
+      });
+    };
+  });
+}
+function show(el, msg, bad) { el.classList.remove('hide'); el.style.color = bad ? 'var(--bad)' : ''; el.textContent = msg; }
 function kpis() {
   var t = D.totals || {};
   function card(b, s, cls, jump) {
