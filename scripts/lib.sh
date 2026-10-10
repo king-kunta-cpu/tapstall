@@ -109,6 +109,18 @@ else:
             break
         except Exception as e:
             err = e
+    def why(e):
+        # Cloudflare's quota refusal is a 429 whose *body* carries code 10048;
+        # str(HTTPError) is only "HTTP Error 429: Too Many Requests", so a text
+        # match on str(e) alone reads a spent quota as an unexplained failure and
+        # holds up the whole release for a page nobody is waiting on. (Learned by
+        # being wrong: CI died exactly this way on run #22.)
+        parts = [str(e), repr(getattr(e, "reason", ""))]
+        read = getattr(e, "read", None)
+        if callable(read):
+            try: parts.append(read().decode("utf-8", "replace")[:400])
+            except Exception: pass
+        return " ".join(parts)
     if err is None:
         print("  ^ %-14s %d -> %d bytes" % (name, len(cur or b""), len(body)))
     elif read() == body:
@@ -120,11 +132,11 @@ else:
         # copy catch up on the next deploy beats shipping nothing for 12 hours.
         # Any other failure mode is still fatal: a stale page from a real bug is
         # exactly what this function exists to refuse.
-        txt = str(err)
-        if "10048" in txt or "free usage limit" in txt or "limit exceeded" in txt:
-            left = getattr(err, "hdrs", {}) and err.hdrs.get("x-cf-quota-remaining") or "?"
-            print("  ! %-14s NOT PUBLISHED — KV write budget spent (old copy still live, %d bytes in git). "
-                  "Goes out on the next deploy after 00:00 UTC. remaining=%s" % (name, len(body), left))
+        txt = why(err)
+        if getattr(err, "code", None) == 429 or "10048" in txt or "free usage limit" in txt or "limit exceeded" in txt:
+            print("  ! %-14s NOT PUBLISHED — this account\'s KV write budget is spent (HTTP 429/10048). "
+                  "The old copy stays live (%d bytes in git, %d in KV); this goes out on the next deploy "
+                  "after 00:00 UTC, and the Worker is deployed regardless." % (name, len(body), len(cur or b"")))
         else:
             raise SystemExit("  ! %-14s could not be published and KV differs from git: %s" % (name, txt[:160]))
 PYEOF
