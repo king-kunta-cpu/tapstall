@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>ZimLink Store</title>
+<meta name="theme-color" content="#0b0f14">
+<style>
+*{box-sizing:border-box}
+body{margin:0;font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f4f6f8;color:#101418;-webkit-text-size-adjust:100%}
+.wrap{max-width:34rem;margin:0 auto;padding:0 0 6.5rem}
+header{position:sticky;top:0;z-index:5;background:#0b0f14;color:#fff;padding:.9rem 1rem .8rem}
+.brand{display:flex;gap:.7rem;align-items:center}
+.logo{width:44px;height:44px;border-radius:12px;object-fit:cover;background:#22303c;flex:0 0 auto}
+h1{font-size:1.05rem;margin:0;line-height:1.2}
+.tag{margin:.15rem 0 0;font-size:.8rem;color:#aebbc7}
+.meta{font-size:.75rem;color:#8fa0af;margin-top:.45rem;display:flex;gap:.5rem;flex-wrap:wrap}
+.chip{background:#1a2530;border-radius:999px;padding:.15rem .5rem}
+.notice{margin:.7rem 1rem 0;background:#fff7e6;border:1px solid #f0d9a8;color:#6b4d09;font-size:.8rem;padding:.55rem .7rem;border-radius:10px}
+.cats{display:flex;gap:.4rem;overflow-x:auto;padding:.75rem 1rem .3rem;scrollbar-width:none}
+.cats::-webkit-scrollbar{display:none}
+.cat{white-space:nowrap;font-size:.82rem;padding:.35rem .7rem;border-radius:999px;background:#fff;border:1px solid #dde3e9}
+.cat.on{background:#101418;color:#fff;border-color:#101418}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:.6rem;padding:.5rem 1rem}
+.card{background:#fff;border-radius:14px;overflow:hidden;border:1px solid #e6ebf0;display:flex;flex-direction:column}
+.card img{width:100%;height:6.2rem;object-fit:cover;background:#eef2f6;display:block}
+.card .noimg{height:6.2rem;background:linear-gradient(135deg,#e9eff5,#dfe7ef)}
+.cb{padding:.5rem .55rem .6rem;display:flex;flex-direction:column;gap:.15rem;flex:1}
+.cn{font-size:.86rem;font-weight:600;line-height:1.25}
+.cd{font-size:.72rem;color:#65788b;line-height:1.3;max-height:2.6em;overflow:hidden}
+.row{display:flex;justify-content:space-between;align-items:flex-end;margin-top:auto;gap:.4rem}
+.price{font-weight:700;font-size:.9rem;font-variant-numeric:tabular-nums}
+.alt{font-size:.68rem;color:#7b8b9b;font-weight:500}
+.add{background:#0b0f14;color:#fff;border:0;border-radius:9px;font-size:.78rem;padding:.35rem .55rem;font-weight:600}
+.add[disabled]{background:#c3ccd5;color:#fff}
+.soldout{font-size:.7rem;color:#b00020;font-weight:600}
+.sheet{position:fixed;left:0;right:0;bottom:0;background:#fff;border-radius:16px 16px 0 0;box-shadow:0 -8px 30px rgba(16,24,32,.18);z-index:20;max-height:88vh;overflow:auto;transform:translateY(102%);transition:transform .22s ease}
+.sheet.on{transform:none}
+.sh-head{display:flex;justify-content:space-between;align-items:center;padding:.8rem 1rem .3rem}
+.sh-head b{font-size:.95rem}
+.x{background:#eef2f6;border:0;border-radius:8px;padding:.3rem .55rem;font-size:.85rem;color:#333}
+.body{padding:.4rem 1rem 1rem}
+h4{margin:.8rem 0 .35rem;font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:#65788b}
+.opts{display:flex;gap:.4rem;flex-wrap:wrap}
+.opt{border:1px solid #dde3e9;background:#fff;border-radius:10px;padding:.4rem .6rem;font-size:.82rem}
+.opt.on{background:#0b0f14;color:#fff;border-color:#0b0f14}
+.qty{display:flex;align-items:center;gap:.7rem;margin-top:.7rem}
+.qb{width:2.4rem;height:2.4rem;border-radius:10px;border:1px solid #dde3e9;background:#fff;font-size:1.1rem}
+.cta{width:100%;background:#0b0f14;color:#fff;border:0;border-radius:12px;padding:.85rem;font-size:.95rem;font-weight:600;margin-top:.8rem}
+.cta.ghost{background:#fff;color:#0b0f14;border:1px solid #cfd8e0}
+label{display:block;font-size:.78rem;color:#42566a;margin:.6rem 0 .2rem;font-weight:600}
+input,textarea,select{width:100%;padding:.65rem .7rem;border:1px solid #dde3e9;border-radius:10px;font:inherit;font-size:.92rem;background:#fff}
+textarea{min-height:3.5rem}
+.bar{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid #e6ebf0;padding:.6rem 1rem calc(.6rem + env(safe-area-inset-bottom));z-index:15;display:none;gap:.7rem;align-items:center}
+.bar.on{display:flex}
+.bar .t{font-weight:700;font-variant-numeric:tabular-nums}
+.bar .n{font-size:.75rem;color:#65788b}
+.bar button{flex:1;margin:0}
+.empty{padding:2.5rem 1.4rem;text-align:center;color:#5b6c7d;font-size:.9rem}
+.done{text-align:center;padding:1.4rem 1rem}
+.done .tick{width:3rem;height:3rem;border-radius:50%;background:#0b3d2e;color:#8ff0c0;display:flex;align-items:center;justify-content:center;margin:0 auto .7rem;font-size:1.4rem}
+.code{font-family:ui-monospace,Menlo,monospace;background:#f1f5f8;border-radius:8px;padding:.2rem .45rem;font-weight:700}
+.paybox{background:#0b0f14;color:#e8eef4;border-radius:14px;padding:.85rem;text-align:left;margin:.9rem 0;font-size:.86rem}
+.paybox .big{font-size:1.5rem;font-weight:700;color:#fff;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.paybox .kv{display:flex;justify-content:space-between;gap:.6rem;padding:.28rem 0;border-top:1px solid #1e2a36;font-size:.8rem}
+.paybox .kv span:last-child{font-weight:600;text-align:right}
+.hint{font-size:.74rem;color:#93a5b6;margin-top:.5rem;line-height:1.4}
+ol.steps{margin:.6rem 0 0;padding-left:1.1rem;font-size:.82rem}
+ol.steps li{margin:.25rem 0}
+.copy{background:#18222c;border:1px solid #2a3946;color:#cfe0ee;border-radius:9px;padding:.45rem .6rem;font-size:.8rem;width:100%;margin-top:.6rem}
+.lines{text-align:left;font-size:.85rem;margin:.8rem 0}
+.lines div{display:flex;justify-content:space-between;padding:.22rem 0;border-bottom:1px dashed #e6ebf0}
+.lines div.tot{font-weight:700;border:0;padding-top:.45rem}
+.foot{text-align:center;font-size:.72rem;color:#8194a5;padding:1.4rem 1rem 2.2rem}
+.foot a{color:#4a6b8a}
+.badge{display:inline-block;font-size:.7rem;background:#e8f7ef;color:#0b5b34;border:1px solid #bfe6d0;border-radius:999px;padding:.15rem .5rem;margin-top:.5rem}
+.warn{background:#fff0f1;border:1px solid #f3c3c9;color:#8a1524;border-radius:10px;padding:.5rem .6rem;font-size:.78rem;margin-top:.6rem;text-align:left}
+@media (prefers-reduced-motion:reduce){.sheet{transition:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <img class="logo" id="logo" alt="" hidden>
+      <div style="min-width:0">
+        <h1 id="sname">Store</h1>
+        <p class="tag" id="stag"></p>
+        <div class="meta">
+          <span class="chip" id="curnow"></span>
+          <span class="chip" id="chours" hidden></span>
+          <span class="chip" id="cloc" hidden></span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="notice" id="notice" hidden></div>
+  <div class="cats" id="cats" hidden></div>
+  <div class="grid" id="grid"></div>
+  <div class="empty" id="empty" hidden></div>
+
+  <div class="foot">
+    <span id="powered"></span>
+  </div>
+</div>
+
+<div class="bar" id="bar">
+  <div style="flex:1.2">
+    <div class="t" id="barTotal">0.00</div>
+    <div class="n" id="barN">0 items</div>
+  </div>
+  <button class="cta" id="toCheckout" style="margin:0;flex:1">Checkout</button>
+</div>
+
+<div class="sheet" id="sheet">
+  <div class="sh-head"><b id="shTitle">Item</b><button class="x" id="shClose">Close</button></div>
+  <div class="body" id="shBody"></div>
+</div>
+
+<script>
+var CFG = /*__ZIMLINK_CONFIG__*/null;
+var TERM = /*__ZIMLINK_TERM__*/null;
+(function () {
+  if (!CFG) { document.getElementById('notice').hidden = false; document.getElementById('notice').textContent = 'Store config missing. Open /onboard to create a store — it takes about 90 seconds.'; return; }
+  var CUR = CFG.currency || 'USD';
+  var ZIG = Number(CFG.zig_rate) || 0;
+  var $ = function (id) { return document.getElementById(id); };
+  var cart = [];
+  try { cart = JSON.parse(localStorage.getItem('zl_cart_' + CFG.handle) || '[]') || []; } catch (e) { cart = []; }
+
+  document.title = CFG.shop_name + ' — order on WhatsApp';
+  $('sname').textContent = CFG.shop_name;
+  if (CFG.tagline) $('stag').textContent = CFG.tagline;
+  if (CFG.logo) { var L = $('logo'); L.src = CFG.logo; L.hidden = false; }
+  if (CFG.hours) { $('chours').textContent = CFG.hours; $('chours').hidden = false; }
+  if (CFG.location) { $('cloc').textContent = CFG.location; $('cloc').hidden = false; }
+  $('curnow').textContent = 'Prices in ' + CUR + (ZIG ? ' + ZiG' : '');
+  $('powered').innerHTML = 'Runs on <a href="/onboard">ZimLink</a> — free store for your WhatsApp business, no monthly bill.';
+  if (CFG.closed) note('Shop closed right now — you can still order and we will confirm when we open.');
+  if (TERM && TERM.state === 'expired') note('This store is paused until the owner renews. Existing orders still reach us on WhatsApp.');
+  if (CFG.rail === 'cash' && !CFG.pay_account) note('Cash / pickup payments: pay the runner or pay when you collect.');
+
+  function note(t) { var n = $('notice'); n.hidden = false; n.textContent = t; }
+  function money(n) { return (Number(n) || 0).toFixed(2) + ' ' + CUR; }
+  function alt(n) { return ZIG ? '≈ ' + Math.round((Number(n) || 0) * ZIG).toLocaleString() + ' ZiG' : ''; }
+
+  var PRODUCTS = [];
+  fetch('/s/' + CFG.handle + '/feed.json', { headers: { accept: 'application/json' } })
+    .then(function (r) { return r.json(); })
+    .then(function (j) { PRODUCTS = (j && j.products) || []; render(); })
+    .catch(function () { render(); });
+
+  var activeCat = 'all';
+  function render() {
+    var g = $('grid');
+    if (!PRODUCTS.length) {
+      $('empty').hidden = false;
+      $('empty').innerHTML = 'No products loaded yet.<br>' + (CFG.feed_error ? '(' + CFG.feed_error + ')' : '') +
+        '<br><span style="font-size:.8rem">Owner: share your Google Sheet as “Anyone with the link”, then re-open this page — it refreshes itself in ~2 minutes.</span>';
+      g.hidden = true; return;
+    }
+    var cats = [];
+    PRODUCTS.forEach(function (p) { if (p.cat && cats.indexOf(p.cat) < 0) cats.push(p.cat); });
+    if (cats.length > 1) {
+      $('cats').hidden = false;
+      $('cats').innerHTML = ['<button class="cat on" data-c="all">All</button>'].concat(cats.map(function (c) {
+        return '<button class="cat" data-c="' + esc(c) + '">' + esc(c) + '</button>';
+      })).join('');
+      Array.prototype.forEach.call($('cats').children, function (b) {
+        b.onclick = function () {
+          activeCat = b.getAttribute('data-c');
+          Array.prototype.forEach.call($('cats').children, function (x) { x.classList.toggle('on', x === b); });
+          renderCards();
+        };
+      });
+    }
+    renderCards();
+  }
+  function renderCards() {
+    var list = PRODUCTS.filter(function (p) { return activeCat === 'all' || p.cat === activeCat; });
+    list.sort(function (a, b) { return (b.popular ? 1 : 0) - (a.popular ? 1 : 0) || a.cat.localeCompare(b.cat); });
+    $('grid').innerHTML = list.map(function (p, i) {
+      var idx = PRODUCTS.indexOf(p);
+      var img = p.img ? '<img loading="lazy" decoding="async" src="' + esc(p.img) + '" alt="' + esc(p.name) + '">' : '<div class="noimg"></div>';
+      var soldOut = p.available === false;
+      var inCart = cart.filter(function (c) { return c.id === p.id; }).length;
+      return '<div class="card">' + img + '<div class="cb">' +
+        '<div class="cn">' + esc(p.name) + (p.popular ? ' <span style="font-size:.62rem;color:#b06a00">★</span>' : '') + '</div>' +
+        (p.desc ? '<div class="cd">' + esc(p.desc) + '</div>' : '') +
+        '<div class="row"><div><div class="price">' + money(p.price) + '</div>' +
+        (ZIG ? '<div class="alt">' + alt(p.price) + '</div>' : '') +
+        (soldOut ? '<div class="soldout">sold out</div>' : '') +
+        '</div>' +
+        '<button class="add" data-i="' + idx + '"' + (soldOut ? ' disabled' : '') + '>' + (soldOut ? '—' : (inCart ? 'Add +' : (p.opts.length || p.addons.length ? 'Choose' : 'Add'))) + '</button>' +
+        '</div></div></div>';
+    }).join('');
+    Array.prototype.forEach.call($('grid').querySelectorAll('.add'), function (b) {
+      b.onclick = function () { openItem(PRODUCTS[Number(b.getAttribute('data-i'))]); };
+    });
+    updateBar();
+  }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
+
+  /* ---- item sheet */
+  var draft = null;
+  function openItem(p) {
+    draft = { p: p, opts: {}, addons: {}, qty: 1 };
+    p.opts.forEach(function (o) { var c = norm(o.choices[0]); draft.opts[o.name] = { label: c.label, up: c.up }; });
+    $('shTitle').textContent = p.name;
+    var h = '';
+    if (p.desc) h += '<p style="font-size:.85rem;color:#54677a;margin:.2rem 0 .5rem">' + esc(p.desc) + '</p>';
+    p.opts.forEach(function (o, oi) {
+      h += '<h4>' + esc(o.name) + '</h4><div class="opts" data-oi="' + oi + '">' + o.choices.map(function (c, ci) {
+        var cc = norm(c);
+        return '<button class="opt' + (ci === 0 ? ' on' : '') + '" data-i="' + ci + '">' + esc(cc.label) + (cc.up ? ' +' + money(cc.up) : '') + '</button>';
+      }).join('') + '</div>';
+    });
+    if (p.addons.length) {
+      h += '<h4>Add on</h4><div class="opts">' + p.addons.map(function (a, ai) {
+        return '<button class="opt" data-ai="' + ai + '">' + esc(a.name) + ' +' + money(a.price) + '</button>';
+      }).join('') + '</div>';
+    }
+    h += '<div class="qty"><button class="qb" id="qm">−</button><b id="q">1</b><button class="qb" id="qp">+</button>' +
+      '<div style="margin-left:auto;text-align:right"><div class="price" id="lu"></div><div class="alt" id="la"></div></div></div>' +
+      '<button class="cta" id="addBtn">Add to order</button>';
+    $('shBody').innerHTML = h;
+    Array.prototype.forEach.call($('shBody').querySelectorAll('.opts[data-oi] .opt'), function (b) {
+      b.onclick = function () {
+        var oi = b.parentNode.getAttribute('data-oi');
+        draft.opts[p.opts[oi].name] = norm(p.opts[oi].choices[Number(b.getAttribute('data-i'))]);
+        Array.prototype.forEach.call(b.parentNode.children, function (x) { x.classList.toggle('on', x === b); });
+        linePrice();
+      };
+    });
+    Array.prototype.forEach.call($('shBody').querySelectorAll('.opt[data-ai]'), function (b) {
+      b.onclick = function () {
+        var ai = Number(b.getAttribute('data-ai')), a = p.addons[ai];
+        if (draft.addons[a.name]) { delete draft.addons[a.name]; b.classList.remove('on'); }
+        else { draft.addons[a.name] = a.price; b.classList.add('on'); }
+        linePrice();
+      };
+    });
+    $('qm').onclick = function () { draft.qty = Math.max(1, draft.qty - 1); $('q').textContent = draft.qty; linePrice(); };
+    $('qp').onclick = function () { draft.qty = Math.min(99, draft.qty + 1); $('q').textContent = draft.qty; linePrice(); };
+    linePrice();
+    $('addBtn').onclick = function () {
+      var ups = Object.keys(draft.opts).map(function (k) { return { name: draft.opts[k], up: 0 }; });
+      cart.push({ id: p.id, name: p.name, price: p.price, qty: draft.qty, options: ups, addons: Object.keys(draft.addons).map(function (k) { return draft.addons[k]; }) });
+      try { localStorage.setItem('zl_cart_' + CFG.handle, JSON.stringify(cart)); } catch (e) {}
+      closeSheet(); renderCards();
+    };
+    $('sheet').classList.add('on');
+  }
+  function norm(c) { return (c && typeof c === 'object') ? { label: c.label, up: Number(c.up) || 0 } : { label: String(c), up: 0 }; }
+  function linePrice() {
+    var ups = Object.keys(draft.opts).reduce(function (a, k) { return a + (draft.opts[k].up || 0); }, 0);
+    var unit = draft.p.price + ups + Object.keys(draft.addons).reduce(function (a, k) { return a + draft.addons[k]; }, 0);
+    $('lu').textContent = money(unit * draft.qty);
+    $('la').textContent = alt(unit * draft.qty);
+  }
+  function closeSheet() { $('sheet').classList.remove('on'); }
+  $('shClose').onclick = closeSheet;
+
+  /* ---- cart bar */
+  function cartTotal() {
+    return cart.reduce(function (a, c) {
+      var u = c.price + (c.addons || []).reduce(function (x, y) { return x + (Number(y) || 0); }, 0) + (c.options || []).reduce(function (x, y) { return x + (Number(y.up) || 0); }, 0);
+      return a + u * c.qty;
+    }, 0);
+  }
+  function updateBar() {
+    var on = cart.length > 0;
+    $('bar').classList.toggle('on', on);
+    if (on) {
+      $('barTotal').textContent = money(Math.round(cartTotal() * 100) / 100);
+      var n = cart.reduce(function (a, c) { return a + c.qty; }, 0);
+      $('barN').textContent = n + (n === 1 ? ' item' : ' items');
+    }
+  }
+  $('toCheckout').onclick = openCheckout;
+
+  /* ---- checkout */
+  function openCheckout() {
+    $('shTitle').textContent = 'Your order';
+    var lines = cart.map(function (c, i) {
+      var u = c.price + (c.addons || []).reduce(function (x, y) { return x + (Number(y) || 0); }, 0) + (c.options || []).reduce(function (x, y) { return x + (Number(y.up) || 0); }, 0);
+      return '<div class="lines"><div><span>' + esc(c.name) + (c.options && c.options.length ? ' · ' + esc(c.options.map(function (o) { return o.name; }).join(', ')) : '') +
+        '</span><span>×' + c.qty + ' · ' + money(u * c.qty) + '</span></div></div>' +
+        '<button class="x" data-rm="' + i + '" style="margin:-.3rem 0 .4rem">remove</button>';
+    }).join('');
+    var st = Math.round(cartTotal() * 100) / 100;
+    var del = CFG.delivery_fee || 0;
+    var freeOver = Number(CFG.free_over) || 0;
+    var dCharge = freeOver && st >= freeOver ? 0 : del;
+    var taxP = Number(CFG.tax_pct) || 0;
+    var tax = Math.round((st + dCharge) * taxP) / 100;
+    var sub = Math.round((st + dCharge + tax) * 100) / 100;
+    var railFee = 0, railNote = '';
+    var railName = (CFG.rail || 'cash').replace(/_/g, ' ');
+    if (CFG.surcharge_mode === 'pass' && CFG.rail !== 'cash') {
+      railFee = Math.round(sub * 3.4) / 100; railNote = 'payment cost added at checkout';
+    }
+    var h = lines +
+      '<div class="lines" style="border-top:1px solid #e6ebf0;padding-top:.4rem">' +
+      '<div><span>Items</span><span>' + money(st) + '</span></div>' +
+      (dCharge ? '<div><span>Delivery</span><span>' + money(dCharge) + '</span></div>' : (del ? '<div><span>Delivery</span><span>free over ' + money(freeOver) + '</span></div>' : '')) +
+      (taxP ? '<div><span>VAT ' + taxP + '%</span><span>' + money(tax) + '</span></div>' : '') +
+      (railFee ? '<div><span>' + esc(railName) + ' fee</span><span>' + money(railFee) + '</span></div>' : '') +
+      '<div class="tot"><span>Pay now</span><span>' + money(sub + railFee) + '</span></div></div>' +
+      (ZIG ? '<p class="hint">ZiG estimate at ' + ZIG + ': ' + Math.round((sub + railFee) * ZIG).toLocaleString() + ' ZiG. Pay what the final receipt says.</p>' : '') +
+      '<p class="hint">Payment: <b>' + esc(railName) + '</b>' + (railNote ? ' — ' + railNote : '') + (CFG.surcharge_mode === 'absorb' && CFG.rail !== 'cash' ? ' — this shop covers the payment cost, you pay the menu price.' : '') + '</p>' +
+      '<label>Your name *</label><input id="fName" autocomplete="name" placeholder="e.g. Rudo M.">' +
+      '<label>WhatsApp number * (with code, e.g. 26377...)</label><input id="fPhone" inputmode="tel" autocomplete="tel" placeholder="263771234567">' +
+      '<label>Delivery or pickup?</label><select id="fService"><option value="pickup">Pickup at shop</option><option value="delivery">Delivery</option></select>' +
+      '<div id="addrWrap" hidden><label>Delivery address *</label><input id="fAddr" placeholder="Suburb, street, house/stand no."></div>' +
+      '<label>When?</label><select id="fWhen"><option value="asap">As soon as possible</option><option value="12:00">12:00</option><option value="13:00">13:00</option><option value="17:00">17:00</option><option value="18:00">18:00</option><option value="tomorrow">Tomorrow</option></select>' +
+      '<label>Note for the shop</label><textarea id="fNote" placeholder="allergies, landmark for delivery, gate code…"></textarea>' +
+      (CFG.require_optin ? '<label style="font-weight:400;display:flex;gap:.5rem;align-items:flex-start;margin-top:.7rem"><input type="checkbox" id="fOpt" style="width:auto;margin-top:.25rem"><span>I agree to be contacted on this number about my order.</span></label>' : '') +
+      '<button class="cta" id="place">Place order · ' + money(sub + railFee) + '</button>' +
+      '<button class="cta ghost" id="shut">Keep shopping</button>';
+    $('shBody').innerHTML = h;
+    $('sheet').classList.add('on');
+    var svc = $('fService');
+    svc.onchange = function () { $('addrWrap').hidden = svc.value !== 'delivery'; };
+    if (CFG.only_delivery) { svc.value = 'delivery'; svc.onchange(); }
+    Array.prototype.forEach.call($('shBody').querySelectorAll('[data-rm]'), function (b) {
+      b.onclick = function () { cart.splice(Number(b.getAttribute('data-rm')), 1); try { localStorage.setItem('zl_cart_' + CFG.handle, JSON.stringify(cart)); } catch (e) {} closeSheet(); renderCards(); };
+    });
+    $('shut').onclick = closeSheet;
+    $('place').onclick = function () {
+      var btn = $('place'); btn.disabled = true; btn.textContent = 'Sending…';
+      fetch('/api/order', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          handle: CFG.handle, items: cart, service: svc.value, when: $('fWhen').value,
+          buyer: { name: $('fName').value, phone: $('fPhone').value, address: $('fAddr') ? $('fAddr').value : '', note: $('fNote').value, optin: $('fOpt') ? $('fOpt').checked : true }
+        })
+      }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (res) {
+          btn.disabled = false;
+          if (!res.ok || !res.j.ok) { btn.textContent = res.j && res.j.error ? res.j.error : 'Could not place order'; return; }
+          cart = []; try { localStorage.setItem('zl_cart_' + CFG.handle, '[]'); } catch (e) {}
+          showDone(res.j);
+        })
+        .catch(function () { btn.disabled = false; btn.textContent = 'Network problem — try again'; });
+    };
+  }
+
+  function showDone(o) {
+    var pr = o.pricing || {}, pay = o.pay || {};
+    var h = '<div class="done"><div class="tick">✓</div>' +
+      '<b>Order ' + esc(o.order.code) + ' received</b>' +
+      '<div class="badge">Stored with the shop — no screenshot needed</div>' +
+      '<div class="paybox">' +
+      '<div style="font-size:.78rem;color:#9fb2c4">Pay exactly</div>' +
+      '<div class="big">' + (pay.amount || pr.pay_now) + ' ' + esc(CUR) + '</div>' +
+      (ZIG ? '<div style="font-size:.78rem;color:#9fb2c4">≈ ' + Math.round((pay.amount || 0) * ZIG).toLocaleString() + ' ZiG</div>' : '') +
+      '<div class="kv"><span>Method</span><span>' + esc(pay.rail || pr.rail && pr.rail.label || '') + '</span></div>' +
+      (pay.dial ? '<div class="kv"><span>Dial</span><span>' + esc(pay.dial) + '</span></div>' : '') +
+      (pay.account ? '<div class="kv"><span>To</span><span>' + esc(pay.account) + '</span></div>' : '') +
+      '<div class="kv"><span>Reference</span><span>' + esc(pay.reference || o.order.code) + '</span></div>' +
+      '<div class="copy" id="cp">Copy payment reference + amount</div>' +
+      '<ol class="steps">' + (pay.steps || []).map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('') + '</ol>' +
+      '<p class="hint">' + esc(pay.note || '') + '</p>' +
+      '</div>' +
+      (o.wa_link ? '<button class="cta" id="waBtn">Send my order on WhatsApp</button>' : '') +
+      '<div class="lines" style="margin-top:.8rem">' + (pr.lines || []).map(function (l) {
+        return '<div><span>' + l.qty + '× ' + esc(l.name) + '</span><span>' + money(l.total) + '</span></div>';
+      }).join('') +
+      (pr.delivery ? '<div><span>Delivery</span><span>' + money(pr.delivery) + '</span></div>' : '') +
+      (pr.tax ? '<div><span>VAT ' + pr.taxPct + '%</span><span>' + money(pr.tax) + '</span></div>' : '') +
+      (pr.fee ? '<div><span>Payment fee</span><span>' + money(pr.fee) + '</span></div>' : '') +
+      '<div class="tot"><span>Total</span><span>' + money(pr.total) + '</span></div>' +
+      (pr.unique_change ? '<div><span style="color:#65788b">odd cents included to identify your payment</span><span>' + money(pr.unique_change) + '</span></div>' : '') +
+      '</div>' +
+      (o.risk_flags && o.risk_flags.length ? '<div class="warn">The shop will double-check this order before sending: ' + esc(o.risk_flags.join(', ')) + '</div>' : '') +
+      (o.trust && o.trust.orders_before > 1 ? '<div class="badge">Welcome back — ' + o.trust.orders_before + ' orders from this number</div>' : '') +
+      '</div>';
+    $('shTitle').textContent = 'Almost done';
+    $('shBody').innerHTML = h;
+    $('sheet').classList.add('on');
+    if (o.wa_link) $('waBtn').onclick = function () { window.location.href = o.wa_link; };
+    $('cp').onclick = function () {
+      var t = 'Order ' + o.order.code + ' — pay ' + (pay.amount || pr.pay_now) + ' ' + CUR + ' to ' + (pay.account || '') + ' (' + (pay.rail || '') + (pay.dial ? ' ' + pay.dial : '') + ') ref ' + (pay.reference || o.order.code);
+      if (navigator.clipboard) navigator.clipboard.writeText(t).then(function () { $('cp').textContent = 'Copied ✓'; });
+    };
+  }
+  function money(n) { return (Number(n) || 0).toFixed(2) + ' ' + CUR; }
+  updateBar();
+})();
+</script>
+</body>
+</html>

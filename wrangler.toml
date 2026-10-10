@@ -1,0 +1,20 @@
+name = "zimlink"
+main = "worker/worker.js"
+compatibility_date = "2025-06-01"
+workers_dev = true
+
+# Menu/feed HTML lives in KV (tpl:*) so templates can be fixed with one PUT —
+# no redeploy, no git push, no dashboard.
+[[kv_namespaces]]
+binding = "STORES"
+id = "b5c1c89d95114092ae91bbafc5a2d76c"
+
+[[kv_namespaces]]
+binding = "ORDERS"
+id = "4f4ac94a66db4b859b61668a3c160819"
+
+[triggers]
+crons = ["15 6,12,18,0 * * *"]
+
+[observability]
+enabled = true

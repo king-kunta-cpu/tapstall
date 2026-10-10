@@ -1,0 +1,43 @@
+name: deploy
+# Push to main => test, then deploy the Worker (API, not wrangler) and publish Pages.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  test-and-worker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - name: tests
+        run: node --test tests/
+      - name: deploy worker to Cloudflare
+        if: github.ref == 'refs/heads/main'
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WORKER_NAME: ${{ secrets.WORKER_NAME || 'zimlink' }}
+        run: bash scripts/deploy.sh
+      - name: upload bundle artifact
+        uses: actions/upload-artifact@v4
+        with: { name: bundle, path: .build }
+  pages:
+    needs: test-and-worker
+    runs-on: ubuntu-latest
+    environment: { name: github-pages, url: ${{ steps.out.outputs.page_url }} }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: pages/public }
+      - id: out
+        uses: actions/deploy-pages@v4

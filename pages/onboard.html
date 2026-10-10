@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Create your WhatsApp store — ZimLink</title>
+<meta name="description" content="A storefront link for your WhatsApp business. No monthly subscription, no foreign card charge, no order cap. Free in about 90 seconds.">
+<style>
+*{box-sizing:border-box}body{margin:0;font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#101418;background:#0b0f14}
+.hero{color:#fff;padding:2.2rem 1.1rem 1.6rem;max-width:40rem;margin:0 auto}
+.hero h1{font-size:1.65rem;line-height:1.15;margin:0 0 .5rem;letter-spacing:-.02em}
+.hero p{margin:.4rem 0;color:#aebbc7;font-size:.95rem}
+.pill{display:inline-block;background:#16202b;border:1px solid #26333f;border-radius:999px;padding:.2rem .6rem;font-size:.75rem;color:#cfe0ee;margin:.3rem .3rem 0 0}
+main{background:#f4f6f8;border-radius:18px 18px 0 0;padding:1rem 1rem 3rem;margin-top:.6rem}
+section{max-width:40rem;margin:0 auto;background:#fff;border:1px solid #e6ebf0;border-radius:14px;padding:1rem 1rem 1.1rem;margin-bottom:.8rem}
+h2{font-size:.95rem;margin:.1rem 0 .7rem;display:flex;gap:.5rem;align-items:baseline}
+h2 i{font-style:normal;background:#101418;color:#fff;width:1.35rem;height:1.35rem;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:.75rem;flex:0 0 auto}
+label{display:block;font-size:.78rem;font-weight:600;color:#42566a;margin:.65rem 0 .2rem}
+label small{font-weight:400;color:#7b8b9b}
+input,select,textarea{width:100%;padding:.62rem .7rem;border:1px solid #dde3e9;border-radius:10px;font:inherit;font-size:.92rem;background:#fff}
+textarea{min-height:4.5rem;font-family:ui-monospace,Menlo,monospace;font-size:.8rem}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}
+button.go{width:100%;background:#0b0f14;color:#fff;border:0;border-radius:12px;padding:.9rem;font:inherit;font-weight:600;font-size:1rem}
+button.gh{background:#fff;border:1px solid #cfd8e0;border-radius:9px;padding:.4rem .6rem;font:inherit;font-size:.8rem;color:#333}
+.hint{font-size:.76rem;color:#65788b;margin:.35rem 0 0}
+.out{background:#0b0f14;color:#e8eef4;border-radius:14px;padding:1rem;font-size:.9rem;display:none}
+.out.on{display:block}
+.out a{color:#8fd4ff;word-break:break-all}
+.kv{display:flex;gap:.5rem;justify-content:space-between;border-top:1px solid #1e2a36;padding:.4rem 0;font-size:.82rem}
+.kv span:last-child{text-align:right;font-weight:600;word-break:break-all}
+.warn{background:#fff7e6;border:1px solid #f0d9a8;color:#6b4d09;border-radius:10px;padding:.55rem .6rem;font-size:.8rem;margin-top:.6rem}
+.ok{background:#e8f7ef;border:1px solid #bfe6d0;color:#0b5b34;border-radius:10px;padding:.55rem .6rem;font-size:.8rem;margin-top:.6rem}
+details{margin-top:.6rem;font-size:.85rem}
+summary{cursor:pointer;font-weight:600;font-size:.82rem;color:#42566a}
+table{border-collapse:collapse;width:100%;font-size:.75rem;margin-top:.4rem}
+th,td{border:1px solid #e6ebf0;padding:.25rem .35rem;text-align:left}
+th{background:#f7f9fb}
+.foot{color:#8194a5;font-size:.72rem;text-align:center;padding:1.2rem}
+.poster{position:fixed;inset:0;background:#fff;z-index:50;padding:1.4rem;overflow:auto;display:none}
+.poster.on{display:block}
+.poster .p{text-align:center;max-width:22rem;margin:0 auto}
+.poster .p h3{font-size:1.4rem;margin:.2rem 0}
+.poster .u{background:#f1f5f8;border-radius:10px;padding:.5rem;font-family:ui-monospace,Menlo,monospace;font-size:.85rem;word-break:break-all}
+@media print{body{background:#fff}.no-print{display:none!important}.poster{position:static;padding:0}}
+</style>
+</head>
+<body>
+<div class="hero">
+  <h1>Your WhatsApp orders, finally in one clean list.</h1>
+  <p>A store link your customers tap, pick from, and pay for — with the order, the name and the number landing in a dashboard you own. Built for Zimbabwe and South African micro-businesses.</p>
+  <div>
+    <span class="pill">Free for 60 days</span><span class="pill">No order cap</span><span class="pill">No USD subscription</span><span class="pill">EcoCash · InnBucks · PayShap</span><span class="pill">Setup in ~90 s</span>
+  </div>
+  <p style="font-size:.8rem;color:#7e8fa0;margin-top:.7rem">You update your menu in a Google Sheet. Your store updates itself. Nobody has to do anything for you, ever.</p>
+</div>
+
+<main>
+<section>
+  <h2><i>1</i> Your menu, in a Google Sheet</h2>
+  <p class="hint" style="margin-top:0">Do this first: open Google Sheets (free, in any browser or on your phone), paste the template below, edit it, then <b>Share → anyone with the link → Viewer</b> and copy the link.</p>
+  <div style="display:flex;gap:.5rem;margin-top:.5rem">
+    <button class="gh" id="copyTpl">Copy template</button>
+    <button class="gh" id="newSheet">Open a new Google Sheet</button>
+  </div>
+  <details><summary>what each column does</summary>
+    <table><tr><th>column</th><th>meaning</th></tr>
+    <tr><td>name</td><td>what the customer sees</td></tr>
+    <tr><td>category</td><td>groups the menu into sections</td></tr>
+    <tr><td>price</td><td>number only</td></tr>
+    <tr><td>image</td><td>direct image URL (see hint below the form)</td></tr>
+    <tr><td>options</td><td><code>Size:Small,Medium,Large</code> — separate multiple with <code>|</code></td></tr>
+    <tr><td>addons</td><td><code>Add cheese:2</code> — name:extra price</td></tr>
+    <tr><td>stock</td><td>blank/yes = available, <code>no</code> = sold out</td></tr>
+    <tr><td>popular</td><td>yes = pinned to the top</td></tr></table>
+    <p class="hint">Images: upload a photo to your Sheet (Insert → Image → image in cell) won't give a URL. Easiest free way: post the photo to a Google Drive folder set to “anyone with the link”, or use the file's direct link. No image is fine too — the store still works.</p>
+  </details>
+</section>
+
+<section>
+  <h2><i>2</i> Store details</h2>
+  <div class="two">
+    <div><label>Shop name *</label><input id="f_name" placeholder="Mama Tunde Kitchen"></div>
+    <div><label>Store link name * <small>(lowercase)</small></label><input id="f_handle" placeholder="mamatunde"></div>
+  </div>
+  <label>One line customers see under your name</label><input id="f_tag" placeholder="Wood-fired pizza · Glen Osborn · delivery till 8pm">
+  <div class="two">
+    <div><label>WhatsApp number for orders * <small>(with country code)</small></label><input id="f_wa" inputmode="tel" placeholder="263771234567"></div>
+    <div><label>Logo image URL <small>(optional)</small></label><input id="f_logo" placeholder="https://…"></div>
+  </div>
+  <div class="two">
+    <div><label>Area / suburb</label><input id="f_loc" placeholder="Harare, Glen Osborn"></div>
+    <div><label>Opening hours text</label><input id="f_hours" placeholder="Mon-Sat 09:00-20:00"></div>
+  </div>
+</section>
+
+<section>
+  <h2><i>3</i> Menu link</h2>
+  <label>Public Google Sheet link *</label>
+  <input id="f_feed" placeholder="https://docs.google.com/spreadsheets/d/1AbC…/edit#gid=0">
+  <p class="hint">Any change you make in the Sheet shows on your store in about 2 minutes. No one touches it for you.</p>
+</section>
+
+<section>
+  <h2><i>4</i> Money</h2>
+  <div class="two">
+    <div><label>Currency</label><select id="f_cur"><option>USD</option><option>ZAR</option><option>BW P</option></select></div>
+    <div><label>Payment your customers use</label><select id="f_rail">
+      <option value="cash">Cash on delivery / pickup</option>
+      <option value="ecocash_usd">EcoCash USD</option>
+      <option value="ecocash_zig">EcoCash ZiG</option>
+      <option value="innbucks">InnBucks</option>
+      <option value="onepay">OnePay / OneMoney</option>
+      <option value="zipit">Bank ZIPIT / RTGS</option>
+      <option value="payshap">PayShap (SA)</option>
+      <option value="ozow">Ozow (SA)</option>
+      <option value="payfast">PayFast card (SA)</option>
+    </select></div>
+  </div>
+  <label>Number / account they pay to</label><input id="f_pay" placeholder="077 123 4567 (EcoCash) or your ShapID">
+  <p class="hint">Why the odd cents: every order gets a unique amount (e.g. $14.87 not $15). Your payment is matched by the amount alone — so <b>no more chasing screenshots, and fake proof stops working on you.</b></p>
+  <div class="two">
+    <div><label>Fee: who pays it?</label><select id="f_sur"><option value="absorb">I absorb it (menu price = final)</option><option value="pass">Add it to the order</option></select></div>
+    <div><label>VAT % <small>(Zim 15.5 if registered)</small></label><input id="f_tax" inputmode="decimal" placeholder="0"></div>
+  </div>
+  <div class="two">
+    <div><label>ZiG rate <small>0 = hide</small></label><input id="f_zig" inputmode="decimal" placeholder="27.5"></div>
+    <div><label>Delivery fee</label><input id="f_del" inputmode="decimal" placeholder="2"></div>
+  </div>
+  <div class="two">
+    <div><label>Free delivery over <small>0 = never</small></label><input id="f_free" inputmode="decimal" placeholder="0"></div>
+    <div><label>Max order value <small>0 = no cap</small></label><input id="f_max" inputmode="decimal" placeholder="0"></div>
+  </div>
+</section>
+
+<section>
+  <h2><i>5</i> Where you want orders to land</h2>
+  <div class="two">
+    <div><label>Your email <small>(welcome link + renewal)</small></label><input id="f_email" placeholder="you@example.com"></div>
+    <div><label>Order alert to a webhook <small>(optional)</small></label><input id="f_hook" placeholder="https://hooks.zapier.com/…"></div>
+  </div>
+  <p class="hint">Orders are always in your dashboard and exportable — the webhook is only if you want a ping elsewhere.</p>
+  <label style="font-weight:400;display:flex;gap:.5rem;margin-top:.7rem"><input type="checkbox" id="f_opt" style="width:auto;margin-top:.3rem"> Require customers to tick before ordering (recommended if you market on WhatsApp — POPIA/DPA consent)</label>
+  <button class="go" id="go">Create my store</button>
+  <p class="hint">No card. No approval. You get the link immediately.</p>
+</section>
+
+<section class="out" id="out"></section>
+
+<div class="foot">ZimLink · runs on free infrastructure, priced once a year in cash. Not affiliated with take.app, Meta or EcoCash.</div>
+</main>
+
+<div class="poster" id="poster">
+  <div class="p">
+    <h3 id="pName">Shop</h3>
+    <p id="pTag" style="color:#54677a;margin:.2rem 0 1rem"></p>
+    <div id="qr" style="display:flex;justify-content:center"></div>
+    <div class="u" id="pUrl">…</div>
+    <p style="font-size:1.1rem;font-weight:700;margin:.9rem 0 .2rem">Order here 👆</p>
+    <p style="font-size:.8rem;color:#54677a">No app to download · pay EcoCash / InnBucks / cash on delivery</p>
+    <div class="no-print" style="display:flex;gap:.5rem;margin-top:1rem">
+      <button class="gh" onclick="window.print()">Print</button>
+      <button class="gh" id="pClose">Close</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" crossorigin="anonymous" onerror="window.__noQR=1"></script>
+<script>
+var TPL = ['id','name','category','price','currency','image','description','options','addons','stock','popular'].join('\t') + '\n' +
+['1','2-litre Coca-Cola','Drinks',2.50,'USD','','','','','','yes'].join('\t') + '\n' +
+['2','Braai box (2 people)','Meals',12,'USD','','Chops, pap, salad, vetkoek','Size:Regular,Large:2','Extra meat:3;Django:1.5','','yes'].join('\t') + '\n' +
+['3','Sadza + beef','Meals',6,'USD','','','Portion:Small,Medium:1.5,Large:2.5','','','' ].join('\t') + '\n' +
+['4','Vanilla ice cream','Desserts',2,'USD','','','','sold out',''].join('\t');
+document.getElementById('copyTpl').onclick = function () {
+  var t = document.getElementById('f_feed');
+  if (navigator.clipboard) navigator.clipboard.writeText(TPL).then(function(){ document.getElementById('copyTpl').textContent = 'Copied — paste into A1 in Sheets ✓'; });
+  else document.getElementById('copyTpl').textContent = 'Copy failed — use the “open Sheet” button and type it in';
+};
+document.getElementById('newSheet').onclick = function () { window.open('https://sheets.new', '_blank'); };
+
+var F = function (id) { return document.getElementById(id); };
+F('f_name').oninput = function () {
+  if (F('f_handle').dataset.auto !== '0') F('f_handle').value = F('f_name').value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 26);
+};
+F('f_handle').oninput = function () { F('f_handle').dataset.auto = '0'; };
+
+F('go').onclick = function () {
+  var b = F('go'); b.disabled = true; b.textContent = 'Creating…';
+  var payload = {
+    shop_name: F('f_name').value, handle: F('f_handle').value, tagline: F('f_tag').value, logo: F('f_logo').value,
+    whatsapp: F('f_wa').value, location: F('f_loc').value, hours: F('f_hours').value,
+    feed_url: F('f_feed').value, currency: F('f_cur').value, rail: F('f_rail').value, pay_account: F('f_pay').value,
+    surcharge_mode: F('f_sur').value, tax_pct: F('f_tax').value, zig_rate: F('f_zig').value,
+    delivery_fee: F('f_del').value, free_over: F('f_free').value, max_order_value: F('f_max').value,
+    notify_email: F('f_email').value, notify_webhook: F('f_hook').value, require_optin: F('f_opt').checked
+  };
+  fetch('/api/register', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) })
+    .then(function (r) { return r.json().then(function (j) { return { s: r.status, j: j }; }); })
+    .then(function (res) {
+      b.disabled = false; b.textContent = 'Create my store';
+      var out = F('out'); out.classList.add('on');
+      if (!res.j.ok) { out.innerHTML = '<div class="warn"><b>Not created:</b> ' + esc(res.j.error || res.s) + (res.j.hint ? '<br>' + esc(res.j.hint) : '') + '</div>'; out.scrollIntoView(); return; }
+      var j = res.j;
+      var n = j.products_loaded;
+      out.innerHTML = '<div class="' + (n > 0 ? 'ok' : 'warn') + '">' + (n > 0
+        ? 'Live. <b>' + n + ' products</b> loaded from your Sheet. Nobody approved this, nobody has to maintain it.'
+        : 'Created — but <b>0 products</b> found. Check the Sheet is shared as “anyone with the link” and that row 1 is the header. Fix the Sheet and reload your store; it re-reads itself every 2 minutes.') + '</div>' +
+        '<div style="margin-top:.8rem">' +
+        row('Your store link', '<a href="' + j.store_url + '" target="_blank">' + j.store_url + '</a>') +
+        row('Your orders dashboard', '<a href="' + j.admin_url + '" target="_blank">open dashboard</a>') +
+        row('Renew link (save it)', '<a href="' + j.renew_url + '" target="_blank">' + j.renew_url + '</a>') +
+        row('Free until', new Date(j.free_until).toDateString()) +
+        '</div>' +
+        '<div style="display:flex;gap:.5rem;margin-top:.8rem">' +
+        '<button class="gh" id="cpLink">Copy store link</button><button class="gh" id="posterBtn">Print QR poster</button>' +
+        '<button class="gh" id="testBtn">Test order flow</button></div>' +
+        '<p class="hint">Put the link in your WhatsApp business profile, your Instagram bio, and on your packaging. The dashboard link is the only thing to keep private.</p>';
+      out.scrollIntoView();
+      F('cpLink').onclick = function () { if (navigator.clipboard) navigator.clipboard.writeText(j.store_url).then(function () { F('cpLink').textContent = 'Copied ✓'; }); };
+      F('testBtn').onclick = function () { window.open(j.store_url, '_blank'); };
+      F('posterBtn').onclick = function () {
+        F('pName').textContent = payload.shop_name || 'Your shop';
+        F('pTag').textContent = payload.tagline || '';
+        F('pUrl').textContent = j.store_url;
+        var box = F('qr'); box.innerHTML = '';
+        if (window.QRCode && !window.__noQR) { new QRCode(box, { text: j.store_url, width: 200, height: 200, correctLevel: QRCode.CorrectLevel.M }); }
+        else { box.innerHTML = '<p style="font-size:.8rem;color:#54677a">QR script unavailable offline — print the page anyway and share the link.</p>'; }
+        F('poster').classList.add('on');
+      };
+      F('pClose').onclick = function () { F('poster').classList.remove('on'); };
+    })
+    .catch(function (e) { b.disabled = false; b.textContent = 'Create my store'; var out = F('out'); out.classList.add('on'); out.innerHTML = '<div class="warn">Network error: ' + esc(e.message || e) + '</div>'; });
+};
+function row(k, v) { return '<div class="kv"><span>' + k + '</span><span>' + v + '</span></div>'; }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
+</script>
+</body>
+</html>

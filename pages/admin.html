@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ZimLink — orders</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#0b0f14;color:#101418}
+.top{background:#0b0f14;color:#fff;padding:.8rem 1rem;position:sticky;top:0;z-index:5}
+.top .in{max-width:44rem;margin:0 auto;display:flex;justify-content:space-between;align-items:center;gap:.6rem}
+.top b{font-size:.95rem}
+.top a{color:#8fd4ff;font-size:.8rem;text-decoration:none}
+main{background:#f4f6f8;min-height:80vh;padding:1rem;border-radius:16px 16px 0 0;margin-top:.4rem}
+.wrap{max-width:44rem;margin:0 auto}
+.card{background:#fff;border:1px solid #e6ebf0;border-radius:14px;padding:.9rem;margin-bottom:.8rem}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:.5rem;margin-bottom:.8rem}
+.stat{background:#fff;border:1px solid #e6ebf0;border-radius:12px;padding:.55rem .6rem}
+.stat b{display:block;font-size:1.15rem;font-variant-numeric:tabular-nums}
+.stat span{font-size:.68rem;color:#65788b;text-transform:uppercase;letter-spacing:.03em}
+input{padding:.6rem .7rem;border:1px solid #dde3e9;border-radius:10px;font:inherit;width:100%}
+button{font:inherit;background:#0b0f14;color:#fff;border:0;border-radius:10px;padding:.6rem .8rem;font-weight:600}
+button.sm{background:#fff;color:#101418;border:1px solid #cfd8e0;font-size:.78rem;padding:.35rem .55rem;font-weight:500}
+button.ok{background:#0b5b34}
+.o{border:1px solid #e6ebf0;border-radius:12px;padding:.7rem;margin-bottom:.55rem;background:#fff}
+.o.flag{border-color:#f3c3c9;background:#fffafa}
+.o .h{display:flex;justify-content:space-between;gap:.5rem;align-items:baseline;flex-wrap:wrap}
+.o .c{font-family:ui-monospace,Menlo,monospace;font-size:.82rem;font-weight:700}
+.o .t{font-size:.74rem;color:#65788b}
+.o .m{font-weight:700;font-variant-numeric:tabular-nums}
+.o .it{font-size:.84rem;margin:.4rem 0;color:#33404d;white-space:pre-wrap}
+.badge{font-size:.7rem;padding:.12rem .45rem;border-radius:999px;border:1px solid #cfd8e0;background:#f4f7fa;color:#42566a}
+.paid{background:#e8f7ef;border-color:#bfe6d0;color:#0b5b34}
+.new{background:#fff6e0;border-color:#f0d9a8;color:#8a5b00}
+.cod{background:#eef3f8;border-color:#cfdcea;color:#33526f}
+.flags{font-size:.72rem;color:#b00020;margin-top:.35rem;font-weight:600}
+.acts{display:flex;gap:.4rem;margin-top:.5rem;flex-wrap:wrap}
+.pay{font-size:.78rem;background:#f7f9fb;border-radius:8px;padding:.4rem .5rem;margin-top:.4rem;color:#33404d}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
+.hint{font-size:.75rem;color:#65788b}
+.empty{text-align:center;color:#65788b;padding:2rem 1rem;font-size:.9rem}
+h3{font-size:.85rem;margin:.1rem 0 .6rem}
+.hide{display:none}
+</style>
+</head>
+<body>
+<div class="top"><div class="in"><b id="ttl">ZimLink · my orders</b><span><a href="/onboard">new store</a> · <a href="#" id="renewLn">renew</a></span></div></div>
+<main><div class="wrap">
+
+<div class="card" id="login">
+  <h3>Open your dashboard</h3>
+  <p class="hint" style="margin-top:0">Paste the dashboard link you were given when you created the store, or type the two parts below. Nothing is sent anywhere except your own store.</p>
+  <div class="two" style="margin-top:.6rem">
+    <div><input id="fH" placeholder="store name (handle)"></div>
+    <div><input id="fT" placeholder="your token" type="password"></div>
+  </div>
+  <div style="display:flex;gap:.5rem;margin-top:.6rem"><button id="go">Open</button><button class="sm" id="pasteHint">I have the full link</button></div>
+</div>
+
+<div id="app" class="hide">
+  <div class="stats">
+    <div class="stat"><b id="sN">0</b><span>orders</span></div>
+    <div class="stat"><b id="sV">0</b><span>value</span></div>
+    <div class="stat"><b id="sC">0</b><span>cash due</span></div>
+    <div class="stat"><b id="sF">0</b><span>flagged</span></div>
+  </div>
+
+  <div class="card" id="storeCard">
+    <div style="display:flex;justify-content:space-between;gap:.6rem;align-items:center;flex-wrap:wrap">
+      <div><b id="sName"></b><div class="hint" id="sPlan"></div></div>
+      <div style="display:flex;gap:.4rem;flex-wrap:wrap">
+        <button class="sm" id="openStore">View store</button>
+        <button class="sm" id="reloadFeed">Reload my menu</button>
+        <button class="sm" id="printDay">Print today</button>
+        <button class="sm" id="exportCsv">Export CSV</button>
+      </div>
+    </div>
+    <div class="hint" id="feedWarn" style="margin-top:.4rem"></div>
+  </div>
+
+  <div class="card" style="padding:.6rem">
+    <div style="display:flex;gap:.4rem;flex-wrap:wrap" id="filters">
+      <button class="sm on" data-f="all">All</button>
+      <button class="sm" data-f="new">To confirm</button>
+      <button class="sm" data-f="flag">Flagged</button>
+      <button class="sm" data-f="paid">Paid</button>
+    </div>
+  </div>
+  <div id="list"></div>
+</div>
+</div></main>
+<script>
+var S = { handle: '', token: '', orders: [], store: {}, filter: 'all' };
+var q = function (s) { return document.querySelector(s); };
+var qa = function (s) { return Array.prototype.slice.call(document.querySelectorAll(s)); };
+function esc(x) { return String(x == null ? '' : x).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
+
+(function boot() {
+  var u = new URL(location.href), params = new URLSearchParams(u.search);
+  var saved = null; try { saved = JSON.parse(localStorage.getItem('zl_adm') || 'null'); } catch (e) {}
+  var h = params.get('handle') || (saved && saved.handle) || '';
+  var t = params.get('token') || (saved && saved.token) || '';
+  if (h) q('#fH').value = h;
+  if (t) q('#fT').value = t;
+  if (h && t) load();
+  if (t) q('#renewLn').href = '/renew/' + t.slice(0, 0) + (params.get('token') || t);
+  q('#pasteHint').onclick = function () {
+    navigator.clipboard && navigator.clipboard.readText().then(function (s) {
+      var m = String(s).match(/handle=([a-z0-9-]+).*?token=([A-Za-z0-9]+)/);
+      if (m) { q('#fH').value = m[1]; q('#fT').value = m[2]; load(); }
+      else alert('Could not find a dashboard link on your clipboard. Type the two parts instead.');
+    });
+  };
+})();
+q('#go').onclick = load;
+function load() {
+  S.handle = q('#fH').value.trim().toLowerCase(); S.token = q('#fT').value.trim();
+  if (!S.handle || !S.token) { alert('Both the store name and your token are needed'); return; }
+  localStorage.setItem('zl_adm', JSON.stringify({ handle: S.handle, token: S.token }));
+  fetch('/api/admin?handle=' + encodeURIComponent(S.handle) + '&token=' + encodeURIComponent(S.token))
+    .then(function (r) { return r.json().then(function (j) { return { s: r.status, j: j }; }); })
+    .then(function (res) {
+      if (!res.j.ok) { alert('Dashboard not opened: ' + (res.j.error || res.s)); return; }
+      S.store = res.j.store || {}; S.orders = res.j.orders || [];
+      q('#login').classList.add('hide'); q('#app').classList.remove('hide');
+      q('#ttl').textContent = (S.store.shop_name || S.handle) + ' · orders';
+      q('#sName').textContent = S.store.shop_name || S.handle;
+      var left = Math.ceil(((S.store.paid_until || 0) - Date.now()) / 864e5);
+      q('#sPlan').textContent = (S.store.plan || 'free') + ' · ' + (left > 0 ? left + ' days left' : 'expired — renew to keep the store live') + ' · ' + (S.store.currency || 'USD');
+      q('#openStore').onclick = function () { window.open('/s/' + S.handle, '_blank'); };
+      q('#reloadFeed').onclick = function () {
+        fetch('/s/' + S.handle + '/feed.json').then(function (r) { return r.json(); }).then(function (j) {
+          alert('Menu reloaded: ' + ((j.products || []).length) + ' products. Your store shows changes within 2 minutes without anyone touching it.');
+        });
+      };
+      q('#exportCsv').onclick = exportCsv;
+      q('#printDay').onclick = printDay;
+      if (S.store.renew_url) q('#renewLn').href = S.store.renew_url;
+      var warns = [];
+      if (!S.store.pay_account && S.store.rail !== 'cash') warns.push('No payment number/account set — customers cannot pay. Add it to your store settings (or create the store again with the right details).');
+      if (S.store.rail === 'cash') warns.push('Rail = cash/COD: no online payment is expected, and drivers must be reconciled by hand.');
+      if ((S.orders || []).length > 45) warns.push('Dashboard keeps the last 200 orders in free storage — export older ones monthly.');
+      q('#feedWarn').textContent = warns.join('  ·  '); q('#feedWarn').style.color = warns.length ? '#b00020' : '';
+      render();
+    });
+}
+function render() {
+  var rows = S.orders.filter(function (o) {
+    if (!o) return false;
+    if (S.filter === 'all') return true;
+    if (S.filter === 'flag') return (o.risk_flags || []).length > 0;
+    if (S.filter === 'paid') return o.status === 'paid';
+    if (S.filter === 'new') return o.status !== 'paid' && o.status !== 'cancelled';
+    return true;
+  });
+  var tot = 0, cod = 0, fl = 0;
+  S.orders.forEach(function (o) { if (!o) return; tot += (o.pricing && o.pricing.total) || 0; if (o.status === 'cod') cod += 1; if ((o.risk_flags || []).length) fl += 1; });
+  q('#sN').textContent = S.orders.length; q('#sV').textContent = tot.toFixed(0); q('#sC').textContent = cod; q('#sF').textContent = fl;
+  q('#list').innerHTML = rows.length ? rows.map(function (o) {
+    var p = o.pricing || {};
+    return '<div class="o' + ((o.risk_flags || []).length ? ' flag' : '') + '">' +
+      '<div class="h"><div><span class="c">' + esc(o.code) + '</span> <span class="t">' + new Date(o.at).toLocaleString() + '</span></div>' +
+      '<div class="m">' + (p.pay_now || p.total || 0).toFixed(2) + ' ' + esc(S.store.currency || 'USD') + '</div></div>' +
+      '<div style="margin-top:.35rem"><span class="badge ' + (o.status === 'paid' ? 'paid' : (o.status === 'cod' ? 'cod' : 'new')) + '">' + esc(o.status) + '</span> ' +
+      '<span class="badge">' + esc(o.service) + '</span>' +
+      (o.prior_unpaid ? ' <span class="badge">' + o.prior_unpaid + ' unpaid before</span>' : '') +
+      '</div>' +
+      '<div class="it">' + esc(o.buyer && o.buyer.name) + ' · ' + esc(o.buyer && o.buyer.phone) + (o.buyer && o.buyer.address ? ' · ' + esc(o.buyer.address) : '') + '\n' +
+      (o.items || []).map(function (i) { return (i.qty || 1) + 'x ' + esc(i.name); }).join('\n') +
+      (o.buyer && o.buyer.note ? '\nNote: ' + esc(o.buyer.note) : '') + '</div>' +
+      (p.fee_absorbed_by_merchant ? '<div class="pay">payment cost you absorb on this order: ' + p.fee_absorbed_by_merchant.toFixed(2) + ' (' + esc(p.rail && p.rail.label || '') + ')</div>' : '') +
+      ((o.risk_flags || []).length ? '<div class="flags">⚠ ' + esc(o.risk_flags.join(' · ')) + '</div>' : '') +
+      '<div class="acts">' +
+      (o.status !== 'paid' && o.status !== 'cancelled' ? '<button class="sm ok" data-pay="' + esc(o.id) + '">Mark paid</button>' : '') +
+      (o.status !== 'cancelled' ? '<button class="sm" data-cancel="' + esc(o.id) + '">Cancel</button>' : '') +
+      '<button class="sm" data-wa="' + esc(o.id) + '">WhatsApp buyer</button>' +
+      '<button class="sm" data-cp="' + esc(o.id) + '">Copy details</button>' +
+      '</div></div>';
+  }).join('') : '<div class="card empty">No orders in this view yet. Share your store link: /s/' + esc(S.handle) + '</div>';
+
+  qa('[data-pay]').forEach(function (b) { b.onclick = function () { mark(b.getAttribute('data-pay'), 'paid'); }; });
+  qa('[data-cancel]').forEach(function (b) { b.onclick = function () { mark(b.getAttribute('data-cancel'), 'cancelled'); }; });
+  qa('[data-wa]').forEach(function (b) { b.onclick = function () {
+    var o = byId(b.getAttribute('data-wa')); if (!o || !o.buyer.phone) return;
+    var txt = 'Hi ' + o.buyer.name + ', it\'s ' + (S.store.shop_name || '') + '. Your order ' + o.code +
+      ' (' + (o.pricing.lines || []).map(function (l) { return l.qty + 'x ' + l.name; }).join(', ') + ') is ' + o.pricing.pay_now + ' ' + (S.store.currency || 'USD') + '.';
+    window.open('https://wa.me/' + String(o.buyer.phone).replace(/\D/g, '') + '?text=' + encodeURIComponent(txt), '_blank');
+  }; });
+  qa('[data-cp]').forEach(function (b) { b.onclick = function () {
+    var o = byId(b.getAttribute('data-cp'));
+    var t = (o.code) + '\n' + o.buyer.name + ' ' + o.buyer.phone + (o.buyer.address ? '\n' + o.buyer.address : '') +
+      '\n' + (o.items || []).map(function (i) { return (i.qty || 1) + 'x ' + i.name; }).join('\n') +
+      '\nPay ' + o.pricing.pay_now + ' ' + (S.store.currency || 'USD') + ' → ' + (S.store.pay_account || '') + ' ref ' + o.code;
+    if (navigator.clipboard) navigator.clipboard.writeText(t).then(function () { b.textContent = 'Copied ✓'; });
+  }; });
+  qa('#filters .sm').forEach(function (b) {
+    b.onclick = function () { S.filter = b.getAttribute('data-f'); qa('#filters .sm').forEach(function (x) { x.classList.toggle('on', x === b); x.style.background = x === b ? '#0b0f14' : '#fff'; x.style.color = x === b ? '#fff' : '#101418'; }); render(); };
+  });
+}
+function byId(id) { for (var i = 0; i < S.orders.length; i++) if (S.orders[i] && S.orders[i].id === id) return S.orders[i]; return null; }
+function mark(id, status) {
+  fetch('/api/mark', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ handle: S.handle, token: S.token, id: id, status: status }) })
+    .then(function (r) { return r.json(); }).then(function (j) { if (!j.ok) { alert(j.error || 'failed'); return; } load(); });
+}
+function exportCsv() {
+  var head = 'code,when,status,name,phone,service,items,total,currency,pay_to,reference,flags\n';
+  var body = S.orders.map(function (o) { if (!o) return ''; var p = o.pricing || {};
+    return [o.code, o.at, o.status, o.buyer.name, o.buyer.phone, o.service, (o.items || []).map(function (i) { return (i.qty || 1) + 'x ' + i.name; }).join(' + '), (p.total || 0).toFixed(2), S.store.currency || 'USD', S.store.pay_account || '', o.code, (o.risk_flags || []).join(' ')].map(csvq).join(','); }).join('\n');
+  dl('zimlink-' + S.handle + '-' + new Date().toISOString().slice(0, 10) + '.csv', head + body);
+}
+function csvq(s) { s = String(s == null ? '' : s); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
+function dl(name, text) {
+  var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'text/csv' })); a.download = name; a.click();
+  setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
+}
+function printDay() {
+  var today = new Date().toDateString();
+  var rows = S.orders.filter(function (o) { return o && new Date(o.at).toDateString() === today; });
+  var w = window.open('', '_blank'); if (!w) { alert('Allow pop-ups to print'); return; }
+  var tot = rows.reduce(function (a, o) { return a + ((o.pricing || {}).total || 0); }, 0);
+  var cod = rows.filter(function (o) { return o.status === 'cod'; }).reduce(function (a, o) { return a + ((o.pricing || {}).total || 0); }, 0);
+  w.document.write('<!doctype html><meta charset=utf-8><title>Day sheet</title><body style="font:14px ui-monospace,Menlo,monospace;padding:1.2rem">' +
+    '<h2>' + esc(S.store.shop_name || S.handle) + ' — ' + today + '</h2>' +
+    '<p>Orders: ' + rows.length + ' · Total: ' + tot.toFixed(2) + ' ' + esc(S.store.currency || 'USD') + ' · Cash to reconcile: ' + cod.toFixed(2) + '</p><hr>' +
+    rows.map(function (o) { var p = o.pricing || {};
+      return '<p><b>' + esc(o.code) + '</b> ' + new Date(o.at).toLocaleTimeString().slice(0,5) + ' · ' + esc(o.buyer.name) + ' · ' + esc(o.buyer.phone) +
+        (o.buyer.address ? ' · ' + esc(o.buyer.address) : '') +
+        '<br>&nbsp;&nbsp;' + esc((o.items || []).map(function (i) { return (i.qty || 1) + 'x ' + i.name; }).join(', ')) +
+        '<br>&nbsp;&nbsp;menu ' + (p.total || 0).toFixed(2) + ' · collect ' + (p.pay_now || 0).toFixed(2) + ' ' + (S.store.currency || 'USD') +
+        ' via ' + esc((p.rail || {}).label || 'cash') + ' [' + esc(S.store.pay_account || '') + '] ref ' + esc(o.code) +
+        '<br>&nbsp;&nbsp;<b>' + esc(o.status) + '</b>' + ((o.risk_flags || []).length ? ' ⚠ ' + esc(o.risk_flags.join(', ')) : '') + '</p>';
+    }).join('') +
+    '<p><i>Driver cash to reconcile at end of day: ' + cod.toFixed(2) + ' ' + esc(S.store.currency || 'USD') + '</i></p>' +
+    '<scr' + 'ipt>window.onload=function(){window.print()}</' + 'script></body>');
+  w.document.close();
+}
+</script>
+</body>
+</html>

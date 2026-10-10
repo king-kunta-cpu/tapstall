@@ -1,0 +1,5 @@
+id,name,category,price,currency,image,description,options,addons,stock,popular
+1,2 litre Coca-Cola,Drinks,2.50,USD,,,,,,yes
+2,Braai box (2 people),Meals,12,USD,,"Chops, pap, salad, vetkoek","Size:Regular:0,Large:3","Extra meat:3|Django:1.5",,yes
+3,Sadza + beef,Meals,6,USD,,,"Portion:Small:0,Medium:1.5,Large:2.5",Extra beef:2,,
+4,Vanilla ice cream,Desserts,2,USD,,,,,no,
