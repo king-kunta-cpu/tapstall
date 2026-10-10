@@ -49,20 +49,22 @@ it is what the Email binding will allow, not a brand choice. The orphan namespac
 `zimlink-store` (b32c2fe9…) is still there for you to delete. `LEGACY_WORKER_NAME`
 is one line to remove once the old hostname stops getting traffic.
 
-## Live right now
+## Live right now (measured 2026-10-10, 13:2x UTC)
 
 | What | Where | Proof |
 |---|---|---|
-| Worker (every tenant) | `https://zimlink.simalidudu.workers.dev` | `/__ping` → `{"ok":true,"version":"0.4.0"}` |
-| Onboarding | `/onboard` | 35,692 bytes served, byte-identical to `pages/onboard.html` in git |
-| Operator console | `/ops` | served page = committed `pages/ops.html` with the session hook filled (37,378 served vs 37,364 in git, the difference being `{"signed_in":false,"version":"0.4.0"}`); `/ops/api/*` → `401` anonymous |
-| Money pages from KV | `tpl:confirm`, `tpl:renew`, `tpl:ops` | `/__selftest` → all eight `tpl_*` true, so no page is on the inline fallback |
-| Rate calculator | `/fees?aov=7&n=140&cod=35&cash=20&min=6&hr=3&m=zw` | HTTP 200, 11,117 B, URL-synced |
-| Landing (Pages) | `https://king-kunta-cpu.github.io/zimlink/` | HTTP 200 |
-| Demo tenant (ZW) | `/s/mamatoe` | 4 products from its own CSV feed, 0 leaked secret fields |
-| Demo tenant (ZA) | `/s/kotaking` | order `KOT-0001` marked `paid` by one tap, plan `annual` |
-| Rail reference | `/rails` | 9 rails with pct/IMTT/type |
-| CI/CD | `.github/workflows/deploy.yml` | run #19 `success` at v0.4.0 — tests → templates → Worker → cron → Pages; 124/124 re-measured on both tenants after it |
+| Worker (canonical) | `https://tapstall.simalidudu.workers.dev` | `/__ping` → `{"ok":true,"version":"0.5.0"}` |
+| Previous hostname | `https://zimlink.simalidudu.workers.dev` | same build (`/__ping` → 0.5.0); `GET /s/mamatoe`, `/a?code=…`, `/ops` → `301` to the canonical origin; `POST /api/order` is **not** redirected — it answers `503 who:"buyer"` because today's writes are gone, which is the point: a rename never eats a request body |
+| Onboarding | `/onboard` | 35,692 B served vs 38,180 B in git: the KV copy predates the rename and cannot be republished until the day's writes return (`429`/`10048`, measured) — the page still works because `fillPage` fills either marker spelling |
+| Operator console | `/ops` | old copy served, session hook filled (`"signed_in":false`); a live `tp_ops` cap reads `/ops/api/state` → 2 stores, 0 attention, no `admin_token`; **the same cap under `zl_ops` → 200**; login sets `tp_ops` and clears `zl_ops` |
+| Markets & rails | `/rails`, `/ops/api/rails` | 9 built-in + 0 added = 10 live; `/ops/api/rails` → `401` anonymous, `422` for a label-less rail; `rail_catalogue_ok`, `rail_custom_ok`, `rail_price_with_own` all true in `/__selftest` |
+| Money pages from KV | `tpl:confirm`, `tpl:renew`, `tpl:ops` | all eight `tpl_*` true, so nothing is on the inline fallback |
+| Rate calculator | `/fees?aov=7&n=140&…&m=zw` | 200, 11,117 B (git is 11,119 — the two bytes are the brand in `<title>`) |
+| Landing + calculator mirror | `https://king-kunta-cpu.github.io/tapstall/` | 200, already titled "Tapstall calculator" (Pages is built from git, so it moved with the commit). The old `…/zimlink/` path is `404`, which is exactly why `PAGES_URL` and `REPO_RAW` changed in the same release |
+| Demo tenants | `/s/mamatoe`, `/s/kotaking` | 4 products from each store's own CSV; `feed.json` answers 200 on a day with no KV writes; `config.json` carries `rail_info` |
+| Merchant API | `/api/admin?handle=mamatoe` | `200` with 22 orders, `via:"key"`, under **either** `x-tapstall-admin` or `x-zimlink-admin`; no header → `401` |
+| CI/CD | `.github/workflows/deploy.yml` | run #27 `success` at 0.5.0 on the renamed repo: tests → templates (refused, warned) → Worker → **alias Worker** → cron → Pages |
+| Selftest | `/__selftest` | `ok:false` for one honest reason — its own write probe — reported as `kv_write_blocked:{reason:"quota",retry_in_sec:…}` beside the other 30+ answers |
 
 ## Verified on production, not only in tests
 
