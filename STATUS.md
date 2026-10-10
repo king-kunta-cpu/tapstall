@@ -6,14 +6,14 @@
 |---|---|---|
 | Worker (every tenant) | `https://zimlink.simalidudu.workers.dev` | `/__ping` → `{"ok":true,"version":"0.4.0"}` |
 | Onboarding | `/onboard` | 35,692 bytes served, byte-identical to `pages/onboard.html` in git |
-| Operator console | `/ops` | served page = committed `pages/ops.html` with the session hook filled (37,512 bytes both sides); `/ops/api/*` → `401` anonymous |
+| Operator console | `/ops` | served page = committed `pages/ops.html` with the session hook filled (37,378 served vs 37,364 in git, the difference being `{"signed_in":false,"version":"0.4.0"}`); `/ops/api/*` → `401` anonymous |
 | Money pages from KV | `tpl:confirm`, `tpl:renew`, `tpl:ops` | `/__selftest` → all eight `tpl_*` true, so no page is on the inline fallback |
 | Rate calculator | `/fees?aov=7&n=140&cod=35&cash=20&min=6&hr=3&m=zw` | HTTP 200, 11,117 B, URL-synced |
 | Landing (Pages) | `https://king-kunta-cpu.github.io/zimlink/` | HTTP 200 |
 | Demo tenant (ZW) | `/s/mamatoe` | 4 products from its own CSV feed, 0 leaked secret fields |
 | Demo tenant (ZA) | `/s/kotaking` | order `KOT-0001` marked `paid` by one tap, plan `annual` |
 | Rail reference | `/rails` | 9 rails with pct/IMTT/type |
-| CI/CD | `.github/workflows/deploy.yml` | run #18 `success` at v0.4.0 — tests → templates → Worker → cron → Pages |
+| CI/CD | `.github/workflows/deploy.yml` | run #19 `success` at v0.4.0 — tests → templates → Worker → cron → Pages; 124/124 re-measured on both tenants after it |
 
 ## Verified on production, not only in tests
 
@@ -185,6 +185,10 @@ What is new:
   `git main`), health (Worker self-test + cron heartbeat + Pages + last CI line),
   and the change log. Every mutation needs `x-zimlink-confirm: 1`; every lever
   writes the store's own log as well as the operator's.
+
+`/onboard` (35,692 B), `/a` (49,711 B), `/fees` and `/` are each byte-identical
+to their file in git, and `/ops` differs only by the filled session hook — which
+is what makes the console's "restore from git main" button a real promise.
 
 Four bugs the page tests caught before anything shipped — none of them visible
 to `node --test` as it stood:
