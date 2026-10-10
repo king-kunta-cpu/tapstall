@@ -66,26 +66,57 @@ kv_id() { # kv_id <title> <binding> -> namespace id (creates when missing)
 
 # ---- templates into KV (hot-swap without redeploy) ------------------------
 kv_put_tpl() { # <namespace_id> <names...>
+  # Publishes a page only when KV does not already hold this exact file: a
+  # deploy that changes no HTML then spends zero of the 1,000 free KV writes a
+  # day, and a quota-exhausted day cannot turn CI red over a byte that is
+  # already there. A refused write where KV *differs* from git is fatal, because
+  # that is the one case where customers would be served a stale page.
   local ns="$1"; shift; local name
   for name in "$@"; do
     local file="pages/$name.html"
     [[ "$name" == *.csv ]] && file="pages/$name"
     [[ -f "$file" ]] || die "missing $file"
-    CF_TOKEN="$CF_TOKEN" CF_ACCOUNT="$CF_ACCOUNT" KV_NS="$ns" TPL="$name" python3 - <<'PYEOF'
-import os, urllib.request
+    CF_TOKEN="$CF_TOKEN" CF_ACCOUNT="$CF_ACCOUNT" KV_NS="$ns" TPL="$name" FILE="$file" python3 - <<'PYEOF'
+import os, urllib.error, urllib.request
 tok  = os.environ["CF_TOKEN"]; acct = os.environ["CF_ACCOUNT"]
-ns   = os.environ["KV_NS"];     name = os.environ["TPL"]
-fn = "pages/%s.html" % name
-if name.endswith(".csv"): fn = "pages/%s" % name
-body = open(fn, encoding="utf-8").read().encode()
-url  = ("https://api.cloudflare.com/client/v4/accounts/%s/storage/kv/namespaces/%s/values/tpl:%s"
-        % (acct, ns, name[:-4] if name.endswith(".csv") else name))   # sample-menu.csv -> tpl:sample-menu
-req  = urllib.request.Request(url, data=body, method="PUT",
-                              headers={"Authorization": "Bearer " + tok})
-out = urllib.request.urlopen(req, timeout=90).read().decode()
-assert '"success": true' in out or '"success":true' in out, out[:200]
-print("  tpl:%s  %s bytes" % (name, format(len(body), ",")))
+ns   = os.environ["KV_NS"];    name = os.environ["TPL"]; fn = os.environ["FILE"]
+key  = "tpl:" + (name[:-4] if name.endswith(".csv") else name)     # sample-menu.csv -> tpl:sample-menu
+body = open(fn, "rb").read()
+base = "https://api.cloudflare.com/client/v4/accounts/%s/storage/kv/namespaces/%s" % (acct, ns)
+
+def read():
+    req = urllib.request.Request(base + "/values/" + key, headers={"Authorization": "Bearer " + tok})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return r.read()
+    except urllib.error.HTTPError as e:
+        if e.code == 404: return None
+        raise
+
+cur = read()
+if cur == body:
+    print("  = %-14s already current in KV (%d bytes), no write spent" % (name, len(body)))
+else:
+    err = None
+    for _ in (1, 2):
+        try:
+            req = urllib.request.Request(base + "/values/" + key, data=body, method="PUT",
+                                        headers={"Authorization": "Bearer " + tok})
+            with urllib.request.urlopen(req, timeout=90) as r:
+                out = r.read().decode()
+            assert '"success": true' in out or '"success":true' in out, out[:200]
+            err = None
+            break
+        except Exception as e:
+            err = e
+    if err is None:
+        print("  ^ %-14s %d -> %d bytes" % (name, len(cur or b""), len(body)))
+    elif read() == body:
+        print("  = %-14s write refused (%s) but KV already matches git: fine" % (name, str(err)[:60]))
+    else:
+        raise SystemExit("  ! %-14s could not be published and KV differs from git: %s" % (name, str(err)[:160]))
 PYEOF
+    [[ $? -eq 0 ]] || die "template publish failed: $name"
   done
 }
 

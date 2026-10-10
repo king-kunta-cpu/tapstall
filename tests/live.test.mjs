@@ -26,7 +26,9 @@ const bundle = join(dir, 'worker.js');
 // core.js has no exports of its own to inline-check here, so build the same
 // bundle the publisher ships, straight into a temp dir.
 before(() => {
-  execFileSync(join(root, 'scripts/build_bundle.sh'), [dir], { cwd: root, stdio: 'pipe' });
+  // bash, not the executable bit: snapshots and some checkouts drop the file
+  // mode, and a test that fails because of that is a test about permissions
+  execFileSync('bash', [join(root, 'scripts/build_bundle.sh'), dir], { cwd: root, stdio: 'pipe' });
   assert.ok(existsSync(bundle), 'build produced no bundle');
 });
 

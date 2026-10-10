@@ -28,6 +28,13 @@ Storefront `…/s/<handle>` · dashboard `…/a` · rate calculator `…/fees`
 A new merchant is one KV write. There is no per-customer deploy, no approval
 queue, no invoice to send.
 
+The one number that bounds it: **1,000 KV writes/day for the whole account**
+(reads are 100,000/day). An order costs about four writes, so the free tier is
+~150–200 orders a day across all tenants before anything needs paying for —
+measured the hard way on 2026-10-10, and the reason every path that can avoid a
+write now does (a deploy with unchanged HTML writes nothing; log writes are
+best-effort; a quota answers 503 with a retry time instead of a 500).
+
 ## The two things the incumbent cannot do here
 
 1. **A payment you can identify by its amount.** Every order is collected at

@@ -229,6 +229,50 @@ Two design changes that came out of testing rather than taste:
   a 15-minute "you can cancel this" window is useless if you cannot read what
   was typed.
 
+## The first real capacity event (2026-10-10, ~10:50 UTC)
+
+`POST /api/order` started answering `{"ok":false,"error":"KV put() limit exceeded
+for the day.","stage":"worker"}` — 500-shaped, opaque, and true. Cloudflare's
+free KV tier allows **1,000 writes/day for the whole account**; today's testing
+consumed them: three `prod_check.sh` runs (each one creates and cancels a probe
+order, files and clears a reference, issues a link, writes audit rows), two CI
+deploys (each publishing eight templates), and the lock-counter probes. Reads
+(100,000/day) were untouched, so every page kept rendering while nothing could be
+written. Fixed, measured and tested rather than explained away:
+
+* **A buyer can no longer be sent to pay for an order that was not saved.**
+  `persistOrder` was inside `ctx.waitUntil`, so the write happened after the 201
+  and its failure was invisible: the buyer got "send 6.00, reference QTQ-0001",
+  the merchant never saw the order. It is now awaited before the answer; only the
+  notification runs after. `tests/limits.test.mjs` drives the bundled Worker
+  against a namespace whose writes all throw and asserts no 201 is possible.
+* **A quota answers 503 in prose, not 500 in internals**: "out of storage writes
+  for the day… Nothing is lost and no order was taken", with `retry_in_sec`
+  (measured to the UTC reset) and `Retry-After`, the raw platform string kept in
+  `detail` for the operator, and — because a CORS failure would hide all of that —
+  `Access-Control-Allow-Origin: *` on the error path too, which it did not have.
+* **Logging may never break the thing it logs.** `pushAudit`, `pushOpsLog`,
+  `authFail` and `authClear` swallow storage failures and return whether they
+  wrote, so on a bad day: a merchant's settings save still lands and answers
+  `logged:false` with a note saying the log line is missing (the duplicate `note:`
+  key that overwrote that sentence with "Saved." was itself a bug this found); a
+  wrong secret is still a 403 with a count, not a 500; and `ops/login` still issues
+  a session even though its own log write failed — a console that cannot be opened
+  during an outage is the worst possible console.
+* **Deploys now spend zero KV writes when the HTML is unchanged.** `kv_put_tpl`
+  reads the current value and skips an identical file; a refused write is fatal
+  only if KV then differs from git. Verified live against the real namespace while
+  writes were blocked: all six pages reported `already current in KV`, and the
+  byte sizes match the repo exactly (ops 37,364 · store 25,301 · onboard 35,692 ·
+  admin 49,711 · confirm 17,115 · renew 17,621).
+
+Headroom, honestly: at roughly four writes per order (order doc, list row, seq,
+buyer touch) plus one audit row per merchant action, the free tier is a ceiling of
+about **150–200 orders a day across every tenant** — not per tenant. Reads are not
+the constraint. The fix when it bites for real is the $5/mo Workers plan (100k
+writes), which is exactly the trade the pricing page should make once revenue
+clears it; nothing else in the stack needs to change.
+
 ## Known limits (deliberate, not TODO)
 
 1. **No instant mobile-money confirmation** — none exists at $0 in ZW/SA. The

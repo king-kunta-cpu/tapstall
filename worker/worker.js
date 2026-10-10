@@ -46,7 +46,21 @@ export default {
       const res = (await route(req, url, env, ctx)) || json({ ok: false, error: 'not_found' }, 404);
       return open ? openCors(res) : res;
     } catch (e) {
-      return json({ ok: false, error: String((e && e.message) || e), stage: 'worker' }, 500);
+      const msg = String((e && e.message) || e);
+      // A spent quota is not a bug, and a 500 with `KV put() limit exceeded for
+      // the day.` in a buyer's face is both opaque and alarming. Cloudflare's
+      // free KV tier answers this once the 1,000 daily writes are gone (hit for
+      // real today after three prod_check runs and two CI deploys), so say what
+      // it is, say when it clears, and hand the raw text to the operator instead.
+      if (/put\(\) limit|write.*limit|CPU time exceeded|Memory limit/i.test(msg)) {
+        const secs = secsToMidnightUTC();
+        const errRes = json({
+          ok: false, retry_in_sec: secs, detail: msg,
+          error: 'This store is out of storage writes for the day. Nothing is lost and no order was taken — try again in a few hours, or message the shop directly.',
+        }, 503, { 'Retry-After': String(secs), 'Cache-Control': 'no-store' });
+        return open ? openCors(errRes) : errRes;
+      }
+      return json({ ok: false, error: msg, stage: 'worker' }, 500);
     }
   },
   async scheduled(event, env, ctx) {
@@ -271,10 +285,16 @@ async function placeOrder(req, url, env, ctx) {
   order.confirm_url = `${url.origin}/c/${markCap}`;
   order.cancel_url = `${url.origin}/c/${cancelCap}`;
 
-  ctx.waitUntil((async () => {
-    await persistOrder(env, st, order);
-    await notify(env, st, order);
-  })());
+  /* The order document is written BEFORE the buyer is answered. It used to sit
+   * in ctx.waitUntil, which meant a failed write — a spent KV write budget, a
+   * namespace hiccup — was invisible: the buyer got "send 6.00 to 077…, quote
+   * QTQ-0001" for an order that did not exist, and the merchant never saw it.
+   * For a service whose whole pitch is proof-of-payment, that is the worst
+   * possible failure, so only the notification is allowed to run after the
+   * response. A persist failure now bubbles up and answers 503 with a retry
+   * time, and nothing was told to anybody. */
+  await persistOrder(env, st, order);
+  ctx.waitUntil(Promise.resolve().then(() => notify(env, st, order)).catch(() => {}));
 
   const wa = st.whatsapp || '';
   const summary = waSummary(st, order);
@@ -414,12 +434,15 @@ async function markPaid(req, url, env) {
   const list = (await env.ORDERS.get('list:' + handle, 'json')) || [];
   const row = list.find(x => x.id === o.id);
   if (row) { row.status = o.status; await env.ORDERS.put('list:' + handle, JSON.stringify(list)); }
-  await pushAudit(env, st, { act: 'mark', via: viaCap ? 'link' : 'session', fields: [o.code + ' → ' + want], ip: ipOf(req) });
+  const logged = await pushAudit(env, st, { act: 'mark', via: viaCap ? 'link' : 'session', fields: [o.code + ' → ' + want], ip: ipOf(req) });
   // an undo link for 15 minutes, same shape, opposite action
   // undo returns the order to whatever it was before this tap
   const undo = await issueCap(secret, { a: 'mark', h: handle, id, s: prev }, UNDO_TTL);
   const label = { paid: 'Marked paid', cancelled: 'Cancelled', awaiting_payment: 'Reopened' }[o.status];
-  return json({ ok: true, id: o.id, code: o.code, status: o.status, label, amount: o.pricing && o.pricing.pay_now, undo_url: '/c/' + undo });
+  // `logged:false` is a gap in the paper trail, not a failed tap: the order row
+  // above is already written, and saying so beats a 500 that leaves the merchant
+  // guessing whether to tap again
+  return json({ ok: true, id: o.id, code: o.code, status: o.status, label, logged, amount: o.pricing && o.pricing.pay_now, undo_url: '/c/' + undo });
 }
 /* -------------------------------------------------------------- register */
 async function register(req, url, env) {
@@ -886,7 +909,9 @@ async function lockedOut(env, handle) {
 async function authFail(env, handle) {
   if (!env.STORES) return 0;
   const n = Number((await env.STORES.get('lock:' + handle)) || 0) + 1;
-  await env.STORES.put('lock:' + handle, String(n), { expirationTtl: LOCK_TTL });
+  // the counter is a courtesy to slow guessing, not a dependency: on a day the
+  // write budget is gone, refuse with 403 as usual instead of 500-ing
+  try { await env.STORES.put('lock:' + handle, String(n), { expirationTtl: LOCK_TTL }); } catch (e) {}
   return n;
 }
 async function authClear(env, handle) {
@@ -895,7 +920,7 @@ async function authClear(env, handle) {
   // every authenticated request would burn the 1,000 free writes/day on a
   // dashboard that polls. Reads are 100k/day, so checking first is free.
   const n = await env.STORES.get('lock:' + handle);
-  if (n && Number(n) > 0) await env.STORES.delete('lock:' + handle);
+  if (n && Number(n) > 0) { try { await env.STORES.delete('lock:' + handle); } catch (e) {} }
 }
 
 /** Who is asking? Cookie session, or the store's API key. Never a URL token. */
@@ -1003,15 +1028,20 @@ async function settingsEdit(req, url, env) {
     after[k] = maskField(k, held ? st.pending.fields[k] : st[k]);
   }
   if (changed || staged) await writeStore(env, st);
-  if (changed || staged) await pushAudit(env, st, { act: 'settings', via: who.via, changed, staged, before, after, ip: ipOf(req) });
+  const logged = (changed || staged) ? await pushAudit(env, st, { act: 'settings', via: who.via, changed, staged, before, after, ip: ipOf(req) }) : true;
   const held = Object.keys(v.money);
   return json({
     ok: true, applied_now: changed ? Object.keys(v.soft) : [],
+    logged,                                    // false = a gap in the change log,
     held, hold_until: st.pending ? st.pending.apply_at : null,
     unchanged: !changed && !staged,
-    note: held.length
-      ? 'Payment, menu and contact changes take effect after 15 minutes and you can cancel them in that window. Anyone already ordering pays the account printed on their slip, so a stolen link cannot quietly reroute today’s takings.'
-      : 'Saved.',
+    // one note, in order of what the merchant most needs to know: a missing
+    // log line first (a duplicate `note:` key used to silently overwrite it
+    // with 'Saved.'), then the hold, then the ordinary thank-you
+    note: !logged ? LOG_GAP
+      : held.length
+        ? 'Payment, menu and contact changes take effect after 15 minutes and you can cancel them in that window. Anyone already ordering pays the account printed on their slip, so a stolen link cannot quietly reroute today’s takings.'
+        : 'Saved.',
   });
 }
 
@@ -1093,17 +1123,21 @@ async function recoverLink(req, url, env) {
 
 /* ------------------------------------------------------------------ audit */
 async function pushAudit(env, st, row) {
-  if (!env.ORDERS || !st) return;
+  if (!env.ORDERS || !st) return false;
   const k = 'audit:' + st.handle;
-  const cur = (await env.ORDERS.get(k, 'json')) || [];
-  cur.unshift({
+  let cur = [];
+  try { cur = (await env.ORDERS.get(k, 'json')) || []; } catch (e) { cur = []; }
+  try {
+    cur.unshift({
     at: new Date().toISOString(), act: row.act, via: row.via || '', ip: row.ip || '',
     changed: row.changed || 0, staged: row.staged || 0,
-    fields: row.fields || Object.keys(row.before || {}),
-    before: row.before || undefined, after: row.after || undefined,
-  });
-  await env.ORDERS.put(k, JSON.stringify(cur.slice(0, 40)));
-}
+      fields: row.fields || Object.keys(row.before || {}),
+      before: row.before || undefined, after: row.after || undefined,
+    });
+    await env.ORDERS.put(k, JSON.stringify(cur.slice(0, 40)));
+    return true;
+  } catch (e) { return false; }   // the change stands; the log has a gap, and
+}                                 // the response says so rather than failing
 async function getAudit(env, handle) {
   if (!env.ORDERS) return [];
   return (await env.ORDERS.get('audit:' + handle, 'json')) || [];
@@ -1204,6 +1238,12 @@ function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<
  * Guessing is throttled per-platform, and a correct secret always works — the
  * lock exists to stop a stranger, not to lock the owner out of their own shop.
  */
+function secsToMidnightUTC() {
+  const now = new Date();
+  const midnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
+  return Math.max(60, Math.round((midnight - now.getTime()) / 1000));
+}
+
 const OPS_COOKIE = 'zl_ops';
 const OPS_TPL_NAMES = ['store', 'onboard', 'admin', 'fees', 'index', 'confirm', 'renew', 'ops', 'sample-menu'];
 const PAGES_URL = 'https://king-kunta-cpu.github.io/zimlink/';
@@ -1375,11 +1415,24 @@ async function getOpsLog(env) {
   if (!env.ORDERS) return [];
   return (await env.ORDERS.get('audit:ops', 'json')) || [];
 }
+/**
+ * Logging is never allowed to break the thing it is logging. Cloudflare's free
+ * KV tier answers `KV put() limit exceeded for the day.` once the 1,000 writes
+ * are gone — measured today, after three prod_check runs and two CI deploys —
+ * and a console that 500s because its own audit line failed is worse than a
+ * console with a gap in the log. Each helper therefore returns whether it
+ * wrote, so callers can say so out loud instead of pretending.
+ */
+const LOG_GAP = 'Applied, but this change could not be written to your change log — the storage write budget for today is spent. Nothing about the change itself failed.';
+
 async function pushOpsLog(env, row) {
-  if (!env.ORDERS) return;
-  const cur = await getOpsLog(env);
-  cur.unshift({ at: new Date().toISOString(), act: row.act, handle: row.handle || '', note: row.note || '', ip: row.ip || '' });
-  await env.ORDERS.put('audit:ops', JSON.stringify(cur.slice(0, 60)));
+  if (!env.ORDERS) return false;
+  try {
+    const cur = await getOpsLog(env);
+    cur.unshift({ at: new Date().toISOString(), act: row.act, handle: row.handle || '', note: row.note || '', ip: row.ip || '' });
+    await env.ORDERS.put('audit:ops', JSON.stringify(cur.slice(0, 60)));
+    return true;
+  } catch (e) { return false; }
 }
 
 /**
@@ -1429,7 +1482,7 @@ async function opsStoreAction(req, env) {
   }
   if (act === 'link') {
     const link = await issueLogin(env, st, new URL(req.url).origin);
-    await pushOpsLog(env, { act: 'link', handle, note: 'issued a dashboard link for the merchant', ip: ipOf(req) });
+    await pushOpsLog(env, { act: 'link', handle, note: 'issued a dashboard link for the merchant', ip: ipOf(req) });   // best-effort
     return json({ ok: true, dashboard_url: link, note: 'Paste this to them once; it opens a 12-hour session and dies in 7 days.' });
   }
 
@@ -1448,9 +1501,14 @@ async function opsStoreAction(req, env) {
 
   await writeStore(env, st);
   const after = { plan: st.plan, paid_until: st.paid_until, suspended: !!st.suspended };
-  await pushOpsLog(env, { act, handle, note: JSON.stringify(after), ip: ipOf(req) });
-  await pushAudit(env, st, { act: 'operator:' + act, via: 'ops', fields: Object.keys(after), before: opsMaskTerm(before), after: opsMaskTerm(after) });
-  return json({ ok: true, handle, action: done, before, after, undo: act === 'reinstate' ? 'suspend' : 'reinstate', note: 'Logged in this store’s change log too, so the merchant can see that it was us, not them.' });
+  const loggedOps = await pushOpsLog(env, { act, handle, note: JSON.stringify(after), ip: ipOf(req) });
+  const loggedStore = await pushAudit(env, st, { act: 'operator:' + act, via: 'ops', fields: Object.keys(after), before: opsMaskTerm(before), after: opsMaskTerm(after) });
+  return json({
+    ok: true, handle, action: done, before, after, logged: loggedOps && loggedStore,
+    undo: act === 'reinstate' ? 'suspend' : 'reinstate',
+    note: loggedStore ? 'Logged in this store’s change log too, so the merchant can see that it was us, not them.'
+      : 'The change is applied. Its log line could not be written (storage write budget for today), so the merchant will not see a note about it until tomorrow.',
+  });
 }
 
 function opsMaskTerm(o) { return { plan: o.plan, suspended: o.suspended, paid_until: o.paid_until ? new Date(o.paid_until).toISOString().slice(0, 10) : null }; }
