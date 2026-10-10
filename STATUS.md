@@ -336,7 +336,26 @@ Then CI taught two more lessons on the live deploy (run #22 red, #23 green):
   caught `rail_catalogue_ok`, which asked whether `{rail:"cash"}` came back as
   `test_momo`: impossible by construction, red in production for a day.
   `prod_check.sh` follows the same rule — it drops the one assertion that needs
-  a write, says why in one yellow line, and still checks every read-side claim. `scripts/
+  a write, says why in one yellow line, and still checks every read-side claim.
+
+Then it found a live one (0.4.3). `prod_check` on the quota day failed 17
+assertions, and 15 of them were the plan, not the build — so `ck()` now reports a
+quota answer as `blocked by the day's KV budget` in its own colour instead of red,
+which left the two that were real:
+
+* **two read paths required a KV write.** `getStore` persisted the matured
+  pending fold and `loadProducts` persisted the menu cache. Consequence: a
+  merchant whose 15-minute hold matures after the budget runs out makes *every*
+  storefront read a 503 until midnight, and a buyer who only wanted to see the
+  menu got one. Both writes are now best-effort (the fold is idempotent; the
+  next read folds again from the same block). Caught by the run, fixed with
+  tests that were then reverted to prove they bite: `not ok` ×2 without the
+  fix, 10/10 with it.
+* **`/ops/logout` promised something it could not do.** `endOpsSessions` swallowed
+  its own error, so on a spent budget the reply still said "every console session
+  is ended now" while a stolen cookie stayed valid for up to 12 hours. It now
+  answers `sessions_ended:false` with the exposure window and the next action,
+  and `prod_check` accepts either the 401 or that sentence — never silence. `scripts/
 deploy.sh --check` also stopped depending on exec bits (`python3 scripts/ui_kit.py`,
 `bash scripts/build_bundle.sh`) because a checkout can lose them and a dry-run
 gate must not be the thing that breaks.

@@ -230,3 +230,48 @@ test('the endpoint that explains an outage still explains while the account cann
   assert.equal(after.json.kv_roundtrip, true, 'and it clears itself when the budget comes back');
   assert.equal(after.json.kv_write_blocked, undefined, 'leaving no scar in the report');
 });
+
+test('a read that cannot cache still reads: the menu is not the thing that broke', async () => {
+  const warm = await call('/s/' + T + '/feed.json');
+  assert.equal(warm.status, 200, warm.text.slice(0, 200));
+  assert.equal((warm.json.products || []).length, 1, 'the stub menu came through while writes worked');
+  FLIP.all = true;
+  let cold;
+  try { cold = await call('/s/' + T + '/feed.json'); } finally { FLIP.all = false; }
+  assert.equal(cold.status, 200, 'a buyer who only wants to see the menu still sees it: ' + cold.text.slice(0, 200));
+  assert.equal((cold.json.products || []).length, 1, 'the products are the answer; the cache was a courtesy');
+});
+
+test('a matured hold is served even when the fold cannot be written down', async () => {
+  const key = 'store:' + T;
+  const st = JSON.parse(env.STORES._map.get(key).value);
+  st.pending = { fields: { pay_account: '0770001112' }, set_at: Date.now() - 20 * 60e3, apply_at: Date.now() - 1000 };
+  await env.STORES.put(key, JSON.stringify(st));
+  FLIP.all = true;
+  let cfg;
+  try { cfg = await call('/s/' + T + '/config.json'); } finally { FLIP.all = false; }
+  assert.equal(cfg.status, 200, 'the storefront reads: ' + cfg.text.slice(0, 200));
+  assert.equal(cfg.json.store.pay_account, '0770001112', 'buyers are quoted the change that matured');
+  const raw = JSON.parse(env.STORES._map.get(key).value);
+  assert.ok(raw.pending, 'and nothing was half-written: the document still carries the pending block');
+  assert.equal(raw.pay_account, '0771234567', 'at rest the old value is still there, as the audit trail says it is');
+  const again = await call('/s/' + T + '/config.json');
+  assert.equal(again.json.store.pay_account, '0770001112', 'folding a second time is the same answer');
+  delete raw.pending;
+  await env.STORES.put(key, JSON.stringify(raw));
+});
+
+test('signing out admits when it could not revoke the other sessions', async () => {
+  const login = await call('/ops/login', { method: 'POST', body: { secret: 'test-secret' }, confirm: true });
+  const c = 'zl_ops=' + (login.cookie.match(/zl_ops=([^;]+)/) || [])[1];
+  FLIP.all = true;
+  let out;
+  try { out = await call('/ops/logout', { method: 'POST', cookie: c }); } finally { FLIP.all = false; }
+  assert.equal(out.status, 200, 'signing out is never the thing that fails loudly: ' + out.text.slice(0, 160));
+  assert.equal(out.json.sessions_ended, false, 'but it cannot claim a revocation it did not perform');
+  assert.match(out.json.note, /could not be written/, out.json.note);
+  assert.match(out.json.note, /12 hours/, 'the operator is told how long the exposure lasts');
+  assert.match(out.json.note, /00:00 UTC/, 'and what to do next');
+  const clean = await call('/ops/logout', { method: 'POST', cookie: c });
+  assert.equal(clean.json.sessions_ended, true, 'and the same click means what it says once writes work');
+});

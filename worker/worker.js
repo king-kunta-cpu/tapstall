@@ -21,7 +21,7 @@ import {
   EDITABLE_FIELDS, SOFT_FIELDS, sign, adminStore, normaliseRail, resolveRail,
 } from './core.js';
 
-const VERSION = '0.4.2';
+const VERSION = '0.4.3';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 const MAX_ORDERS_KEPT = 200;
@@ -139,8 +139,13 @@ async function route(req, url, env, ctx) {
   if (p === '/ops/login') return req.method === 'POST' ? opsLogin(req, env) : json({ ok: false, error: 'method_not_allowed' }, 405, { Allow: 'POST' });
   if (p === '/ops/logout') {
     if (req.method !== 'POST') return json({ ok: false, error: 'method_not_allowed' }, 405, { Allow: 'POST' });
-    await endOpsSessions(env);
-    return withCookie(json({ ok: true, note: 'Every console session on this platform is ended now, not just this tab.' }), opsKillCookie());
+    const ended = await endOpsSessions(env);
+    return withCookie(json({
+      ok: true, sessions_ended: ended,
+      note: ended
+        ? 'Every console session on this platform is ended now, not just this tab.'
+        : 'This tab is signed out, but the platform-wide revocation could not be written — any other session stays valid until its cookie expires (12 hours max). Sign out again after the write budget resets at 00:00 UTC to be certain.',
+    }), opsKillCookie());
   }
   if (p === '/ops/api/state') return opsGate(req, env, () => opsState(env));
   if (p === '/ops/api/health') return opsGate(req, env, () => opsHealth(env));
@@ -191,7 +196,15 @@ async function getStore(env, handle) {
   const st = await env.STORES.get('store:' + handle, 'json');
   if (!st || !st.pending) return st;
   const { applied } = applyPending(st, Date.now());
-  if (applied.length) await writeStore(env, st);
+  if (applied.length) {
+    // Persisting the fold is a convenience — the next read would fold it again
+    // from the same `pending` block. Awaiting it here meant a merchant who moved
+    // their payout account at 18:00 on a day the write budget ran out at 17:55
+    // turned *every* storefront read into a 503 from 18:15 to midnight, because
+    // the lazy apply could not be written down. Read paths serve; they do not
+    // require a write to answer.
+    try { await writeStore(env, st); } catch (e) { /* served from the fold, uncached */ }
+  }
   return st;
 }
 
@@ -214,7 +227,11 @@ async function loadProducts(st, env, force) {
     }
   } catch (e) { error = 'feed_fetch_failed'; }
   st.feed_cache = { at: Date.now(), products, count: products.length, error };
-  await writeStore(env, st);
+  // Same rule one layer up: the products came from the merchant's sheet and cost
+  // nothing to read, so refusing to *cache* them must not refuse to *show* them.
+  // A quota day leaves the storefront re-fetching per hit instead of 503-ing at
+  // every buyer who only wanted to see what is on offer.
+  try { await writeStore(env, st); } catch (e) { /* uncached today, correct today */ }
   return products;
 }
 
@@ -1335,7 +1352,12 @@ function opsKillCookie() { return OPS_COOKIE + '=; Path=/; Max-Age=0; HttpOnly; 
  *  it, so one tiny KV read is the price of a logout that actually logs out.
  *  Bumping it ends every console session on the platform at once. */
 async function endOpsSessions(env) {
-  try { if (env.STORES) await env.STORES.put('ops_gen', Date.now().toString(36)); } catch (e) {}
+  if (!env.STORES) return true;
+  // returns whether the platform-wide revocation actually landed. Swallowing
+  // this error let the reply promise "every console session is ended now" while
+  // a stolen cookie stayed valid for its remaining 12 hours — the one answer
+  // the operator must be able to trust.
+  try { await env.STORES.put('ops_gen', Date.now().toString(36)); return true; } catch (e) { return false; }
 }
 async function opsGen(env) {
   if (!env.STORES) return '0';
