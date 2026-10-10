@@ -208,3 +208,25 @@ test('a spent quota answers each reader in their own words', async () => {
   const after = await call('/rails');
   assert.equal(after.status, 200, 'and the moment the write budget is back, so is the lever');
 });
+
+test('the endpoint that explains an outage still explains while the account cannot write', async () => {
+  const clean = await call('/__selftest');
+  assert.equal(clean.json.kv_roundtrip, true, 'before the budget goes: ' + clean.text.slice(0, 160));
+  FLIP.all = true;
+  const during = await call('/__selftest');
+  FLIP.all = false;
+  assert.equal(during.status, 200, 'a refused write must not turn the health report into a 500: ' + during.text.slice(0, 200));
+  assert.equal(during.json.kv_roundtrip, false, 'the probe tells the truth about what it could not do');
+  assert.equal(during.json.kv_write_blocked.reason, 'quota');
+  assert.ok(Number(during.json.kv_write_blocked.retry_in_sec) > 0, 'with a clock, not a shrug');
+  assert.match(during.json.kv_write_blocked.note, /free KV writes/, during.json.kv_write_blocked.note);
+  // the strongest form of the claim, and the only one that does not depend on
+  // which assertions this stub environment can pass at all: the report changes
+  // in exactly one place
+  const norm = (j) => { const c = Object.assign({}, j); delete c.kv_roundtrip; delete c.kv_write_blocked; delete c.ok; return c; };
+  assert.deepEqual(norm(during.json), norm(clean.json), 'every other answer is identical to the healthy run');
+  assert.ok(!('kv_write_blocked' in norm(during.json)), 'and the scar is confined to the probe that failed');
+  const after = await call('/__selftest');
+  assert.equal(after.json.kv_roundtrip, true, 'and it clears itself when the budget comes back');
+  assert.equal(after.json.kv_write_blocked, undefined, 'leaving no scar in the report');
+});

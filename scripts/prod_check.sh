@@ -37,11 +37,24 @@ echo "[1] version, and the security primitives inside the Worker's own runtime"
 WANT_VER=$(grep -m1 "^const VERSION = " worker/worker.js | tr -dc '0-9.')
 ck "ping reports the version in this checkout ($WANT_VER)" "\"$WANT_VER\"" "$(curl -s -m 30 "$ORIGIN/__ping")"
 ST=$(curl -s -m 60 "$ORIGIN/__selftest")
-for k in cap_roundtrip cap_rejects_tamper cap_rejects_other_secret cap_rejects_expired \
-         settings_rejects_bad money_change_is_held money_change_lands_late masking_hides_values \
-         secret_leak_check kv_stores kv_roundtrip; do
+# A day with no KV writes left is not a day the Worker is broken, and thirteen
+# red lines about "the security primitives" would say it is. The probe reports
+# `kv_write_blocked` when that is the only cause; drop the one assertion that
+# genuinely needs a write, say so once, and check every read-side claim anyway.
+SK="cap_roundtrip cap_rejects_tamper cap_rejects_other_secret cap_rejects_expired
+    settings_rejects_bad money_change_is_held money_change_lands_late masking_hides_values
+    secret_leak_check kv_stores"
+if printf '%s' "$ST" | grep -q 'kv_write_blocked'; then
+  printf '  \033[33m!\033[0m selftest: this account has no KV writes left today (%s) — kv_roundtrip cannot pass; everything else is still checked\n' \
+    "$(printf '%s' "$ST" | jq -r '"clears in " + ((.kv_write_blocked.retry_in_sec / 3600) | floor | tostring) + " h"')"
+  ck "selftest says which keys are green anyway" '"pricing"' "$ST"
+else
+  SK="$SK kv_roundtrip"
+fi
+for k in $SK; do
   ck "selftest.$k" "\"$k\":true" "$ST"
 done
+if printf '%s' "$ST" | grep -q 'kv_write_blocked'; then ck "  · and the single verdict still says degraded, honestly" '"ok":false' "$ST"; else ck "selftest.ok reflects all of it" '"ok":true' "$ST"; fi
 for t in tpl_store tpl_onboard tpl_admin tpl_fees tpl_index; do ck "selftest.$t" "$t.:true" "$ST"; done
 ck "selftest.kv_orders" '"kv_orders":true' "$ST"
 ck "selftest.pricing" '"pay_now"' "$ST"

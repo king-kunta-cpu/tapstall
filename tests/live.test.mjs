@@ -1028,6 +1028,13 @@ test('the rails console is behind the operator session, the rail list is not', a
   assert.ok(!/rails:extra/.test(open.text), 'the public list does not announce the KV key behind it');
 });
 
+test('selftest grades itself with one verdict an operator can grep', async () => {
+  const all = await call('/__selftest');
+  assert.equal(all.json.ok, true, 'ok is computed last, over every boolean: ' + JSON.stringify(Object.keys(all.json).filter((k) => all.json[k] === false)));
+  assert.ok(all.json.kv_roundtrip, 'a real write went through and came back');
+  assert.equal(all.json.kv_write_blocked, undefined, 'nothing is masked as blocked when it is not');
+});
+
 test('selftest reports green bindings, templates and pricing', async () => {
   const r = await call('/__selftest?scheduled=1');
   assert.equal(r.status, 200);

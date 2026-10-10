@@ -786,9 +786,21 @@ async function selftest(env) {
   }
   if (env.STORES) {
     const k = '__ping:' + Date.now();
-    await env.STORES.put(k, '1');
-    t.kv_roundtrip = (await env.STORES.get(k)) === '1';
-    await env.STORES.delete(k);
+    // The write probe is the one line here that can fail, and if it throws it
+    // takes the other thirty assertions with it — which is how a spent KV budget
+    // turned the endpoint that exists to explain outages into one more outage.
+    // Fail the probe, keep the report, and name the reason with a clock.
+    try {
+      await env.STORES.put(k, '1');
+      t.kv_roundtrip = (await env.STORES.get(k)) === '1';
+      await env.STORES.delete(k);
+    } catch (e) {
+      const msg = String((e && e.message) || e);
+      t.kv_roundtrip = false;
+      t.kv_write_blocked = QUOTA_RE.test(msg)
+        ? { reason: 'quota', retry_in_sec: secsToMidnightUTC(), note: 'the account has spent its free KV writes for today' }
+        : { reason: 'error', note: msg.slice(0, 140) };
+    }
     for (const tplName of ['store', 'onboard', 'admin', 'fees', 'index', 'confirm', 'renew', 'ops']) t['tpl_' + tplName] = ((await tpl(env, tplName)) || '').length > 200;
   }
   const fake = { handle: 'selftest', currency: 'USD', tax_pct: 15.5, delivery_fee: 2, rail: 'ecocash_usd', surcharge_mode: 'absorb', unique_change: true, pay_account: '0771234567' };
@@ -806,8 +818,17 @@ async function selftest(env) {
   t.cap_rejects_other_secret = !(await verifyCap('other', cap));
   t.cap_rejects_expired = !(await verifyCap(k, cap, Math.floor(Date.now() / 1000) + 3600));
   const v = validateSettings({ rail: 'nope', tax_pct: 999, hours: '8-5' }, Date.now(), { rails: await railsCatalog(env) });
-  const vCat = validateSettings({ rail: 'cash' }, Date.now(), { rails: Object.assign(await railsCatalog(env), { test_momo: normaliseRail({ label: 'Test MoMo', pct: 0.01 }, 'test_momo') }) });
-  t.rail_catalogue_ok = vCat.ok && vCat.money.rail === 'test_momo';
+  const cat = Object.assign(await railsCatalog(env), { test_momo: normaliseRail({ label: 'Test MoMo', pct: 0.01 }, 'test_momo') });
+  // A rail the operator added this morning has to be selectable, resolvable and
+  // priceable by the very next order — that is the whole promise of rails-as-data.
+  // (The first draft of this checked `rail: 'cash'` came back as 'test_momo',
+  // which is impossible by construction and read as a red selftest for a day.)
+  const vCat = validateSettings({ rail: 'test_momo' }, Date.now(), { rails: cat });
+  const pCat = priceOrder({ currency: 'USD', rail: 'test_momo', surcharge_mode: 'pass', unique_change: false },
+    [{ name: 'x', price: 100, qty: 1 }], 'pickup', 'test_momo', cat);
+  t.rail_catalogue_ok = vCat.ok && vCat.money.rail === 'test_momo'
+    && resolveRail({}, 'test_momo', cat).label === 'Test MoMo'
+    && pCat.fee === 1 && pCat.pay_now === 101;
   t.rail_custom_ok = (() => { const r = resolveRail({ rail_def: { label: 'My Yape', dial: 'Yape app', pct: 0.012 } }, 'custom'); return r.label === 'My Yape' && r.pct === 0.012; })();
   t.rail_price_with_own = (() => { const p = priceOrder({ currency: 'USD', rail: 'custom', rail_def: { label: 'My Yape', pct: 0.10, fixed: 0, type: 'manual' }, surcharge_mode: 'pass', unique_change: false }, [{ name: 'x', price: 100, qty: 1 }], 'pickup', 'custom'); return p.fee === 10 && p.pay_now === 110; })();
   t.settings_rejects_bad = !v.ok && !!(v.errors.rail && v.errors.tax_pct) && v.soft.hours === '8-5';
@@ -820,8 +841,20 @@ async function selftest(env) {
     && maskField('notify_email', 'secret@example.com') === 's***@example.com'
     && maskField('whatsapp', '263771234567') === '•••4567'
     && maskField('feed_url', 'https://docs.google.com/spreadsheets/d/abcdef/edit').indexOf('abcdef') === -1;
+  // One verdict for the caller, computed on the last line: every assertion in
+  // here is written so that true means healthy, so `ok` is "no boolean came
+  // back false". Anything added below this line is silently outside the verdict,
+  // which is why it sits after the last check instead of near the first.
+  t.ok = Object.keys(t).every((k) => typeof t[k] !== 'boolean' || t[k] === true || CAPABILITY_FLAGS.includes(k));
   return t;
 }
+
+// Which booleans are facts about the wiring rather than verdicts on it. `email`
+// is the binding being absent on a $0 account and `kv_orders` the namespace not
+// yet created on a fresh one — both documented gaps, neither a failure, so they
+// must not turn the single verdict red. A new capability flag has to be listed
+// here or it becomes an alarm.
+const CAPABILITY_FLAGS = ['kv_stores', 'kv_orders', 'email'];
 
 /**
  * The rails a store may price with: the built-in table (published tariffs for

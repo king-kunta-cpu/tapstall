@@ -313,8 +313,30 @@ What the new tests caught, in order of embarrassment:
    dashboard renders and the `/__selftest` assertion. Membership is now checked
    inside `validateSettings` via `opts.rails`.
 
-`node --test tests/` is 85 (was 81): +1 rails catalogue/merchant path, +1
-self-described rail, +1 preview-matches-receipt, +1 who-can-see-what. `scripts/
+`node --test tests/` is 88 (was 81): +1 rails catalogue/merchant path, +1
+self-described rail, +1 preview-matches-receipt, +1 who-can-see-what, +1 quota
+wording per reader, +1 selftest-under-quota, +1 the single verdict.
+
+Then CI taught two more lessons on the live deploy (run #22 red, #23 green):
+
+* `kv_put_tpl`'s new quota branch never fired in CI, because `str(HTTPError)` is
+  only `"HTTP Error 429: Too Many Requests"` and Cloudflare's `10048` / "free
+  usage limit" sentence is in the **body**. So the release was held up by a page
+  nobody was waiting for — the exact thing that change was written to prevent.
+  The publisher now reads the body, treats 429 as quota, warns with both byte
+  counts, and lets the Worker deploy. Verified against a real refusal, not a
+  mock: `store NOT PUBLISHED … (26159 bytes in git, 25301 in KV)`.
+* `/__selftest` had no verdict at all, and its KV write probe threw straight
+  through the fetch handler, so on a quota day the endpoint that explains
+  outages *became* one: `{ok:false, error:…, who:"operator"}` and nothing else.
+  It now catches the probe, reports `kv_write_blocked` with a clock, keeps the
+  other thirty answers, and returns one `ok` computed last over every boolean
+  (capability flags — `kv_stores`, `kv_orders`, `email` — listed as such, so a
+  missing optional binding is not an alarm). Adding that verdict immediately
+  caught `rail_catalogue_ok`, which asked whether `{rail:"cash"}` came back as
+  `test_momo`: impossible by construction, red in production for a day.
+  `prod_check.sh` follows the same rule — it drops the one assertion that needs
+  a write, says why in one yellow line, and still checks every read-side claim. `scripts/
 deploy.sh --check` also stopped depending on exec bits (`python3 scripts/ui_kit.py`,
 `bash scripts/build_bundle.sh`) because a checkout can lose them and a dry-run
 gate must not be the thing that breaks.
