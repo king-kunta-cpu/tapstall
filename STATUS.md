@@ -83,6 +83,21 @@ against the stored key and is redirected to a fresh code, and `GET` on such a
 link is answered the same way — never by marking anything paid. Guessing at
 either path counts as a failed attempt against the store's lock counter.
 
+## Also fixed on the way (found by the new tests, not by a customer)
+
+* **`publicStore` was a denylist and leaked the queued change.** Once `pending`
+  lived on the store document, `/s/<handle>/config.json` handed an anonymous
+  visitor the payout account that was 15 minutes from going live. `publicStore`
+  is now an allowlist (`PUBLIC_KEYS`) and `adminStore` is the credential-stripped
+  full record for the signed-in owner, so a field added in the future is private
+  until someone deliberately publishes it. Asserted in both test files.
+* **The dashboard payload used to carry `admin_url`.** A login code inside JSON
+  turns any XSS on the dashboard page into a saved 7-day credential, and the
+  cookie it replaces is `HttpOnly`, so the page never needed it.
+* **The owner sees the raw queued value** (masked only in the append-only log) —
+  a 15-minute "you can cancel this" window is useless if you cannot read what
+  was typed.
+
 ## Known limits (deliberate, not TODO)
 
 1. **No instant mobile-money confirmation** — none exists at $0 in ZW/SA. The

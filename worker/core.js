@@ -211,13 +211,29 @@ export function waSummary(st = {}, o = {}) {
   ].filter(Boolean).join('\n');
 }
 
+/**
+ * What a stranger may learn about a store. An allowlist, on purpose: a denylist
+ * leaks the day someone adds a field and forgets to list it here — which is
+ * exactly what happened when `pending` (a queued payout account) started riding
+ * along on the store document and turned up in `/s/<handle>/config.json`.
+ */
+export const PUBLIC_KEYS = [
+  'handle', 'shop_name', 'tagline', 'logo', 'location', 'hours', 'closed',
+  'currency', 'zig_rate', 'tax_pct', 'rail', 'surcharge_mode', 'delivery_fee', 'free_over',
+  'pay_account', 'whatsapp', 'require_optin', 'unique_change', 'order_prefix', 'reference_format',
+];
 export function publicStore(st) {
   if (!st) return null;
-  const {
-    admin_token, notify_webhook, notify_email, fw_secret, secret_hash, owner_email,
-    feed_url, feed_cache, admin_url, renew_url, ...pub
-  } = st;
-  return pub;
+  const out = {};
+  for (const k of PUBLIC_KEYS) if (st[k] !== undefined) out[k] = st[k];
+  return out;
+}
+
+/** What the signed-in owner may learn: everything except the credentials. */
+export function adminStore(st) {
+  if (!st) return null;
+  const { admin_token, auth_gen, admin_url, feed_cache, pending, secret_hash, fw_secret, ...rest } = st;
+  return rest;
 }
 
 /** SHA-256 hex — used for buyer fingerprints (no PII stored in the open). */

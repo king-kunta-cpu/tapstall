@@ -369,6 +369,15 @@ test('settings: cosmetic fields save at once, money fields are queued 15 minutes
   assert.ok(Math.abs(money.json.hold_until - (Date.now() + 15 * 60e3)) < 60e3, 'for 15 minutes: ' + money.json.hold_until);
   assert.match(money.json.note, /15 minutes/);
   assert.notEqual(money.json.unchanged, true, 'a real change is not reported as a no-op');
+  // the leak this test exists to catch: a queued value must not be public
+  const pubLeak = await call('/s/mamatoe/config.json');
+  const pubBlob = JSON.stringify(pubLeak.json.store);
+  assert.ok(!pubBlob.includes('0785551122'), 'a queued payout account is invisible to a stranger: ' + pubBlob);
+  assert.ok(!pubBlob.includes('pending'), 'no pending block on the public config');
+  assert.ok(!pubBlob.includes('auth_gen'), 'no revocation counter on the public config');
+  const dashRaw = await call('/api/admin?handle=mamatoe', { cookie: store.cookie });
+  assert.equal(dashRaw.json.pending.fields.pay_account, '0785551122', 'the owner still reads what they typed');
+
   const st = JSON.parse(env.STORES._map.get('store:mamatoe').value);
   assert.equal(st.hours, 'Tue-Sat 9-5', 'the soft field in the same save still lands now');
   assert.notEqual(st.pay_account, '0785551122', 'the payout account did NOT change yet');

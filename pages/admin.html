@@ -84,6 +84,7 @@ h3{font-size:.85rem;margin:.1rem 0 .6rem}
       <div style="display:flex;gap:.4rem;flex-wrap:wrap">
         <button class="sm" id="openStore">View store</button>
         <button class="sm" id="reloadFeed">Reload my menu</button>
+        <button class="sm" id="refresh" title="New orders can take up to a minute to appear in the list">↻ Refresh</button>
         <button class="sm" id="printDay">Print today</button>
         <button class="sm" id="exportCsv">Export CSV</button>
       </div>
@@ -217,6 +218,7 @@ function load() {
       });
     };
     q('#exportCsv').onclick = exportCsv;
+    q('#refresh').onclick = function () { this.textContent = 'Reloading…'; load(); };
     q('#printDay').onclick = printDay;
     q('#saveSt').onclick = saveSettings;
     q('#revertBtn').onclick = function () { api('/api/settings/revert', { handle: S.handle }).then(function () { load(); }); };

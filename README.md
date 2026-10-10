@@ -144,6 +144,10 @@ see and cancel, and because revoking takes one press.
   account, or the sheet link for a cash shop) — 12 tries per 10 minutes per
   store, so the answer space is not searchable. There is no second factor, and
   no support queue either, which is the point of a $0 product.
+* **A live order feed.** KV is eventually consistent: a new order appears in the
+  dashboard list within about a minute, while the confirm link in the
+  notification works the second it is sent. The ledger list and the order
+  document are separate keys, and $0 rules out a database.
 * **Instant mobile-money confirmation.** No $0 API exists for EcoCash/InnBucks/
   OnePay in Zimbabwe. Unique-cents matching plus one-tap confirmation is the
   honest answer; a bank/rail API would change nothing about the design.

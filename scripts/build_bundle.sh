@@ -19,7 +19,8 @@ assert m, "worker.js must import from './core.js' (build inlines it)"
 
 body = re.sub(r"^export (const|function|async function)", r"\1", core, flags=re.M)
 body = re.sub(r"/\*[\s\S]*?\*/", "", body.strip(), count=1).strip()
-for need in ("function priceOrder", "function parseProducts", "const RAILS", "function publicStore"):
+for need in ("function priceOrder", "function parseProducts", "const RAILS", "function publicStore",
+             "function adminStore", "const PUBLIC_KEYS", "function issueCap", "function verifyCap", "async function sign"):
     assert need in body, "core.js lost %s during inlining" % need
 
 out = worker.replace(m.group(0), "/* ---- core.js, inlined by build_bundle.sh (source of truth: worker/core.js) ---- */\n" + body)

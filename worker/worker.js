@@ -18,7 +18,7 @@ import {
   RAILS, round2, clamp, slug, digits, isEmail, validHandle, parseCSV, normalizeFeedUrl,
   parseProducts, priceOrder, payInstructions, riskFlags, waSummary, publicStore, hash,
   issueCap, verifyCap, randomKey, validateSettings, stageSettings, applyPending, maskField,
-  EDITABLE_FIELDS, SOFT_FIELDS, sign,
+  EDITABLE_FIELDS, SOFT_FIELDS, sign, adminStore,
 } from './core.js';
 
 const VERSION = '0.3.0';
@@ -100,10 +100,10 @@ async function route(req, url, env, ctx) {
 
   // ---- merchant authority: a code becomes a cookie, and only POSTs act ----
   const MUT = /^\/api\/(mark|settings|settings\/revert|revoke|login|logout|recover)$/;
-  // A v0.2 style ?token= GET still reaches markPaid, which only trades it for a
-  // session — it never performs the write. Everything else is a flat 405.
-  const legacyMark = p === '/api/mark' && url.searchParams.get('token');
-  if (MUT.test(p) && req.method !== 'POST' && !legacyMark) {
+  // /api/mark answers its own 405, because it also has to recognise a v0.2
+  // ?token= link and trade it for a session rather than dead-end the merchant.
+  const selfHandled = p === '/api/mark';
+  if (MUT.test(p) && req.method !== 'POST' && !selfHandled) {
     return json({ ok: false, error: 'method_not_allowed', why: 'This endpoint changes state, so it never answers GET.' }, 405, { Allow: 'POST' });
   }
   if (p === '/api/login' && req.method === 'POST') return loginExchange(req, env);
@@ -497,9 +497,11 @@ async function adminView(req, url, env) {
     // No admin_url here on purpose: a login code inside a JSON body turns any
     // XSS on the dashboard into a saved 7-day credential. The session cookie is
     // HttpOnly, so the page itself cannot read it back.
-    store: { ...publicStore(st), feed_url: st.feed_url, renew_url: st.renew_url, dashboard_path: '/a' },
+    store: { ...adminStore(st), feed_url: st.feed_url, renew_url: st.renew_url, dashboard_path: '/a' },
     orders: orders.filter(Boolean),
-    pending: st.pending ? { keys: Object.keys(st.pending.fields), apply_at: st.pending.apply_at, in_ms: Math.max(0, st.pending.apply_at - Date.now()), fields: maskPending(st.pending.fields) } : null,
+    // the owner sees the real queued value — cancelling is useless if they
+    // cannot check what was typed — while the append-only log keeps it masked
+    pending: st.pending ? { keys: Object.keys(st.pending.fields), apply_at: st.pending.apply_at, in_ms: Math.max(0, st.pending.apply_at - Date.now()), fields: st.pending.fields } : null,
     editable: EDITABLE_FIELDS,
     soft_fields: SOFT_FIELDS,
     audit: await getAudit(env, handle),
@@ -1021,11 +1023,6 @@ async function pushAudit(env, st, row) {
 async function getAudit(env, handle) {
   if (!env.ORDERS) return [];
   return (await env.ORDERS.get('audit:' + handle, 'json')) || [];
-}
-function maskPending(fields) {
-  const out = {};
-  for (const k of Object.keys(fields || {})) out[k] = maskField(k, fields[k]);
-  return out;
 }
 
 /* -------------------------------------------------- inert, self-posting page */

@@ -259,3 +259,15 @@ test('publicStore also strips the dashboard and renew links', () => {
   const out = JSON.stringify(C.publicStore({ handle: 'x', admin_url: 'https://z/a?code=v1.1.2.3', renew_url: 'https://z/renew/abc', admin_token: 't' }));
   assert.ok(!out.includes('admin_url') && !out.includes('renew_url') && !out.includes('v1.1.2.3'), out);
 });
+
+test('publicStore is an allowlist, so a new field is private by default', () => {
+  const st = { handle: 'x', shop_name: 'S', pay_account: '0771', pending: { fields: { pay_account: 'EVIL' } }, auth_gen: '7', admin_url: 'https://z/a?code=v1', new_secret_field: 'oops' };
+  const out = JSON.stringify(C.publicStore(st));
+  for (const bad of ['EVIL', 'pending', 'auth_gen', 'admin_url', 'new_secret_field']) {
+    assert.ok(!out.includes(bad), 'leaked ' + bad);
+  }
+  assert.equal(JSON.parse(out).pay_account, '0771', 'the buyer-facing fields stay');
+  const admin = JSON.stringify(C.adminStore(st));
+  assert.ok(!admin.includes('admin_url') && !admin.includes('auth_gen') && !admin.includes('"pending"'), 'the owner payload drops credentials too');
+  assert.ok(admin.includes('new_secret_field'), 'but shows the owner their own record');
+});
