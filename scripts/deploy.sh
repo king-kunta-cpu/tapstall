@@ -78,7 +78,11 @@ python3 scripts/ui_kit.py check || die "pages/*.html are out of date with pages/
 if [[ "$MODE" == "--templates" ]]; then
   say "templates → KV only (no bundle, no worker publish)"
   kv_put_tpl "$STORES_ID" store onboard admin fees index confirm renew ops sample-menu.csv
-  verify_templates "$STORES_ID" store onboard admin fees index confirm renew ops sample-menu.csv
+  # Read back, and fail on the difference. A step that prints a warning and exits 0
+  # is how a stale page stayed stale: the log said the truth and the pipeline said
+  # success, and the only reader of a green run is the person who was not there.
+  verify_templates "$STORES_ID" store onboard admin fees index confirm renew ops sample-menu.csv \
+    || die "the pages above are not what customers are being served — the account could not write them today"
   exit 0
 fi
 

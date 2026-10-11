@@ -35,7 +35,14 @@ jobs:
           CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           WORKER_NAME: tapstall
-        run: bash ./scripts/deploy.sh --templates 2>&1 | tail -20
+        run: |
+          # not a pipe into tail: a pipeline's status is tail's, so a stale page would
+          # read green. Keep the code, print the tail of it, then exit with the code.
+          set +e
+          bash ./scripts/deploy.sh --templates > /tmp/templates.log 2>&1
+          code=$?
+          tail -20 /tmp/templates.log
+          exit $code
 
   worker:
     runs-on: ubuntu-latest
