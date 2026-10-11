@@ -1035,6 +1035,28 @@ test('the rails console is behind the operator session, the rail list is not', a
   assert.ok(!/rails:extra/.test(open.text), 'the public list does not announce the KV key behind it');
 });
 
+test('a lever posted to a read endpoint is refused, not answered with ok:true', async () => {
+  // The console posts store levers to /ops/api/store; /ops/api/state is the poll.
+  // A payload aimed at the wrong one used to come back 200 with the whole state
+  // body — including `ok:true` — which is how a script or a tired operator believes
+  // a suspend, a revoke or a notify happened when nothing was dispatched.
+  const c = 'tp_ops=' + opsCookie;
+  const wrong = await call('/ops/api/state', { method: 'POST', cookie: c, confirm: true,
+    body: { handle: 'mamatoe', action: 'link' } });
+  assert.equal(wrong.status, 400, wrong.text.slice(0, 160));
+  assert.equal(wrong.json.ok, false);
+  assert.equal(wrong.json.use, '/ops/api/store', 'and it names the door that works');
+  assert.match(wrong.json.error, /changed nothing/);
+  assert.ok(!wrong.json.dashboard_url, 'the read endpoint must not pretend to have issued a link');
+  const read = await call('/ops/api/state', { cookie: c });
+  assert.equal(read.status, 200, 'the poll itself is untouched');
+  assert.ok(Array.isArray(read.json.stores), 'and still lists the tenants');
+  const right = await call('/ops/api/store', { method: 'POST', cookie: c, confirm: true,
+    body: { handle: 'mamatoe', action: 'link' } });
+  assert.equal(right.status, 200, right.text.slice(0, 160));
+  assert.match(right.json.dashboard_url, /\/a\?code=v1\./, 'the same lever on the right path still works');
+});
+
 test('the store page is frameable by the dashboard and by nobody else', async () => {
   // The merchant's "this is your store" preview is an <iframe> of /s/<handle>
   // inside /a, so a blanket DENY painted it as a blank box on every device. The

@@ -21,7 +21,7 @@ import {
   EDITABLE_FIELDS, SOFT_FIELDS, sign, adminStore, normaliseRail, resolveRail,
 } from './core.js';
 
-const VERSION = '0.5.1';
+const VERSION = '0.5.2';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 const MAX_ORDERS_KEPT = 200;
@@ -218,14 +218,21 @@ async function route(req, url, env, ctx) {
         : 'This tab is signed out, but the platform-wide revocation could not be written — any other session stays valid until its cookie expires (12 hours max). Sign out again after the write budget resets at 00:00 UTC to be certain.',
     }), opsKillCookies());
   }
-  if (p === '/ops/api/state') return opsGate(req, env, () => opsState(env));
-  if (p === '/ops/api/health') return opsGate(req, env, () => opsHealth(env));
-  if (p === '/ops/api/audit') return opsGate(req, env, () => opsAudit(req, url, env));
+  // The four read endpoints used to swallow a lever's payload: `POST
+  // /ops/api/state {"action":"link"}` answered 200 with the state body and the
+  // operator's script (or the console, if a route is ever rewired) read `ok:true`
+  // for a lever that never fired. Measured, not theorised — this is exactly what
+  // happened to whoever automates this console. Now a write-shaped POST to a read
+  // path is refused by name and pointed at the door that dispatches it, after the
+  // auth check so an anonymous probe learns nothing.
+  if (p === '/ops/api/state') return opsGate(req, env, async () => (await misroutedLever(req, p)) || opsState(env));
+  if (p === '/ops/api/health') return opsGate(req, env, async () => (await misroutedLever(req, p)) || opsHealth(env));
+  if (p === '/ops/api/audit') return opsGate(req, env, async () => (await misroutedLever(req, p)) || opsAudit(req, url, env));
   if (p === '/ops/api/store') {
     if (req.method === 'POST') return opsGate(req, env, () => opsStoreAction(req, env));
     return opsGate(req, env, () => opsStoreDetail(url, env));
   }
-  if (p === '/ops/api/templates') return opsGate(req, env, () => opsTemplates(env));
+  if (p === '/ops/api/templates') return opsGate(req, env, async () => (await misroutedLever(req, p)) || opsTemplates(env));
   if (p === '/ops/api/template') {
     if (req.method === 'POST') return opsGate(req, env, () => opsTemplateWrite(req, env));
     return opsGate(req, env, () => opsTemplateRead(url, env));
@@ -1511,6 +1518,23 @@ function quotaAnswer(msg, pathname) {
       : 'Nothing was written. The account has spent its free storage writes for today (1,000/day on the free Workers plan), so this lever will work again in a few hours. Upgrade to the $5 plan and the ceiling goes away.';
   return json({ ok: false, retry_in_sec: secs, detail: msg, who, error: line },
     503, { 'Retry-After': String(secs), 'Cache-Control': 'no-store' });
+}
+
+/** A POST that carries an `action` to a read-only ops path: answered as an error
+ *  rather than as a successful no-op. Returns null for everything legitimate. */
+async function misroutedLever(req, path) {
+  if (req.method !== 'POST') return null;
+  let b = null;
+  try { b = await req.clone().json(); } catch (e) { return null; }
+  const act = b && String(b.action || b.act || '').slice(0, 32);
+  if (!act) return null;   // a read endpoint ignores an empty or unrelated body, as before
+  return json({
+    ok: false,
+    error: `'${act}' is a store lever: it posts to /ops/api/store with {handle, action}. `
+         + `${path} is a read endpoint — it would have answered your last attempt with the `
+         + 'current state and changed nothing.',
+    action: act, use: '/ops/api/store',
+  }, 400);
 }
 
 async function opsGate(req, env, fn) {
