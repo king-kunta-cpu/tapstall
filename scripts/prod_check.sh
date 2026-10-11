@@ -531,7 +531,47 @@ ck "  · and it posts to the store that asked" '/api/image\?handle=' "$SHIP_A"
 ck "  · with the confirm header every other write needs" 'x-tapstall-confirm' "$SHIP_A"
 rm -f "$UP_IMG" "$UP_IMG.svg" "$UP_IMG.big" "$UP_IMG.jpg" "$IMG_OUT" "$IMG_HDR"
 
-echo "[10] tidy up"
+echo "[10] proof of payment: each rail says what it needs, once — and nothing is blocked for it"
+# The gap this closes is not the money, it is finding it: four pending orders and one
+# amount is how a merchant on a hand-checked rail spends an evening. Checked on the
+# answers the Worker gives a stranger, because a policy published wrongly is a field
+# every buyer sees, and a value published by mistake is a buyer's reference on a shop page.
+PUBP=$(curl -s -m 30 "$ORIGIN/s/$HANDLE/config.json")
+RAILS=$(curl -s -m 30 "$ORIGIN/rails")
+PROOFMODE=$(printf '%s' "$PUBP" | python3 -c "
+import json,sys
+print((json.load(sys.stdin).get('store') or {}).get('rail_info', {}).get('proof', ''))" 2>/dev/null)
+railproof() { printf '%s' "$RAILS" | python3 -c "
+import json,sys
+d = json.load(sys.stdin)
+r = d['rails'] if isinstance(d, dict) and 'rails' in d else d
+print((r.get('$1') or {}).get('proof', 'missing'))" 2>/dev/null; }
+ck "a wallet asks for the code its app prints" '^ask$' "$(railproof ecocash_usd)"
+ck "a bank transfer demands one, because it is one amount and forty payers" '^require$' "$(railproof zipit)"
+ck "a hosted card link asks for nothing, because there the asking is theatre" '^none$' "$(railproof payfast)"
+ck "cash on collection proves nothing in advance, so nothing is asked" '^none$' "$(railproof cash)"
+ck "the shop tells a stranger what it needs" '"proof":[[:space:]]*"(ask|require|none)"' "$PUBP"
+ck "  · in the name the shop gave it, not ours" '"proof_label":[[:space:]]*"[^"]' "$PUBP"
+ck "  · and where to look, since every app hides it differently" 'not the order code' "$PUBP"
+ck "  · with the sending number asked where it explains a payment" '"ask_payer":[[:space:]]*true' "$PUBP"
+ck "a public page carries the policy and never a buyer's reference" '^0$' "$(printf '%s' "$PUBP" | grep -cE '"buyer"')"
+if [[ "$PROOFMODE" == none ]]; then
+  ckw "a shop that needs no proof prints no line about it" '^0$' "$(printf '%s' "$ORD" | grep -cE '"proof_mode"')"
+else
+  ckw "the slip says what is wanted before the buyer pays" '"proof_mode":[[:space:]]*"'$PROOFMODE'"' "$ORD"
+fi
+ckw "  · it answers the field empty rather than inventing one" '"proof":[[:space:]]*""' "$ORD"
+ckw "  · and an ask-only rail never scolds a buyer for it" '^0$' "$(printf '%s' "$ORD" | grep -cE 'ask them before sending')"
+ckw "the merchant's ledger sees the field on the order document" '"proof":[[:space:]]*""' "$DASH"
+SHIP_S=$(cat pages/store.html)
+ck "the page we ship asks once, then lets the order through" 'id="fProof"' "$SHIP_S"
+ck "  · shown because the server said so, not from a list of rail names" "R\.proof !== 'none'" "$SHIP_S"
+ck "  · and the code is read back on the receipt" 'pay\.proof' "$SHIP_S"
+ck "the dashboard ships the picker and a name for the field" 'data-rd="proof"' "$SHIP_A"
+ck "  · the ledger row prints who sent it and which code they gave" 'o\.buyer\.proof' "$SHIP_A"
+ck "  · and the CSV has a header name for every column it writes" 'payer,proof_of_payment,flags' "$SHIP_A"
+
+echo "[11] tidy up"
 CK2=$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" \
   -d '{"handle":"'"$HANDLE"'","id":"'"$ID"'","status":"cancelled"}' "$ORIGIN/api/mark")
 ckw "probe order cancelled" '"status":"cancelled"' "$CK2"
