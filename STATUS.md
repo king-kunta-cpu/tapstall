@@ -68,6 +68,19 @@ verified *not* to be readable before its fuse, the week is verified to rewrite t
 sentence, `rail_accts` is verified absent from `config.json`, the half-typed week is
 verified refused, and then revert + restore put the store back exactly as found.
 
+**And the harness was the bug, not the shop.** The first two runs after this deploy
+reported three reds, all greps on the served dashboard. `ck`/`nk` decided with
+`printf '%s' "$page" | grep -qE …` while the script runs under `set -o pipefail`, and
+`grep -q` returns the moment it matches: the SIGPIPE that then kills `printf` becomes
+the pipeline's status (141), so the taken branch is "not found". It only bites inputs
+larger than the 64K pipe buffer whose match sits early — i.e. `admin.html`, and
+nothing else. `/a` was byte-identical to the deployed file the whole time, twelve
+fetches in a row. Both helpers now write the value to a temp file and grep the file
+(one process, one verdict, and the `got:` excerpt reads the same bytes), and section
+[6] asserts the served dashboard's length equals the deployed one before it asserts
+anything about its contents — that check alone would have ended this in one line.
+Two consecutive runs: **152 passed, 0 blocked, 0 failed**.
+
 **Still owed:** image upload with browse/drag-drop (#1), and the rest of #5 — of
 which one item is yours, not mine: a verified sending domain, without which email
 transport stays off and PINs keep arriving through you.

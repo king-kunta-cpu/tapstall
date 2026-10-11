@@ -21,15 +21,22 @@ ORD_KV=${ORDERS_NS:-4f4ac94a66db4b859b61668a3c160819}   # tapstall-orders (was z
 pass=0 fail=0
 blocked=0
 
+# grep -q returns the moment it matches. Under `set -o pipefail` that kills the printf
+# feeding it with SIGPIPE, so the pipeline's status is 141 and the branch taken is
+# "not found" — which means any pattern sitting in the first part of a large page was
+# reported as missing. Three checks in section [6] were lying that way. Both helpers
+# therefore grep a file: no pipeline to cut short, and the verdict is grep's alone.
+ckf=/tmp/ts_ck.$$
 ck() {   # ck <name> <must-contain-regex> <actual>
-  if printf '%s' "$3" | grep -qE -- "$2"; then printf '  \033[32m+\033[0m %s\n' "$1"; pass=$((pass + 1))
-  elif printf '%s' "$3" | grep -qE 'KV put\(\) limit|limit exceeded|retry_in_sec|free KV writes'; then
+  printf '%s\n' "$3" > "$ckf"
+  if grep -qE -- "$2" "$ckf"; then printf '  \033[32m+\033[0m %s\n' "$1"; pass=$((pass + 1))
+  elif grep -qE 'KV put\(\) limit|limit exceeded|retry_in_sec|free KV writes' "$ckf"; then
     # 1,000 free KV writes a day is a fact of the plan, not of this build. A
     # step that needs a write cannot be verified on a spent day, and calling
     # that "failed" thirteen times buries the two lines that matter. Say it
     # once per line, in its own colour, and keep the answer in the output.
-    printf '  \033[33m!\033[0m %s \033[2m— not verifiable today: the account has no KV writes left\033[0m\n      got:  %s\n' "$1" "$(printf '%s' "$3" | head -c 200)"; blocked=$((blocked + 1))
-  else printf '  \033[31m-\033[0m %s\n      want: %s\n      got:  %s\n' "$1" "$2" "$(printf '%s' "$3" | head -c 240)"; fail=$((fail + 1)); fi
+    printf '  \033[33m!\033[0m %s \033[2m— not verifiable today: the account has no KV writes left\033[0m\n      got:  %s\n' "$1" "$(head -c 200 "$ckf" | tr '\n' ' ')"; blocked=$((blocked + 1))
+  else printf '  \033[31m-\033[0m %s\n      want: %s\n      got:  %s\n' "$1" "$2" "$(head -c 240 "$ckf" | tr '\n' ' ')"; fail=$((fail + 1)); fi
 }
 ckw() {  # like ck, for a line that cannot be verified without a KV write today
   # These are not failures of the build: the assertion needs an order or a staged
@@ -43,10 +50,12 @@ ckw() {  # like ck, for a line that cannot be verified without a KV write today
   ck "$@"
 }
 nk() {   # nk <name> <must-NOT-contain-regex> <actual>
-  if printf '%s' "$3" | grep -qE -- "$2"; then printf '  \033[31m-\033[0m %s (found: %s)\n' "$1" "$(printf '%s' "$3" | grep -oE "$2" | head -1)"; fail=$((fail + 1));
+  printf '%s\n' "$3" > "$ckf"
+  if grep -qE -- "$2" "$ckf"; then printf '  \033[31m-\033[0m %s (found: %s)\n' "$1" "$(grep -oE "$2" "$ckf" | head -1)"; fail=$((fail + 1));
   else printf '  \033[32m+\033[0m %s\n' "$1"; pass=$((pass + 1)); fi
 }
 code() { curl -s -m 30 -o /dev/null -w '%{http_code}' "$@"; }
+trap 'rm -f "$ckf"' EXIT
 
 echo "target: $ORIGIN"
 echo "store:  $HANDLE"
@@ -267,12 +276,34 @@ echo "[6] the front door: a store name and six digits, and nothing else"
 # 0.6.0 replaced link sign-in with a key + PIN. What has to be true on the live
 # worker: the door is two fields, the old links are inert without being dead ends,
 # nothing about a PIN is ever said out loud, and a guessing flood learns nothing.
-ck "an old ?token= link lands on the sign-in card, not a blank page" 'id="login"' "$(curl -sL -m 30 "$ORIGIN/a?handle=$HANDLE&token=$ADMIN_KEY")"
-ck "  · same when a mailer escaped the &" 'retired' "$(curl -sL -m 30 "$ORIGIN/a?handle=$HANDLE&amp;token=$ADMIN_KEY")"
+# /a is served out of KV, and this run has already written to that namespace twice,
+# so the first read after a write can be seconds stale — the platform's consistency
+# model, not a product fault. Read until the served page is the deployed page (up to
+# fifteen seconds), say which case you are in, and only then assert on its contents.
+# Command substitution eats the page's trailing newline, so the deployed size is
+# measured the same way the served one is. Comparing a $(cat file) count against a
+# curl count is a one-byte lie, and it was: this check failed while the product was fine.
+DEPLOYED_A=$(printf '%s' "$(cat pages/admin.html)" | wc -c | tr -d ' ')
+fetch_a() {  # fetch_a <path> — retries a stale read, prints whatever the last try gave
+  local out i
+  for i in 1 2 3 4 5; do
+    out=$(curl -sL -m 30 "$ORIGIN$1")
+    [[ "${#out}" -eq "$DEPLOYED_A" ]] && break
+    sleep 3
+  done
+  printf '%s' "$out"
+}
+PAGE_A=$(fetch_a "/a?v=$RANDOM")
+if [[ "${#PAGE_A}" -ne "$DEPLOYED_A" ]]; then
+  echo "      served ${#PAGE_A} bytes instead; first line: $(printf '%s' "$PAGE_A" | head -c 90)"
+fi
+ck "the served dashboard is the deployed one ($DEPLOYED_A bytes)" "^${#PAGE_A}$" "$DEPLOYED_A"
+ck "an old ?token= link lands on the sign-in card, not a blank page" 'id="login"' "$(fetch_a "/a?handle=$HANDLE&token=$ADMIN_KEY")"
+ck "  · same when a mailer escaped the &" 'retired' "$(fetch_a "/a?handle=$HANDLE&amp;token=$ADMIN_KEY")"
 ck "  · and the query repair still works where a query is read" '"ok":true' "$(curl -s -m 30 "$ORIGIN/api/lookup?handle=$HANDLE&amp;x=1")"
-ck "the screen asks for exactly two things" '^2$' "$(curl -s -m 30 "$ORIGIN/a" | grep -o 'id="f[KP]"' | wc -l | tr -d ' ')"
-ck "  · one button, and no paste-box for a link left behind" '^0$' "$(curl -s -m 30 "$ORIGIN/a" | grep -c 'id="fL"')"
-ck "  · and the PIN panel is where a PIN is changed" 'Change your PIN' "$(curl -s -m 30 "$ORIGIN/a")"
+ck "the screen asks for exactly two things" '^2$' "$(printf '%s' "$PAGE_A" | grep -o 'id="f[KP]"' | wc -l | tr -d ' ')"
+ck "  · one button, and no paste-box for a link left behind" '^0$' "$(printf '%s' "$PAGE_A" | grep -c 'id="fL"')"
+ck "  · and the PIN panel is where a PIN is changed" 'Change your PIN' "$PAGE_A"
 ck "the retired exchange door explains the change, in one sentence" 'retired' "$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"code":"junk"}' "$ORIGIN/api/login")"
 ck "  · and so does the retired recovery door" '^410$' "$(code -X POST -H 'content-type: application/json' -d '{}' "$ORIGIN/api/recover")"
 BAD1=$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"key":"'"$HANDLE"'","pin":"000000"}' "$ORIGIN/api/auth")
