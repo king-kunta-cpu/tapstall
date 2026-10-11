@@ -1,5 +1,75 @@
 # Tapstall — status
 
+## A merchant can put a picture on the shop (2026-10-11, v0.6.6)
+
+**What changed.** `logo` and every item row now take a file, from the same control:
+drop it on the square, click Browse, or paste a link — for the shop mark and for each
+item, plus the add-an-item form. Drag-and-drop is bound with `dragover` + `drop` +
+`preventDefault`, so dropping lands the picture instead of navigating the dashboard
+away to it. The browser squeezes to 120 KB (quality first, then the box, then it gives
+up honestly rather than shipping a blurry 400 KB); a small PNG or WebP is passed
+through untouched, because flattening a transparent logo to a white square is not
+"helping". A `Take off` button clears either.
+
+**What is stored is a path, never the bytes.** `/i/<store>/<id>` in the store
+document, the file in its own KV key. The store doc is read on every page view and
+every priced order, and 1 GB of KV across every merchant is the ceiling this runs at:
+twelve thumbnails as bytes in the document would be twelve KV reads per view and a
+store doc in the hundreds of kilobytes. Proved in a test (`the store document keeps
+the path and never the bytes`) and in prod check (`the store document stays a
+document (2,103 bytes)`).
+
+**Serving.** `GET /i/…` is public (it is a photo of the food), typed from the bytes it
+sniffed, `X-Content-Type-Options: nosniff`, and `Cache-Control: public,
+max-age=31536000, immutable` — honest because an id is never reused, so a new picture
+is a new path and no cache anywhere has to be invalidated. `ETag` is the id, so a
+buyer's reload costs a 304 and no KV read at all, which is the answer to the
+100,000-reads-a-day budget rather than a reason for a new bucket.
+
+**Why KV and not R2, measured:** KV's value ceiling is 25 MiB (docs, checked today), so
+a photo fits 100× over; what decided it is that R2's public read needs a custom domain
+on the free plan, and a logo that only loads after the merchant buys a name is not a
+feature. Storage total: 60 pictures a store, refused at 429 with a sentence that says
+what to do about it.
+
+**Refusals, in the merchant's words.** SVG is refused by name on both sides of the wire
+("SVG is refused because it can carry code") because a picture that can run script
+would run it with the merchant's session cookie; a GIF too; anything that does not
+sniff as JPEG/PNG/WebP; over 200 KB with the number it wanted; and an upload with no
+session answers 401, the same answer as a store that does not exist, so a guesser
+learns nothing. Refused uploads spend **no KV write** — asserted, because a 1,000-a-day
+budget is a thing a hostile trickle can spend.
+
+**Storage hygiene is a sweep, not a promise.** Every menu save and every logo change
+lists the store's own `img:` keys and deletes what no document points at, so "60
+pictures" can only be said when it is true and an abandoned upload does not sit on the
+1 GB forever. A list is not one of the 1,000 writes.
+
+**Proved:** `node --test tests/` **142/142** (49 core · 60 live · 10 limits · 23 pages).
+Against production: **137 passed / 0 failed / 35 blocked** — the blocked ones are the
+assertions that need a KV write, and today the account's 1,000 were spent by the day's
+four deploys; the refusals, the 401, the store-document size, the public shape of the
+route and the shipped page all ran for real. Live checks run this release: upload →
+`/i/` 200 with identical bytes → 304 revalidation → SVG 422 → 260 KB 413 → anonymous
+401 → logo saved and visible in `config.json` → store doc still 2,103 bytes → logo
+restored → the freed file returns 404.
+
+**One thing still true at handover:** `/a` is served from KV, and KV would not accept a
+write when this shipped, so merchants see the new picture control from the next
+deploy after 00:00 UTC. That retry is now automatic rather than something to remember:
+`deploy.sh --templates` (pages only, spends a write only where KV differs from git, then
+reads every page back against git and fails if a customer is being served an older
+copy) is run by a new scheduled CI job at **00:20 UTC daily**, so the page ships itself
+and a night where it does not is a red run, not a rumour.
+
+**Two harness lies this round caught and killed:** `tests/live.test.mjs`'s flood test
+asserted `≤6` writes across the whole namespace, so a legitimate mid-loop fold of the
+store document read as a throttle regression — it is now per key (`pinl:mamatoe` ≤ 4,
+one per freeze tier) plus a looser total. And `prod_check.sh` asserted two page-shape
+facts against the *served* page while a spent KV budget held that page at an older
+revision, which is a blocked check, not a failed one: they read the shipped file now and
+the live-vs-git question is stated once, in section [6].
+
 ## Rails that know their own number, and a week that means something (2026-10-11, v0.6.5)
 
 Items 2 and 3 off your list, in one release because they met in the same place —

@@ -255,6 +255,18 @@ details.box .in{padding:.5rem 0 .7rem}
 #menuEdit .pr{width:6.4rem;padding:.3rem .4rem;text-align:right;border:1px solid #cfd8e0;border-radius:4px;font:inherit}
 #menuEdit .added{background:#f7fbf8}
 #menuEdit .hint{width:100%;margin-top:.15rem}
+/* one box for a picture: drop a file on it, click Browse, or paste a link.
+   Used for the shop logo and for every item row, because a merchant has either
+   a photo on the phone or a URL, and should not have to know which field wants which. */
+.pic{display:flex;align-items:center;gap:.35rem;flex-wrap:wrap}
+.pic .pv{width:2.5rem;height:2.5rem;flex:0 0 auto;border:1px dashed #cfd8e0;border-radius:8px;
+  background:#f4f7fa;color:#8898a8;display:inline-flex;align-items:center;justify-content:center;overflow:hidden;cursor:pointer}
+.pic .pv img{width:100%;height:100%;object-fit:cover;display:block}
+.pic.hot .pv{border-color:#0a6b33;border-style:solid;background:#e9f6ef}
+.pic .pu{flex:1 1 9rem;min-width:7rem;font-size:.78rem}
+.pic .st{font-size:.72rem;color:#65788b;width:100%}
+#menuEdit .mrow .pic{flex:1 1 100%;margin:.1rem 0 .15rem}
+#menuEdit .mrow .pic .pv{width:2rem;height:2rem}
 .seclab{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;font-weight:600;font-size:13px;margin:.8rem 0 .1rem}
 #railAccts .arow,#weekEd .wrow{display:flex;flex-wrap:wrap;gap:.3rem;align-items:center;padding:.28rem 0;border-bottom:1px solid #eef2f6}
 #railAccts .an{flex:1 1 7rem;min-width:6rem;font-size:13px}
@@ -354,7 +366,7 @@ details.box .in{padding:.5rem 0 .7rem}
           </div>
           <div class="two">
             <div class="f"><label>group</label><input id="mGp" placeholder="Specials"></div>
-            <div class="f"><label>photo URL (optional)</label><input id="mIm" placeholder="https://…"></div>
+            <div class="f"><label>photo (optional)</label><span class="pic" data-which="new"><span class="pv" title="drop a picture here, or click it to pick a file">+</span><input class="pu" id="mIm" placeholder="image link, or drop a file"><button class="sm" data-pk="pick">Browse</button><button class="sm sec" data-pk="off" style="display:none">Take off</button><input type="file" accept="image/*" style="display:none"><span class="st"></span></span></div>
           </div>
           <button class="sm" id="nGo">Add it to the list below</button>
         </div>
@@ -611,6 +623,9 @@ function mergeFeed(feed, d) {
     if (o.cat) q.cat = o.cat;
     if (typeof o.price === 'number') q.price = o.price;
     if (typeof o.available === 'boolean') q.available = o.available;
+    // mirrors applyMenu: an empty string is an order to take the picture off,
+    // not a no-op, or the row would keep showing a photo its merchant deleted
+    if (o.img != null) q.img = o.img;
     q.edited = !!Object.keys(o).length;
     out.push(q);
   });
@@ -660,6 +675,8 @@ function menuRows() {
       + (fresh ? '<button class="sm" data-k="drop">Delete</button>' : '<button class="sm" data-k="hide">Hide</button>')
       + '<button class="sm" data-k="up" title="move up">↑</button><button class="sm" data-k="down" title="move down">↓</button>'
       + (p.edited ? '<button class="sm sec" data-k="revert">Revert</button>' : '')
+      + picHtml(p.img, 'image link, or drop a file — optional',
+          'data-which="row" data-id="' + esc(p.id) + '"', '')
       + '</div>';
   }).join('')
     + (hidden.length ? '<div class="hint">hidden by you: ' + hidden.map(function (p) {
@@ -780,6 +797,12 @@ function renderFields() {
         + '</div><p class="hint">' + (on
           ? 'This wording and these numbers go on the buyer’s slip. Percent is their fee, “+ fixed” is per payment. The name check is the line that stops a wallet swap. Leave everything blank and orders say “pay on collection”.'
           : 'Not used while a listed method is selected. Choose “My own method (I describe it)” above and this becomes what buyers are told.') + '</p></div>';
+    } else if (k === 'logo') {
+      // The shop's own mark. Same box as an item's photo: a link from anywhere, or
+      // a file dropped on the square. What Save sends is a path, not the bytes.
+      f = '<div class="f"><label>' + esc(LABEL.logo) + '</label>'
+        + picHtml(v || '', 'image link, or drop a file', 'data-which="logo"', 'data-k="logo"')
+        + '</div>';
     } else if (k === 'hours') {
       // The sentence is printed from the week below, so it is not also a free-text
       // box while a week is set: two owners of one fact is how they disagree.
@@ -799,6 +822,147 @@ function renderFields() {
     if (r.j && r.j.rails) { S.rails = r.j.rails; renderFields(); }
   });
 }
+
+/* ---------------------------------------------------------- the picture box
+ * What is stored is a path — /i/<store>/<id> — never the bytes. The store document
+ * is read on every page view and every priced order, so a picture inside it is a
+ * picture every visitor pays for; the file goes up on its own, and the path is what
+ * the ordinary Save writes. That also means a dropped photo that is then abandoned
+ * is not a half-saved setting: the next save frees it.
+ *
+ * Two sizes matter and they are not the same number. The browser squeezes to 120 KB,
+ * because that is what a 3G handset in Harare loads in about a second; the server
+ * refuses above 200 KB, because a thumbnail does not need to be bigger and 1 GB of
+ * KV across every store is the ceiling this runs under.
+ * -------------------------------------------------------------------------- */
+var PIC_AIM = 120 * 1024, PIC_HARD = 200 * 1024, PIC_EDGE = 720;
+function upTo(el, cls) { while (el && !(el.classList && el.classList.contains(cls))) el = el.parentNode; return el; }
+function picHtml(value, ph, boxAttr, inAttr) {
+  return '<span class="pic"' + (boxAttr ? ' ' + boxAttr : '') + '>'
+    + '<span class="pv" title="drop a picture here, or click it to pick a file">'
+    + (value ? '<img src="' + esc(value) + '" alt="">' : '+') + '</span>'
+    + '<input class="pu"' + (inAttr ? ' ' + inAttr : '') + ' value="' + esc(value || '')
+    + '" placeholder="' + esc(ph || 'image link, or drop a file') + '">'
+    + '<button class="sm" data-pk="pick">Browse</button>'
+    + '<button class="sm sec" data-pk="off"' + (value ? '' : ' style="display:none"') + '>Take off</button>'
+    + '<input type="file" accept="image/*" style="display:none">'
+    + '<span class="st"></span></span>';
+}
+function picSay(box, t, bad) {
+  var el = box.querySelector ? box.querySelector('.st') : null;
+  if (el) { el.textContent = t || ''; el.style.color = bad ? '#a2141f' : '#0a6b33'; }
+}
+/** Read the file the way a merchant means it: keep a small PNG or WebP exactly as
+ *  it is (a logo with a transparent background must not be flattened to a white
+ *  square by a helper that was only trying to help), and squeeze anything bigger
+ *  down through a canvas: quality first, then the box, then give up honestly. */
+function picSqueeze(file) {
+  return new Promise(function (res, rej) {
+    var ty = String(file.type || '');
+    if (/svg/i.test(ty) || /\.svg$/i.test(file.name || '')) {
+      return rej(new Error('SVG is refused: it can carry code. A PNG or a photo is what you want.'));
+    }
+    if ((ty === 'image/png' || ty === 'image/webp') && file.size <= PIC_AIM) return res(file);
+    if (file.size <= PIC_AIM && !/^image\//.test(ty)) return rej(new Error('That file is not a picture.'));
+    var url = URL.createObjectURL(file), img = new Image();
+    img.onerror = function () { URL.revokeObjectURL(url); rej(new Error('Your browser could not read that as a picture.')); };
+    img.onload = function () {
+      URL.revokeObjectURL(url);
+      var edge = PIC_EDGE;
+      var step = function (attempt) {
+        var sc = Math.min(1, edge / Math.max(img.naturalWidth || 1, img.naturalHeight || 1));
+        var cw = Math.max(1, Math.round((img.naturalWidth || 1) * sc));
+        var ch = Math.max(1, Math.round((img.naturalHeight || 1) * sc));
+        var c = document.createElement('canvas'); c.width = cw; c.height = ch;
+        var g = c.getContext('2d');
+        g.fillStyle = '#fff'; g.fillRect(0, 0, cw, ch);      // a JPEG has no alpha
+        g.drawImage(img, 0, 0, cw, ch);
+        c.toBlob(function (b) {
+          if (!b) return rej(new Error('Your browser would not turn that into a picture file.'));
+          if (b.size <= PIC_AIM) return res(b);
+          if (attempt >= 5) return rej(new Error('That stays over ' + Math.round(PIC_HARD / 1024) + ' KB — crop it smaller and try again.'));
+          edge = attempt < 3 ? edge : Math.round(edge * 0.75);   // quality first, then size
+          step(attempt + 1);
+        }, 'image/jpeg', attempt < 3 ? 0.8 : 0.7);
+      };
+      step(0);
+    };
+    img.src = url;
+  });
+}
+function picUpload(box, apply, blob) {
+  picSay(box, 'sending…', false);
+  fetch('/api/image?handle=' + encodeURIComponent(S.handle), {
+    method: 'POST', credentials: 'same-origin',
+    headers: { 'x-tapstall-confirm': '1' },
+    body: blob
+  }).then(function (r) {
+    return r.text().then(function (t) {
+      var j = null; try { j = JSON.parse(t); } catch (e) {}
+      return { st: r.status, j: j };
+    });
+  }).then(function (o) {
+    if (!o.j || !o.j.ok) { picSay(box, (o.j && o.j.error) || ('the shop would not take that file (' + o.st + ')'), true); return; }
+    apply(o.j.ref);
+    picSay(box, 'kept — ' + Math.max(1, Math.round(o.j.bytes / 1024)) + ' KB, at /i/… — press Save', false);
+  }).catch(function (e) { picSay(box, 'that did not upload: ' + ((e && e.message) || e), true); });
+}
+function picTake(box, apply, file) {
+  if (!file) return;
+  picSay(box, 'squeezing…', false);
+  picSqueeze(file).then(function (blob) { picUpload(box, apply, blob); },
+    function (err) { picSay(box, (err && err.message) || 'that file was not a picture', true); });
+}
+/** One delegated binding for every box on the page, so a re-render cannot orphan a
+ *  handler: menus are rebuilt on each edit and the whole field list with them. */
+function picWire(root, applyFor) {
+  if (!root || root._pic) return; root._pic = 1;
+  root.addEventListener('dragover', function (e) {
+    var box = upTo(e.target, 'pic'); if (!box) return;
+    e.preventDefault(); box.classList.add('hot');
+  });
+  root.addEventListener('dragleave', function (e) { var b = upTo(e.target, 'pic'); if (b) b.classList.remove('hot'); });
+  root.addEventListener('drop', function (e) {
+    var box = upTo(e.target, 'pic'); if (!box) return;
+    e.preventDefault(); box.classList.remove('hot');
+    var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) picTake(box, applyFor(box), f);
+  });
+  root.addEventListener('click', function (e) {
+    var b = e.target, k = b && b.getAttribute ? b.getAttribute('data-pk') : null;
+    var box = upTo(b, 'pic'); if (!box) return;
+    if (k === 'pick' || (b.classList && b.classList.contains('pv'))) {
+      e.preventDefault();
+      var fi = box.querySelector('input[type=file]'); if (fi) { fi._apply = applyFor(box); fi.value = ''; fi.click(); }
+      return;
+    }
+    if (k === 'off') { e.preventDefault(); applyFor(box)(''); picSay(box, 'picture taken off — press Save', false); }
+  });
+  root.addEventListener('change', function (e) {
+    var t = e.target;
+    if (t && t.type === 'file' && t.files && t.files[0]) picTake(upTo(t, 'pic'), t._apply || function () {}, t.files[0]);
+  });
+}
+/** Where a finished picture belongs. Every one of them ends up as a value the
+ *  ordinary Save already sends: a path on the settings body, an `img` on the row's
+ *  draft, or the text in the add-an-item box. Nothing about the save path changed
+ *  because a file was involved, which is the whole point of storing a path. */
+function picApplyFor(box) {
+  var which = box.getAttribute('data-which');
+  return function (v) {
+    var input = box.querySelector('.pu');
+    if (input) input.value = v || '';
+    var pv = box.querySelector('.pv');
+    if (pv) pv.innerHTML = v ? '<img src="' + esc(v) + '" alt="">' : '+';
+    var off = box.querySelector('[data-pk="off"]');
+    if (off) off.style.display = v ? '' : 'none';
+    if (which === 'row') setEdit(box.getAttribute('data-id'), { img: v || '' });
+    else picSay(box, v ? 'press Save to put it up' : 'picture taken off — press Save', false);
+  };
+}
+picWire(q('#fields'), picApplyFor);
+picWire(q('#menuEdit'), picApplyFor);
+picWire(q('#menuNew'), picApplyFor);
 
 /* ------------------------------------------------- payment detail, per method
  * One number per shop was a guess: the EcoCash wallet, the ZIPIT account and the

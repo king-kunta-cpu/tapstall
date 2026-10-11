@@ -172,6 +172,42 @@ PYEOF
   done
 }
 
+verify_templates() { # <namespace_id> <names...> — reads only, so it is free on a spent day
+  # The question a deploy should answer and usually does not: is the page customers
+  # are served the page in git? A KV write that was refused for budget reasons looks
+  # like success in every log that does not read the value back.
+  local ns="$1"; shift
+  CF_TOKEN="$CF_TOKEN" CF_ACCOUNT="$CF_ACCOUNT" KV_NS="$ns" TPL_NAMES="$*" python3 - <<'PYEOF'
+import os, urllib.request
+tok, acct = os.environ["CF_TOKEN"], os.environ["CF_ACCOUNT"]
+ns, names = os.environ["KV_NS"], os.environ["TPL_NAMES"].split()
+base = "https://api.cloudflare.com/client/v4/accounts/%s/storage/kv/namespaces/%s" % (acct, ns)
+bad = []
+for name in names:
+    fn = ("pages/%s.html" % name) if not name.endswith(".csv") else ("pages/%s" % name)
+    key = "tpl:" + (name[:-4] if name.endswith(".csv") else name)
+    want = open(fn, "rb").read() if os.path.exists(fn) else None
+    if want is None:
+        bad.append("%s: no %s in this checkout" % (name, fn)); continue
+    try:
+        req = urllib.request.Request(base + "/values/" + key, headers={"Authorization": "Bearer " + tok})
+        with urllib.request.urlopen(req, timeout=60) as r: got = r.read()
+    except Exception as e:
+        got = b"" if getattr(e, "code", None) == 404 else None
+        if got is None: bad.append("%s: KV read failed (%s)" % (name, e)); continue
+    if got == want:
+        print("  + %-14s %d bytes in git, same bytes in KV" % (name, len(want)))
+    else:
+        print("  ! %-14s git has %d bytes, KV has %d — customers are served the older page" % (name, len(want), len(got)))
+        bad.append(name)
+if bad:
+    print("  ! not current: %s" % ", ".join(bad))
+    print("    the fix is one command once the account can write again: ./scripts/deploy.sh --templates")
+    raise SystemExit(3)
+print("  all shipped pages are what git holds")
+PYEOF
+}
+
 # ---- secrets --------------------------------------------------------------
 admin_secret() {
   if [[ -s .secrets/admin_secret ]]; then cat .secrets/admin_secret; return; fi

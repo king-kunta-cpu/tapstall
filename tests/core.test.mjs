@@ -488,3 +488,81 @@ test('the public page publishes one number, not all of them', () => {
   assert.equal(out.rail_info.spec, 'phone', 'the shape is public so the form asks the right question');
   assert.equal(out.open.open, false, 'and open/closed is computed here, not on the buyer’s clock');
 });
+
+/* ------------------------------------------------------------ store images */
+/* Written against the failures a picture invites: a reference pointed at somebody
+ * else's shop, a file that is not a file, and a document that quietly grows to a
+ * megabyte because a validator took whatever it was handed. */
+const ref = (h, id) => '/i/' + h + '/' + id;
+
+test('a picture reference is only a picture if it is this store’s own', () => {
+  assert.equal(C.cleanImg(ref('mamatoe', 'aB3dEf6gH9'), 'mamatoe'), ref('mamatoe', 'aB3dEf6gH9'));
+  assert.equal(C.cleanImg('https://cdn.example/x.jpg', 'mamatoe'), 'https://cdn.example/x.jpg', 'a URL still works: half of these stores already have one');
+  assert.equal(C.cleanImg(ref('kotaking', 'aB3dEf6gH9'), 'mamatoe'), '', 'another shop’s path is not a link to a stranger’s photos');
+  assert.equal(C.cleanImg('/i/mamatoe/..%2f..%2fstore', 'mamatoe'), '', 'and it is not a way to walk out of the namespace either');
+  assert.equal(C.cleanImg('data:image/png;base64,AAAA', 'mamatoe'), '', 'bytes do not get smuggled in through a field meant for a path');
+  assert.equal(C.cleanImg('javascript:alert(1)', 'mamatoe'), '', 'nor does script');
+  assert.equal(C.cleanImg('', 'mamatoe'), '', 'blank is a legal answer, not an error');
+  assert.equal(C.cleanImg('  ' + ref('mamatoe', 'aB3dEf6gH9') + '  ', 'mamatoe'), ref('mamatoe', 'aB3dEf6gH9'), 'a paste with whitespace is the same picture');
+  assert.equal(C.cleanImg(ref('mamatoe', 'ab'), 'mamatoe'), '', 'an id too short to be unguessable is refused');
+});
+
+test('the logo field stores a path or a URL and rejects the rest', () => {
+  const set = (v, h) => C.validateSettings({ logo: v }, 0, { handle: h });
+  assert.equal(set(ref('mamatoe', 'aB3dEf6gH9'), 'mamatoe').soft.logo, ref('mamatoe', 'aB3dEf6gH9'), 'a logo is a soft field: no 15-minute fuse on a picture');
+  assert.equal(set('https://x.test/a.png', 'mamatoe').soft.logo, 'https://x.test/a.png');
+  assert.equal(set(ref('kotaking', 'aB3dEf6gH9'), 'mamatoe').ok, false, 'a borrowed path comes back as a field error');
+  assert.ok(!set(ref('kotaking', 'aB3dEf6gH9'), 'mamatoe').money.logo, 'and it is not staged into the money queue either');
+});
+
+test('a byte string is judged by what its first bytes say', () => {
+  const enc = (s) => new TextEncoder().encode(s);
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0xd]).buffer;
+  assert.equal(C.sniffImage(png).mime, 'image/png');
+  assert.equal(C.sniffImage(new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4, 5, 6, 7, 8]).buffer).kind, 'jpeg');
+  assert.equal(C.sniffImage(enc('RIFFxxxxWEBPVP8 ').buffer).kind, 'webp');
+  assert.match(C.sniffImage(enc('<svg xmlns="http://www.w3.org/2000/svg"><script>1</script></svg>').buffer).why, /SVG is refused/i, 'SVG on this origin would run with the merchant’s session cookie');
+  assert.match(C.sniffImage(enc('GIF89a........').buffer).why, /GIF is refused/i);
+  assert.match(C.sniffImage(enc('PK..........' ).buffer).why, /not a picture/i);
+  assert.equal(C.sniffImage(enc('tiny').buffer), null, 'a buffer too short to name is not a picture');
+});
+
+test('what a store points at is exactly what may be kept', () => {
+  const st = { handle: 'mamatoe', logo: ref('mamatoe', 'logoId1'),
+    menu: { over: { '1': { img: ref('mamatoe', 'itemId1') }, '2': { img: 'https://x.test/y.jpg' } },
+            extra: [{ id: 'z', name: 'z', img: ref('mamatoe', 'extraId') }] } };
+  const kept = C.referencedImages(st);
+  assert.deepEqual([...kept].sort(), [ref('mamatoe', 'extraId'), ref('mamatoe', 'itemId1'), ref('mamatoe', 'logoId1')].sort());
+  assert.ok(!kept.has('https://x.test/y.jpg'), 'a URL is not our bytes to delete');
+  assert.equal(C.referencedImages({}).size, 0, 'a store with nothing references nothing, and does not throw');
+});
+
+test('an id for a new picture is unguessable and never shaped like a counter', () => {
+  const seen = new Set();
+  for (let i = 0; i < 400; i++) {
+    const id = C.newImgId();
+    assert.match(id, /^[A-Za-z0-9_-]{10}$/, 'the path regex and the generator have to agree: ' + id);
+    seen.add(id);
+  }
+  assert.ok(seen.size > 390, '400 draws collide more than once in a while: ' + seen.size);
+});
+
+test('a menu row can carry a photo, and only its own store’s photo', () => {
+  const withOwn = C.sanitizeMenu({ over: { '1': { price: '5.5', img: ref('mamatoe', 'aB3dEf6gH9') } }, handle: 'mamatoe' });
+  assert.equal(withOwn.over['1'].img, ref('mamatoe', 'aB3dEf6gH9'));
+  const without = C.sanitizeMenu({ over: { '1': { price: '5.5', img: ref('mamatoe', 'aB3dEf6gH9') } } });
+  assert.equal(without.over['1'].img, '', 'no handle on the payload means no refs: a URL still rides along');
+  const cleared = C.sanitizeMenu({ over: { '1': { img: '' } }, handle: 'mamatoe' });
+  assert.equal(cleared.over['1'].img, '', 'and an empty string is kept as the order to take the picture off');
+  const extra = C.sanitizeMenu({ extra: [{ name: 'New cake', img: ref('mamatoe', 'aB3dEf6gH9') }], handle: 'mamatoe' });
+  assert.equal(extra.extra[0].img, ref('mamatoe', 'aB3dEf6gH9'), 'a brand-new item can arrive with its picture');
+  const laid = C.applyMenu([{ id: '1', name: 'x', price: 1, img: 'https://x.test/old.jpg' }],
+    { over: { '1': { img: ref('mamatoe', 'aB3dEf6gH9') } } });
+  assert.equal(laid[0].img, ref('mamatoe', 'aB3dEf6gH9'), 'the store’s own picture wins over the sheet’s');
+});
+
+test('taking a picture off a row really takes it off', () => {
+  const laid = C.applyMenu([{ id: '1', name: 'x', price: 1, img: 'https://x.test/old.jpg' }],
+    { over: { '1': { img: '' } } });
+  assert.equal(laid[0].img, '', 'an override that says nothing must beat the sheet that says something, or the row keeps a photo its merchant deleted');
+});

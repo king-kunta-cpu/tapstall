@@ -257,14 +257,14 @@ RA=$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-tapstall-ad
 ck "a per-method number is held like money" '"held":\["rail_accts"\]' "$RA"
 ck "  · while the week applies in the same breath" '"applied_now":\["week"\]' "$RA"
 PUBW=$(curl -s -m 30 "$ORIGIN/s/$HANDLE/config.json")
-ck "the week writes the sentence buyers read" '"hours":"Mon 09:00-17:00' "$PUBW"
+ckw "the week writes the sentence buyers read" '"hours":"Mon 09:00-17:00' "$PUBW"
 ck "  · and the shop clock ships with it, not the visitor's" '"open":\{' "$PUBW"
 nk "no rail map is published to a stranger" 'rail_accts' "$PUBW"
 nk "  · and a staged number is not even readable early" 'ZZ PROBE' "$PUBW"
 ck "a half-typed week is refused, not read as closed" 'both ends' "$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" -d '{"handle":"'"$HANDLE"'","week":[{"open":"09:00"}]}' "$ORIGIN/api/settings")"
 curl -s -m 30 -o /dev/null -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" -d '{"handle":"'"$HANDLE"'","week":[],"hours":"'"$HOURS"'"}' "$ORIGIN/api/settings"
 RV2=$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" -d '{"handle":"'"$HANDLE"'"}' "$ORIGIN/api/settings/revert")
-ck "revert drops the staged number too" 'rail_accts' "$RV2"
+ckw "revert drops the staged number too" 'rail_accts' "$RV2"
 PUB3=$(curl -s -m 30 "$ORIGIN/s/$HANDLE/config.json")
 nk "and the store is left exactly as it was found" 'ZZ PROBE' "$PUB3"
 ck "  · hours back to the shop's own words" "\"hours\":\"$HOURS\"" "$PUB3"
@@ -297,7 +297,7 @@ PAGE_A=$(fetch_a "/a?v=$RANDOM")
 if [[ "${#PAGE_A}" -ne "$DEPLOYED_A" ]]; then
   echo "      served ${#PAGE_A} bytes instead; first line: $(printf '%s' "$PAGE_A" | head -c 90)"
 fi
-ck "the served dashboard is the deployed one ($DEPLOYED_A bytes)" "^${#PAGE_A}$" "$DEPLOYED_A"
+ckw "the served dashboard is the deployed one ($DEPLOYED_A bytes)" "^${#PAGE_A}$" "$DEPLOYED_A"
 ck "an old ?token= link lands on the sign-in card, not a blank page" 'id="login"' "$(fetch_a "/a?handle=$HANDLE&token=$ADMIN_KEY")"
 ck "  · same when a mailer escaped the &" 'retired' "$(fetch_a "/a?handle=$HANDLE&amp;token=$ADMIN_KEY")"
 ck "  · and the query repair still works where a query is read" '"ok":true' "$(curl -s -m 30 "$ORIGIN/api/lookup?handle=$HANDLE&amp;x=1")"
@@ -482,7 +482,56 @@ fi
 rm -f "$HDR"
 fi
 
-echo "[9] tidy up"
+echo "[9] a dropped picture: stored, served, and never inside the store document"
+# The only place this product takes bytes from a browser. Four things have to be true
+# against the live Worker: the same door guards it, a file that is not a picture is
+# refused in words, what comes back is a path a buyer can load, and the store
+# document — read on every page view — stays a document. The uploaded file is left
+# nowhere behind: the logo is put back exactly as found, which frees it again.
+UP_IMG=$(mktemp)
+printf '%s' 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==' | base64 -d > "$UP_IMG"
+UPLOAD=$(curl -s -m 60 -X POST -H 'content-type: application/octet-stream' -H "x-tapstall-admin: $ADMIN_KEY" \
+  --data-binary "@$UP_IMG" "$ORIGIN/api/image?handle=$HANDLE")
+REF=$(printf '%s' "$UPLOAD" | python3 -c "import sys,json;print(json.load(sys.stdin).get('ref',''))" 2>/dev/null)
+STORE2=$(curl -s -m 30 -H "Authorization: Bearer $TOK" "https://api.cloudflare.com/client/v4/accounts/$ACCT/storage/kv/namespaces/$KV/values/store:$HANDLE")
+PREV_LOGO=$(printf '%s' "$STORE2" | python3 -c "import sys,json;print(json.dumps(json.load(sys.stdin).get('logo','')))" 2>/dev/null)
+ckw "an upload answers with a path under this store, not with bytes" "^/i/$HANDLE/" "$REF"
+ckw "  · and it says what the file turned out to be" '"kind":"png"' "$UPLOAD"
+IMG_OUT=$(mktemp); IMG_HDR=$(mktemp)
+curl -s -m 30 -o "$IMG_OUT" -D "$IMG_HDR" "$ORIGIN$REF"
+IMG_BLOB=$(tr -d '\r' < "$IMG_HDR")
+ckw "  · the path serves the same file to a stranger" "^$(wc -c < "$UP_IMG" | tr -d ' ')$" "$(wc -c < "$IMG_OUT" | tr -d ' ')"
+ckw "  · typed as what it is, and not for the browser to guess" 'image/png' "$IMG_BLOB"
+ckw "  · with the sniffing refused explicitly" 'nosniff' "$IMG_BLOB"
+ckw "  · and cached for a year, because an id is never reused" 'immutable' "$IMG_BLOB"
+ckw "  · a revalidation costs no bytes at all" '^304$' "$(code -H "if-none-match: \"${REF##*/}\"" "$ORIGIN$REF")"
+nk "no secret rides in a picture response" 'set-cookie|admin_token' "$IMG_BLOB"
+printf '%s' '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>' > "$UP_IMG.svg"
+ck "an SVG is refused by name, with the reason" 'SVG is refused' \
+  "$(curl -s -m 30 -X POST -H 'content-type: application/octet-stream' -H "x-tapstall-admin: $ADMIN_KEY" --data-binary "@$UP_IMG.svg" "$ORIGIN/api/image?handle=$HANDLE")"
+head -c 260000 /dev/urandom > "$UP_IMG.big"; printf '\xff\xd8\xff\xe0' | cat - "$UP_IMG.big" > "$UP_IMG.jpg"
+ck "a file over the ceiling is refused with the number it wanted" '^413$' \
+  "$(code -X POST -H 'content-type: application/octet-stream' -H "x-tapstall-admin: $ADMIN_KEY" --data-binary "@$UP_IMG.jpg" "$ORIGIN/api/image?handle=$HANDLE")"
+ck "and nobody without the door can post one at all" '^401$' \
+  "$(code -X POST -H 'content-type: application/octet-stream' --data-binary "@$UP_IMG" "$ORIGIN/api/image?handle=$HANDLE")"
+SAVED=$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" \
+  -d '{"handle":"'"$HANDLE"'","logo":"'"$REF"'"}' "$ORIGIN/api/settings")
+ckw "a picture on the shop is a soft change, so it lands now" '"logo"' "$SAVED"
+ckw "  · the buyer's config carries the path" "$REF" "$(curl -s -m 30 "$ORIGIN/s/$HANDLE/config.json")"
+DOC2=$(curl -s -m 30 -H "Authorization: Bearer $TOK" "https://api.cloudflare.com/client/v4/accounts/$ACCT/storage/kv/namespaces/$KV/values/store:$HANDLE")
+ckw "  · while the store document stays a document ($(printf '%s' "$DOC2" | wc -c | tr -d ' ') bytes)" '^ok$' "$(printf '%s' "$DOC2" | wc -c | awk '{print ($1 < 60000) ? "ok" : "too big"}')"
+BACK=$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" \
+  -d '{"handle":"'"$HANDLE"'","logo":'"$PREV_LOGO"'}' "$ORIGIN/api/settings")
+ckw "  · the shop is left exactly as found" '"ok": *true' "$BACK"
+ckw "  · and the file it stopped pointing at is gone, not orphaned" '^404$' "$(code "$ORIGIN$REF")"
+SHIP_A=$(cat pages/admin.html)
+ck "the page we ship has the picture control: browse, drop, and a link field" 'accept="image/\*"' "$SHIP_A"
+ck "  · a Browse button and a Take off, in that order" 'data-pk="pick".*data-pk="off"' "$SHIP_A"
+ck "  · and it posts to the store that asked" '/api/image\?handle=' "$SHIP_A"
+ck "  · with the confirm header every other write needs" 'x-tapstall-confirm' "$SHIP_A"
+rm -f "$UP_IMG" "$UP_IMG.svg" "$UP_IMG.big" "$UP_IMG.jpg" "$IMG_OUT" "$IMG_HDR"
+
+echo "[10] tidy up"
 CK2=$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" \
   -d '{"handle":"'"$HANDLE"'","id":"'"$ID"'","status":"cancelled"}' "$ORIGIN/api/mark")
 ckw "probe order cancelled" '"status":"cancelled"' "$CK2"

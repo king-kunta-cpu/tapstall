@@ -18,12 +18,14 @@ import {
   RAILS, round2, clamp, slug, digits, isEmail, validHandle, parseCSV, normalizeFeedUrl,
   parseProducts, priceOrder, payInstructions, riskFlags, waSummary, publicStore, hash,
   applyMenu, sanitizeMenu, menuPrice, openNow, cleanWeek, cleanRailAccts, hoursText,
+  cleanImg, sniffImage, imgKeyOf, imgRefOf, newImgId, referencedImages, IMG_MAX_BYTES,
+  IMG_TARGET_BYTES,
   issueCap, verifyCap, randomKey, validateSettings, stageSettings, applyPending, maskField,
   EDITABLE_FIELDS, SOFT_FIELDS, sign, adminStore, normaliseRail, resolveRail,
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '0.6.5';
+const VERSION = '0.6.6';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 const MAX_ORDERS_KEPT = 200;
@@ -176,6 +178,9 @@ async function route(req, url, env, ctx) {
   if (p === '/onboard') return html(await tpl(env, 'onboard'));
 
   let m;
+  // A merchant's own picture, out of the store's KV. Public on purpose: it is a
+  // photo of the food, and the storefront is what has to load it fast on a handset.
+  if ((m = p.match(/^\/i\/([a-z0-9][a-z0-9-]{1,30})\/([A-Za-z0-9_-]{4,40})$/))) return imageGet(req, env, m[1], m[2]);
   if ((m = p.match(/^\/s\/([a-z0-9][a-z0-9-]{1,30})$/))) return storePage(env, m[1]);
   if ((m = p.match(/^\/s\/([a-z0-9][a-z0-9-]{1,30})\/config\.json$/))) {
     const st = await getStore(env, m[1]);
@@ -192,7 +197,7 @@ async function route(req, url, env, ctx) {
   }
 
   // ---- merchant authority: a code becomes a cookie, and only POSTs act ----
-  const MUT = /^\/api\/(mark|settings|settings\/revert|menu|revoke|auth|pin\/change|pin\/reset|login|logout|recover)$/;
+  const MUT = /^\/api\/(mark|settings|settings\/revert|menu|revoke|auth|pin\/change|pin\/reset|login|logout|recover|image)$/;
   // /api/mark answers its own 405, because it also has to recognise a v0.2
   // ?token= link and trade it for a session rather than dead-end the merchant.
   const selfHandled = p === '/api/mark';
@@ -219,6 +224,7 @@ async function route(req, url, env, ctx) {
   if (p === '/api/settings' && req.method === 'POST') return settingsEdit(req, url, env);
   if (p === '/api/settings/revert' && req.method === 'POST') return revertPending(req, url, env);
   if (p === '/api/menu' && req.method === 'POST') return menuEdit(req, env);
+  if (p === '/api/image' && req.method === 'POST') return imageUpload(req, env);
   if (p === '/api/revoke' && req.method === 'POST') return revokeKeys(req, url, env);
 
   // The one-tap confirm link: GET renders an inert page, the browser posts.
@@ -618,7 +624,7 @@ async function register(req, url, env) {
     handle,
     shop_name: String(b.shop_name).slice(0, 60),
     tagline: String(b.tagline || '').slice(0, 140),
-    logo: /^https?:\/\//.test(b.logo || '') ? b.logo : '',
+    logo: cleanImg(b.logo, handle),   // a URL at sign-up; there is nothing stored to reference yet
     whatsapp: digits(b.whatsapp || b.phone).replace(/\D/g, '').slice(0, 15),
     location: String(b.location || '').slice(0, 90),
     hours: String(b.hours || '').slice(0, 60),
@@ -1405,7 +1411,9 @@ async function menuEdit(req, env) {
   }
   const st = who.st;
   const was = st.menu || {};
-  const next = sanitizeMenu(b.menu);
+  // The handle rides along so a reference can be checked against the store saving
+  // it: /i/other-shop/abc is not a picture of this shop's food.
+  const next = sanitizeMenu(Object.assign({}, b.menu, { handle: st.handle }));
   const touched = Object.keys(next.over).length + next.hide.length + next.extra.length + (next.order.length ? 1 : 0);
   if (!touched) delete st.menu; else st.menu = next;
   await writeStore(env, st);
@@ -1414,6 +1422,11 @@ async function menuEdit(req, env) {
     before: { edits: Object.keys(was.over || {}).length + (was.hide || []).length + (was.extra || []).length },
     after: { edits: touched },
   });
+  // Any save can orphan a picture — a cleared row, a deleted extra, a revert that
+  // drops the whole shelf — so the sweep runs on every one of them rather than on a
+  // guess about which edits touch images. It is a list plus deletes for keys nobody
+  // references, and a merchant saves a menu a handful of times a day at most.
+  await pruneImages(env, st);
   const eff = await loadProducts(st, env);
   return json({
     ok: true, edits: touched, items: eff.length,
@@ -1421,6 +1434,132 @@ async function menuEdit(req, env) {
       ? 'Saved on the store, so buyers see it on their next load. Nothing in your sheet was touched — a row you edited here keeps this value until you press Revert on it.'
       : 'Everything is back to your sheet: no row is overridden here any more.',
   });
+}
+
+/* ------------------------------------------------------------ store images */
+const IMG_MAX_PER_STORE = 60;
+const IMG_CT = { jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' };
+
+/**
+ * A picture the merchant dropped in the dashboard, out of that store's own KV.
+ *
+ * Why KV and not R2: R2 is the right object store and it is free to 10 GB, but a
+ * bucket nobody can read in a browser is worse than a KV key everyone can — public
+ * access needs a custom domain on the free plan, and this product's rule is that the
+ * merchant never has to leave the dashboard or buy a name. What KV costs here is the
+ * read budget, and that is answered by the header below instead of by new plumbing:
+ * ids are never reused, so a storefront thumbnail is a KV read once per object and a
+ * revalidation after that is a 304 with no read at all.
+ */
+async function imageGet(req, env, handle, id) {
+  const inm = reqHeader(req, 'if-none-match') || '';
+  if (inm === '"' + id + '"') {
+    return new Response(null, { status: 304, headers: { etag: '"' + id + '"', 'cache-control': 'public, max-age=31536000, immutable' } });
+  }
+  let buf = null;
+  // 'arrayBuffer' as the second argument, the way every other KV read in this file
+  // asks: Cloudflare accepts both this and the options object, and the stub the live
+  // suite runs on understands only this — which is how a wrong shape here reads as
+  // "the picture is not there" rather than "the picture is not a picture".
+  try { buf = await env.STORES.get(imgKeyOf(handle, id), 'arrayBuffer'); }
+  catch (e) { return json({ ok: false, error: 'This picture could not be read just now.' }, 503, { 'Cache-Control': 'no-store' }); }
+  if (!buf || !buf.byteLength) return new Response('not found', { status: 404, headers: { 'Cache-Control': 'no-store' } });
+  const kind = sniffImage(buf);
+  if (!kind || kind.bad) {
+    // A value that does not sniff is not a picture we were given; drop it on the
+    // floor rather than serve bytes we cannot name, and say so in the log line a
+    // merchant would never see but I would want to exist.
+    console.log('image_get_unsniffable', handle, id, buf.byteLength);
+    return new Response('not found', { status: 404, headers: { 'Cache-Control': 'no-store' } });
+  }
+  return new Response(buf, {
+    headers: {
+      'content-type': IMG_CT[kind.kind] || 'application/octet-stream',
+      'content-length': String(buf.byteLength),
+      'cache-control': 'public, max-age=31536000, immutable',
+      etag: '"' + id + '"',
+      'x-content-type-options': 'nosniff',
+      'cross-origin-resource-policy': 'always',
+      'access-control-allow-origin': '*',
+    },
+  });
+}
+
+/**
+ * POST /api/image — the upload half of the same control the logo box and the item
+ * rows use. It takes the file as the body and nothing else, because the browser
+ * already has it: no base64 in JSON (33% bigger, and it would sit in the store
+ * document where every storefront render pays for it), no form parsing, no field
+ * names to agree on. The response hands back the path, and the *path* is what the
+ * dashboard's normal Save writes.
+ */
+async function imageUpload(req, env) {
+  const who = await identify(req, env, urlHandle(req));
+  if (!who || !who.st) return json({ ok: false, error: 'no store' }, 404);
+  const lr = lockRes(who); if (lr) return lr;
+  if (who.anonymous || who.bad) return json({ ok: false, need_login: true, error: 'Sign in first: /a, your store name and your PIN.' }, 401);
+  if (who.via === 'sess' && (reqHeader(req, 'x-tapstall-confirm') || '') !== '1') {
+    return json({ ok: false, error: 'missing x-tapstall-confirm header' }, 403);
+  }
+  const st = who.st;
+  const len = Number(reqHeader(req, 'content-length') || '0');
+  // A 4 MB phone photo is refused before a single byte is read, so the ceiling
+  // costs nothing to enforce. The client is asked for less than half of it, so
+  // this only ever fires on something that was never going to be a thumbnail.
+  if (len > IMG_MAX_BYTES * 4) {
+    return json({ ok: false, error: 'That file is too big for a menu picture. The dashboard squeezes pictures for you if you drop it in the box instead.', max_bytes: IMG_MAX_BYTES }, 413);
+  }
+  let buf;
+  try { buf = await req.arrayBuffer(); } catch (e) { return json({ ok: false, error: 'The file did not arrive intact — send it again.' }, 422); }
+  if (!buf || !buf.byteLength) return json({ ok: false, error: 'There was nothing in that file.' }, 422);
+  if (buf.byteLength > IMG_MAX_BYTES) {
+    return json({ ok: false, error: 'That picture is ' + Math.round(buf.byteLength / 1024) + ' KB. Under ' + Math.round(IMG_MAX_BYTES / 1024) + ' KB, please — drop it in the box and it gets squeezed to ' + Math.round(IMG_TARGET_BYTES / 1024) + ' KB for you.', max_bytes: IMG_MAX_BYTES }, 413);
+  }
+  const kind = sniffImage(buf);
+  if (!kind || kind.bad) {
+    return json({ ok: false, error: (kind && kind.why) || 'That is not a picture we know how to serve: use a JPEG, PNG or WebP.' }, 422);
+  }
+  const live = await pruneImages(env, st);
+  if (live >= IMG_MAX_PER_STORE) {
+    return json({ ok: false, error: 'This store has ' + IMG_MAX_PER_STORE + ' pictures on file, which is the ceiling. Take one off an item or the logo and send this one again.', cap: IMG_MAX_PER_STORE }, 429);
+  }
+  const id = newImgId();
+  try {
+    await env.STORES.put(imgKeyOf(st.handle, id), buf, { metadata: { kind: kind.kind, bytes: buf.byteLength } });
+  } catch (e) {
+    const msg = String((e && e.message) || e);
+    const qa = quotaAnswer(msg, '/api/image');
+    return qa || json({ ok: false, error: 'The picture could not be stored just now: ' + msg.slice(0, 120) }, 503);
+  }
+  await pushAudit(env, st, { act: 'image_put', via: who.via, ip: ipOf(req), after: { ref: imgRefOf(st.handle, id), bytes: buf.byteLength, kind: kind.kind } });
+  return json({ ok: true, ref: imgRefOf(st.handle, id), bytes: buf.byteLength, kind: kind.kind,
+    note: 'Stored. Put it where you want it and Save — the file is already kept, so a discarded upload costs nothing but a little space.' });
+}
+
+/**
+ * Delete what no document points at. Called before a count and after a save, so
+ * "this store is full" is only ever said when it is true, and so an upload the
+ * merchant abandoned does not sit on the 1 GB forever. One list per call, and a
+ * list is not one of the 1,000 writes a day.
+ */
+async function pruneImages(env, st) {
+  const prefix = 'img:' + st.handle + ':';
+  let keys = [];
+  try {
+    const r = await env.STORES.list({ prefix, limit: 1000 });
+    keys = (r && r.keys) || [];
+  } catch (e) { return 0; }
+  if (!keys.length) return 0;
+  const keep = referencedImages(st);
+  let live = 0, gone = 0;
+  for (const k of keys) {
+    const id = String(k.name).slice(prefix.length);
+    const ref = imgRefOf(st.handle, id);
+    if (keep.has(ref)) live++;
+    else { try { await env.STORES.delete(k.name); gone++; } catch (e) { /* budget; next save tries again */ } }
+  }
+  if (gone) console.log('image_prune', st.handle, gone);
+  return live;
 }
 
 async function pinChange(req, env) {
@@ -1523,7 +1662,7 @@ async function settingsEdit(req, url, env) {
   // intention, not two: the number is validated against the shape being written
   // now, not the one that happened to be stored before it.
   const described = patch.rail_def && typeof patch.rail_def === 'object' ? normaliseRail(patch.rail_def, 'custom') : null;
-  const v = validateSettings(patch, Date.now(), { rails: cat, rail_def: described || st.rail_def });
+  const v = validateSettings(patch, Date.now(), { rails: cat, rail_def: described || st.rail_def, handle: st.handle });
   if (!v.ok) return json({ ok: false, error: 'some fields need a different format', fields: v.errors, ignored: v.ignored,
     hint: v.errors.rail ? 'Pick one of: ' + Object.keys(cat).join(', ') + '. "custom" means you describe it below.' : undefined }, 422);
   if (v.money.rail === 'custom') {
@@ -1547,6 +1686,9 @@ async function settingsEdit(req, url, env) {
     after[k] = maskField(k, held ? st.pending.fields[k] : st[k]);
   }
   if (changed || staged) await writeStore(env, st);
+  // Swapping or clearing the logo orphans its bytes: the store document holds a
+  // path, so the file itself has nobody left who points at it.
+  if (changed && v.soft.logo !== undefined) await pruneImages(env, st);
   const logged = (changed || staged) ? await pushAudit(env, st, { act: 'settings', via: who.via, changed, staged, before, after, ip: ipOf(req) }) : true;
   const held = Object.keys(v.money);
   return json({

@@ -70,11 +70,12 @@ pages/public/         what GitHub Pages uploads: _headers, the sample CSV, and
                       index.html/fees.html are copied in by CI from pages/, never
                       committed here (two consumers, one source)
 scripts/ui_kit.py     inlines kit.css into every page; `check` is the drift gate
-tests/core.test.mjs   42 unit tests on the money, the parser, the menu and the rails
-tests/live.test.mjs   53 tests that run the real handler + cron against a stub KV
+tests/core.test.mjs   49 unit tests on the money, the parser, the menu, the rails and the pictures
+tests/live.test.mjs   60 tests that run the real handler + cron against a stub KV
 tests/limits.test.mjs 10 tests on the free-tier budgets (writes, sizes, locks)
-tests/pages.test.mjs  21 tests on the shipped HTML itself (no browser needed)
+tests/pages.test.mjs  23 tests on the shipped HTML itself (no browser needed)
 scripts/deploy.sh     one command: tests → KV → templates → bundle → deploy → triggers → self-check
+scripts/deploy.sh --templates   the pages only, for the morning after a day whose 1,000 KV writes ran out
 scripts/build_bundle.sh   inlines core.js into .build/worker.js, ESM syntax check
 scripts/cf_publish.py     dependency-free publisher (fallback when wrangler is absent)
 scripts/set_triggers.py   verifies the schedule/route over HTTP rather than trusting a write
@@ -301,13 +302,15 @@ every `cron:*` write while `REDIRECT_TO` is set.
 
 ## Verified
 
-`node --test tests/` → **96 pass** (28 unit on `core.js`, 42 driving the real
-bundled Worker against an in-memory KV — the full journey plus the authority
-model: forged/expired/revoked codes, inert GETs, the 15-minute hold, masked
-audit, cross-origin refusal, and now every `/ops` gate, lever and template rule;
-14 on the shipped HTML — script compiles, ids resolve, endpoints routed, console
-buttons backed by Worker actions — and 10 on the limits that a caller cannot talk
-past: the per-IP order rate, the lockout, the KV quota). Deployed and exercised on the real Worker:
+`node --test tests/` → **142 pass** (49 unit on `core.js` — money, menu, rails,
+hours, image references and sniffing; 60 driving the real bundled Worker against an
+in-memory KV — the full journey plus the authority model: forged/expired/revoked
+codes, inert GETs, the 15-minute hold, masked audit, cross-origin refusal, every
+`/ops` gate, lever and template rule, and an upload that is stored, served, refused
+and swept; 23 on the shipped HTML — script compiles, ids resolve, endpoints routed,
+console buttons backed by Worker actions, a picture path cannot escape its
+attribute — and 10 on the limits a caller cannot talk past: the per-IP order rate,
+the lockout, the KV quota). Deployed and exercised on the real Worker:
 two tenants (Harare/USD/EcoCash, Durban/ZAR/PayShap), order → one-tap paid,
 cross-tenant isolation, expiry → cron suspension → 503 → webhook → reinstated
 (`plan: annual`, 746 days). `/__selftest` reports bindings, all five templates,

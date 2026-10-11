@@ -5,6 +5,8 @@ on:
   push:
     branches: [main]
     paths-ignore: ['ci-deploy.log']
+  schedule:
+    - cron: '20 0 * * *'      # 00:20 UTC, twenty minutes after the KV write budget resets
   workflow_dispatch: {}
 
 permissions:
@@ -17,6 +19,24 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # The one failure at $0 hosting that looks like success: the Worker deploys, a page
+  # does not, because the account's 1,000 free KV writes a day were spent before the
+  # template step ran. deploy.sh says so and carries on — and then nothing retries it,
+  # because a retry needs a push. This is the retry. 00:20 UTC is after the reset; on a
+  # day with nothing missing it spends no write at all, reads every page back against
+  # git, and goes green in seconds.
+  pages-are-current:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: ship any page a spent KV budget held back
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WORKER_NAME: tapstall
+        run: bash ./scripts/deploy.sh --templates 2>&1 | tail -20
+
   worker:
     runs-on: ubuntu-latest
     steps:

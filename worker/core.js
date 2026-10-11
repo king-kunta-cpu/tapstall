@@ -288,6 +288,80 @@ export const digits = (s) => String(s || '').replace(/[^\d+]/g, '');
 export const isEmail = (s) => /^[^@\s]+@[^@\s]+\.[a-zA-Z]{2,}$/.test(String(s || ''));
 export const validHandle = (h) => /^[a-z0-9][a-z0-9-]{1,29}$/.test(String(h));
 
+/* ------------------------------------------------------------ store images */
+/**
+ * A picture is not a setting. The store document is read on every storefront
+ * render and every priced order, so a 120 KB blob living inside it would be
+ * fetched by Cloudflare's KV on every single page view — and KV is capped at
+ * 1,000 writes a day and 1 GB in total on this plan, which a document that
+ * grows a photo per item would not survive.
+ *
+ * So the bytes go in their own key and the document holds only the path:
+ * `/i/<handle>/<id>`. The storefront asks for the path, the edge caches it for
+ * a year, and a photo costs one KV read per object per cache window rather than
+ * one per page. 25 MiB is a KV value's ceiling, so even an untrimmed camera shot
+ * fits; what decides the cap here is buyer patience on a 3G handset in Harare,
+ * not the platform.
+ */
+export const IMG_MAX_BYTES = 200 * 1024;        // server-side refusal, generous
+export const IMG_TARGET_BYTES = 120 * 1024;     // what the dashboard aims for
+const IMG_ID_RE = /^[A-Za-z0-9_-]{4,40}$/;
+export const imgKeyOf = (handle, id) => 'img:' + handle + ':' + id;
+export const imgRefOf = (handle, id) => '/i/' + handle + '/' + id;
+/** A reference is only ever this store's own path. Accepting another handle's
+ *  would be a free way to read a competitor's uploads, and rejecting it is
+ *  silent because the field is a picture, not a legal document. */
+export function cleanImg(v, handle) {
+  const s = String(v == null ? '' : v).trim();
+  if (!s) return '';
+  if (/^https?:\/\/\S+$/i.test(s)) return s.slice(0, 400);
+  const m = s.match(/^\/i\/([a-z0-9][a-z0-9-]{1,29})\/([A-Za-z0-9_-]{4,40})$/);
+  if (m && handle && m[1] === String(handle) && IMG_ID_RE.test(m[2])) return m[0];
+  return '';
+}
+/** The three kinds a phone camera or a screenshot produces, read from the bytes
+ *  rather than the header the browser was asked to send. SVG is refused by name:
+ *  it is a document that can run script, and on this origin that script would
+ *  carry the merchant's session cookie. */
+/** Every /i/ path this store's document actually points at. The delete side needs
+ *  the exact inverse of that, or a merchant who swaps a picture loses the wrong one. */
+export function referencedImages(st) {
+  const out = new Set();
+  const s = st && typeof st === 'object' ? st : {};
+  const add = (v) => { if (typeof v === 'string' && v.indexOf('/i/') === 0) out.add(v); };
+  add(s.logo);
+  const m = s.menu && typeof s.menu === 'object' ? s.menu : {};
+  for (const k of Object.keys(m.over || {})) add((m.over[k] || {}).img);
+  for (const x of (Array.isArray(m.extra) ? m.extra : [])) add(x && x.img);
+  return out;
+}
+const B64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz09123456789_-';
+export const newImgId = () => {
+  const b = new Uint8Array(10);
+  (globalThis.crypto || {}).getRandomValues ? globalThis.crypto.getRandomValues(b) : b.forEach((_, i) => { b[i] = Math.floor(Math.random() * 256); });
+  let s = '';
+  for (const x of b) s += B64URL[x % 64];
+  return s;
+};
+/** An id is never reused, which is what lets /i/ answers be `immutable`: a new
+ *  picture is a new path, so no cache anywhere has to be invalidated. */
+export function sniffImage(buf) {
+  const b = buf instanceof Uint8Array ? buf : new Uint8Array(buf || []);
+  if (b.length < 12) return null;
+  const at = (i) => b[i];
+  const str = (i, n) => String.fromCharCode.apply(null, b.subarray(i, i + n));
+  if (at(0) === 0xff && at(1) === 0xd8 && at(2) === 0xff) return { kind: 'jpeg', mime: 'image/jpeg' };
+  if (at(0) === 0x89 && str(1, 3) === 'PNG' && at(4) === 0x0d && at(5) === 0x0a && at(6) === 0x1a && at(7) === 0x0a) {
+    return { kind: 'png', mime: 'image/png' };
+  }
+  if (str(0, 4) === 'RIFF' && str(8, 4) === 'WEBP') return { kind: 'webp', mime: 'image/webp' };
+  if (str(0, 3) === 'GIF') return { bad: 'gif', why: 'A GIF is refused: it can hold dozens of frames and a photo needs one.' };
+  if (str(0, 5).indexOf('<?xml') === 0 || str(0, 4) === '<svg' || (str(0, 1) === '<' && str(0, 5).toLowerCase().indexOf('xml') > 0)) {
+    return { bad: 'svg', why: 'SVG is refused because it can carry code. A photo should be a PNG or a JPEG.' };
+  }
+  return { bad: 'unknown', why: 'That is not a picture we know how to serve: use a JPEG, PNG or WebP.' };
+}
+
 /** Parse a CSV string into rows of fields, honouring quotes and doubled quotes. */
 export function parseCSV(text) {
   const rows = []; let row = [], f = '', q = false;
@@ -728,7 +802,8 @@ export const SOFT_FIELDS = ['tagline', 'logo', 'location', 'hours', 'closed', 'w
 const SET = {
   shop_name: (v) => { const s = String(v || '').trim().slice(0, 60); return s.length >= 2 ? s : null; },
   tagline: (v) => String(v || '').trim().slice(0, 140),
-  logo: (v) => (!v ? '' : /^https?:\/\/\S+$/.test(String(v)) ? String(v).slice(0, 300) : null),
+  // a URL from anywhere, or the store's own /i/ path after an upload
+  logo: (v, opts) => { const s = cleanImg(v, opts && opts.handle); return (v && !s) ? null : s; },
   location: (v) => String(v || '').trim().slice(0, 90),
   hours: (v) => String(v || '').trim().slice(0, 60),
   // `false` is a legal stored answer meaning "this store has none", which is how a
@@ -888,7 +963,7 @@ const MENU_ITEM = (x, opts) => {
     price: round2(clamp(Number(o.price) || 0, 0, 100000)),
     cur: String(o.cur || o.currency || 'USD').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 6) || 'USD',
     desc: String(o.desc || '').trim().slice(0, 240),
-    img: /^https?:\/\/\S+$/.test(String(o.img || '').trim()) ? String(o.img).trim().slice(0, 400) : '',
+    img: cleanImg(o.img, opts && opts.handle),
     available: o.out === true ? false : o.available === false ? false : true,
     popular: !!o.popular,
   };
@@ -913,14 +988,16 @@ const MENU_ITEM = (x, opts) => {
  *  merchant makes is a price or a sold-out tick on a row that already has a name
  *  in the sheet, and an editor that requires the name to be resent would throw the
  *  whole edit away. Absent means "unchanged", so nothing here may default a value. */
-export function sanitizeMenuEdit(input) {
+export function sanitizeMenuEdit(input, handle) {
   const o = input && typeof input === 'object' ? input : {};
   const c = {};
   if (o.name != null && String(o.name).trim()) c.name = String(o.name).trim().slice(0, 80);
   if (o.cat != null && String(o.cat).trim()) c.cat = String(o.cat).trim().slice(0, 40);
   if (o.price != null && String(o.price).trim() !== '' && isFinite(Number(o.price))) c.price = round2(clamp(Number(o.price), 0, 100000));
   if (o.desc != null) c.desc = String(o.desc).trim().slice(0, 240);
-  if (o.img != null) c.img = /^https?:\/\/\S+$/.test(String(o.img).trim()) ? String(o.img).trim().slice(0, 400) : '';
+  // '' on a field that was present means "take the picture off", which is how a
+  // merchant clears an upload without editing the row's other fields.
+  if (o.img != null) c.img = cleanImg(o.img, handle);
   const sold = o.out === true || o.out === 'true' || o.out === 1;
   const back = o.out === false || o.out === 'false' || o.out === 0 || o.available === true;
   if (sold) c.available = false; else if (back) c.available = true;
@@ -934,17 +1011,21 @@ export function sanitizeMenuEdit(input) {
  *  than throwing: a half-typed item must not 500 a save. */
 export function sanitizeMenu(input) {
   const m = input && typeof input === 'object' ? input : {};
+  // `handle` rides inside the payload rather than as a second argument because the
+  // dashboard posts one object, and the check that matters is "does this path
+  // belong to the store saving it". An unknown handle disables refs, not URLs.
+  const handle = m.handle != null && validHandle(String(m.handle)) ? String(m.handle) : '';
   const out = { over: {}, hide: [], extra: [], order: [], set_at: new Date().toISOString() };
   const over = m.over && typeof m.over === 'object' ? m.over : {};
   for (const k of Object.keys(over).slice(0, MENU_CAP)) {
-    const clean = sanitizeMenuEdit(over[k]);
+    const clean = sanitizeMenuEdit(over[k], handle);
     if (Object.keys(clean).length) out.over[String(k).slice(0, 60)] = clean;
   }
   const hide = new Set((Array.isArray(m.hide) ? m.hide : []).map((x) => String(x).slice(0, 60)).filter(Boolean));
   out.hide = [...hide].slice(0, MENU_CAP);
   const seen = new Set();
   for (const x of (Array.isArray(m.extra) ? m.extra : []).slice(0, MENU_CAP)) {
-    const item = MENU_ITEM(x, {});
+    const item = MENU_ITEM(x, { handle });
     if (!item || !item.id || seen.has(item.id)) continue;
     seen.add(item.id); item.menu_item = true; out.extra.push(item);
   }
@@ -969,7 +1050,7 @@ export function applyMenu(products, menu) {
     if (o.cat) next.cat = o.cat;
     if (isFinite(Number(o.price))) next.price = round2(Number(o.price));
     if (o.desc != null) next.desc = o.desc;
-    if (o.img) next.img = o.img;
+    if (o.img != null) next.img = o.img;   // '' is an order to take the picture off, not a no-op
     if (Array.isArray(o.opts) && o.opts.length) next.opts = o.opts;
     if (Array.isArray(o.addons)) next.addons = o.addons;
     if (typeof o.available === 'boolean') next.available = o.available;

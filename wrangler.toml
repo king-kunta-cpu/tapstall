@@ -5,7 +5,7 @@ workers_dev = true
 
 # Templates are served from KV (keys tpl:*) so an HTML fix is one PUT, not a
 # redeploy: no git push, no dashboard, no build step. That is why there is no
-# [assets] block here — Cloudflare's static-asset upload format is the one part
+# [assets] block here - Cloudflare's static-asset upload format is the one part
 # of this stack that is not pleasant to script, and KV does the job for free.
 [[kv_namespaces]]
 binding = "STORES"
@@ -15,8 +15,10 @@ id = "b5c1c89d95114092ae91bbafc5a2d76c"
 binding = "ORDERS"
 id = "4f4ac94a66db4b859b61668a3c160819"
 
-[triggers]
-crons = ["15 6,12,18,0 * * *"]
+# The previous brand's hostname. It answers redirects for pages and keeps serving
+# anything with a body, so a browser mid-order is never told "go somewhere else".
+[vars]
+REDIRECT_TO = "https://tapstall.simalidudu.workers.dev"
 
 [observability]
 enabled = true

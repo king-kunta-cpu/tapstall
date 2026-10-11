@@ -294,3 +294,54 @@ test('the storefront asks for the sending number only where it explains a paymen
   assert.ok(/CFG\.open/.test(s), 'the open/closed line is computed on the shop clock, not the visitor’s');
   assert.ok(!/rail_accts/.test(s), 'the map of every rail is never handed to a public page');
 });
+
+test('a merchant can drop a picture, browse for one, or paste a link — in both places', () => {
+  const a = page('admin');
+  // The control is one builder used for the shop logo and every item row, plus the
+  // static copy in the add-an-item form. Two ways to say "the same box twice".
+  assert.ok(/function picHtml\(value, ph, boxAttr, inAttr\)/.test(a), 'one builder for every picture box');
+  assert.ok(a.includes("data-which=\"logo\"") && a.includes("data-which=\"row\""), 'the logo and the rows use it');
+  assert.ok(/data-which="new"/.test(a), 'and so does the add-an-item form');
+  for (const need of ['accept="image/*"', 'data-pk="pick"', 'data-pk="off"', 'class="pu"']) {
+    assert.ok(a.includes(need), need + ' — a picture box without it is a box that cannot ' + (need.includes('pick') ? 'pick a file' : need.includes('off') ? 'take one off' : 'hold a link'));
+  }
+  assert.ok((a.match(/accept="image\/\*"/g) || []).length >= 2, 'a file input for the built boxes and for the static one');
+  // Drag and drop is only real if both events are handled and the drop is stopped
+  // from navigating the page to the file.
+  assert.ok(/addEventListener\('dragover'/.test(a) && /addEventListener\('drop'/.test(a), 'the box accepts a dropped file');
+  assert.ok(/e\.preventDefault\(\)/.test(a), 'and dropping does not replace the dashboard with the image');
+  // An upload is a write, so it carries the same header the settings save does.
+  assert.ok(/fetch\('\/api\/image\?handle='/.test(a), 'it posts to the store that asked for it');
+  assert.ok(/'x-tapstall-confirm': '1'/.test(a), 'with the confirmation header a cross-site form cannot set');
+  // The bytes never become the setting. Only a path does.
+  assert.ok(!/data:image/.test(a), 'no base64 picture is ever built into a save payload');
+  assert.ok(a.includes("apply(o.j.ref)"), 'what comes back from the upload is the path, and that is what is applied');
+  assert.ok(/setEdit\(box\.getAttribute\('data-id'\), \{ img: v \|\| '' \}\)/.test(a), 'a row records the path in the same draft the price uses');
+  // Client and server have to agree on the ceiling, or a squeezed file still gets refused.
+  assert.ok(/PIC_AIM = 120 \* 1024, PIC_HARD = 200 \* 1024/.test(a), 'the dashboard aims under what the worker accepts');
+  assert.ok(/SVG is refused/.test(a), 'and it says so before the round trip, in the same words the server uses');
+  const s = page('store');
+  assert.ok(/p\.img/.test(s) && /class="logo" id="logo"/.test(s), 'the buyer’s page shows the item picture and the logo the store holds');
+});
+
+test('a picture path typed by a merchant cannot escape the attribute it is written into', () => {
+  // The box puts a value the merchant controls into an HTML attribute, in three
+  // places, and it is built in script rather than by the browser — so this is the
+  // one claim about it worth executing instead of grepping.
+  const js = scripts(src('admin')).join('\n;\n');
+  const grab = (name) => {
+    const i = js.indexOf('function ' + name);
+    assert.ok(i >= 0, name + ' is in the admin script');
+    const j = js.indexOf('\n}', i);
+    assert.ok(j > i, name + ' closes on its own line');
+    return js.slice(i, j + 2);
+  };
+  const picHtml = new Function(grab('esc') + '\n' + grab('picHtml') + '\nreturn picHtml;')();
+  const hostile = '/i/mamatoe/abc" onerror="alert(1)';
+  const out = picHtml(hostile, 'ph', 'data-which="row"', '');
+  assert.ok(!/["']\s*onerror\s*=/.test(out), 'the quote is escaped, so a value cannot open a new attribute: ' + out);
+  assert.ok(out.includes('&quot;'), 'and it is visibly escaped rather than silently dropped');
+  const box = picHtml('', 'drop a file', 'data-which="logo"', 'data-k="logo"');
+  assert.ok(box.includes('<input class="pu" data-k="logo" value=""'), 'the logo box writes into the field the ordinary Save already reads: ' + box);
+  assert.ok(box.includes('Take off') && box.includes('style="display:none"'), 'and there is a way to take a picture off, shown only when one is set');
+});

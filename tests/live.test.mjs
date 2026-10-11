@@ -47,22 +47,36 @@ const MENU = [
 
 function kvStub() {
   const m = new Map();
-  let writes = 0;                                 // the free plan allows 1,000 a day, total
+  let writes = 0, deletes = 0;                    // the free plan allows 1,000 a day, total
+  const byKey = new Map(); const gone = [];
+  // A budget is only a meaningful assertion when you can say which key spent it:
+  // "60 wrong PINs cost <= 6 writes" tipped over on a legitimate fold of the store
+  // document, which is a different event on a different budget, and the test read as
+  // a throttle regression. So the tally is per key and the ceiling is per behaviour.
+  const tally = (k) => byKey.set(k, (byKey.get(k) || 0) + 1);
+  const toBin = (v) => (v instanceof ArrayBuffer ? v
+    : ArrayBuffer.isView(v) ? v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength)
+    : new TextEncoder().encode(String(v)).buffer);
   return {
     _map: m,
     get _writes() { return writes; },
-    async get(key, type) {
+    get _deletes() { return deletes; },
+    _writesTo(key) { return byKey.get(key) || 0; },
+    _deleted(key) { return gone.includes(key); },
+    async get(key, kind) {
       if (!m.has(key)) return null;
       const v = m.get(key).value;
-      if (type === 'json') return JSON.parse(v);
-      if (type === 'stream') return { json: async () => JSON.parse(v) };
-      return v;
+      const type = typeof kind === 'string' ? kind : (kind && kind.type) || '';   // both shapes Cloudflare takes
+      if (type === 'json') return JSON.parse(typeof v === 'string' ? v : new TextDecoder().decode(v));
+      if (type === 'stream') return { json: async () => JSON.parse(typeof v === 'string' ? v : new TextDecoder().decode(v)) };
+      if (type === 'arrayBuffer') return toBin(v).slice(0);
+      return typeof v === 'string' ? v : new TextDecoder().decode(v);
     },
     async put(key, value, opts) {
-      writes++;
-      m.set(key, { value: typeof value === 'string' ? value : JSON.stringify(value), exp: opts?.expirationTtl });
+      writes++; tally(key);
+      m.set(key, { value: typeof value === 'string' ? value : toBin(value), exp: opts?.expirationTtl });
     },
-    async delete(key) { m.delete(key); },
+    async delete(key) { deletes++; gone.push(key); tally('del:' + key); m.delete(key); },
     async list(arg) {
       const prefix = typeof arg === 'string' ? arg : (arg && arg.prefix) || '';
       const keys = [...m.keys()].filter((k) => !prefix || k.startsWith(prefix))
@@ -88,25 +102,28 @@ async function load() {
 // `ip` because POST /api/order is throttled 8/min/IP — the rail tests below
 // place a few more orders than that on purpose, and a 429 is not what they are
 // here to prove.
-async function call(path, { method = 'GET', body, cookie, confirm, headers, ip } = {}) {
+async function call(path, { method = 'GET', body, cookie, confirm, headers, ip, raw, etag } = {}) {
   const w = await load();
   const h = { 'content-type': 'application/json', 'cf-connecting-ip': ip || '196.0.0.1', ...(headers || {}) };
   if (cookie) h.cookie = cookie;
   if (confirm) h['x-tapstall-confirm'] = '1';
+  if (etag) h['if-none-match'] = etag;
+  if (raw && body !== undefined && !(body instanceof ArrayBuffer)) h['content-type'] = 'application/octet-stream';
   const req = new Request('https://tapstall.test' + path, {
     method, headers: h,
-    body: body === undefined ? undefined : (typeof body === 'string' ? body : JSON.stringify(body)),
+    body: body === undefined ? undefined : (typeof body === 'string' || body instanceof ArrayBuffer ? body : JSON.stringify(body)),
   });
   const ctx = { waitUntil: (p) => p };
   const res = await w.fetch(req, env, ctx);
-  const text = await res.text();
+  const text = raw ? null : await res.text();
+  const buf = raw ? await res.arrayBuffer() : null;   // for a body that is not text
   let json = null;
   try { json = JSON.parse(text); } catch {}
   const cookies = res.headers.getSetCookie?.() || [];
   // `cookies` as well as `cookie`: the rename means one response can now carry a
   // Set-Cookie for the new name and a Max-Age=0 for the old one, and a test that
   // only sees a joined blob cannot tell which cookie it is complaining about
-  return { status: res.status, text, json, headers: res.headers, cookies, cookie: cookies.join(';') };
+  return { status: res.status, text, json, buf, headers: res.headers, cookies, cookie: cookies.join(';') };
 }
 /** A form post, the way a page with no JavaScript (or a `<noscript>` fallback) sends one. */
 function form(o) { return Object.keys(o).map((k) => encodeURIComponent(k) + '=' + encodeURIComponent(o[k])).join('&'); }
@@ -1303,9 +1320,16 @@ test('a guessing flood is cheap to the tenant, and an operator can undo it', asy
   const wrongPin = String((Number(store.pin) + 1) % 1000000).padStart(6, '0');
   assert.notEqual(wrongPin, store.pin, 'the test cannot accidentally use the right PIN');
   const before = env.STORES._writes;
+  const beforePin = env.STORES._writesTo('pinl:mamatoe');
   for (let i = 0; i < 60; i++) await call('/api/auth', { method: 'POST', body: { key: 'mamatoe', pin: wrongPin } });
   const spent = env.STORES._writes - before;
-  assert.ok(spent <= 6, '60 wrong PINs cost ' + spent + ' KV writes, not 60');
+  const pinSpent = env.STORES._writesTo('pinl:mamatoe') - beforePin;
+  // The property is about the counter's own key: one write per tier crossed, never
+  // one per attempt. The total gets a looser ceiling because a read that finds a
+  // matured hold legitimately re-folds the store document mid-loop, and making the
+  // throttle assertion absorb that cost was how this test came to flake.
+  assert.ok(pinSpent <= 4, 'the freeze counter was written ' + pinSpent + ' times for 60 wrong PINs, and there are four tiers');
+  assert.ok(spent <= 8, '60 wrong PINs cost ' + spent + ' KV writes all in, not 60');
   assert.ok(await env.STORES.get('pinl:mamatoe'), 'the freeze is persisted, so a fresh isolate inherits it');
   const frozen = await call('/api/auth', { method: 'POST', body: { key: 'mamatoe', pin: store.pin } });
   assert.equal(frozen.status, 429, 'and past the first tier the door is shut for everyone: ' + frozen.text);
@@ -1586,4 +1610,140 @@ test('a described rail says what its number looks like', async () => {
   const g3 = JSON.parse(env.STORES._map.get('store:mamatoe').value);
   if (g3.pending && g3.pending.fields) g3.pending.apply_at = Date.now() - 1;
   env.STORES._map.set('store:mamatoe', { value: JSON.stringify(g3) });
+});
+
+
+/* ------------------------------------------------------------ store images */
+/* A merchant dropping a photo in should not be able to: grow the document the
+ * storefront reads on every render, hand a stranger's bytes, publish a file the
+ * worker cannot name, or eat the store's picture budget one abandoned upload at a
+ * time. Each test below is one of those, written as the failure. */
+const b64ToBuf = (b) => Uint8Array.from(Buffer.from(b, 'base64'), (c) => c).buffer;
+const PNG1 = b64ToBuf('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==');
+const adminKey = () => JSON.parse(env.STORES._map.get('store:mamatoe').value).admin_token;
+const sendImage = (bytes, over) => call('/api/image?handle=mamatoe', Object.assign(
+  { method: 'POST', body: bytes, headers: { 'x-tapstall-admin': adminKey() } }, over || {}));
+const putKey = (name, value) => env.STORES._map.set(name, { value });
+
+test('a dropped picture comes back as a path, and the path serves the same bytes', async () => {
+  const up = await sendImage(PNG1);
+  assert.equal(up.status, 200, 'the upload: ' + up.text);
+  assert.match(up.json.ref, /^\/i\/mamatoe\/[A-Za-z0-9_-]{10}$/, 'a path under this store, never a data: URL: ' + up.json.ref);
+  assert.equal(up.json.kind, 'png', 'and it says what it found, from the bytes');
+  const id = up.json.ref.split('/').pop();
+  const got = await call(up.json.ref, { raw: true });
+  assert.equal(got.status, 200, 'the storefront fetches it with no credentials, so a cached page still shows the food — body: ' + (await call(up.json.ref)).text);
+  assert.equal(Buffer.compare(Buffer.from(got.buf), Buffer.from(PNG1)), 0, 'byte for byte the file that was sent');
+  assert.equal(got.headers.get('content-type'), 'image/png');
+  assert.match(got.headers.get('cache-control') || '', /immutable/, 'an id is never reused, so a year of cache is honest');
+  assert.equal(got.headers.get('x-content-type-options'), 'nosniff');
+  const again = await call(up.json.ref, { raw: true, etag: '"' + id + '"' });
+  assert.equal(again.status, 304, 'a reload revalidates against the path itself');
+  assert.equal(again.buf.byteLength, 0, 'and costs no bytes');
+  const gone = await call('/i/mamatoe/Zzzzzzzzzz', { raw: true });
+  assert.equal(gone.status, 404, 'a path nobody stored is a 404, not an empty 200');
+  assert.match(gone.headers.get('cache-control') || '', /no-store/, 'and a miss is never cached, or a first load could stay broken');
+});
+
+test('nobody posts a picture to a store without saying who they are', async () => {
+  const anon = await call('/api/image?handle=mamatoe', { method: 'POST', body: PNG1 });
+  assert.equal(anon.status, 401, 'a stranger cannot fill a store with files: ' + anon.text);
+  assert.match(anon.text, /sign in/i, 'and the answer names the way in');
+  const inKey = await sendImage(PNG1);
+  assert.equal(inKey.status, 200, 'the API key a script sends works');
+  const sess = await loginWithPin(store.handle, store.pin);
+  assert.equal(sess.r.status, 200, 'and so does a signed-in merchant: ' + sess.r.text);
+  const bare = await call('/api/image?handle=mamatoe', { method: 'POST', body: PNG1, cookie: sess.cookie });
+  assert.equal(bare.status, 403, 'a cookie alone is not consent from another page');
+  assert.match(bare.text, /x-tapstall-confirm/);
+  const ok = await call('/api/image?handle=mamatoe', { method: 'POST', body: PNG1, cookie: sess.cookie, confirm: true });
+  assert.equal(ok.status, 200, 'one tap of the button the merchant already pressed is enough');
+  const forged = await call('/api/image?handle=mamatoe', { method: 'POST', body: PNG1, headers: { 'x-tapstall-admin': 'guess' } });
+  // 401, the same answer as no key at all, and on purpose: a guesser must not learn
+  // that the store exists and only the key was wrong.
+  assert.equal(forged.status, 401, 'a wrong key is answered like no key: ' + forged.text);
+});
+
+test('a file that is not a picture is refused in words, and it costs no storage', async () => {
+  const writes = env.STORES._writes;
+  const svg = await sendImage(new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>').buffer);
+  assert.equal(svg.status, 422, 'SVG would run on this origin with the merchant’s cookie in the jar');
+  assert.match(svg.json.error, /SVG is refused/i, 'the answer says which format and why: ' + svg.json.error);
+  const gif = await sendImage(new TextEncoder().encode('GIF89a          ').buffer);
+  assert.equal(gif.status, 422);
+  assert.match(gif.json.error, /GIF is refused/i);
+  const zip = await sendImage(new TextEncoder().encode('PK\x03\x04          ').buffer);
+  assert.equal(zip.status, 422);
+  assert.match(zip.json.error, /not a picture/i);
+  const empty = await sendImage(new ArrayBuffer(0));
+  assert.equal(empty.status, 422);
+  assert.match(empty.json.error, /nothing in that file/i);
+  const big = new Uint8Array(300 * 1024);
+  big.set([0xff, 0xd8, 0xff, 0xe0], 0);
+  const over = await sendImage(big.buffer);
+  assert.equal(over.status, 413, 'a real JPEG that is 300 KB is still too big for a thumbnail');
+  assert.match(over.json.error, /KB/, 'and the merchant is told the size it wanted: ' + over.json.error);
+  assert.equal(env.STORES._writes, writes, 'refusals write nothing: a refused upload must not spend the store’s day');
+});
+
+test('the store document keeps the path and never the bytes', async () => {
+  const up = await sendImage(PNG1);
+  const doc = () => env.STORES._map.get('store:mamatoe').value;
+  const raw = typeof doc() === 'string' ? doc() : JSON.stringify(doc());
+  assert.ok(raw.length < 60000, 'the store document is ' + raw.length + ' bytes — a picture in here is paid for on every page view');
+  const saved = await call('/api/settings', { method: 'POST', body: { handle: 'mamatoe', logo:  up.json.ref }, headers: { 'x-tapstall-admin': adminKey() } });
+  assert.equal(saved.status, 200, 'a logo is a soft field, so it lands now: ' + saved.text);
+  assert.ok((saved.json.applied_now || []).includes('logo'), 'and the answer says so: ' + JSON.stringify(saved.json));
+  const pub = await call('/s/mamatoe/config.json');
+  assert.equal(pub.json.store.logo, up.json.ref, 'the buyer’s page reads the path straight out of the public config');
+  const after = typeof doc() === 'string' ? doc() : JSON.stringify(doc());
+  assert.ok(after.indexOf(up.json.ref) >= 0, 'the path is stored on the store');
+  assert.ok(!/iVBORw0KGgo|89504e47/i.test(after) && after.length < 60000, 'and no picture is embedded in it');
+});
+
+test('a picture the shop stops pointing at is taken out of storage', async () => {
+  const a = await sendImage(PNG1);
+  await call('/api/settings', { method: 'POST', body: { handle: 'mamatoe', logo:  a.json.ref }, headers: { 'x-tapstall-admin': adminKey() } });
+  const b = await sendImage(PNG1);
+  const swap = await call('/api/settings', { method: 'POST', body: { handle: 'mamatoe', logo:  b.json.ref }, headers: { 'x-tapstall-admin': adminKey() } });
+  assert.equal(swap.status, 200);
+  assert.equal((await call(b.json.ref)).status, 200, 'the new one is live');
+  assert.equal((await call(a.json.ref)).status, 404, 'the one nobody points at is gone, not orphaned forever');
+  assert.ok(env.STORES._deleted('img:mamatoe:' + a.json.ref.split('/').pop()), 'and it is a delete, so the 1 GB ceiling moves back');
+  const off = await call('/api/settings', { method: 'POST', body: { handle: 'mamatoe', logo:  '' }, headers: { 'x-tapstall-admin': adminKey() } });
+  assert.equal(off.status, 200, 'and taking the logo off entirely works like any other clear');
+  assert.equal((await call(b.json.ref)).status, 404, 'which frees that one too');
+});
+
+test('an item row takes its photo from the same upload and the shelf passes it on', async () => {
+  const up = await sendImage(PNG1);
+  const saved = await call('/api/menu', { method: 'POST', body: { handle: 'mamatoe', menu:  { over: { '2': { img: up.json.ref } } } }, headers: { 'x-tapstall-admin': adminKey() } });
+  assert.equal(saved.status, 200, saved.text);
+  const feed = await call('/s/mamatoe/feed.json');
+  const row = (feed.json.products || []).find((p) => String(p.id) === '2');
+  assert.equal(row && row.img, up.json.ref, 'the buyer’s feed now carries the path');
+  const back = await call('/api/menu', { method: 'POST', body: { handle: 'mamatoe', menu:  { over: { '2': { img: '' } } } }, headers: { 'x-tapstall-admin': adminKey() } });
+  assert.equal(back.status, 200);
+  const feed2 = await call('/s/mamatoe/feed.json');
+  const row2 = (feed2.json.products || []).find((p) => String(p.id) === '2');
+  assert.equal(row2.img, '', 'and clearing it clears it, rather than leaving a photo the merchant deleted');
+  assert.equal((await call(up.json.ref)).status, 404, 'the bytes go with it');
+});
+
+test('sixty pictures is what a store gets, and the last answer says what to do', async () => {
+  const refs = [];
+  for (let i = 0; i < 60; i++) {
+    const up = await sendImage(PNG1);
+    assert.equal(up.status, 200, 'upload ' + i + ': ' + up.text);
+    refs.push(up.json.ref);
+    const save = await call('/api/menu', { method: 'POST', headers: { 'x-tapstall-admin': adminKey() }, body: { handle: 'mamatoe', menu:  { extra: refs.map((r, j) => ({ id: 'cap' + j, name: 'Cap ' + j, img: r })) } } });
+    assert.equal(save.status, 200, 'save ' + i + ': ' + save.text);
+  }
+  assert.equal((await call(refs[0])).status, 200, 'every stored image is still pointed at, so prune left them all alone');
+  const oneTooMany = await sendImage(PNG1);
+  assert.equal(oneTooMany.status, 429, 'the ceiling is a real number, not a suggestion');
+  assert.match(oneTooMany.json.error, /ceiling/i, 'and it is said in words a merchant can act on: ' + oneTooMany.json.error);
+  const clean = await call('/api/menu', { method: 'POST', body: { handle: 'mamatoe', menu:  {} }, headers: { 'x-tapstall-admin': adminKey() } });
+  assert.equal(clean.status, 200, 'reverting the menu frees the lot: ' + clean.text);
+  assert.equal((await call(refs[0])).status, 404, 'and the files go with the rows that named them');
 });

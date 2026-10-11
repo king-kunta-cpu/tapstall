@@ -70,6 +70,18 @@ KEYS=$(cf GET "/storage/kv/namespaces/$STORES_ID/keys?per_page=1" | jq -r '.resu
 # the shipped pages must be the generated ones, or KV would publish a stale UI
 python3 scripts/ui_kit.py check || die "pages/*.html are out of date with pages/src/ — run python3 scripts/ui_kit.py and commit"
 
+# --templates ships the pages and nothing else. It exists because the 1,000 free KV
+# writes a day can be spent by the time a release gets to them: the Worker goes out,
+# the HTML waits, and the only way to finish is to run something again after midnight.
+# This is that something. It spends a write only where KV differs from git, so a
+# nightly run on a quiet day costs nothing and proves the same fact every time.
+if [[ "$MODE" == "--templates" ]]; then
+  say "templates → KV only (no bundle, no worker publish)"
+  kv_put_tpl "$STORES_ID" store onboard admin fees index confirm renew ops sample-menu.csv
+  verify_templates "$STORES_ID" store onboard admin fees index confirm renew ops sample-menu.csv
+  exit 0
+fi
+
 say "templates → KV (hot-swappable: HTML edits need no redeploy)"
 kv_put_tpl "$STORES_ID" store onboard admin fees index confirm renew ops sample-menu.csv
 
