@@ -103,6 +103,15 @@ system, the ledger and the storefront — dozens of hard-won fixes and most of t
 needs one `POST /ops/api/store {action:'reset_pin', handle}` to be handed a PIN; the
 console row reads `no PIN` until then and the drawer shows `PIN since <date>` after.
 
+One thing the log said about all this, unprompted: at 14:38–14:39 three
+`pin_reset · via:ops` rows landed on `mamatoe` from the operator's own IP — the
+console's *New sign-in PIN* lever, pressed by a human, twice in two minutes, while
+this rebuild was still in flight. That is the exact behaviour the lever exists for,
+and the reason `prod_check` no longer calls a stale `PIN=` a failure: it now reads
+the store's `pin.set_at` and reports the check as not verifiable today, because the
+truth is "somebody with the shop changed the PIN", not "the door is broken".
+`PIN=919414` afterwards: **138 passed, 0 blocked, 0 failed**, real session and all.
+
 **Measured on production after the deploy (run #40, `0.6.0` on both origins).**
 `scripts/prod_check.sh` → **138 passed, 0 blocked, 0 failed**, including a real
 sign-in from an empty cookie jar, the HttpOnly/SameSite=Strict/Secure flags, and
