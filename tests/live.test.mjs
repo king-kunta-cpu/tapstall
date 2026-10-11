@@ -1035,6 +1035,34 @@ test('the rails console is behind the operator session, the rail list is not', a
   assert.ok(!/rails:extra/.test(open.text), 'the public list does not announce the KV key behind it');
 });
 
+test('the store page is frameable by the dashboard and by nobody else', async () => {
+  // The merchant's "this is your store" preview is an <iframe> of /s/<handle>
+  // inside /a, so a blanket DENY painted it as a blank box on every device. The
+  // exception is scoped to that one path: every other surface still refuses all
+  // framing, because framing is how a clickbait site borrows a real login form.
+  const store = await call('/s/mamatoe');
+  assert.equal(store.headers.get('x-frame-options'), 'SAMEORIGIN');
+  assert.match(store.headers.get('content-security-policy'), /frame-ancestors 'self'/);
+  assert.doesNotMatch(store.headers.get('content-security-policy'), /frame-ancestors 'none'/);
+  // Exactly one of each: this whole class of bug is a header appearing twice with
+  // different casing, which Headers joins with a comma and a browser then reads
+  // as the stricter of the two.
+  for (const [name, re] of [['x-frame-options', /^SAMEORIGIN$/], ['content-security-policy', /^(?!.*,)/]]) {
+    const v = store.headers.get(name);
+    assert.ok(re.test(v), `${name} must be a single value, got: ${v}`);
+  }
+  for (const path of ['/a', '/ops', '/onboard', '/fees', '/__selftest', '/rails']) {
+    const r = await call(path);
+    assert.equal(r.headers.get('x-frame-options'), 'DENY', `${path} must still refuse framing`);
+    assert.match(r.headers.get('content-security-policy'), /frame-ancestors 'none'/,
+      `${path}'s CSP is what matters on a browser that ignores XFO`);
+  }
+  // Derived, not duplicated: a CSP changed in one place must not stop applying to
+  // the other, which is how this pair would drift back into a blank preview.
+  const src = readFileSync(join(root, 'worker', 'worker.js'), 'utf8');
+  assert.match(src, /SEC_HEADERS\['Content-Security-Policy'\]\.replace\(/);
+});
+
 test('an alias origin does not sweep the same KV twice a day', async () => {
   // Cloudflare would not let this token delete the schedule the old hostname kept
   // (PUT /schedules -> success:false), so the guard is in the code: a Worker

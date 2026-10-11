@@ -103,6 +103,19 @@ ck "anonymous settings POST -> 401" '^401$' "$(curl -s -m 30 -o /dev/null -w '%{
 ck "OPTIONS on a mutation path -> 403" '^403$' "$(code -X OPTIONS "$ORIGIN/api/settings")"
 ck "OPTIONS on the buyer path still allows the storefront" 'access-control-allow-origin: \*' "$(curl -s -m 30 -D - -o /dev/null -X OPTIONS "$ORIGIN/api/order" | tr -d '\r')"
 ck "storefront 200" '^200$' "$(code "$ORIGIN/s/$HANDLE")"
+# The dashboard embeds the storefront so a merchant can see what a buyer sees.
+# That needs same-origin framing on this one path; everything else must still
+# refuse it, and the policy must appear once — a header set twice with different
+# casing is joined by the Headers object, and a browser then obeys the stricter
+# of the two, which is how this feature stayed blank for a whole release.
+SH=$(mktemp)
+curl -s -m 30 -D "$SH" -o /dev/null "$ORIGIN/s/$HANDLE"
+SBLOB=$(tr -d '\r' < "$SH")
+ck "storefront is frameable by our own pages" 'x-frame-options: SAMEORIGIN' "$SBLOB"
+ck "storefront CSP says frame-ancestors 'self'" "frame-ancestors 'self'" "$SBLOB"
+nk "and not a second joined policy forbidding it" "frame-ancestors .none" "$SBLOB"
+ck "the dashboard still refuses all framing" 'x-frame-options: DENY' "$(curl -s -m 30 -D - -o /dev/null "$ORIGIN/a" | tr -d '\r')"
+rm -f "$SH"
 ck "menu feed 200" '^200$' "$(code "$ORIGIN/s/$HANDLE/feed.json")"
 ck "fees page 200" '^200$' "$(code "$ORIGIN/fees")"
 ck "onboarding 200" '^200$' "$(code "$ORIGIN/onboard")"

@@ -163,6 +163,15 @@ test('no page prints a credential, and none can be framed', () => {
    The GitHub Pages mirror — the one host with no server to fall back on.
    -------------------------------------------------------------------------- */
 
+test('the dashboard preview frames the store page, the one page allowed to be framed', () => {
+  // The store page's `frame-ancestors 'self'` exists only for this iframe. If the
+  // preview starts pointing somewhere else, it goes blank and the header
+  // exception is then nothing but a hole — so the two halves are asserted together.
+  const html = page('admin');
+  assert.match(html, /var url = location\.origin \+ '\/s\/' \+ S\.handle;/);
+  assert.match(html, /q\('#shareFrame'\)\.src = url;/);
+});
+
 test('the mirror never links to a page it does not have', () => {
   // Pages serves files and nothing else. It has no rewrite engine and ignores
   // `_redirects` (that file is Netlify's), so `/onboard` on the mirror 404'd for

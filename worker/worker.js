@@ -21,7 +21,7 @@ import {
   EDITABLE_FIELDS, SOFT_FIELDS, sign, adminStore, normaliseRail, resolveRail,
 } from './core.js';
 
-const VERSION = '0.5.0';
+const VERSION = '0.5.1';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 const MAX_ORDERS_KEPT = 200;
@@ -252,7 +252,7 @@ async function storePage(env, handle) {
   const term = await env.STORES.get('term:' + handle, 'json');
   const page = fillPage(await tpl(env, 'store'),
     [['TAPSTALL_CONFIG', publicStore(st, await railsCatalog(env))], ['TAPSTALL_TERM', term || null]]);
-  return html(page, 200, { 'Cache-Control': 'public, max-age=60, s-maxage=300' });
+  return html(page, 200, { 'Cache-Control': 'public, max-age=60, s-maxage=300', ...FRAMEABLE });
 }
 
 /**
@@ -1011,6 +1011,22 @@ const SEC_HEADERS = {
  * admin, settings, mark and login endpoints deliberately do not, so no foreign
  * page can read a ledger or fire a mutation from a visitor's browser.
  */
+/**
+ * The store page is the one surface the dashboard embeds, to show a merchant
+ * their own store next to the share buttons. `frame-ancestors 'none'` +
+ * `X-Frame-Options: DENY` on it therefore painted that preview as a blank white
+ * box on every device — a feature that has never once rendered. Same-origin
+ * framing is allowed there and nowhere else: a stranger's page still cannot put
+ * a store inside a clickbait frame, and the admin, operator and API surfaces keep
+ * DENY. Deriving the string instead of duplicating it is deliberate: a CSP edited
+ * in one place must not silently stop applying to the other.
+ */
+const FRAMEABLE = {
+  'X-Frame-Options': 'SAMEORIGIN',
+  'Content-Security-Policy': SEC_HEADERS['Content-Security-Policy'].replace(
+    "frame-ancestors 'none'", "frame-ancestors 'self'"),
+};
+
 const LEGACY_PAGES_RE = /^\/$|^\/s\/|^\/a$|^\/c\/|^\/renew\/|^\/fees\b|^\/onboard\b|^\/rails\b|^\/data\/|^\/ops$/;
 const OPEN_RE = /^\/s\/|^\/rails\b|^\/fees\b|^\/data\/|^\/onboard\b|^\/__ping\b|^\/api\/(order|register|lookup|hook\/)|^\/renew\//;
 function isOpenPath(pathname) { return OPEN_RE.test(pathname); }
@@ -1029,7 +1045,14 @@ function sessCookie(value) {
 function hdr(extra) {
   // both spellings for one release: a cached page or a script an operator wrote
   // against the old header should keep working while it is still in use
-  const h = { 'cache-control': 'no-store', 'x-tapstall': VERSION, 'x-zimlink': VERSION, ...SEC_HEADERS };
+  // Everything is folded into one lower-cased table on purpose. Spreading
+  // SEC_HEADERS first leaves `X-Frame-Options` and `Content-Security-Policy` in
+  // their original casing, and a per-route override then *adds* a second key that
+  // differs only in case — a Headers object keeps both and joins them, so the
+  // response read `DENY, SAMEORIGIN` (and two CSPs, which a browser intersects:
+  // the stricter one wins). Lower-case both sides and an override replaces.
+  const h = { 'cache-control': 'no-store', 'x-tapstall': VERSION, 'x-zimlink': VERSION };
+  for (const k of Object.keys(SEC_HEADERS)) h[k.toLowerCase()] = SEC_HEADERS[k];
   for (const k of Object.keys(extra || {})) h[k.toLowerCase()] = extra[k];
   return h;
 }
