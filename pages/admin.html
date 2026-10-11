@@ -255,6 +255,18 @@ details.box .in{padding:.5rem 0 .7rem}
 #menuEdit .pr{width:6.4rem;padding:.3rem .4rem;text-align:right;border:1px solid #cfd8e0;border-radius:4px;font:inherit}
 #menuEdit .added{background:#f7fbf8}
 #menuEdit .hint{width:100%;margin-top:.15rem}
+.seclab{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;font-weight:600;font-size:13px;margin:.8rem 0 .1rem}
+#railAccts .arow,#weekEd .wrow{display:flex;flex-wrap:wrap;gap:.3rem;align-items:center;padding:.28rem 0;border-bottom:1px solid #eef2f6}
+#railAccts .an{flex:1 1 7rem;min-width:6rem;font-size:13px}
+#railAccts .an i{font-style:normal;color:#0a6b33;font-size:11px}
+#railAccts .arow input,#weekEd .wrow input[type=time]{padding:.3rem .4rem;border:1px solid #cfd8e0;border-radius:4px;font:inherit}
+#railAccts .arow input{flex:1 1 8rem;min-width:7rem}
+#railAccts .arow.on{background:#f5faf6}
+#railAccts .hint,#weekEd .wrow .hint{font-size:12px;color:#65788b;width:100%}
+#weekEd .wd{flex:0 0 5.2rem;font-size:13px}
+#weekEd .to{font-size:11px;color:#65788b}
+#weekEd input[type=time]{width:6.6rem}
+.ck{display:inline-flex;gap:.25rem;align-items:center;font-size:12px;font-weight:400}
 </style>
 </head>
 <body>
@@ -353,6 +365,8 @@ details.box .in{padding:.5rem 0 .7rem}
       <summary>Change what buyers see and where they pay</summary>
       <div class="in">
         <div id="fields"></div>
+        <div id="railAccts"></div>
+        <div id="weekEd"></div>
         <div style="display:flex;gap:.5rem;margin-top:.6rem;flex-wrap:wrap">
           <button id="saveSt">Save</button>
           <button class="sm" id="revertBtn">Cancel queued changes</button>
@@ -720,7 +734,7 @@ q('#menuClear').onclick = function () {
 var LABEL = {
   shop_name: 'Shop name', tagline: 'Tagline', logo: 'Logo (image URL)', location: 'Location / address', hours: 'Opening hours', closed: 'Closed right now',
   rail_def: 'Describe your own method',
-  whatsapp: 'Your WhatsApp (buyers reach you)', pay_account: 'Payment account / number customers pay', rail: 'Payment rail', surcharge_mode: 'Who pays the payment cost',
+  whatsapp: 'Your WhatsApp (buyers reach you)', pay_account: 'Default payment number (for methods with no number of their own)', rail: 'Payment rail', surcharge_mode: 'Who pays the payment cost',
   currency: 'Currency', zig_rate: 'ZiG exchange rate', tax_pct: 'Tax %', delivery_fee: 'Delivery fee', free_over: 'Free delivery over',
   max_order_value: 'Flag orders over', cod_review_above: 'Review cash orders over', cache_seconds: 'Menu cache (seconds)', feed_url: 'Menu sheet link',
   notify_webhook: 'Order webhook (URL)', notify_email: 'Notify this email of orders', owner_email: 'Owner email (also lets you reset your own PIN)',
@@ -752,9 +766,26 @@ function renderFields() {
         + '<span style="width:7rem"><input data-rd="dial" placeholder="*151#" value="' + esc(d.dial || '') + '"></span>'
         + '<span style="width:5rem"><input data-rd="pct" type="number" step="0.01" min="0" max="30" placeholder="fee %" value="' + esc(d.pct != null ? (d.pct * 100) : '') + '"></span>'
         + '<span style="width:5rem"><input data-rd="fixed" type="number" step="0.01" min="0" placeholder="+ fixed" value="' + esc(d.fixed != null ? d.fixed : '') + '"></span>'
+        + '</div>'
+        // A method nobody has heard of outside one street also has its own idea of
+        // what a number looks like — M-Pesa wants a phone, a bank app an account.
+        // Saying so is what lets it be validated and printed properly, not guessed.
+        + '<div class="row" style="margin-top:.3rem;display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">'
+        + '<span style="flex:1 1 12rem"><select data-rd="spec">'
+        + [['wallet','the number looks like a wallet ID'], ['phone','like a phone number'], ['bank','like a bank account number'], ['shapid','like a ShapID / proxy'], ['link','a payment link'], ['none','nothing — pay on collection']]
+            .map(function (o) { var cur = d.spec || 'wallet'; return '<option value="' + o[0] + '"' + (cur === o[0] ? ' selected' : '') + '>' + o[1] + '</option>'; }).join('')
+        + '</select></span>'
+        + '<label class="ck"><input type="checkbox" data-rd="holder"' + (d.holder === false ? '' : ' checked') + '> buyers should see a name</label>'
+        + '<label class="ck"><input type="checkbox" data-rd="till"' + (d.till ? ' checked' : '') + '> they also have a till / paybill</label>'
         + '</div><p class="hint">' + (on
-          ? 'This wording and these numbers go on the buyer’s slip. Percent is their fee, “+ fixed” is per payment. Leave everything blank and orders say “pay on collection”.'
+          ? 'This wording and these numbers go on the buyer’s slip. Percent is their fee, “+ fixed” is per payment. The name check is the line that stops a wallet swap. Leave everything blank and orders say “pay on collection”.'
           : 'Not used while a listed method is selected. Choose “My own method (I describe it)” above and this becomes what buyers are told.') + '</p></div>';
+    } else if (k === 'hours') {
+      // The sentence is printed from the week below, so it is not also a free-text
+      // box while a week is set: two owners of one fact is how they disagree.
+      var gen = !!(S.store.week && S.store.week.length);
+      f = '<div class="f"><label>' + esc(LABEL.hours) + (gen ? ' <span class="n">· written from your week below</span>' : '') + '</label>'
+        + '<input data-k="hours" value="' + esc(v == null ? '' : v) + '"' + (gen ? ' readonly' : '') + '></div>';
     } else {
       var num = typeof v === 'number';
       f = '<div class="f"><label>' + esc(LABEL[k] || k) + (inst ? '' : ' <span class="n">· 15-min hold</span>') + '</label>'
@@ -762,10 +793,156 @@ function renderFields() {
     }
     return f;
   }).join('');
+  renderAccts(); renderWeek();
   // rail names come from the public /rails list; fetch once, rebuild once
   if (!S.rails) api('/rails').then(function (r) {
     if (r.j && r.j.rails) { S.rails = r.j.rails; renderFields(); }
   });
+}
+
+/* ------------------------------------------------- payment detail, per method
+ * One number per shop was a guess: the EcoCash wallet, the ZIPIT account and the
+ * ShapID are three shapes, and a buyer told "send it to the account" sends it to
+ * whichever one they find first. Each method can hold its own, and the placeholder
+ * says what shape is expected, because the server refuses the wrong shape by name.
+ * -------------------------------------------------------------------------- */
+var SPEC_PH = { phone: '0771234567', bank: '1234567890', shapid: '0821234567', wallet: 'wallet ID', link: 'https://…' };
+function railKeys() {
+  var keys = Object.keys(S.rails || {}).length ? Object.keys(S.rails)
+    : ['cash', 'ecocash_usd', 'ecocash_zig', 'innbucks', 'onepay', 'zipit', 'payshap', 'ozow', 'payfast', 'custom'];
+  if (keys.indexOf('custom') < 0) keys.push('custom');
+  return keys;
+}
+function specOf(k) {
+  if (k === 'custom') return (S.store.rail_def || {}).spec || 'wallet';
+  return ((S.rails || {})[k] || {}).spec || 'wallet';
+}
+function railRows() {
+  var accts = S.store.rail_accts || {};
+  return railKeys().map(function (k) {
+    var r = (S.rails || {})[k] || {}, spec = specOf(k), row = accts[k] || {}, inuse = S.store.rail === k;
+    if (spec === 'none') return '';
+    var label = k === 'custom' ? ((S.store.rail_def || {}).label || 'My own method') : (r.label || k.replace(/_/g, ' '));
+    var holdOff = k === 'custom' ? (S.store.rail_def || {}).holder === false : r.holder === false;
+    var hasTill = k === 'custom' ? !!(S.store.rail_def || {}).till : !!r.till;
+    return '<div class="arow' + (inuse ? ' on' : '') + '"><span class="an">' + esc(label) + (inuse ? ' <i>· in use</i>' : '') + '</span>'
+      + '<input data-ra="' + k + ':acct" inputmode="' + (spec === 'phone' || spec === 'bank' ? 'numeric' : 'text') + '" value="' + esc(row.acct || '') + '" placeholder="' + esc(SPEC_PH[spec] || '') + '">'
+      + (holdOff ? '' : '<input data-ra="' + k + ':holder" value="' + esc(row.holder || '') + '" placeholder="name they should see">')
+      + (hasTill ? '<input data-ra="' + k + ':till" value="' + esc(row.till || '') + '" placeholder="till / paybill">' : '')
+      + '<span class="hint">' + (row.acct ? 'their own number'
+          : 'falls back to your default' + (S.store.pay_account ? ' — ' + esc(String(S.store.pay_account).slice(0, 20)) : ', which is not set')) + '</span></div>';
+  }).join('');
+}
+function renderAccts() {
+  var b = q('#railAccts'); if (!b) return;
+  var n = Object.keys(S.store.rail_accts || {}).length;
+  b.innerHTML = '<div class="seclab">Payment number, per method'
+    + (S.store.pay_account ? ' <button class="sm sec" id="acctAll">use my default everywhere</button>' : '') + '</div>'
+    + '<p class="hint" style="margin-top:0">' + (n
+        ? n + ' method' + (n > 1 ? 's have' : ' has') + ' a number of their own. A buyer is shown the one for the method they picked — never a number you did not put there. Held 15 minutes like any other money change.'
+        : 'One default number for everything, or give a method its own: a wallet, a bank account and a till are not the same number. Held 15 minutes before it goes live, so a mistake can be cancelled.') + '</p>'
+    + railRows();
+  var all = q('#acctAll');
+  if (all) all.onclick = function () {
+    qa('#railAccts [data-ra$=":acct"]').forEach(function (el) { if (!el.value.trim()) el.value = S.store.pay_account || ''; });
+    q('#saveMsg').textContent = 'Filled in — press Save to send them.';
+  };
+}
+function collectAccts() {
+  var els = qa('#railAccts [data-ra]');
+  if (!els.length) return { changed: false };
+  var cur = JSON.parse(JSON.stringify(S.store.rail_accts || {})), changed = false;
+  els.forEach(function (el) {
+    var p = el.getAttribute('data-ra').split(':'), raw = el.value.trim();
+    var old = ((S.store.rail_accts || {})[p[0]] || {})[p[1]] || '';
+    if (raw === old) return;
+    changed = true;
+    cur[p[0]] = cur[p[0]] || {};
+    cur[p[0]][p[1]] = raw;
+  });
+  Object.keys(cur).forEach(function (k) {
+    var r = cur[k] || {};
+    if (!r.acct && !r.holder && !r.till) delete cur[k];
+  });
+  return { changed: changed, value: Object.keys(cur).length ? cur : false };
+}
+
+/* -------------------------------------------------------------------- the week
+ * Seven days, each closed or one or two from/to slots. The sentence every surface
+ * prints is generated from this, and the storefront's "Open until 17:00" is worked
+ * out on the server from the shop's clock — a buyer in another zone still reads the
+ * truth. Blanking a day closes it; the order that arrives at 02:00 still reaches
+ * the merchant, marked as sent while closed, because refusing it helps nobody.
+ * -------------------------------------------------------------------------- */
+var DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+function hhmm(min) { return min == null ? '' : String(Math.floor(min / 60)).padStart(2, '0') + ':' + String(min % 60).padStart(2, '0'); }
+function renderWeek() {
+  var b = q('#weekEd'); if (!b) return;
+  var w = S.store.week && S.store.week.length ? S.store.week : null;
+  var rows = '';
+  for (var d = 0; d < 7; d++) {
+    var sl = (w && w[d] && w[d].slots) || [];
+    rows += '<div class="wrow"><span class="wd">' + DAYS[d] + '</span>'
+      + '<input type="time" data-wk="' + d + ':o" value="' + hhmm(sl[0] && sl[0].o) + '">'
+      + '<span class="to">to</span><input type="time" data-wk="' + d + ':c" value="' + hhmm(sl[0] && sl[0].c) + '">'
+      + (sl[1] ? '<input type="time" data-wk="' + d + ':o2" value="' + hhmm(sl[1].o) + '"><span class="to">to</span><input type="time" data-wk="' + d + ':c2" value="' + hhmm(sl[1].c) + '">' : '')
+      + (sl.length ? '<button class="sm sec" data-wkx="' + d + '">close</button>' : '')
+      + '</div>';
+  }
+  b.innerHTML = '<div class="seclab">Days open and time slots'
+    + '<button class="sm sec" id="wkCopy">Mon–Fri same as Monday</button>'
+    + '<button class="sm sec" id="wkClear">blank the week</button></div>'
+    + '<p class="hint" style="margin-top:0">Two slots covers a split shift. A closing time earlier than the opening one means you shut after midnight. Blank = closed that day.</p>'
+    + rows
+    + '<p class="hint">' + (w ? 'Buyers read: <b>' + esc(S.store.hours || '') + '</b>' : 'No week set, so buyers see the shop as open whenever the text above says so.') + '</p>';
+  var cp = q('#wkCopy');
+  if (cp) cp.onclick = function () {
+    var o = q('#weekEd [data-wk="0:o"]').value, c = q('#weekEd [data-wk="0:c"]').value;
+    for (var d = 1; d < 5; d++) {
+      var a = q('#weekEd [data-wk="' + d + ':o"]'), z = q('#weekEd [data-wk="' + d + ':c"]');
+      if (a && !a.value) a.value = o; if (z && !z.value) z.value = c;
+    }
+    q('#saveMsg').textContent = 'Copied — press Save when the week looks right.';
+  };
+  var cl = q('#wkClear');
+  if (cl) cl.onclick = function () { qa('#weekEd [data-wk]').forEach(function (el) { el.value = ''; }); q('#saveMsg').textContent = 'Blanked — press Save to make the week empty.'; };
+  qa('#weekEd [data-wkx]').forEach(function (el) {
+    el.onclick = function () {
+      var d = el.getAttribute('data-wkx');
+      qa('#weekEd [data-wk]').forEach(function (i) { if (i.getAttribute('data-wk').indexOf(d + ':') === 0) i.value = ''; });
+    };
+  });
+}
+function collectWeek() {
+  var els = qa('#weekEd [data-wk]');
+  if (!els.length) return { changed: false };
+  var edit = {};
+  els.forEach(function (el) {
+    var p = el.getAttribute('data-wk').split(':'), d = Number(p[0]), ix = p[1].length > 1 && p[1][1] === '2' ? 1 : 0, key = p[1][0] === 'o' ? 'o' : 'c';
+    var w = S.store.week || [];
+    var old = ((w[d] || {}).slots || [])[ix];
+    var oldv = old ? (key === 'o' ? hhmm(old.o) : hhmm(old.c)) : '';
+    if (el.value.trim() === oldv) return;
+    edit[d] = edit[d] || [null, null];
+    edit[d][ix] = edit[d][ix] || {};
+    edit[d][ix][key] = el.value.trim();
+  });
+  if (!Object.keys(edit).length) return { changed: false };
+  var out = [], bad = [];
+  for (var d = 0; d < 7; d++) {
+    var cur = ((S.store.week || [])[d] || {}).slots || [], slots = [];
+    for (var i = 0; i < 2; i++) {
+      var e = (edit[d] && edit[d][i]) || {};
+      var o = 'o' in e ? e.o : (cur[i] ? hhmm(cur[i].o) : '');
+      var c = 'c' in e ? e.c : (cur[i] ? hhmm(cur[i].c) : '');
+      if (!o && !c) continue;
+      if (!o || !c) { if (bad.indexOf(DAYS[d]) < 0) bad.push(DAYS[d]); continue; }
+      slots.push({ open: o, close: c });
+    }
+    out.push(slots.length ? { slots: slots } : null);
+  }
+  if (bad.length) return { bad: bad.join(', ') + ': an opening time needs a closing time as well' };
+  return { changed: true, value: out };
 }
 function saveSettings() {
   var body = { handle: S.handle };
@@ -780,14 +957,25 @@ function saveSettings() {
   if (rd.length) {
     var got = {}, old = S.store.rail_def || {};
     rd.forEach(function (el) {
-      var n = el.getAttribute('data-rd'), raw = el.value.trim();
+      var n = el.getAttribute('data-rd');
+      if (el.type === 'checkbox') { got[n] = el.checked; return; }
+      var raw = el.value.trim();
       got[n] = (n === 'pct' || n === 'fixed') ? (raw === '' ? 0 : Number(raw)) : raw;
       if (n === 'pct') got[n] = (Number(got[n]) || 0) / 100;
     });
-    var same = ['label', 'dial', 'pct', 'fixed'].every(function (n) { return String(got[n] || '') === String(old[n] == null ? '' : old[n]); });
+    var same = ['label', 'dial', 'pct', 'fixed', 'spec'].every(function (n) {
+      return String(got[n] == null ? '' : got[n]) === String(old[n] == null ? '' : old[n]);
+    }) && ['holder', 'till'].every(function (n) {
+      return !!got[n] === (n in old ? !!old[n] : n === 'holder');       // the name check is on unless it was turned off
+    });
     if (!same) body.rail_def = got;
     if (got.label && S.store.rail !== 'custom') body.rail = 'custom';   // naming a method is choosing it
   }
+  var accts = collectAccts();
+  if (accts.changed) body.rail_accts = accts.value;
+  var wkd = collectWeek();
+  if (wkd.bad) { q('#saveMsg').innerHTML = '<span style="color:#b00020">' + esc(wkd.bad) + '</span>'; return; }
+  if (wkd.changed) body.week = wkd.value;
   var keys = Object.keys(body).filter(function (k) { return k !== 'handle'; });
   if (!keys.length) { q('#saveMsg').textContent = 'Nothing changed.'; return; }
   q('#saveMsg').textContent = 'Saving…';
@@ -927,7 +1115,8 @@ function mark(id, status, btn) {
 function renderShop() {
   var feed = S.feed || [];
   var warns = [];
-  if (!S.store.pay_account && S.store.rail !== 'cash' && S.store.rail !== 'custom') warns.push('No payment account set, so buyers are told nothing about how to pay. Fix it under “Change what buyers see”, field “Payment account”.');
+  var own = (S.store.rail_accts || {})[S.store.rail] || {};
+  if (!own.acct && !S.store.pay_account && S.store.rail !== 'cash') warns.push('Nothing to pay into on “' + esc((S.store.rail || 'cash').replace(/_/g, ' ')) + '”: no number for that method and no default. Fill it in under “Payment number, per method”.');
   if (S.store.rail === 'cash') warns.push('Method is cash / on delivery: nothing to reconcile online, count the driver at the end of the day.');
   var sw = q('#shopWarn');
   sw.classList.toggle('hide', !warns.length); sw.innerHTML = warns.map(function (t) { return '⚠ ' + esc(t); }).join('<br>');

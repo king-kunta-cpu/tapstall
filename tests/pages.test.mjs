@@ -267,3 +267,30 @@ test('no shipped sentence still tells a merchant to use a link', () => {
     });
   }
 });
+
+test('the dashboard can hold a number per method and a week of hours', () => {
+  const a = page('admin');
+  for (const id of ['railAccts', 'weekEd', 'fields']) {
+    assert.ok(a.includes('id="' + id + '"'), id + ' exists in the settings drawer');
+  }
+  // Both editors build their rows in script, so the only proof they are wired is
+  // the render call next to the grid they hang under.
+  assert.ok(/renderAccts\(\); renderWeek\(\);/.test(a), 'the two editors are repainted whenever the settings grid is');
+  assert.ok(a.includes("getAttribute('data-ra')"), 'each rail row is read back on save');
+  assert.ok(a.includes("getAttribute('data-wk')"), 'and each day slot too');
+  assert.ok(/an opening time needs a closing time/.test(a), 'a half-typed slot is stopped here, not sent as a closed week');
+  assert.ok(/readonly/.test(a), 'and the hours sentence goes read-only while the week owns it');
+  // The default is still the default: a store that never touches the new fields
+  // must behave exactly as it did, which is what "falls back" has to mean.
+  assert.ok(/falls back to your default/.test(a), 'the dashboard says which rails are falling back');
+});
+
+test('the storefront asks for the sending number only where it explains a payment', () => {
+  const s = page('store');
+  assert.ok(s.includes('id="fPayer"'), 'the buyer can say what number the payment comes from');
+  assert.ok(/R\.type === 'manual'/.test(s), 'but only on a manual rail, decided by the shape the server published');
+  assert.ok(/Should read/.test(s) && /pay\.holder/.test(s), 'the name to check the confirmation against is on the slip');
+  assert.ok(/pay\.till/.test(s), 'and so is the till, when the merchant has one');
+  assert.ok(/CFG\.open/.test(s), 'the open/closed line is computed on the shop clock, not the visitor’s');
+  assert.ok(!/rail_accts/.test(s), 'the map of every rail is never handed to a public page');
+});

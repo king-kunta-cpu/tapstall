@@ -142,7 +142,15 @@ var TERM = /*__TAPSTALL_TERM__*/null;
   $('sname').textContent = CFG.shop_name;
   if (CFG.tagline) $('stag').textContent = CFG.tagline;
   if (CFG.logo) { var L = $('logo'); L.src = CFG.logo; L.hidden = false; }
-  if (CFG.hours) { $('chours').textContent = CFG.hours; $('chours').hidden = false; }
+  // The shop's own clock, not the buyer's: `open` is computed on the server from
+  // the store's week, so a phone in another zone still reads the truth.
+  if (CFG.hours || (CFG.open && CFG.open.known)) {
+    var ch = $('chours'), o = CFG.open || {};
+    ch.textContent = (o.known && !o.open) ? '\u25cf ' + (o.label || 'Closed')
+      : (o.label ? '\u25cf ' + o.label + ' \u00b7 ' : '') + (CFG.hours || '');
+    ch.style.color = (o.known && !o.open) ? '#a2141f' : '#0a6b33';
+    ch.hidden = false;
+  }
   if (CFG.location) { $('cloc').textContent = CFG.location; $('cloc').hidden = false; }
   $('curnow').textContent = 'Prices in ' + CUR + (ZIG ? ' + ZiG' : '');
   $('powered').innerHTML = 'Runs on <a href="/onboard">Tapstall</a> — free store for your WhatsApp business, no monthly bill.';
@@ -334,6 +342,12 @@ var TERM = /*__TAPSTALL_TERM__*/null;
       '<p class="hint">Payment: <b>' + esc(railName) + '</b>' + (railNote ? ' — ' + railNote : '') + (CFG.surcharge_mode === 'absorb' && railCosts && !cod ? ' — this shop covers the payment cost, you pay the menu price.' : '') + '</p>' +
       '<label>Your name *</label><input id="fName" autocomplete="name" placeholder="e.g. Rudo M.">' +
       '<label>WhatsApp number * (with code, e.g. 26377...)</label><input id="fPhone" inputmode="tel" autocomplete="tel" placeholder="263771234567">' +
+      // On a manual wallet the merchant matches an SMS to an order; the number the
+      // payment comes from is the whole reconciliation, so ask for it — and only
+      // here, because a card link or cash has no such thing to match.
+      (R && R.type === 'manual' && (R.spec === 'phone' || R.spec === 'wallet')
+        ? '<label>Number you will pay from <span style="font-weight:400;color:#93a5b6;font-size:.82em">(optional — helps us find your payment)</span></label><input id="fPayer" inputmode="tel" placeholder="0712345678">'
+        : '') +
       '<label>Delivery or pickup?</label><select id="fService"><option value="pickup">Pickup at shop</option><option value="delivery">Delivery</option></select>' +
       '<div id="addrWrap" hidden><label>Delivery address *</label><input id="fAddr" placeholder="Suburb, street, house/stand no."></div>' +
       '<label>When?</label><select id="fWhen"><option value="asap">As soon as possible</option><option value="12:00">12:00</option><option value="13:00">13:00</option><option value="17:00">17:00</option><option value="18:00">18:00</option><option value="tomorrow">Tomorrow</option></select>' +
@@ -356,7 +370,7 @@ var TERM = /*__TAPSTALL_TERM__*/null;
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           handle: CFG.handle, items: cart, service: svc.value, when: $('fWhen').value,
-          buyer: { name: $('fName').value, phone: $('fPhone').value, address: $('fAddr') ? $('fAddr').value : '', note: $('fNote').value, optin: $('fOpt') ? $('fOpt').checked : true }
+          buyer: { name: $('fName').value, phone: $('fPhone').value, payer: $('fPayer') ? $('fPayer').value : '', address: $('fAddr') ? $('fAddr').value : '', note: $('fNote').value, optin: $('fOpt') ? $('fOpt').checked : true }
         })
       }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
         .then(function (res) {
@@ -380,7 +394,10 @@ var TERM = /*__TAPSTALL_TERM__*/null;
       (ZIG ? '<div style="font-size:.78rem;color:#9fb2c4">≈ ' + Math.round((pay.amount || 0) * ZIG).toLocaleString() + ' ZiG</div>' : '') +
       '<div class="kv"><span>Method</span><span>' + esc(pay.rail || pr.rail && pr.rail.label || '') + '</span></div>' +
       (pay.dial ? '<div class="kv"><span>Dial</span><span>' + esc(pay.dial) + '</span></div>' : '') +
-      (pay.account ? '<div class="kv"><span>To</span><span>' + esc(pay.account) + '</span></div>' : '') +
+      (pay.account ? '<div class="kv"><span>' + esc(pay.account_label || 'To') + '</span><span>' + esc(pay.account)
+          + (pay.till ? ' <span style="color:#93a5b6">till ' + esc(pay.till) + '</span>' : '') + '</span></div>' : '') +
+      (pay.holder ? '<div class="kv"><span>Should read</span><span>' + esc(pay.holder) + '</span></div>' : '') +
+      (pay.payer_from ? '<div class="kv"><span>From</span><span>' + esc(pay.payer_from) + '</span></div>' : '') +
       '<div class="kv"><span>Reference</span><span>' + esc(pay.reference || o.order.code) + '</span></div>' +
       '<div class="copy" id="cp">Copy payment reference + amount</div>' +
       '<ol class="steps">' + (pay.steps || []).map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('') + '</ol>' +

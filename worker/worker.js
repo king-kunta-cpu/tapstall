@@ -17,13 +17,13 @@
 import {
   RAILS, round2, clamp, slug, digits, isEmail, validHandle, parseCSV, normalizeFeedUrl,
   parseProducts, priceOrder, payInstructions, riskFlags, waSummary, publicStore, hash,
-  applyMenu, sanitizeMenu, menuPrice,
+  applyMenu, sanitizeMenu, menuPrice, openNow, cleanWeek, cleanRailAccts, hoursText,
   issueCap, verifyCap, randomKey, validateSettings, stageSettings, applyPending, maskField,
   EDITABLE_FIELDS, SOFT_FIELDS, sign, adminStore, normaliseRail, resolveRail,
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '0.6.4';
+const VERSION = '0.6.5';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 const MAX_ORDERS_KEPT = 200;
@@ -361,6 +361,11 @@ async function placeOrder(req, url, env, ctx) {
     address: String((body.buyer || {}).address || '').trim().slice(0, 200),
     note: String((body.buyer || {}).note || '').trim().slice(0, 400),
     optin: !!(body.buyer || {}).optin,
+    // The number the payment will come *from*, when the buyer volunteers it. On a
+    // manual mobile-money rail the merchant's whole reconciliation is matching an
+    // SMS alert to an order, and an alert with no number in it is a phone call.
+    // Optional by design: a buyer who will not say gets the order anyway.
+    payer: digits((body.buyer || {}).payer || (body.buyer || {}).pay_from || (body.buyer || {}).from || '').replace(/\D/g, '').slice(0, 15),
   };
   if (!buyer.name || !buyer.phone || buyer.phone.replace(/\D/g, '').length < 9) {
     return json({ ok: false, error: 'name and a valid WhatsApp number are required' }, 422);
@@ -400,12 +405,22 @@ async function placeOrder(req, url, env, ctx) {
     status: railKey === 'cash' ? 'cod' : 'awaiting_payment',
     // What the merchant has to know: the cart arrived with different numbers than
     // the menu (so: check it), or this store has no menu to check against at all.
-    risk_flags: priced.authoritative ? priced.notes.slice(0, 6) : ['no menu on file: priced from the browser'],
+    // When the shop opened its doors is part of the order, not a decoration: the
+    // flag below is what tells the merchant this arrived at 02:00 with nobody home.
+    hours: openNow(st),
   };
   /* Freeze the payment details onto the order. The merchant's dashboard, the
    * WhatsApp handoff and the notification all read the slip, not the store — so
    * a payout account changed afterwards can never rewrite what a buyer was
    * already told to pay, and yesterday's customer is never sent to a new number. */
+  /* The risk engine and the pricing notes are one list. `riskFlags` had been sitting
+   * unwired since the first release — repeat-unpaid, high-value cash and a missing
+   * payout account were computed by a function nothing called — so the flags a
+   * merchant reads on an order now come from both halves: what the cart did wrong and
+   * what the buyer's history says. */
+  const flags = riskFlags(st, order, hist).concat(
+    priced.authoritative ? priced.notes.slice(0, 6) : ['no menu on file: priced from the browser']);
+  order.risk_flags = [...new Set(flags)].slice(0, 8);
   order.pay = payInstructions(st, order, pricing);
 
   /* One-tap confirm, without a bearer credential in the URL: each link is a
@@ -607,6 +622,17 @@ async function register(req, url, env) {
     whatsapp: digits(b.whatsapp || b.phone).replace(/\D/g, '').slice(0, 15),
     location: String(b.location || '').slice(0, 90),
     hours: String(b.hours || '').slice(0, 60),
+    // Onboarding may arrive with a week and per-rail numbers already in hand (the
+    // CSV importer and a merchant's own form both do). Junk in that half is dropped
+    // silently — the dashboard is the careful path — but a blank must never make a
+    // store believe hours it never set.
+    ...(() => { try {
+      const g = {};
+      const wk = cleanWeek(b.week); if (wk) { g.week = wk; }
+      const ra = cleanRailAccts(b.rail_accts, null); if (ra) g.rail_accts = ra;
+      if (g.week) g.hours = hoursText(g.week);
+      return g;
+    } catch (e) { return {}; } })(),
     feed_url: fed.slice(0, 400),
     currency: String(b.currency || 'USD').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3),
     zig_rate: Number(b.zig_rate) || 0,
@@ -1048,7 +1074,11 @@ async function railsCatalog(env) {
     const r = normaliseRail(extra[k], k);
     if (r) out[k] = r;
   }
-  out.custom = { key: 'custom', label: 'My own method (I describe it)', dial: 'as you describe', pct: 0, imtt: 0, fixed: 0, type: 'manual', own: true };
+  // The picker's own entry: `own` tells a UI to render the merchant's description,
+  // and the shape fields say what a number for an undescribed method looks like —
+  // a wallet ID, a name worth checking and, if they have one, a till.
+  out.custom = { key: 'custom', label: 'My own method (I describe it)', dial: 'as you describe', pct: 0, imtt: 0, fixed: 0, type: 'manual',
+                 spec: 'wallet', holder: true, till: true, own: true };
   return out;
 }
 
@@ -1489,7 +1519,11 @@ async function settingsEdit(req, url, env) {
   // morning is accepted here in the same breath as the built-ins, and a
   // misspelled one comes back as a field error instead of a mystery
   const cat = await railsCatalog(env);
-  const v = validateSettings(patch, Date.now(), { rails: cat });
+  // A POST that describes a rail and fills its number in the same breath is one
+  // intention, not two: the number is validated against the shape being written
+  // now, not the one that happened to be stored before it.
+  const described = patch.rail_def && typeof patch.rail_def === 'object' ? normaliseRail(patch.rail_def, 'custom') : null;
+  const v = validateSettings(patch, Date.now(), { rails: cat, rail_def: described || st.rail_def });
   if (!v.ok) return json({ ok: false, error: 'some fields need a different format', fields: v.errors, ignored: v.ignored,
     hint: v.errors.rail ? 'Pick one of: ' + Object.keys(cat).join(', ') + '. "custom" means you describe it below.' : undefined }, 422);
   if (v.money.rail === 'custom') {

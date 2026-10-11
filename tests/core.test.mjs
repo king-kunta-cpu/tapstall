@@ -149,7 +149,10 @@ test('waSummary contains code, buyer, totals and payment line', () => {
   const pricing = C.priceOrder(st, [{ price: 5, qty: 2, name: 'Sadza' }], 'pickup', 'ecocash_usd');
   const txt = C.waSummary(st, { code: 'A-1', buyer: { name: 'Rudo' }, items: [{ qty: 2, name: 'Sadza' }], service: 'pickup', when: 'asap', pricing });
   assert.match(txt, /A-1/); assert.match(txt, /Rudo/); assert.match(txt, /2x Sadza/);
-  assert.match(txt, new RegExp('Pay ' + String(pricing.pay_now).replace('.', '\\.') + ' to 0771234567 ref A-1'));
+  assert.match(txt, new RegExp('Pay ' + String(pricing.pay_now).replace('.', '\\.') + ' USD to 0771234567 ref A-1'));
+  // The currency is on the line because a ZiG quote and a USD payment are one
+  // WhatsApp message apart, and this summary is that message.
+  assert.match(txt, /USD/);
 });
 
 /* ---------- privacy ---------- */
@@ -333,4 +336,155 @@ test('menuPrice re-prices a cart instead of trusting it', () => {
 
   const qty = menuPrice(menu, [{ id: 'a', price: 5.5, qty: 1e6 }]);
   assert.ok(qty.items[0].qty <= 99, 'a quantity is bounded on the way in too');
+});
+
+/* ------------------------------------------------ payment detail, per rail */
+test('each rail takes the shape of number it actually uses', () => {
+  assert.equal(C.cleanAcct('07712 34567', 'phone'), '0771234567', 'spaces are a typing artefact');
+  assert.equal(C.cleanAcct('+263771234567', 'phone'), '+263771234567', 'a country code survives');
+  assert.equal(C.cleanAcct('123-456-7890', 'bank'), '1234567890', 'dashes off a bank number');
+  assert.equal(C.cleanAcct('', 'phone'), '', 'blank means use the default, not an error');
+  assert.equal(C.cleanAcct('anything at all', 'none'), '', 'cash has no number, whatever was typed');
+  for (const [v, kind] of [['12345', 'phone'], ['abc', 'bank'], ['ftp://x', 'link'], ['@@', 'wallet']]) {
+    assert.throws(() => C.cleanAcct(v, kind), /[a-z]/, kind + ' refuses ' + v + ' in words');
+    let msg = '';
+    try { C.cleanAcct(v, kind); } catch (e) { msg = e.message; }
+    assert.ok(msg.length > 8 && /\d|http/.test(msg), 'and the sentence says what it wanted: ' + msg);
+  }
+});
+
+test('a rail map keeps only rails that exist and rows that say something', () => {
+  const m = C.cleanRailAccts({
+    ecocash_usd: { acct: '0771234567', holder: '  Mama   Too ', till: '*121*9#' },
+    cash: { acct: 'no number needed' },
+    nosuchrail: { acct: '0700' },
+    zipit: { acct: '', holder: '', till: '' },
+  }, null);
+  assert.deepEqual(Object.keys(m), ['ecocash_usd'], 'an unregistered rail and an empty row are not stored');
+  assert.equal(m.ecocash_usd.acct, '0771234567');
+  assert.equal(m.ecocash_usd.holder, 'Mama Too', 'the name a buyer checks is collapsed, not mangled');
+  assert.equal(C.cleanRailAccts({ cash: { acct: '' } }, null), undefined, 'a map of nothing is no map at all');
+  const st = { pay_account: '0800000000', shop_name: 'Mama Too', rail: 'ozow', rail_accts: m };
+  const own = C.railAcctOf(st, 'ecocash_usd', C.RAILS.ecocash_usd);
+  assert.equal(own.acct, '0771234567'); assert.equal(own.own, true); assert.equal(own.till, '1219');
+  const fb = C.railAcctOf(st, 'ozow', C.RAILS.ozow);
+  assert.equal(fb.acct, '0800000000', 'a method with no number of its own uses the default');
+  assert.equal(fb.own, false, 'and says so, which is what the dashboard prints');
+});
+
+test('the slip prints the number, the name to expect and the till', () => {
+  const st = { currency: 'USD', shop_name: 'Mama Too', rail: 'ecocash_usd', pay_account: '0800000000',
+               rail_accts: { ecocash_usd: { acct: '0771234567', holder: 'MAMA TOO CATERING', till: '55123' } } };
+  const pricing = C.priceOrder(st, [{ price: 5, qty: 1, name: 'Sadza' }], 'pickup', 'ecocash_usd');
+  const pay = C.payInstructions(st, { code: 'A-2', buyer: { payer: '0718663235' }, hours: { known: false } }, pricing);
+  assert.equal(pay.account, '0771234567', 'the rail’s own number, not the default');
+  assert.ok(pay.steps[1].includes('(till 55123)'), 'the till rides on the same line');
+  assert.ok(pay.steps.some((t) => /MAMA TOO CATERING/.test(t)), 'and the name check is a step, not a hint');
+  assert.equal(pay.ask_payer, true, 'a manual wallet asks who it is coming from');
+  assert.equal(pay.payer_from, '0718663235', 'typed as typed, digits kept, no invented country code');
+  const cod = C.payInstructions(st, { code: 'A-3', buyer: {} }, C.priceOrder(st, [{ price: 5 }], 'pickup', 'cash'));
+  assert.equal(cod.account, 'pay on delivery');
+  assert.equal(cod.ask_payer, false, 'nothing to match on cash');
+});
+
+test('the week is a week, and the sentence is printed from it', () => {
+  const wk = C.cleanWeek([
+    { open: '09:00', close: '17:00' }, { open: '09:00', close: '17:00' }, { open: '09:00', close: '17:00' },
+    { open: '09:00', close: '17:00' }, { open: '09:00', close: '17:00' }, { open: '08:00', close: '13:00' }, null,
+  ]);
+  assert.equal(C.hoursText(wk), 'Mon–Fri 09:00-17:00 · Sat 08:00-13:00 · closed Sun');
+  const one = C.cleanWeek([{ open: '09:00', close: '17:00' }, null, null, null, null, null, null]);
+  assert.equal(one.length, 7, 'a week with one day open is still a full seven-day week');
+  assert.match(C.hoursText(one), /^Mon 09:00-17:00 · closed Tue/);
+  assert.equal(C.hoursText(C.cleanWeek([{ slots: [{ open: '06:30', close: '10:00' }, { open: '18:00', close: '21:30' }, { open: '22:00', close: '23:00' }] }])), 'Mon 06:30-10:00 & 18:00-21:30 · closed Tue Wed Thu Fri Sat Sun', 'two slots a day, the third dropped');
+  // One unreadable box must not be silently read as "closed": that is how a typo
+  // deletes a shop's hours and nobody notices until the phone will not ring.
+  assert.throws(() => C.cleanWeek(['nonsense', null, null, null, null, null, null]), /both ends/);
+  assert.throws(() => C.cleanWeek([{ open: '99:99', close: '08:00' }]), /both ends/, '99:99 is not a time');
+  assert.throws(() => C.cleanWeek([{ open: '09:00' }]), /both ends/, 'a start with no end is a half-answer');
+  assert.equal(C.cleanWeek([{}, {}, {}, {}, {}, {}, {}]), undefined, 'a week of genuinely blank days is no week');
+  assert.equal(C.cleanWeek([{ open: '', close: '' }, null, null, null, null, null, null]), undefined, 'and blanks read as blank, not as garbage');
+});
+
+test('open now is answered from the shop clock, past midnight included', () => {
+  const at = (iso) => Date.parse(iso);
+  const wk = C.cleanWeek([{ open: '09:00', close: '17:00' }, { open: '18:00', close: '02:00' }, null, null, null, null, { open: '11:00', close: '15:00' }]);
+  const st = { week: wk };
+  assert.equal(C.openNow(st, at('2026-10-12T09:00:00Z')).open, true, 'Mon 11:00 local, inside 09:00-17:00');
+  assert.match(C.openNow(st, at('2026-10-12T09:00:00Z')).label, /Open until 17:00/);
+  assert.equal(C.openNow(st, at('2026-10-13T23:00:00Z')).open, true, 'Wed 01:00 local is still Tuesday night');
+  assert.equal(C.openNow(st, at('2026-10-13T23:00:00Z')).since, 'last night', 'and it says so');
+  assert.equal(C.openNow(st, at('2026-10-14T07:00:00Z')).open, false, 'Wed 09:00: Wednesday is shut');
+  assert.match(C.openNow(st, at('2026-10-14T07:00:00Z')).label, /opens Sun at 11:00/, 'and names the day it next opens');
+  assert.ok(C.openNow(st, at('2026-10-14T07:00:00Z')).in_min > 0, 'and how long');
+  assert.equal(C.openNow({ week: wk, closed: true }, at('2026-10-12T09:00:00Z')).open, false, 'the closed tick beats the calendar');
+  assert.equal(C.openNow({}, at('2026-10-12T09:00:00Z')).known, false, 'a store with no week is open, not shut by an absence');
+  assert.equal(C.openNow({}, at('2026-10-12T09:00:00Z')).open, true);
+});
+
+test('a settings write can clear a week, and the sentence follows it', () => {
+  const st = { hours: 'old words' };
+  const v = C.validateSettings({ week: [{ open: '08:00', close: '16:00' }, null, null, null, null, null, null] }, Date.now());
+  assert.ok(v.ok, 'accepted: ' + JSON.stringify(v.errors));
+  C.stageSettings(st, v.soft, v.money, 9e5, 1000);
+  assert.equal(st.hours, 'Mon 08:00-16:00 · closed Tue Wed Thu Fri Sat Sun', 'generated, on the same write');
+  const again = C.validateSettings({ week: [{ open: '08:00', close: '16:00' }, null, null, null, null, null, null] }, Date.now());
+  const before = JSON.stringify(st);
+  const r2 = C.stageSettings(st, again.soft, again.money, 9e5, 2000);
+  assert.equal(r2.changed, 0, 'saving the identical week is not a change, so no new fuse and no lie');
+  assert.equal(JSON.stringify(st), before);
+  const cleared = C.validateSettings({ week: [] }, Date.now());
+  C.stageSettings(st, cleared.soft, cleared.money, 9e5, 3000);
+  assert.ok(!st.week, 'and posting an empty week removes it — a validator that only adds can never take away');
+  assert.equal(st.hours, 'Mon 08:00-16:00 · closed Tue Wed Thu Fri Sat Sun', 'the last printed words stand until they are edited');
+});
+
+test('a per-rail number is a money field and waits like one', () => {
+  const st = { rail: 'ecocash_usd', pay_account: '0800000000' };
+  const now = 1e9;
+  const v = C.validateSettings({ rail_accts: { ecocash_usd: { acct: '0771234567' } } }, now, { rails: C.RAILS });
+  assert.ok(v.ok, JSON.stringify(v.errors));
+  const r = C.stageSettings(st, v.soft, v.money, 9e5, now);
+  assert.equal(r.staged, 1, 'staged, not applied');
+  assert.ok(!st.rail_accts, 'the shop is untouched until the fuse runs out');
+  assert.deepEqual(C.applyPending(st, now + 9e5).applied, ['rail_accts'], 'and lands when it is due');
+  assert.equal(st.rail_accts.ecocash_usd.acct, '0771234567');
+  const off = C.validateSettings({ rail_accts: false }, now, { rails: C.RAILS });
+  C.stageSettings(st, off.soft, off.money, 9e5, now);
+  assert.deepEqual(C.applyPending(st, now + 9e5).applied, ['rail_accts']);
+  assert.ok(!st.rail_accts, 'and taking it away is as easy as putting it on');
+});
+
+test('a bad number names its rail instead of saying invalid', () => {
+  const v = C.validateSettings({ rail_accts: { zipit: { acct: 'not a number' }, ecocash_usd: { acct: '0771234567' } } }, Date.now(), { rails: C.RAILS });
+  assert.equal(v.ok, false);
+  assert.match(v.errors.rail_accts, /account number/, 'the field error carries the validator’s own sentence');
+});
+
+test('flags: a missing number and an order sent after hours', () => {
+  const pricing = { rail: { key: 'ecocash_usd', type: 'manual', label: 'EcoCash USD' } };
+  const bare = { rail: 'ecocash_usd', pay_account: '', currency: 'USD' };
+  const f1 = C.riskFlags(bare, { pricing, service: 'pickup', hours: { known: false } }, {});
+  assert.ok(f1.some((x) => /pay_account_not_set/.test(x)), 'no number anywhere: ' + JSON.stringify(f1));
+  const covered = { rail: 'ecocash_usd', pay_account: '', rail_accts: { ecocash_usd: { acct: '0771234567' } }, currency: 'USD' };
+  const f2 = C.riskFlags(covered, { pricing, service: 'pickup', hours: { known: false } }, {});
+  assert.ok(!f2.some((x) => /pay_account_not_set/.test(x)), 'the rail has its own, so nobody is warned about a hole that is not there');
+  const night = C.riskFlags({ ...covered, week: C.cleanWeek([null, null, null, null, null, null, null]) || undefined, closed: true },
+    { pricing, service: 'pickup' }, {});
+  assert.ok(night.some((x) => /sent while closed/.test(x)), 'and an order that arrives with the shutters down says so: ' + JSON.stringify(night));
+});
+
+test('the public page publishes one number, not all of them', () => {
+  const st = { handle: 'h', shop_name: 'S', rail: 'ecocash_usd', pay_account: '0800000000',
+               rail_accts: { ecocash_usd: { acct: '0771234567', holder: 'MAMA TOO', till: '55123' }, zipit: { acct: '999888777', holder: 'SECRET BANK' } },
+               admin_token: 'SECRET', week: C.cleanWeek([{ open: '09:00', close: '17:00' }, null, null, null, null, null, null]) };
+  const out = C.publicStore(st);
+  const blob = JSON.stringify(out);
+  assert.equal(out.pay_account, '0771234567', 'the number for the method on offer');
+  assert.equal(out.pay_holder, 'MAMA TOO');
+  assert.ok(!blob.includes('999888777'), 'the ZIPIT account is not the storefront’s business');
+  assert.ok(!blob.includes('SECRET'), 'and the API key never rides along');
+  assert.ok(!('rail_accts' in out), 'the map itself stays private');
+  assert.equal(out.rail_info.spec, 'phone', 'the shape is public so the form asks the right question');
+  assert.equal(out.open.open, false, 'and open/closed is computed here, not on the buyer’s clock');
 });

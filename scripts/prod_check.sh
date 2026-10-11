@@ -240,6 +240,25 @@ ckw "revert cancels it" '"cancelled":\["pay_account"\]' "$RV"
 PUB2=$(curl -s -m 30 "$ORIGIN/s/$HANDLE/config.json")
 nk "nothing was applied in the meantime" "$PROBE" "$PUB2"
 ck "hours unchanged after the whole test" "\"hours\":\"$HOURS\"" "$PUB2"
+# 0.6.5: a number per method, and the hours as a week. Both are proven here on a
+# live store, then taken back off it — the check leaves nothing behind, which is the
+# only reason it is allowed to write at all.
+RA=$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" \
+  -d '{"handle":"'"$HANDLE"'","rail_accts":{"ecocash_usd":{"acct":"0771234567","holder":"ZZ PROBE","till":"55123"}},"week":[{"open":"09:00","close":"17:00"},null,null,null,null,null,null]}' "$ORIGIN/api/settings")
+ck "a per-method number is held like money" '"held":\["rail_accts"\]' "$RA"
+ck "  · while the week applies in the same breath" '"applied_now":\["week"\]' "$RA"
+PUBW=$(curl -s -m 30 "$ORIGIN/s/$HANDLE/config.json")
+ck "the week writes the sentence buyers read" '"hours":"Mon 09:00-17:00' "$PUBW"
+ck "  · and the shop clock ships with it, not the visitor's" '"open":\{' "$PUBW"
+nk "no rail map is published to a stranger" 'rail_accts' "$PUBW"
+nk "  · and a staged number is not even readable early" 'ZZ PROBE' "$PUBW"
+ck "a half-typed week is refused, not read as closed" 'both ends' "$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" -d '{"handle":"'"$HANDLE"'","week":[{"open":"09:00"}]}' "$ORIGIN/api/settings")"
+curl -s -m 30 -o /dev/null -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" -d '{"handle":"'"$HANDLE"'","week":[],"hours":"'"$HOURS"'"}' "$ORIGIN/api/settings"
+RV2=$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" -d '{"handle":"'"$HANDLE"'"}' "$ORIGIN/api/settings/revert")
+ck "revert drops the staged number too" 'rail_accts' "$RV2"
+PUB3=$(curl -s -m 30 "$ORIGIN/s/$HANDLE/config.json")
+nk "and the store is left exactly as it was found" 'ZZ PROBE' "$PUB3"
+ck "  · hours back to the shop's own words" "\"hours\":\"$HOURS\"" "$PUB3"
 ck "a bad value is refused by field" '"fields":\{"rail"' "$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" -d '{"handle":"'"$HANDLE"'","rail":"momo_pay"}' "$ORIGIN/api/settings")"
 ck "a forged cap is refused as expired" '"link_expired"' "$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"v1.9999999999.eyJhIjoibWFyayJ9.AAAAAAAA"}' "$ORIGIN/api/mark")"
 ck "a truncated copy of a real cap is refused" '"link_expired"' "$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"${MARK#/c/}"'x"}' "$ORIGIN/api/mark")"

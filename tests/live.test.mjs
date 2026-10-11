@@ -1454,3 +1454,136 @@ test('a store with no menu at all is priced from the browser and says so', async
   assert.equal(Number(r.json.pricing.subtotal), 12, 'the browser price is used, because there is nothing else to use');
   assert.ok(r.json.risk_flags.some((f) => /no menu/i.test(f)), 'but the order says so out loud: ' + JSON.stringify(r.json.risk_flags));
 });
+
+/* ------------------------------------------------------------------ rails & hours
+ * Two things a merchant asked for, and the reason both are guarded by the money
+ * tests rather than the markup tests: where money lands, and when the shutters go
+ * up, are the two settings a customer can feel.
+ * -------------------------------------------------------------------------- */
+test('the week: an instant write, and the sentence is printed from it', async () => {
+  const wk = [{ open: '09:00', close: '17:00' }, { open: '09:00', close: '17:00' }, { open: '09:00', close: '17:00' },
+              { open: '09:00', close: '17:00' }, { open: '09:00', close: '17:00' }, { open: '08:00', close: '13:00' }, null];
+  const r = await call('/api/settings', { method: 'POST', cookie: store.cookie, confirm: true, body: { handle: 'mamatoe', week: wk } });
+  assert.equal(r.status, 200, r.text);
+  assert.ok((r.json.applied_now || []).includes('week'), 'hours are cosmetic: applied now, no 15-minute wait, ' + r.text);
+
+  const st = JSON.parse(env.STORES._map.get('store:mamatoe').value);
+  assert.equal(st.hours, 'Mon–Fri 09:00-17:00 · Sat 08:00-13:00 · closed Sun', 'the one line every surface prints is generated, not typed');
+  const cfg = await call('/s/mamatoe/config.json');
+  assert.equal(cfg.json.store.hours, st.hours, 'and the storefront reads that line, so nothing can drift apart');
+  assert.equal(cfg.json.store.open.known, true, 'the open/closed answer ships with it, computed on the server clock');
+
+  // an unparseable time is refused with words a form can show under the box
+  const junk = await call('/api/settings', { method: 'POST', cookie: store.cookie, confirm: true, body: { handle: 'mamatoe', week: [{ open: '9pm', close: '' }] } });
+  assert.equal(junk.status, 422, 'a day nobody can read is not stored as a day nobody can shop on: ' + junk.text);
+
+  const cleared = await call('/api/settings', { method: 'POST', cookie: store.cookie, confirm: true, body: { handle: 'mamatoe', week: [] } });
+  assert.equal(cleared.status, 200, cleared.text);
+  assert.ok(!JSON.parse(env.STORES._map.get('store:mamatoe').value).week, 'and an empty week takes it back off — a validator that only adds can never remove');
+
+  // put it back for the tests below, and close the shop with the tick
+  await call('/api/settings', { method: 'POST', cookie: store.cookie, confirm: true, body: { handle: 'mamatoe', week: wk } });
+  const shut = await call('/api/settings', { method: 'POST', cookie: store.cookie, confirm: true, body: { handle: 'mamatoe', closed: true } });
+  assert.equal(shut.status, 200, shut.text);
+  const o = await call('/api/order', { method: 'POST', ip: '196.0.0.51', body: {
+    handle: 'mamatoe', service: 'pickup', buyer: { name: 'Night Owl', phone: '263780000151' },
+    items: [{ id: '1', name: 'Chicken & rice', price: 5.5, qty: 1 }],
+  } });
+  assert.equal(o.status, 201, 'a closed shop still takes the order: ' + o.text);
+  assert.ok(o.json.risk_flags.some((f) => /sent while closed/.test(f)), 'and the merchant is told, ' + JSON.stringify(o.json.risk_flags));
+  assert.match(o.json.pay.hours_note, /Closed right now/, 'the buyer sees it on the receipt too');
+  await call('/api/settings', { method: 'POST', cookie: store.cookie, confirm: true, body: { handle: 'mamatoe', closed: false } });
+});
+
+test('a number per method: staged like money, published one at a time', async () => {
+  const w = await call('/api/settings', { method: 'POST', cookie: store.cookie, confirm: true, body: {
+    handle: 'mamatoe',
+    rail_accts: { ecocash_usd: { acct: '07712 34567', holder: 'MAMA TOO CATERING', till: '55123' }, zipit: { acct: '999888777' } },
+  } });
+  assert.equal(w.status, 200, w.text);
+  assert.ok((w.json.held || []).includes('rail_accts'), 'where money lands waits 15 minutes, ' + JSON.stringify(w.json));
+
+  const now = await call('/s/mamatoe/config.json');
+  assert.ok(!JSON.stringify(now.json).includes('999888777'), 'nothing is published before the fuse runs out');
+  assert.ok(!('rail_accts' in (now.json.store || {})), 'and even afterwards the storefront gets one number, not the map');
+
+  const raw = JSON.parse(env.STORES._map.get('store:mamatoe').value);
+  raw.pending.apply_at = Date.now() - 1;                       // as if the hold had elapsed
+  env.STORES._map.set('store:mamatoe', { value: JSON.stringify(raw) });
+  const after = await call('/s/mamatoe/config.json');
+  assert.equal(after.json.store.pay_account, '0771234567', 'the EcoCash number is what the shelf now shows, spaces and all stripped');
+  assert.equal(after.json.store.pay_holder, 'MAMA TOO CATERING', 'with the name a buyer checks the confirmation against');
+  assert.equal(after.json.store.pay_till, '55123');
+  assert.equal(after.json.store.rail_info.spec, 'phone', 'and the shape, so the form asks for the right thing');
+  const st2 = JSON.parse(env.STORES._map.get('store:mamatoe').value);
+  assert.equal(st2.rail_accts.zipit.acct, '999888777', 'the bank account is stored for the day this shop switches rails — just never on this page');
+
+  const o = await call('/api/order', { method: 'POST', ip: '196.0.0.52', body: {
+    handle: 'mamatoe', service: 'pickup', buyer: { name: 'Paid Already', phone: '263780000152', payer: '0718663235' },
+    items: [{ id: '1', name: 'Chicken & rice', price: 5.5, qty: 1 }],
+  } });
+  assert.equal(o.status, 201, o.text);
+  assert.equal(o.json.pay.account, '0771234567', 'the slip quotes the rail, not the default');
+  assert.ok(o.json.pay.steps.some((t) => /MAMA TOO CATERING/.test(t)), 'and makes the name check a step');
+  assert.ok(/\(till 55123\)/.test(o.json.pay.steps[1]), 'the till rides on the send line');
+  assert.equal(o.json.pay.payer_from, '0718663235', 'the number they said they would pay from is on the slip');
+  const wa = o.json.wa_link ? decodeURIComponent(String(o.json.wa_link).split('text=')[1]) : '';
+  assert.ok(/from 0718663235/.test(wa), 'and travels in the WhatsApp handoff, which is where the merchant reads it: ' + wa.slice(0, 200));
+  const row = (await call('/api/admin?handle=mamatoe', { cookie: store.cookie })).json.orders.find((x) => x.id === o.json.order.id);
+  assert.equal(row.buyer.payer, '0718663235', 'kept on the order, so tomorrow’s reconciliation does not need a memory');
+
+  const bad = await call('/api/settings', { method: 'POST', cookie: store.cookie, confirm: true, body: {
+    handle: 'mamatoe', rail_accts: { zipit: { acct: 'abc' } } } });
+  assert.equal(bad.status, 422, 'a bank account that is not a number is refused, ' + bad.text);
+  assert.match(bad.json.fields.rail_accts, /account number/, 'naming the shape, not “invalid”');
+
+  const off = await call('/api/settings', { method: 'POST', cookie: store.cookie, confirm: true, body: { handle: 'mamatoe', rail_accts: false } });
+  assert.equal(off.status, 200, off.text);
+  const raw2 = JSON.parse(env.STORES._map.get('store:mamatoe').value);
+  raw2.pending.apply_at = Date.now() - 1;
+  env.STORES._map.set('store:mamatoe', { value: JSON.stringify(raw2) });
+  await call('/s/mamatoe/config.json');
+  assert.ok(!JSON.parse(env.STORES._map.get('store:mamatoe').value).rail_accts, 'and one switch turns the whole thing back off');
+});
+
+test('a described rail says what its number looks like', async () => {
+  const r = await call('/api/settings', { method: 'POST', cookie: store.cookie, confirm: true, body: {
+    handle: 'mamatoe', rail: 'custom',
+    rail_def: { label: 'Momo Street Wallet', dial: '*222#', pct: 1.5, fixed: 0, spec: 'phone', holder: true, till: true },
+  } });
+  assert.equal(r.status, 200, r.text);
+  const raw = JSON.parse(env.STORES._map.get('store:mamatoe').value);
+  raw.pending = raw.pending || {};                        // the rail is money too; run its fuse
+  if (raw.pending.fields) raw.pending.apply_at = Date.now() - 1;
+  env.STORES._map.set('store:mamatoe', { value: JSON.stringify(raw) });
+  await call('/s/mamatoe/config.json');
+  const cfg = await call('/s/mamatoe/config.json');
+  assert.equal(cfg.json.store.rail, 'custom');
+  assert.equal(cfg.json.store.rail_info.label, 'Momo Street Wallet', 'the merchant’s own words, on the slip');
+  assert.equal(cfg.json.store.rail_info.spec, 'phone', 'and the shape they described, so the form and the validation follow it');
+
+  const bad = await call('/api/settings', { method: 'POST', cookie: store.cookie, confirm: true, body: {
+    handle: 'mamatoe', rail_accts: { custom: { acct: 'not a phone' } } } });
+  assert.equal(bad.status, 422, 'a custom rail validates against the shape it was given: ' + bad.text);
+  assert.match(bad.json.fields.rail_accts, /number buyers pay/i);
+  const good = await call('/api/settings', { method: 'POST', cookie: store.cookie, confirm: true, body: {
+    handle: 'mamatoe', rail_accts: { custom: { acct: '0551234567', holder: 'STREET MOMO' } } } });
+  assert.equal(good.status, 200, good.text);
+  const g2 = JSON.parse(env.STORES._map.get('store:mamatoe').value);
+  if (g2.pending && g2.pending.fields) g2.pending.apply_at = Date.now() - 1;
+  env.STORES._map.set('store:mamatoe', { value: JSON.stringify(g2) });
+  const o = await call('/api/order', { method: 'POST', ip: '196.0.0.53', body: {
+    handle: 'mamatoe', service: 'pickup', buyer: { name: 'Street', phone: '263780000153' },
+    items: [{ id: '1', name: 'Chicken & rice', price: 5.5, qty: 1 }],
+  } });
+  assert.equal(o.status, 201, o.text);
+  assert.equal(o.json.pay.account, '0551234567', 'an undescribed-to-nobody method still prints its number');
+  assert.ok(o.json.pay.steps.some((t) => /STREET MOMO/.test(t)), 'with the name check a custom rail would otherwise not have');
+  assert.ok(o.json.pay.ask_payer, 'and the sender question, because it is a phone-shaped wallet');
+
+  // put mamatoe back the way the suite found it
+  await call('/api/settings', { method: 'POST', cookie: store.cookie, confirm: true, body: { handle: 'mamatoe', rail: 'ecocash_usd', rail_accts: false, week: [] } });
+  const g3 = JSON.parse(env.STORES._map.get('store:mamatoe').value);
+  if (g3.pending && g3.pending.fields) g3.pending.apply_at = Date.now() - 1;
+  env.STORES._map.set('store:mamatoe', { value: JSON.stringify(g3) });
+});

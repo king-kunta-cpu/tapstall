@@ -4,16 +4,24 @@
  * tests/core.test.mjs, so the tests run against shipped code, not a copy.
  */
 
+/* Every rail also says what its payment *detail* looks like, because one
+ * `pay_account` per shop cannot be true: the EcoCash wallet is a phone number, the
+ * ZIPIT account is a bank number, PayShap is a proxy handle, and cash has nothing
+ * at all. `spec` picks the shape (RAIL_SPECS below), `holder` means "the payer
+ * should see this name in their confirmation" — the one check that stops a wallet
+ * swap — and `till` means the rail has a merchant paybill/till some shops use
+ * instead of a personal number.
+ */
 export const RAILS = {
-  ecocash_usd: { label: 'EcoCash USD', dial: '*151#', pct: 0.014, imtt: 0.02, fixed: 0, type: 'manual' },
-  ecocash_zig: { label: 'EcoCash ZiG', dial: '*151#', pct: 0.02, imtt: 0.015, fixed: 0, type: 'manual' },
-  innbucks: { label: 'InnBucks', dial: '*155*4#', pct: 0.015, imtt: 0.02, fixed: 0, type: 'manual' },
-  onepay: { label: 'OnePay / OneMoney', dial: 'wallet app', pct: 0.015, imtt: 0.02, fixed: 0, type: 'manual' },
-  zipit: { label: 'Bank ZIPIT / RTGS', dial: 'bank app', pct: 0, imtt: 0.02, fixed: 0, type: 'manual' },
-  cash: { label: 'Cash on delivery / pickup', dial: '', pct: 0, imtt: 0, fixed: 0, type: 'cod' },
-  payshap: { label: 'PayShap (SA)', dial: 'ShapID', pct: 0.005, imtt: 0, fixed: 0, type: 'manual' },
-  ozow: { label: 'Ozow (SA)', dial: 'link', pct: 0.01, imtt: 0, fixed: 0, type: 'auto' },
-  payfast: { label: 'PayFast card (SA)', dial: 'hosted', pct: 0.029, imtt: 0, fixed: 1.0, type: 'auto' },
+  ecocash_usd: { label: 'EcoCash USD', dial: '*151#', pct: 0.014, imtt: 0.02, fixed: 0, type: 'manual', spec: 'phone', holder: true, till: true },
+  ecocash_zig: { label: 'EcoCash ZiG', dial: '*151#', pct: 0.02, imtt: 0.015, fixed: 0, type: 'manual', spec: 'phone', holder: true, till: true },
+  innbucks: { label: 'InnBucks', dial: '*155*4#', pct: 0.015, imtt: 0.02, fixed: 0, type: 'manual', spec: 'phone', holder: true, till: false },
+  onepay: { label: 'OnePay / OneMoney', dial: 'wallet app', pct: 0.015, imtt: 0.02, fixed: 0, type: 'manual', spec: 'phone', holder: true, till: false },
+  zipit: { label: 'Bank ZIPIT / RTGS', dial: 'bank app', pct: 0, imtt: 0.02, fixed: 0, type: 'manual', spec: 'bank', holder: true, till: false },
+  cash: { label: 'Cash on delivery / pickup', dial: '', pct: 0, imtt: 0, fixed: 0, type: 'cod', spec: 'none', holder: false, till: false },
+  payshap: { label: 'PayShap (SA)', dial: 'ShapID', pct: 0.005, imtt: 0, fixed: 0, type: 'manual', spec: 'shapid', holder: true, till: false },
+  ozow: { label: 'Ozow (SA)', dial: 'link', pct: 0.01, imtt: 0, fixed: 0, type: 'auto', spec: 'bank', holder: true, till: false },
+  payfast: { label: 'PayFast card (SA)', dial: 'hosted', pct: 0.029, imtt: 0, fixed: 1.0, type: 'auto', spec: 'link', holder: false, till: true },
 };
 
 /**
@@ -35,7 +43,227 @@ export function normaliseRail(def, key) {
   const fixed = clamp(Number(d.fixed), 0, 1000) || 0;
   const type = ['manual', 'auto', 'cod'].indexOf(d.type) >= 0 ? d.type : 'manual';
   const dial = String(d.dial || '').trim().slice(0, 40);
-  return { key: key || 'custom', label, dial: dial || (type === 'auto' ? 'link' : 'wallet app'), pct, imtt, fixed, type, added: true };
+  const spec = RAIL_SPECS[d.spec] ? String(d.spec) : (type === 'cod' ? 'none' : 'wallet');
+  return { key: key || 'custom', label, dial: dial || (type === 'auto' ? 'link' : 'wallet app'), pct, imtt, fixed, type,
+           spec, holder: d.holder !== false && type !== 'cod', till: d.till === true, added: true };
+}
+
+/* ───────────────────────── the number a buyer actually needs ─────────────────
+ *
+ * One field called `pay_account` for a whole shop was a guess about how people
+ * get paid. They do not: the EcoCash USD wallet, the ZiG wallet, the ZIPIT
+ * account and the ShapID are four numbers in four shapes, and a buyer who is
+ * told "send it to the account" is a buyer who sends it to the wrong one. So
+ * each rail holds its own detail, validated against that rail's own shape, and
+ * `pay_account` survives underneath as the fallback — no store is broken by
+ * this, every store can be improved by it.
+ */
+export const RAIL_SPECS = {
+  none:   { label: 'Nothing to pay ahead', hint: 'Cash / on delivery — no number needed', ph: '' },
+  phone:  { label: 'Number buyers pay', hint: 'The number they dial from their wallet, e.g. 0771234567 or 263771234567', ph: '0771234567' },
+  bank:   { label: 'Account number', hint: 'The account the transfer lands in — branch code goes in your note if you need one', ph: '1234567890' },
+  shapid: { label: 'ShapID / proxy address', hint: 'Your ShapID: a number, an @handle or an ID your bank gave you', ph: '0821234567' },
+  wallet: { label: 'Wallet ID', hint: 'What your wallet is called inside that app', ph: 'wallet-id' },
+  link:   { label: 'Payment link or store ID', hint: 'Where buyers are sent to pay', ph: 'https://…' },
+};
+
+/** One rail's payment detail. Blank means "use the store default", which is what
+ *  makes this additive: a store that never touches it keeps behaving as before.
+ *  Thrown messages are deliberate — validateSettings puts them on the field, so
+ *  the merchant reads "EcoCash USD: 6 to 20 digits" instead of "invalid". */
+export function cleanAcct(v, specName) {
+  const s = String(v == null ? '' : v).trim();
+  const spec = RAIL_SPECS[specName] || RAIL_SPECS.wallet;
+  if (!s) return '';
+  if (specName === 'none') return '';
+  if (specName === 'phone') {
+    const d = s.replace(/[^\d+]/g, '');
+    if (!/^\+?\d{9,15}$/.test(d)) throw new Error(spec.label.toLowerCase() + ': 9 to 15 digits, with or without a +');
+    return d;
+  }
+  if (specName === 'bank') {
+    const d = s.replace(/[\s-]/g, '');
+    if (!/^\d{6,20}$/.test(d)) throw new Error(spec.label.toLowerCase() + ': 6 to 20 digits, no spaces');
+    return d;
+  }
+  if (specName === 'link') {
+    if (!/^https?:\/\/\S{4,200}$/.test(s)) throw new Error(spec.label.toLowerCase() + ': a full http(s) link');
+    return s;
+  }
+  if (s.length > 40 || !/^[A-Za-z0-9@.:+_-]{4,40}$/.test(s)) throw new Error(spec.label.toLowerCase() + ': 4 to 40 characters');
+  return s;
+}
+const cleanHolder = (v) => String(v == null ? '' : v).trim().replace(/\s+/g, ' ').slice(0, 40);
+const cleanTill = (v) => { const s = String(v == null ? '' : v).trim().replace(/[^0-9A-Za-z-]/g, ''); return s ? s.slice(0, 20) : ''; };
+
+/** The whole map a settings POST may carry: { ecocash_usd: {acct, holder, till} }.
+ *  Unknown rails and empty rows fall away; nothing here is stored as a stray. */
+export function cleanRailAccts(input, rails, railDef) {
+  const src = input && typeof input === 'object' ? input : {};
+  const out = {};
+  const custom = railDef && typeof railDef === 'object' ? railDef : null;
+  for (const k of Object.keys(src).slice(0, 24)) {
+    const key = String(k).toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 20);
+    if (!key) continue;
+    // A self-described rail is validated against the shape its owner gave it —
+    // "Momo Street Wallet, phone-shaped" must refuse 'abc' as a phone number, not
+    // shrug because the built-in table has never heard of it.
+    const info = key === 'custom' && custom ? { spec: custom.spec || 'wallet', holder: custom.holder !== false, till: custom.till === true }
+      : (rails && rails[key]) || RAILS[key] || (key === 'custom' ? { spec: 'wallet', holder: true, till: true } : null);
+    if (!info) continue;                                   // a rail nobody has registered is not stored
+    const row = src[k] && typeof src[k] === 'object' ? src[k] : {};
+    const acct = cleanAcct(row.acct != null ? row.acct : row, info.spec);
+    const holder = info.holder === false ? '' : cleanHolder(row.holder != null ? row.holder : row.name);
+    const till = info.till === false ? '' : cleanTill(row.till != null ? row.till : row.paybill);
+    if (acct || holder || till) out[key] = { acct, holder, till };
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** What to tell a buyer about this rail, resolved against the store. */
+export function railAcctOf(st, railKey, rail) {
+  const s = st || {};
+  const r = rail || {};
+  const row = (s.rail_accts || {})[railKey || s.rail || ''] || null;
+  const spec = RAIL_SPECS[r.spec] ? r.spec : 'wallet';
+  const acct = (row && row.acct) || String(s.pay_account || '').trim();
+  return {
+    acct,
+    holder: r.holder === false ? '' : ((row && row.holder) || String(s.shop_name || '').trim()),
+    till: r.till === false ? '' : ((row && row.till) || ''),
+    label: (RAIL_SPECS[spec] || RAIL_SPECS.wallet).label,
+    spec,
+    own: !!(row && row.acct),
+  };
+}
+
+/* ─────────────────────────────────── the week ────────────────────────────
+ *
+ * "Opening hours" as one free-text line is a decoration: the buyer cannot act on
+ * "Mon-Sat mornings" at 19:40, and the merchant cannot be asked to format it. So
+ * the store holds a week — seven days, each closed or a list of from/to slots —
+ * and the sentence every existing surface prints is *generated* from it. Two
+ * slots a day covers the split shift a Harare caterer actually runs (breakfast,
+ * supper), and a close time before the open time means the slot runs past
+ * midnight, which is what a shebeen and a late kitchen need.
+ *
+ * Both markets this runs in are UTC+2 with no daylight saving, so the local clock
+ * is a constant. If a third market ever moves, this is the one line to change.
+ */
+export const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const STORE_TZ_MIN = 120;
+
+const toMin = (v) => {
+  const m = String(v == null ? '' : v).trim().match(/^(\d{1,2})[:.](\d{2})$/);
+  if (!m) return null;
+  const h = Number(m[1]), mm = Number(m[2]);
+  if (h > 23 || mm > 59) return null;
+  return h * 60 + mm;
+};
+const fromMin = (n) => String(Math.floor(n / 60)).padStart(2, '0') + ':' + String(n % 60).padStart(2, '0');
+
+/** Tolerant on purpose: the dashboard sends {slots:[{open,close}]}, a hand-written
+ *  payload may send {open,close} or "09:00-17:00", and a day may be null, false, 0
+ *  or 'closed'. What comes out is always 7 rows of null | { slots:[{o,c}] }. */
+const BLANK = (x) => x == null || String(x).trim() === '';
+function daySlots(v) {
+  if (v == null || v === false || v === 0 || v === 'false' || v === 'closed') return null;
+  const raw = Array.isArray(v) ? v : (typeof v === 'object' ? (Array.isArray(v.slots) ? v.slots : [v]) : String(v).split(/,(?=[^,]*-)/));
+  const slots = [];
+  for (const x of raw) {
+    if (!x || x === true) continue;
+    if (typeof x === 'string') {
+      if (BLANK(x)) continue;
+      const p = x.split(/[-–]/).map((t) => toMin(t));
+      if (p.length !== 2 || p[0] == null || p[1] == null) {
+        throw new Error('a time needs both ends, like 09:00 to 17:00');
+      }
+      slots.push({ o: p[0], c: p[1] });
+      continue;
+    }
+    const rawO = x.open != null ? x.open : x.o, rawC = x.close != null ? x.close : (x.to != null ? x.to : x.c);
+    if (BLANK(rawO) && BLANK(rawC)) continue;                  // an empty row is a closed day
+    const o = toMin(rawO), c = toMin(rawC);
+    // Refusing here matters: the alternative is "unreadable" falling through to
+    // "nothing open", which lets one typo'd box delete a shop's whole week.
+    if (o == null || c == null) throw new Error('a time needs both ends, like 09:00 to 17:00');
+    if (o !== c) slots.push({ o, c });
+    if (slots.length >= 2) break;
+  }
+  return slots.length ? { slots: slots.slice(0, 2) } : null;
+}
+export function cleanWeek(input) {
+  const src = Array.isArray(input) ? input : (input && typeof input === 'object' ? [] : null);
+  if (!src) return null;
+  const out = [];
+  for (let d = 0; d < 7; d++) out.push(daySlots(src[d]));
+  return out.some(Boolean) ? out : undefined;
+}
+
+/** The one line every surface already prints. Runs of identical days collapse, so
+ *  a normal shop reads "Mon–Fri 08:00–17:00 · Sat 08:00–13:00", not seven clauses. */
+export function hoursText(week) {
+  if (!week || !week.length) return '';
+  const sig = (d) => (week[d] ? week[d].slots.map((s) => fromMin(s.o) + '-' + fromMin(s.c)).join(',') : '');
+  const parts = [];
+  let d = 0;
+  while (d < 7) {
+    if (!week[d]) { d++; continue; }
+    let e = d;
+    while (e + 1 < 7 && sig(e + 1) === sig(d)) e++;
+    const span = e === d ? DAY_NAMES[d] : DAY_NAMES[d] + '–' + DAY_NAMES[e];
+    parts.push(span + ' ' + sig(d).replace(/,/g, ' & '));
+    d = e + 1;
+  }
+  const open = parts.join(' · ');
+  const off = [];
+  for (let k = 0; k < 7; k++) if (!week[k]) off.push(DAY_NAMES[k]);
+  return open ? (open + (off.length ? ' · closed ' + off.join(' ') : '')) : 'By arrangement';
+}
+
+export const syncHours = (st) => { const t = hoursText(st && st.week); if (t && st.hours !== t) st.hours = t; return st; };
+
+/**
+ * Is the shop open right now, and if not, when does it next open?
+ * Unknown is a real answer and the default: a store that never set a week is
+ * open, because the alternative is silently shutting 200 shops that predate this.
+ */
+export function openNow(st, nowMs) {
+  const s = st || {};
+  const week = s.week;
+  if (s.closed) return { known: true, open: false, label: 'Closed right now', next: null };
+  if (!week || !week.length) return { known: false, open: true, label: '', next: null };
+  const t = new Date((nowMs || Date.now()) + STORE_TZ_MIN * 60000);
+  const day = (t.getUTCDay() + 6) % 7;                    // index 0 = Monday
+  const m = t.getUTCHours() * 60 + t.getUTCMinutes();
+  const on = (row, check) => {
+    if (!row) return null;
+    for (const sl of row.slots) if (check(sl)) return sl;
+    return null;
+  };
+  // Today's own slots. A slot that closes before it opened runs past midnight, so
+  // "18:00–02:00" is open at 23:00 (m >= o) and at 01:00 (m < c).
+  const hit = on(week[day], (sl) => sl.c > sl.o ? (m >= sl.o && m < sl.c) : (m >= sl.o || m < sl.c));
+  if (hit) {
+    const ends = hit.c > hit.o ? hit.c : (m < hit.c ? hit.c : hit.c + 1440);
+    return { known: true, open: true, label: 'Open until ' + fromMin(ends % 1440), left: ends - m };
+  }
+  // And yesterday's, if it is still running into this morning — the case a
+  // late kitchen lives in, and the one a day-indexed table always forgets.
+  const prev = on(week[(day + 6) % 7], (sl) => sl.c <= sl.o && m < sl.c);
+  if (prev) return { known: true, open: true, label: 'Open until ' + fromMin(prev.c), left: prev.c - m, since: 'last night' };
+  let best = null;
+  for (let i = 0; i < 8; i++) {
+    const d = (day + i) % 7, row = week[d];
+    if (!row) continue;
+    for (const sl of row.slots) {
+      const at = i * 1440 + sl.o;
+      if (at <= m) continue;
+      if (!best || at < best.at) best = { at, when: fromMin(sl.o), day: i === 0 ? 'today' : (i === 1 ? 'tomorrow' : DAY_NAMES[d]) };
+    }
+  }
+  return { known: true, open: false, in_min: best ? best.at - m : null,
+           label: best ? 'Closed — opens ' + best.day + ' at ' + best.when : 'Closed' };
 }
 
 /** The rail a store actually prices with: operator-added catalogue, then the
@@ -187,7 +415,11 @@ export function priceOrder(st = {}, items = [], service = 'pickup', railKey = 'c
   const jitter = st.unique_change === false ? 0 : (Math.abs(Math.round(total * 100)) % 97) / 100;
   return {
     lines, itemsTotal, delivery: del, tax, taxPct, subtotal,
-    rail: { key: railKey, label: rail.label, dial: rail.dial, pct: rail.pct, imtt: rail.imtt, fixed: rail.fixed, type: rail.type },
+    // The shape fields ride along because this object is what a slip is printed
+    // from *later*, when the store may have changed its rail config: a frozen order
+    // that lost "this is a phone number, ask who it came from" would stop asking.
+    rail: { key: railKey, label: rail.label, dial: rail.dial, pct: rail.pct, imtt: rail.imtt, fixed: rail.fixed, type: rail.type,
+            spec: rail.spec, holder: rail.holder, till: rail.till },
     fee: mode === 'pass' ? fee : 0,
     fee_absorbed_by_merchant: mode === 'absorb' ? fee : 0,
     surcharge_mode: mode,
@@ -210,14 +442,36 @@ export function reference(st = {}, order = {}) {
 export function payInstructions(st = {}, order = {}, pricing = {}) {
   const rail = pricing.rail || {};
   const ref = reference(st, order);
-  const acct = st.pay_account || (rail.type === 'cod' ? 'pay on delivery' : 'not set — owner must fix');
+  const det = railAcctOf(st, rail.key || st.rail, rail);
+  const cod = rail.type === 'cod';
+  // A cash slip has nothing to pay into. Printing the shop's EcoCash number there
+  // because it happens to be on file is how a buyer pays early to a wallet the
+  // order was never going to be reconciled against.
+  const acct = cod ? 'pay on delivery' : (det.acct || 'not set — owner must fix');
+  const cur = st.currency || 'USD';
+  const to = det.till ? `${acct} (till ${det.till})` : acct;
+  const steps = cod
+    ? ['Nothing to pay now — pay the runner or pay at pickup.']
+    : [`Open ${rail.label}${rail.dial ? ' (' + rail.dial + ')' : ''}`,
+       `Send exactly ${pricing.pay_now} ${cur} to ${to}`,
+       // The confirmation screen's name is the only check a buyer can make before
+       // money leaves, and a wallet swap looks exactly like a valid payment.
+       ...(det.holder ? [`Check it reads “${det.holder}” — if it does not, do not send`] : []),
+       `Use reference: ${ref}`];
+  // Printed as the buyer typed it, digits kept. A local number has no country code
+  // in it and inventing one is how a merchant phones a stranger's line.
+  const from = String(((order.buyer || {}).payer || '')).replace(/[^\d+]/g, '').slice(0, 16);
   return {
-    rail: rail.label, dial: rail.dial, account: acct, reference: ref,
-    amount: pricing.pay_now, currency: st.currency || 'USD',
+    rail: rail.label, dial: rail.dial, account: acct, account_label: det.label, holder: det.holder,
+    till: det.till, reference: ref, amount: pricing.pay_now, currency: cur,
+    // Manual rails are the ones where "which number did he send from?" is the whole
+    // reconciliation, so the buyer is asked — and the answer rides on the slip.
+    ask_payer: !cod && det.spec === 'phone' ? true : false,
+    payer_from: from,
+    // A buyer who set hours expects to be told when nobody is home to see the alert.
+    hours_note: (order.hours && order.hours.open === false && order.hours.label) || '',
     note: 'Pay the EXACT amount. The odd cents are what links your payment to your order — no screenshot needed.',
-    steps: rail.type === 'cod'
-      ? ['Nothing to pay now — pay the runner or pay at pickup.']
-      : [`Open ${rail.label}${rail.dial ? ' (' + rail.dial + ')' : ''}`, `Send exactly ${pricing.pay_now} ${st.currency || 'USD'} to ${acct}`, `Use reference: ${ref}`],
+    steps,
   };
 }
 
@@ -227,9 +481,16 @@ export function riskFlags(st = {}, order = {}, hist = {}) {
   if (order.service === 'delivery' && ((order.pricing || {}).total || 0) > (Number(st.cod_review_above) || 80)) {
     f.push('high_value_cod_review_before_sending');
   }
-  if (((order.pricing || {}).rail || {}).type === 'manual' && String(st.pay_account || '').length < 6) {
+  const railKey = ((order.pricing || {}).rail || {}).key || st.rail;
+  const has = (st.rail_accts || {})[railKey] && (st.rail_accts || {})[railKey].acct;
+  if (((order.pricing || {}).rail || {}).type === 'manual' && String(st.pay_account || '').length < 6 && !has) {
     f.push('merchant_pay_account_not_set');
   }
+  // Hours are never a reason to lose an order, so an order sent at 02:00 is taken
+  // and marked: the merchant sees "this arrived while the shop was shut" and can
+  // decide, instead of the buyer hitting a wall and going to a competitor.
+  const now = order.hours && order.hours.known !== undefined ? order.hours : openNow(st);
+  if (now && now.known && !now.open) f.push('sent while closed' + (now.label ? ' — ' + now.label : ''));
   return f;
 }
 
@@ -243,7 +504,13 @@ export function waSummary(st = {}, o = {}) {
     `Total *${p.pay_now}* ${cur} (${(p.rail || {}).label || 'cash'})`,
     o.service === 'delivery' ? `Deliver to: ${(o.buyer || {}).address || ''}` : 'Pickup',
     o.when && o.when !== 'asap' ? `Time: ${o.when}` : '',
-    (p.rail || {}).type !== 'cod' ? `Pay ${p.pay_now} to ${st.pay_account || '—'} ref ${o.code}` : 'Paying on delivery',
+    // The same number the buyer was shown, from the same source: a handoff message
+    // that quotes the store default while the slip says the EcoCash wallet is how a
+    // payment ends up in the wrong account and nobody can say why.
+    (p.rail || {}).type !== 'cod' ? (() => { const d = railAcctOf(st, (p.rail || {}).key, p.rail || {});
+      return `Pay ${p.pay_now} ${cur} to ${d.acct || '—'}${d.till ? ' (till ' + d.till + ')' : ''}${o.buyer && o.buyer.payer ? ' · from ' + String(o.buyer.payer).replace(/[^\d+]/g, '') : ''} ref ${o.code}`;
+    })() : 'Paying on delivery',
+    o.hours && o.hours.known && !o.hours.open ? `(sent while closed — ${o.hours.label})` : '',
     (o.buyer || {}).note ? `Note: ${o.buyer.note}` : '',
   ].filter(Boolean).join('\n');
 }
@@ -272,7 +539,18 @@ export function publicStore(st, catalog) {
   // 3.4% quoting a Ghanaian or Bangladeshi shop a number nothing will match.
   const r = resolveRail(st, st.rail || 'cash', catalog);
   out.rail_info = { key: r.key, label: r.label, dial: r.dial, type: r.type,
-                    pct: r.pct, imtt: r.imtt, fixed: r.fixed, added: !!r.added };
+                    pct: r.pct, imtt: r.imtt, fixed: r.fixed, added: !!r.added,
+                    // the storefront asks for the sender's number only on rails where
+                    // that is how a payment gets found, so it needs the shape here
+                    spec: r.spec || 'wallet' };
+  // The buyer needs the number for the rail this shop actually takes; the other
+  // five are nobody's business on a public page. So the derived one is published
+  // and `rail_accts` itself never is.
+  const det = railAcctOf(st, r.key, r);
+  out.pay_account = det.acct || '';
+  out.pay_holder = det.holder || '';
+  out.pay_till = det.till || '';
+  out.open = { known: true, ...openNow(st) };
   return out;
 }
 
@@ -444,7 +722,7 @@ export async function pinMiss(pin) { await pinOk(pin, PIN_GHOST); return false; 
 /* ------------------------------------------------------------ settings model */
 
 /** Fields a merchant may change instantly: nothing here moves money or PII. */
-export const SOFT_FIELDS = ['tagline', 'logo', 'location', 'hours', 'closed'];
+export const SOFT_FIELDS = ['tagline', 'logo', 'location', 'hours', 'closed', 'week'];
 
 /** Every editable field and its validator; null = rejected, undefined-safe. */
 const SET = {
@@ -453,6 +731,12 @@ const SET = {
   logo: (v) => (!v ? '' : /^https?:\/\/\S+$/.test(String(v)) ? String(v).slice(0, 300) : null),
   location: (v) => String(v || '').trim().slice(0, 90),
   hours: (v) => String(v || '').trim().slice(0, 60),
+  // `false` is a legal stored answer meaning "this store has none", which is how a
+  // merchant takes a week (or a rail's number) back off the shop: a validator that
+  // only ever returns a value could add but never remove.
+  week: (v) => (v === '' || v === null || v === false || (Array.isArray(v) && !v.some(Boolean))) ? false : (cleanWeek(v) || false),
+  rail_accts: (v, opts) => (v === '' || v === null || v === false) ? false
+    : (cleanRailAccts(v, opts && opts.rails, opts && opts.rail_def) || false),
   closed: (v) => v === true || v === 'true' || v === 1 || v === '1',
   whatsapp: (v) => { const d = digits(v).replace(/\D/g, ''); return d.length >= 9 && d.length <= 15 ? d : null; },
   pay_account: (v) => String(v || '').trim().slice(0, 60),
@@ -499,22 +783,40 @@ export function validateSettings(body, now, opts) {
   for (const k of Object.keys(src)) {
     if (!SET[k]) { ignored.push(k); continue; }
     let v;
-    try { v = SET[k](src[k], options); } catch (e) { v = null; }
+    // A thrown message is the merchant-facing reason, so a validator that knows
+    // exactly what it wanted can say so instead of returning a bare null and
+    // leaving "check the format" to cover a phone number and a webhook alike.
+    try { v = SET[k](src[k], options); } catch (e) { errors[k] = String((e && e.message) || 'check the format of this field').slice(0, 140); continue; }
+    if (v === undefined) continue;                          // "no change", not an error
     if (v === null) { errors[k] = 'check the format of this field'; continue; }
     if (SOFT_FIELDS.indexOf(k) >= 0) soft[k] = v; else money[k] = v;
   }
   return { ok: !Object.keys(errors).length, soft, money, errors, ignored, at: now || Date.now() };
 }
 
+/** Objects and arrays need a real comparison: `!==` on two equal weeks is always
+ *  true, which would report a change on every save and let a merchant "edit" the
+ *  same hours into an endless 15-minute fuse. */
+const sameVal = (a, b) => a === b || (!!a && !!b && typeof a === 'object' && typeof b === 'object'
+  && JSON.stringify(a) === JSON.stringify(b));
+
+/** Write one setting, with one extra meaning: `false` is "remove it". The week is
+ *  the only field that carries a derived twin, so applying it also refreshes the
+ *  sentence every other surface prints. */
+export function applyField(st, k, v) {
+  if (v === false) delete st[k]; else st[k] = v;
+  if (k === 'week') syncHours(st);
+}
+
 /** Apply the harmless fields, stage the rest. Returns counts for the response. */
 export function stageSettings(st, soft, money, holdMs, now) {
   const t = now || Date.now();
   let changed = 0;
-  for (const k of Object.keys(soft || {})) if (st[k] !== soft[k]) { st[k] = soft[k]; changed++; }
+  for (const k of Object.keys(soft || {})) if (!sameVal(st[k], soft[k])) { applyField(st, k, soft[k]); changed++; }
   const pend = (st.pending && st.pending.fields) || {};
   let staged = 0;
   for (const k of Object.keys(money || {})) {
-    if (st[k] === money[k] && !(k in pend)) continue;
+    if (sameVal(st[k], money[k]) && !(k in pend)) continue;
     pend[k] = money[k]; staged++;
   }
   if (staged) st.pending = { fields: pend, set_at: t, apply_at: t + Math.max(60e3, holdMs) };
@@ -536,13 +838,22 @@ export function applyPending(st, now) {
     return { applied: [], pending: { keys: Object.keys(p.fields), in_ms: p.apply_at - t, apply_at: p.apply_at } };
   }
   const applied = [];
-  for (const k of Object.keys(p.fields)) { st[k] = p.fields[k]; applied.push(k); }
+  for (const k of Object.keys(p.fields)) { applyField(st, k, p.fields[k]); applied.push(k); }
   delete st.pending;
   return { applied, pending: null };
 }
 
 /** Audit-friendly rendering: enough to recognise a change, never the value. */
 export function maskField(k, v) {
+  // A whole week or a map of rail accounts must not read as "[object Object]" in
+  // the log a merchant is told to trust.
+  if (v && typeof v === 'object') {
+    if (k === 'rail_accts') { const n = Object.keys(v).length; return n ? n + ' rail' + (n > 1 ? 's' : '') + ' given a number' : '(none)'; }
+    if (k === 'week') return hoursText(v) || '(cleared)';
+    if (k === 'menu') return ((v.over && Object.keys(v.over).length) + (v.extra && v.extra.length) || 0) + ' edits';
+    return '(set)';
+  }
+  if (v === false) return '(cleared)';
   const s = String(v == null ? '' : v);
   if (!s) return '(blank)';
   if (k === 'notify_webhook' || k === 'feed_url' || k === 'logo') {

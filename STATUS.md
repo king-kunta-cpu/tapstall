@@ -1,5 +1,77 @@
 # Tapstall — status
 
+## Rails that know their own number, and a week that means something (2026-10-11, v0.6.5)
+
+Items 2 and 3 off your list, in one release because they met in the same place —
+the line on the slip a buyer reads.
+
+**A payment number per rail.** One `pay_account` for a whole shop was a guess about
+how people get paid. It isn't: the EcoCash USD wallet, the ZiG wallet, the ZIPIT
+account, the ShapID and a PayFast store ID are five different shapes, and a buyer
+told "send it to the account" picks whichever one they find first. So:
+
+| Now | Detail |
+|---|---|
+| `st.rail_accts` | `{ ecocash_usd: { acct, holder, till }, zipit: { acct } … }` — each method holds its own |
+| `RAIL_SPECS` | every rail says what its number *looks like*: `phone` (9–15 digits), `bank` (6–20), `shapid`, `wallet`, `link`, `none` |
+| `cleanAcct` | validates against that shape and **throws a sentence** — `account number: 6 to 20 digits, no spaces` — which `validateSettings` now puts on the field, so a wrong-shaped number is named, not "invalid" |
+| `payInstructions` | quotes the rail's own number, its till, and a step that was missing: **"Check it reads “MAMA TOO CATERING” — if it does not, do not send"** — the one check a buyer can make before money leaves, which is what a wallet swap defeats |
+| `publicStore` | publishes **one** number (the method on offer) plus the name and till. `rail_accts` itself is never public: your ZIPIT account is not the storefront's business |
+| `buyer.payer` | on a manual wallet the buyer is asked, optionally, what number they'll pay from. It rides on the slip, the WhatsApp handoff (`· from 0718663235`) and the dashboard, because the merchant's whole reconciliation is matching an SMS alert to an order |
+| `ask_payer` | the question appears **only** where it explains a payment — `spec: phone|wallet` and `type: manual`. Card links and cash never see it |
+
+`pay_account` stays underneath as the default, so nothing built before this breaks; a
+rail with no number of its own says "falls back to your default" in the dashboard and
+prints the default on the slip. **The whole map is a money field**: staged 15 minutes
+like a payout change, cancellable, because repricing where money lands is exactly
+that class of edit.
+
+**The custom rail, developed.** `rail_def` now carries `spec`, `holder` and `till` —
+so "MTN MoMo, phone-shaped, name check, has a till" is a rail the platform validates,
+prices and prints properly, with no operator in the loop. A number posted for a
+custom rail is checked against **the shape being written in the same POST**, not the
+one stored before it.
+
+**Opening hours are a week, not a sentence.** `st.week` = seven days, each closed or
+one or two `from → to` slots, in the shop's own clock. `st.hours` — the string every
+existing surface already prints — is now *generated* from it (`Mon–Fri 09:00-17:00 ·
+Sat 08:00-13:00 · closed Sun`), so the chip, the config, the WhatsApp line and the
+preview cannot disagree with the editor. `openNow()` answers *is it open*: today's
+slots, **and yesterday's if they run past midnight** (18:00–02:00 is open at 01:00 —
+the case a day-indexed table always forgets), plus `Closed — opens tomorrow at
+09:00`. Both markets are UTC+2 with no DST, so it's a constant, and the one place to
+change if that stops being true.
+
+Two decisions worth stating:
+- **A store with no week is open.** `known: false`. The alternative is shutting every
+  shop that predates this feature because they never typed a calendar.
+- **An order sent while closed is taken, and flagged** (`sent while closed — Closed
+  right now`), and the buyer sees the same words on the receipt. Refusing a hungry
+  customer at 22:00 is a way to lose them to a competitor; the merchant decides.
+
+**Found on the way, both by tests:** `riskFlags()` — repeat-unpaid, high-value cash,
+missing payout account — **had never been called from `placeOrder`**; the risk engine
+was a function and a dream, so flags now come from the buyer's history *and* the
+cart *and* the clock. And `priceOrder` froze a rail without its `spec`, so the "ask
+who is paying" question would have vanished from every slip printed later.
+
+**Refusing to lose data:** one unreadable time box is now a 422 (`a time needs both
+ends, like 09:00 to 17:00`) instead of being read as "closed" — a validator that
+treats garbage as an empty day is a validator that deletes a shop's hours on a typo.
+A genuinely blank day still means closed, and `week: []` still means "take the week
+back off", because a setter that cannot unset is a trap.
+
+**Proved:** `node --test tests/` **124/124** (42 core · 53 live · 10 limits · 21
+pages; was 111). Nine new production assertions in `prod_check.sh` run the same
+paths against a live store and leave nothing behind: the held `rail_accts` is
+verified *not* to be readable before its fuse, the week is verified to rewrite the
+sentence, `rail_accts` is verified absent from `config.json`, the half-typed week is
+verified refused, and then revert + restore put the store back exactly as found.
+
+**Still owed:** image upload with browse/drag-drop (#1), and the rest of #5 — of
+which one item is yours, not mine: a verified sending domain, without which email
+transport stays off and PINs keep arriving through you.
+
 ## The shelf belongs to the store now (2026-10-11, v0.6.4)
 
 You opened `mamatoe`, looked at the Shop card and said the quiet part: *4 items ·
