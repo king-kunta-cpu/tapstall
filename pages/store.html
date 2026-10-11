@@ -342,11 +342,22 @@ var TERM = /*__TAPSTALL_TERM__*/null;
       '<p class="hint">Payment: <b>' + esc(railName) + '</b>' + (railNote ? ' — ' + railNote : '') + (CFG.surcharge_mode === 'absorb' && railCosts && !cod ? ' — this shop covers the payment cost, you pay the menu price.' : '') + '</p>' +
       '<label>Your name *</label><input id="fName" autocomplete="name" placeholder="e.g. Rudo M.">' +
       '<label>WhatsApp number * (with code, e.g. 26377...)</label><input id="fPhone" inputmode="tel" autocomplete="tel" placeholder="263771234567">' +
-      // On a manual wallet the merchant matches an SMS to an order; the number the
-      // payment comes from is the whole reconciliation, so ask for it — and only
-      // here, because a card link or cash has no such thing to match.
-      (R && R.type === 'manual' && (R.spec === 'phone' || R.spec === 'wallet')
+      // Which questions are worth asking a buyer is the rail's business, not this
+      // page's: the worker knows a hosted card link has no number to match and a
+      // ZIPIT has nothing else to match. So the page obeys what it is told, with the
+      // old shape test as the fallback for a config cached before this shipped.
+      (R && (R.ask_payer !== undefined ? !!R.ask_payer : (R.type === 'manual' && (R.spec === 'phone' || R.spec === 'wallet')))
         ? '<label>Number you will pay from <span style="font-weight:400;color:#93a5b6;font-size:.82em">(optional — helps us find your payment)</span></label><input id="fPayer" inputmode="tel" placeholder="0712345678">'
+        : '') +
+      // The code their own app prints. Optional unless the shop said it cannot do
+      // without it — and even then the order is taken, because a lost sale is worse
+      // for the shop than a missing line.
+      (R && R.proof && R.proof !== 'none'
+        ? '<label>' + esc(R.proof_label || 'Code from the app')
+          + (R.proof === 'require' ? ' *' : ' <span style="font-weight:400;color:#93a5b6;font-size:.82em">(optional — helps us find your payment)</span>')
+          + '</label><input id="fProof" autocomplete="off" placeholder="e.g. 88123456">'
+          + '<p class="hint">' + esc(R.proof_hint || 'The confirmation your app or SMS shows after it sends.') + '</p>'
+          + (R.proof === 'require' ? '<p class="hint" id="pfNeed">This shop cannot find a payment without it. If you have not paid yet, pay first and come back to this page — the code is on the confirmation.</p>' : '')
         : '') +
       '<label>Delivery or pickup?</label><select id="fService"><option value="pickup">Pickup at shop</option><option value="delivery">Delivery</option></select>' +
       '<div id="addrWrap" hidden><label>Delivery address *</label><input id="fAddr" placeholder="Suburb, street, house/stand no."></div>' +
@@ -364,13 +375,26 @@ var TERM = /*__TAPSTALL_TERM__*/null;
       b.onclick = function () { cart.splice(Number(b.getAttribute('data-rm')), 1); try { localStorage.setItem('tp_cart_' + CFG.handle, JSON.stringify(cart)); } catch (e) {} closeSheet(); renderCards(); };
     });
     $('shut').onclick = closeSheet;
+    var pf = $('fProof');
+    if (pf && R && R.proof === 'require') {
+      // One firm ask, then get out of the way: an empty code is a problem the shop
+      // can solve by asking, a lost buyer is a problem nobody can solve.
+      pf.oninput = function () { var n = $('pfNeed'); if (n) n.style.display = ''; };
+    }
+    var nudged = false;
     $('place').onclick = function () {
+      var pf = $('fProof');
+      if (!nudged && pf && R && R.proof === 'require' && !pf.value.trim()) {
+        nudged = true; pf.focus();
+        var n = $('pfNeed'); if (n) { n.textContent = 'Add the code if your app gave you one — or send it as it is and the shop will ask you for it.'; n.style.color = '#a2141f'; }
+        return;
+      }
       var btn = $('place'); btn.disabled = true; btn.textContent = 'Sending…';
       fetch('/api/order', {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           handle: CFG.handle, items: cart, service: svc.value, when: $('fWhen').value,
-          buyer: { name: $('fName').value, phone: $('fPhone').value, payer: $('fPayer') ? $('fPayer').value : '', address: $('fAddr') ? $('fAddr').value : '', note: $('fNote').value, optin: $('fOpt') ? $('fOpt').checked : true }
+          buyer: { name: $('fName').value, phone: $('fPhone').value, payer: $('fPayer') ? $('fPayer').value : '', proof: $('fProof') ? $('fProof').value : '', address: $('fAddr') ? $('fAddr').value : '', note: $('fNote').value, optin: $('fOpt') ? $('fOpt').checked : true }
         })
       }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
         .then(function (res) {
@@ -399,6 +423,8 @@ var TERM = /*__TAPSTALL_TERM__*/null;
       (pay.holder ? '<div class="kv"><span>Should read</span><span>' + esc(pay.holder) + '</span></div>' : '') +
       (pay.payer_from ? '<div class="kv"><span>From</span><span>' + esc(pay.payer_from) + '</span></div>' : '') +
       '<div class="kv"><span>Reference</span><span>' + esc(pay.reference || o.order.code) + '</span></div>' +
+      (pay.proof ? '<div class="kv"><span>' + esc(pay.proof_label || 'Code from the app') + '</span><span>' + esc(pay.proof) + '</span></div>' : '') +
+      (!pay.proof && pay.proof_mode === 'require' ? '<p class="hint">You did not send the code the app shows. The shop will message you for it — nothing else about your order is delayed.</p>' : '') +
       '<div class="copy" id="cp">Copy payment reference + amount</div>' +
       '<ol class="steps">' + (pay.steps || []).map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('') + '</ol>' +
       '<p class="hint">' + esc(pay.note || '') + '</p>' +

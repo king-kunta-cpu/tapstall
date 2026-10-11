@@ -17,6 +17,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import * as CORE from '../worker/core.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const page = (n) => readFileSync(join(root, 'pages', n + '.html'), 'utf8');
@@ -345,3 +346,73 @@ test('a picture path typed by a merchant cannot escape the attribute it is writt
   assert.ok(box.includes('<input class="pu" data-k="logo" value=""'), 'the logo box writes into the field the ordinary Save already reads: ' + box);
   assert.ok(box.includes('Take off') && box.includes('style="display:none"'), 'and there is a way to take a picture off, shown only when one is set');
 });
+
+/* ------------------------------------------------------- proof of payment, in the UI */
+test('the buyer is asked for their payment code where the rail needs one, and nowhere else', () => {
+  const s = page('store');
+  assert.ok(s.includes('id="fProof"'), 'the field exists on the order form');
+  assert.ok(/if \(!p\.value && !nudged\)|!nudged && pf && R && R\.proof === 'require'/.test(s),
+    'an empty code is asked for once and then let through — a form that will not send is a lost order');
+  assert.ok(/return;/.test(s.slice(s.indexOf('!nudged && pf'), s.indexOf('!nudged && pf') + 400)),
+    'the first tap only focuses the field, it does not send');
+  assert.ok(/R\.proof !== 'none'/.test(s), 'whether to show it at all is the server’s answer, not a list of rail names');
+  assert.ok(s.includes("R.proof_label || 'Code from the app'"), 'the label is the shop’s own words, because buyers know the name their street uses');
+  assert.ok(/cannot find a payment without it/i.test(s), 'a required code says why, in one line, not a paragraph');
+  assert.ok(/proof: \$\('fProof'\)/.test(s), 'and it is sent with the order');
+  assert.ok(/pay\.proof \? '<div class="kv">/.test(s), 'the receipt repeats it back, so a buyer can read it over the phone');
+  assert.ok(/will message you for it/.test(s), 'and if they skipped it, the receipt tells them what happens next instead of leaving them guessing');
+  const flags = s.split('\n').filter((l) => l.includes('risk_flags'));
+  assert.equal(flags.length, 1, 'the buyer sees the merchant’s flags once, and only once: ' + JSON.stringify(flags.map((l) => l.trim().slice(0, 60))));
+  assert.match(flags[0], /The shop will double-check this order before sending/, 'and always inside the sentence that says what happens next, never as a list of suspicions');
+});
+
+test('a merchant decides how much proof each method needs, in their own words', () => {
+  const a = page('admin');
+  assert.ok(a.includes('data-rd="proof"') && a.includes('data-rd="proof_label"'), 'both controls are in the rail editor');
+  assert.ok(/var PROOF_MODES_UI = \{ none:/.test(a), 'and the picker offers the three answers, in merchant words');
+  assert.ok(a.includes("'proof', 'proof_label'"), 'both are in the list of fields a save compares and sends, or they would be typed into a void');
+  assert.ok(/\\nfrom ' \+ esc\(o\.buyer\.payer\)/.test(a), 'the ledger row shows who sent it');
+  assert.ok(/o\.buyer\.proof \? '\\n'/.test(a), 'and what code they gave, in the shop’s name for it');
+  assert.ok(/p\.rail\.proof === 'require'/.test(a), 'a row that needs a code and has none is marked — from the rail frozen on the order, not from a field the order does not carry');
+  assert.ok(a.includes('payer,proof_of_payment,flags'), 'the CSV names its columns, so a bookkeeper opening it is not guessing what the two new ones are');
+});
+
+test('the dashboard’s idea of a rail default is the Worker’s, column for column', () => {
+  // The picker shows the merchant what will happen if they touch nothing. The moment
+  // that sentence and proofDefault() disagree, a saved rail means something other than
+  // what the merchant was shown — which is the exact failure this product cannot afford.
+  const a = page('admin');
+  const fn = a.match(/function autoProof\(type, spec\) \{[\s\S]*?\n\}/);
+  assert.ok(fn, 'the mirror exists as one readable function');
+  const auto = (0, eval)(fn[0] + '; autoProof');
+  const C = CORE;
+  const types = ['manual', 'cod', 'auto', 'link', 'nonsense'];
+  const specs = ['wallet', 'phone', 'bank', 'shapid', 'link', 'none', undefined];
+  let seen = 0;
+  for (const t of types) {
+    for (const sp of specs) {
+      assert.equal(auto(t, sp), C.proofDefault(t, sp), 'the picker shows ' + t + '/' + sp);
+      seen++;
+    }
+  }
+  assert.ok(seen > 30, 'the whole table was walked, not a few rows of it: ' + seen);
+});
+
+test('the merchant’s CSV has one header name per value, or Excel shifts the book', () => {
+  const a = page('admin');
+  const head = a.match(/var head = '([^']*)';/);
+  assert.ok(head, 'the header is one string on one line');
+  const cols = head[1].replace(/\\n$/, '').split(',');
+  const from = a.indexOf('return [', a.indexOf('var head ='));
+  const to = a.indexOf('].map(csvq)', from);
+  assert.ok(from > 0 && to > from, 'the row is one array literal that a header can be counted against');
+  const arr = a.slice(from + 'return ['.length, to);
+  let depth = 0, n = 1;
+  for (const ch of arr) {
+    if ('([{'.includes(ch)) depth++;
+    else if (')]}'.includes(ch)) depth--;
+    else if (ch === ',' && depth === 0) n++;
+  }
+  assert.equal(cols.length, n, 'header says ' + cols.length + ' columns, the row writes ' + n + ': ' + cols.join('|'));
+});
+

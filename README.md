@@ -154,7 +154,8 @@ verified ZW/SA tariffs) but it is now a **default, not the whole answer**:
   names the shops, because silently repricing a live merchant as cash is the one
   edit that would cost them money.
 - **Merchant:** pick `My own method (I describe it)` and type the label, the dial
-  string and the rate — in onboarding and in the dashboard. `rail_def` is a
+  string, the rate, the shape of the number buyers pay into, and what proof the buyer
+  has to hand over — in onboarding and in the dashboard. `rail_def` is a
   money-class field, so it waits out the same 15-minute reversible hold as the
   payment account, and it is public by design: it is what the buyer is shown.
 - Pricing is arithmetic on whatever rail resolves
@@ -162,6 +163,22 @@ verified ZW/SA tariffs) but it is now a **default, not the whole answer**:
   worker snapshots it into `order.pay`, and `/s/<handle>/config.json` hands the
   storefront the resolved rail as `rail_info` so the cart preview and the receipt
   cannot disagree. A rail removed later cannot change a slip already sent.
+
+- **Every rail answers a second question: how does the money get *found*.** A wallet
+  prints a code in its confirmation SMS, and a merchant who searches the app by amount
+  usually finds the payment anyway; a bank transfer is one amount and forty payers, so
+  there a reference is not a nicety. So `proof` is per rail — `none`, `ask`, `require` —
+  derived from the rail's own shape (`cod`/`auto`/`link` → `none`, `bank` → `require`,
+  everything else → `ask`) and overridable, with the merchant's own name for the field,
+  in the rail description. What the policy does: `ask` and `require` put one line on the
+  order form (`require` marks it and nudges once if it is empty), the payment slip tells
+  the buyer to keep the code **before** they pay, the ledger row and the WhatsApp handoff
+  carry it, and a `require` order that arrives without one is flagged on the row — never
+  refused. Built-ins declare theirs (`zipit` requires, `payfast`/`ozow`/`cash` ask for
+  nothing) and `proofDefault` in `worker/core.js` is the single authority: the dashboard's
+  picker mirrors it, and a test walks the two tables cell by cell. Values live on the order
+  document and the list row only — `/s/<handle>/config.json` publishes the policy and
+  never a buyer's reference, because there is no buyer on a store page.
 
 An invalid description at sign-up becomes `cash` rather than a rejected
 registration: a merchant who never opens the shop is worse than one whose slip

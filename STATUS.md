@@ -1,5 +1,56 @@
 # Tapstall — status
 
+## Every rail says how the money gets found (2026-10-12, v0.6.7)
+
+**The problem was the last five minutes, again.** A merchant on a hand-checked rail
+does not lose money at checkout; they lose it standing in front of a wallet app with
+four "pending" orders and one amount. Two shops can be on the same rail and need
+opposite things — an EcoCash seller reads the confirmation code as a nicety, a ZIPIT
+seller cannot match a transfer without one, and a PayFast seller has nothing to ask
+for. So a rail now carries a *policy*, not just a number: `proof` is `none`, `ask` or
+`require`, derived from what the rail is and overridable in the dashboard, where the
+merchant can also rename the field, because their buyers know their word for it.
+
+**What the buyer sees** is one line, on the form, with the shop's own label and a hint
+about where the code lives ("what the wallet app or the confirmation SMS shows after it
+sends — not the order code") — every app hides it differently, and that sentence is the
+difference between a code and a shrug. On a `require` rail the tap is met once by a
+focus and one firm sentence, and then the order sends anyway.
+
+**Never a wall.** A missing code is a flag on the row — `no reference from your bank —
+ask them before sending` — printed in the badge line of the ledger, carried into the
+WhatsApp handoff (`· proof SLP 88123`) and into the CSV. It is not a 422: the field a
+merchant forgot to fill cannot be allowed to cost them an order, and a buyer who hits a
+required field they cannot answer goes nowhere. This is the same rule the payer field
+follows and the reason "require" is a word about *asking*, not about *blocking*.
+
+**Where the values live.** On the order document and the list row, nowhere else.
+`publicStore` publishes `proof`, `proof_label`, `proof_hint` and `ask_payer` — the
+policy — and never a code; `config.json` therefore says what a shop needs and stays
+safe to cache publicly. `priceOrder` freezes `proof` and `proof_label` into
+`pricing.rail` for the same reason it freezes the fee: the slip gets printed later,
+after the store may have changed, and a rail removed or renamed must not rewrite an
+order's instructions.
+
+**Two real bugs, both caught by the suite written for this:** the slip's `proofMode` /
+`payer_from` block sat *below* the `steps` array that reads it — a temporal-dead-zone
+`ReferenceError` in `payInstructions`, which would have thrown on a live order after it
+was already stored; and the merchant's CSV gained two row values without two header
+names, which is the quiet kind of corruption where Excel shifts a whole month's book.
+The second is now structurally impossible: a test counts the columns in the header and
+the elements in the row at bracket-depth one, and the dashboard's `autoProof` mirror is
+compared to the Worker's `proofDefault` for every type × spec pair.
+
+**Verification.** `node --test tests/` → **159/159** (core 58, live 64, limits 10,
+pages 27): a zipit store asks and flags, a described M-Pesa rail demands its own code
+under its own name, a code is kept character-for-character (` REF-99.x/1 ` arrives as
+`REF-99.x/1`, never upper-cased, since banks print lowercase), a wallet payer is
+narrowed to dialable digits, `+263 77 123 4567` → `+263771234567`, and no public
+surface — config, feed, lookup, storefront — carries a buyer's reference.
+
+**Browser-only, unverified here:** the nudge's focus behaviour and the settings drawer's
+three-way picker on a phone. Everything they depend on is asserted in the suites.
+
 ## A merchant can put a picture on the shop (2026-10-11, v0.6.6)
 
 **What changed.** `logo` and every item row now take a file, from the same control:

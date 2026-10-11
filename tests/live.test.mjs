@@ -1747,3 +1747,107 @@ test('sixty pictures is what a store gets, and the last answer says what to do',
   assert.equal(clean.status, 200, 'reverting the menu frees the lot: ' + clean.text);
   assert.equal((await call(refs[0])).status, 404, 'and the files go with the rows that named them');
 });
+
+/* ------------------------------------------------------------ proof of payment */
+/* The gap on a hand-checked rail is not the money, it is finding it. These run the
+ * whole path — a store that declares what it needs, a buyer who is asked once, a
+ * ledger row that shows the answer, and a public page that shows the policy and
+ * never the code. */
+// Read off whatever rail the shop is on by now — EcoCash USD at rest, a described
+// wallet after the rail tests have run — because a hand-checked wallet answers the
+// same way either time, and that is the point of deriving it from the shape.
+test('a live store publishes what it needs to find the money, and the buyer’s page can obey it', async () => {
+  const pub = await call('/s/mamatoe/config.json');
+  const info = pub.json.store.rail_info;
+  assert.equal(info.proof, 'ask', 'a wallet asks for the app code, and asks rather than demands: ' + JSON.stringify(info));
+  assert.equal(info.proof_label, 'Code from the app');
+  assert.ok(/not the order code/.test(info.proof_hint), 'and says where to find it, because every app hides it differently');
+  assert.equal(info.ask_payer, true, 'the sender’s number is asked on the same rails it helps on');
+});
+
+test('a rail that cannot match a transfer without a code asks for one', async () => {
+  const h = 'zzproof' + String(Date.now()).slice(-5);
+  const reg = await call('/api/register', { method: 'POST', body: {
+    handle: h, shop_name: 'Proof Test', whatsapp: '263771234567', rail: 'zipit', pay_account: '1234567890', currency: 'USD',
+  } });
+  assert.equal(reg.status, 201, reg.text);
+  const pub = await call('/s/' + h + '/config.json');
+  assert.equal(pub.json.store.rail_info.proof, 'require', 'a bank transfer is the case that needs it: ' + JSON.stringify(pub.json.store.rail_info));
+  assert.equal(pub.json.store.rail_info.proof_label, 'Reference from your bank');
+
+  // An order with no code is still an order. It is taken, and flagged.
+  const bare = await call('/api/order', { method: 'POST', ip: '196.21.0.1', body: { handle: h, service: 'pickup',
+    buyer: { name: 'Tinashe M', phone: '0780001122' }, items: [{ name: 'Box', price: 12 }] } });
+  assert.equal(bare.status, 201, 'the buyer is never stopped by a field the shop forgot to fill: ' + bare.text);
+  const flag = (bare.json.risk_flags || []).join(' | ');
+  assert.match(flag, /no reference from your bank — ask them before sending/, 'the row says what to ask for: ' + flag);
+  assert.ok(bare.json.pay.steps.some((l) => /keep the code the app shows/i.test(l)), 'and the slip asked for it before they paid: ' + JSON.stringify(bare.json.pay.steps));
+  assert.equal(bare.json.pay.proof_mode, 'require', 'the slip names how badly it was wanted');
+
+  const withProof = await call('/api/order', { method: 'POST', ip: '196.21.0.2', body: { handle: h, service: 'pickup',
+    buyer: { name: 'Rudo M', phone: '0780002233', payer: 'Standard Bank 6288112233', proof: ' REF-99.x/1 ' },
+    items: [{ name: 'Box', price: 12 }] } });
+  assert.equal(withProof.status, 201, withProof.text);
+  assert.ok(!(withProof.json.risk_flags || []).some((f) => /no reference/.test(f)), 'given, so nothing to flag: ' + JSON.stringify(withProof.json.risk_flags));
+  assert.equal(withProof.json.pay.proof, 'REF-99.x/1', 'and it is on the printed slip the merchant reads');
+  assert.equal(withProof.json.pay.proof_mode, 'require');
+  assert.equal(withProof.json.pay.payer_from, 'Standard Bank 6288112233', 'a payer typed as words is printed as words — the merchant searches their own statement, not our shape');
+
+  const doc = JSON.parse(env.ORDERS._map.get('order:' + h + ':' + withProof.json.order.id).value);
+  assert.equal(doc.buyer.proof, 'REF-99.x/1', 'kept exactly as typed, spaces trimmed, nothing reshaped');
+  assert.equal(doc.buyer.payer, 'Standard Bank 6288112233', 'what they typed is what is stored — the rail is chosen by the shop, and a payer may outlive it');
+  const rows = JSON.parse(env.ORDERS._map.get('list:' + h).value);
+  const row = rows.find((r) => r.id === withProof.json.order.id);
+  assert.equal(row.proof, 'REF-99.x/1', 'and on the ledger row, so the list does not need the document to answer');
+  assert.equal(row.payer, 'Standard Bank 6288112233', 'and the ledger row agrees with the slip');
+  assert.equal(rows.find((r) => r.id === bare.json.order.id).proof, '', 'a row with nothing says nothing rather than lying about it');
+
+  const key = JSON.parse(env.STORES._map.get('store:' + h).value).admin_token;
+  const dash = await call('/api/admin?handle=' + h, { headers: { 'x-tapstall-admin': key } });
+  assert.equal(dash.status, 200, dash.text);
+  const shown = (dash.json.orders || []).find((o) => o.id === withProof.json.order.id);
+  assert.equal(shown.buyer.proof, 'REF-99.x/1', 'the merchant’s own ledger shows it');
+
+  // The public surfaces carry the policy and never a code: a reference is the buyer's
+  // word about their own payment, not shop furniture.
+  for (const path of ['/s/' + h + '/config.json', '/s/' + h + '/feed.json', '/api/lookup?handle=' + h, '/s/' + h]) {
+    const body = (await call(path)).text;
+    assert.ok(!/REF-99/.test(body), path + ' must not carry a buyer’s reference');
+  }
+  const lite = await call('/ops/api/store', { method: 'POST', cookie: 'tp_ops=' + opsCookie, confirm: true, body: { handle: h, action: 'store_view' } });
+  if (lite.status === 200 && lite.json && lite.json.orders) {
+    assert.ok(JSON.stringify(lite.json.orders).includes('REF-99.x/1'), 'the operator sees what the merchant sees: ' + lite.text.slice(0, 120));
+  }
+});
+
+test('a wallet payer is narrowed to digits, because that is what a wallet search takes', async () => {
+  const ord = await call('/api/order', { method: 'POST', ip: '196.21.0.5', body: { handle: 'mamatoe', service: 'pickup',
+    buyer: { name: 'Tine M', phone: '0780004455', payer: '+263 77 123 4567', proof: 'EC 88 12 34' },
+    items: [{ id: '1', name: 'Chicken & rice', price: 5.5, qty: 1 }] } });
+  assert.equal(ord.status, 201, ord.text);
+  assert.equal(ord.json.pay.payer_from, '+263771234567', 'spaces gone, plus kept, so the number is dialable from the slip');
+  assert.equal(ord.json.pay.proof, 'EC 88 12 34', 'a code keeps its spaces: an EcoCash SMS has them');
+});
+
+test('a described method can demand its own code and name it', async () => {
+  const h = 'zzmpesa' + String(Date.now()).slice(-5);
+  const reg = await call('/api/register', { method: 'POST', body: {
+    handle: h, shop_name: 'M-Pesa Test', whatsapp: '254771234567', rail: 'custom', currency: 'USD',
+    rail_def: { label: 'M-Pesa', dial: '*334#', pct: 0.079, type: 'manual', spec: 'phone', proof: 'require', proof_label: 'M-Pesa code' },
+    pay_account: '0771234567',
+  } });
+  assert.equal(reg.status, 201, reg.text);
+  const pub = await call('/s/' + h + '/config.json');
+  assert.equal(pub.json.store.rail_info.proof, 'require', 'the custom rail declares its own policy, not the placeholder’s');
+  assert.equal(pub.json.store.rail_info.proof_label, 'M-Pesa code', 'and its own name for the thing');
+  const ord = await call('/api/order', { method: 'POST', ip: '196.21.0.3', body: { handle: h, service: 'pickup',
+    buyer: { name: 'Akinyi O', phone: '0700000001', proof: 'SLP 88123' }, items: [{ name: 'Tea', price: 2 }] } });
+  assert.equal(ord.status, 201, ord.text);
+  assert.ok(!(ord.json.risk_flags || []).some((f) => /no m-pesa code/.test(f)), 'nothing missing, nothing flagged: ' + JSON.stringify(ord.json.risk_flags));
+  assert.ok(ord.json.pay.steps.some((l) => /m-pesa code/i.test(l)), 'the slip uses the shop’s words, not a generic label');
+  const doc = JSON.parse(env.ORDERS._map.get('order:' + h + ':' + ord.json.order.id).value);
+  assert.equal(doc.buyer.proof, 'SLP 88123');
+  const miss = await call('/api/order', { method: 'POST', ip: '196.21.0.4', body: { handle: h, service: 'pickup',
+    buyer: { name: 'No Code', phone: '0700000002' }, items: [{ name: 'Tea', price: 2 }] } });
+  assert.match((miss.json.risk_flags || []).join(' '), /no m-pesa code/, 'and the flag speaks the same words back to the merchant: ' + JSON.stringify(miss.json.risk_flags));
+});

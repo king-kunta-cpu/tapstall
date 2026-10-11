@@ -566,3 +566,114 @@ test('taking a picture off a row really takes it off', () => {
     { over: { '1': { img: '' } } });
   assert.equal(laid[0].img, '', 'an override that says nothing must beat the sheet that says something, or the row keeps a photo its merchant deleted');
 });
+
+/* -------------------------------------------------------- proof on a payment */
+/* A manual rail is a phone the merchant reads. These tests are about what the rail
+ * says it needs to find the money — a policy, a label, a code kept exactly as typed,
+ * and a flag rather than a wall when the code is missing. */
+test('each rail says how much proof it needs, from what it is', () => {
+  assert.equal(C.RAILS.ecocash_usd.proof, 'ask', 'a wallet SMS has a code and the merchant can usually find it without one');
+  assert.equal(C.RAILS.zipit.proof, 'require', 'a bank transfer with no reference is one amount and forty payers');
+  assert.equal(C.RAILS.payfast.proof, 'none', 'a hosted gateway confirms itself — asking a buyer for a card auth code is theatre');
+  assert.equal(C.RAILS.ozow.proof, 'none');
+  assert.equal(C.RAILS.cash.proof, 'none', 'nothing was paid ahead, so nothing can be proven');
+  assert.equal(C.RAILS.payshap.proof, 'ask', 'a ShapID proof is a reference photo, and it helps');
+});
+
+test('a described rail declares its own proof, and the default follows its shape', () => {
+  const mpesa = C.normaliseRail({ label: 'M-Pesa', type: 'manual', spec: 'phone' }, 'custom');
+  assert.equal(mpesa.proof, 'ask', 'a hand-checked wallet asks');
+  const bank = C.normaliseRail({ label: 'Nequi', type: 'manual', spec: 'bank' }, 'custom');
+  assert.equal(bank.proof, 'require', 'a hand-checked transfer needs the code');
+  const link = C.normaliseRail({ label: 'Wave', type: 'auto', spec: 'link' }, 'custom');
+  assert.equal(link.proof, 'none');
+  const set = C.normaliseRail({ label: 'Tigo Pasa', type: 'manual', spec: 'phone', proof: 'require', proof_label: 'TP code' }, 'custom');
+  assert.equal(set.proof, 'require', 'the merchant overrides the shape');
+  assert.equal(set.proof_label, 'TP code', 'and names it in their own words, because their buyers know their name for it');
+  const junk = C.normaliseRail({ label: 'Yolo', proof: 'please', proof_label: '  ' + 'q'.repeat(90) }, 'custom');
+  assert.equal(junk.proof, 'ask', 'a mode nobody knows falls back to the default, not to nothing');
+  assert.equal(junk.proof_label.length, 40, 'a label is capped rather than rejected — a long name is not a reason to lose a rail');
+});
+
+test('a proof code is kept as typed and nothing else gets in', () => {
+  assert.equal(C.cleanProof(' ABC-1234.5/6 '), 'ABC-1234.5/6', 'dashes, dots and slashes are in real references');
+  assert.equal(C.cleanProof('abc-1'), 'abc-1', 'not upper-cased: the bank prints it lower and matching is character for character');
+  assert.equal(C.cleanProof('a   b'), 'a b', 'runs of space collapse, because the ledger is read by eye');
+  assert.equal(C.cleanProof('1234<script>'), '1234script', 'markup is stripped, not escaped into a surprise');
+  assert.equal(C.cleanProof('id 🙂 77'), 'id  77'.replace('  ', ' '), 'and emoji go: they are not in any bank reference');
+  assert.equal(C.cleanProof('x'.repeat(80)).length, 40, 'a novel is not a reference');
+  assert.equal(C.cleanProof(null), '', 'nothing is nothing');
+});
+
+test('the number a payment came from is kept in the shape that rail needs', () => {
+  assert.equal(C.cleanPayer('0771234567', 'phone'), '0771234567');
+  assert.equal(C.cleanPayer('+263 77 123 4567', 'phone'), '+263771234567', 'a phone keeps digits and a plus');
+  assert.equal(C.cleanPayer('CABS 1234567890', 'bank'), 'CABS 1234567890', 'a bank needs its letters');
+  assert.equal(C.cleanPayer('CABS 1234567890', 'loose'), 'CABS 1234567890', 'at capture nobody knows the rail yet, so nothing is dropped');
+  assert.equal(C.cleanPayer('0771234567', 'loose'), '0771234567');
+  assert.equal(C.cleanPayer('x'.repeat(60), 'loose').length, 30, 'but it is still bounded');
+  assert.equal(C.cleanPayer('a@b.c', 'bank'), 'ab.c', 'no addresses, no at-signs');
+});
+
+test('the proof shape is frozen into the order, not read from the store later', () => {
+  const st = { handle: 'h', rail: 'zipit', pay_account: '1234567890', currency: 'USD' };
+  const p = C.priceOrder(st, [{ name: 'x', price: 10, qty: 1 }], 'pickup', 'zipit');
+  assert.equal(p.rail.proof, 'require', 'so a slip printed next month still knows this order needed a code');
+  assert.equal(C.priceOrder(st, [{ name: 'x', price: 10 }], 'pickup', 'cash').rail.proof, 'none');
+  const bare = { rail: { key: 'x', type: 'manual', spec: 'phone', label: 'Old rail' }, pay_now: 1 };
+  assert.equal(bare.rail.proof, undefined, 'an order stored before this release has no proof field, which is why every reader defaults it');
+  const i = C.payInstructions({ pay_account: '1' }, { code: 'A-1', buyer: {} }, bare);
+  assert.equal(i.proof_mode, 'ask', 'and it is read as the shape default, not as none');
+});
+
+test('the slip tells the buyer to keep the code, in the shop’s own words', () => {
+  const st = { shop_name: 'Mama Too', currency: 'USD', rail: 'zipit', pay_account: '1234567890' };
+  const ord = { code: 'A-1', buyer: { payer: '0771234567', proof: 'REF-99' } };
+  const p = C.priceOrder(st, [{ name: 'x', price: 10 }], 'pickup', 'zipit');
+  const i = C.payInstructions(st, ord, p);
+  assert.ok(i.steps.some((l) => /keep the code the app shows/i.test(l)), 'one line, before they pay, while the code is still on screen: ' + JSON.stringify(i.steps));
+  assert.equal(i.proof, 'REF-99');
+  assert.equal(i.proof_mode, 'require');
+  assert.equal(i.proof_label, 'Reference from your bank');
+  assert.ok(/bank shows when the transfer goes out/.test(i.proof_hint), 'and it says where to look, because every app hides it differently');
+  assert.equal(i.payer_from, '0771234567');
+  assert.equal(i.ask_payer, true, 'a bank transfer is matched by account, so that question is worth asking too');
+  const custom = C.payInstructions({ ...st, rail: 'custom', rail_def: { label: 'M-Pesa', spec: 'phone', proof: 'require', proof_label: 'M-Pesa code' } }, ord,
+    C.priceOrder({ ...st, rail: 'custom', rail_def: { label: 'M-Pesa', spec: 'phone', proof: 'require', proof_label: 'M-Pesa code' } }, [{ name: 'x', price: 10 }], 'pickup', 'custom'));
+  assert.equal(custom.proof_label, 'M-Pesa code', 'the shop’s name for it is the name the buyer reads');
+  const cash = C.payInstructions(st, ord, C.priceOrder(st, [{ name: 'x', price: 10 }], 'pickup', 'cash'));
+  assert.ok(!cash.steps.some((l) => /keep the code/i.test(l)), 'a cash slip asks for nothing it cannot use');
+  assert.equal(cash.proof_mode, 'none');
+});
+
+test('a missing code is a flag on the row, never a refused order', () => {
+  const st = { handle: 'h', rail: 'zipit', pay_account: '1234567890' };
+  const rail = { key: 'zipit', type: 'manual', spec: 'bank', proof: 'require' };
+  const none = C.riskFlags(st, { pricing: { rail, total: 5 }, buyer: {} }, {});
+  assert.ok(none.some((f) => /no reference from your bank — ask them before sending/.test(f)), 'the flag says what to ask, in the words the rail uses: ' + JSON.stringify(none));
+  assert.ok(!C.riskFlags(st, { pricing: { rail, total: 5 }, buyer: { proof: 'R-1' } }, {}).length, 'given, and nothing is flagged');
+  const ask = { key: 'ecocash_usd', type: 'manual', spec: 'phone', proof: 'ask' };
+  assert.ok(!C.riskFlags(st, { pricing: { ask, total: 5 }, buyer: {} }, {}).some((f) => /no code/.test(f)), 'optional means optional, and no order is shamed for it');
+});
+
+test('the handoff to the merchant’s phone carries the code', () => {
+  const st = { shop_name: 'S', currency: 'USD', rail: 'ecocash_usd', pay_account: '0771234567', rail_accts: { ecocash_usd: { acct: '0771234567' } } };
+  const p = C.priceOrder(st, [{ name: 'x', price: 10 }], 'pickup', 'ecocash_usd');
+  const withIt = C.waSummary(st, { code: 'A-1', buyer: { name: 'Rudo', payer: '0912345678', proof: 'TX88123' }, pricing: p });
+  assert.ok(/ · proof TX88123$/.test(withIt) || withIt.includes('proof TX88123'), 'the merchant reads one line and knows: ' + withIt);
+  const without = C.waSummary(st, { code: 'A-1', buyer: { name: 'Rudo', payer: '0912345678' }, pricing: p });
+  assert.ok(!/proof/.test(without), 'and does not see an empty field');
+});
+
+test('the buyer’s page is told the policy and never a code', () => {
+  const st = { handle: 'h', shop_name: 'S', rail: 'zipit', pay_account: '1234567890', currency: 'USD' };
+  const out = C.publicStore(st);
+  assert.equal(out.rail_info.proof, 'require');
+  assert.equal(out.rail_info.proof_label, 'Reference from your bank');
+  assert.ok(out.rail_info.proof_hint.length > 8, 'where to look is part of the field, not a paragraph under it');
+  assert.equal(out.rail_info.ask_payer, true);
+  assert.ok(!JSON.stringify(out).includes('proof:'), 'no code is ever published — there is no buyer on a store page, and none should be needed');
+  const auto = C.publicStore({ ...st, rail: 'payfast', pay_account: 'https://pay/biz' });
+  assert.equal(auto.rail_info.proof, 'none');
+  assert.equal(auto.rail_info.ask_payer, false, 'a hosted link has nothing to match, so the page asks nothing');
+});

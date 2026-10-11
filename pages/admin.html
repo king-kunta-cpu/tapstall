@@ -794,8 +794,21 @@ function renderFields() {
         + '</select></span>'
         + '<label class="ck"><input type="checkbox" data-rd="holder"' + (d.holder === false ? '' : ' checked') + '> buyers should see a name</label>'
         + '<label class="ck"><input type="checkbox" data-rd="till"' + (d.till ? ' checked' : '') + '> they also have a till / paybill</label>'
+        + '</div>'
+        // A method nobody has heard of outside one street also has its own idea of
+        // how a payment gets *found*: the code the buyer's app prints is the whole
+        // match on a bank transfer and a nicety on a wallet. Saying which is what
+        // turns "did he pay?" from a phone call into a line on the ledger.
+        + '<div class="row" style="margin-top:.3rem;display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">'
+        + '<span style="flex:1 1 16rem"><select data-rd="proof" title="how much proof this method needs before you can find the money">'
+        + ['none', 'ask', 'require'].map(function (mode) {
+            var cur = d.proof || autoProof(d.type, d.spec);
+            return '<option value="' + mode + '"' + (cur === mode ? ' selected' : '') + '>' + PROOF_MODES_UI[mode] + '</option>';
+          }).join('')
+        + '</select></span>'
+        + '<span style="flex:1 1 12rem"><input data-rd="proof_label" placeholder="what your buyers call that code" value="' + esc(d.proof_label || '') + '"></span>'
         + '</div><p class="hint">' + (on
-          ? 'This wording and these numbers go on the buyer’s slip. Percent is their fee, “+ fixed” is per payment. The name check is the line that stops a wallet swap. Leave everything blank and orders say “pay on collection”.'
+          ? 'This wording and these numbers go on the buyer’s slip. Percent is their fee, “+ fixed” is per payment. The name check is the line that stops a wallet swap, and the code they type after sending is the line that lets you find the money without asking. Leave everything blank and orders say “pay on collection”.'
           : 'Not used while a listed method is selected. Choose “My own method (I describe it)” above and this becomes what buyers are told.') + '</p></div>';
     } else if (k === 'logo') {
       // The shop's own mark. Same box as an item's photo: a link from anywhere, or
@@ -970,6 +983,15 @@ picWire(q('#menuNew'), picApplyFor);
  * whichever one they find first. Each method can hold its own, and the placeholder
  * says what shape is expected, because the server refuses the wrong shape by name.
  * -------------------------------------------------------------------------- */
+/* The three settings a rail has about proof, in the words a merchant picks with,
+ * and the default the server applies when a field is left alone. Mirrored here so
+ * the picker shows what will happen, not so that the browser decides anything: the
+ * worker validates and stores it, and an old store document still means the default. */
+var PROOF_MODES_UI = { none: 'nothing — I will see it in the app', ask: 'ask for the code their app shows (optional)', require: 'they must type the code before ordering' };
+function autoProof(type, spec) {
+  if (type === 'cod' || type === 'auto' || spec === 'none' || spec === 'link') return 'none';
+  return spec === 'bank' ? 'require' : 'ask';
+}
 var SPEC_PH = { phone: '0771234567', bank: '1234567890', shapid: '0821234567', wallet: 'wallet ID', link: 'https://…' };
 function railKeys() {
   var keys = Object.keys(S.rails || {}).length ? Object.keys(S.rails)
@@ -1127,7 +1149,7 @@ function saveSettings() {
       got[n] = (n === 'pct' || n === 'fixed') ? (raw === '' ? 0 : Number(raw)) : raw;
       if (n === 'pct') got[n] = (Number(got[n]) || 0) / 100;
     });
-    var same = ['label', 'dial', 'pct', 'fixed', 'spec'].every(function (n) {
+    var same = ['label', 'dial', 'pct', 'fixed', 'spec', 'proof', 'proof_label'].every(function (n) {
       return String(got[n] == null ? '' : got[n]) === String(old[n] == null ? '' : old[n]);
     }) && ['holder', 'till'].every(function (n) {
       return !!got[n] === (n in old ? !!old[n] : n === 'holder');       // the name check is on unless it was turned off
@@ -1222,11 +1244,17 @@ function row(o) {
     + '<div class="it">' + esc(o.buyer && o.buyer.name) + (o.buyer && o.buyer.phone ? ' · ' + esc(o.buyer.phone) : '')
     + (o.buyer && o.buyer.address ? ' · ' + esc(o.buyer.address) : '') + '\n'
     + (o.items || []).map(function (i) { return (i.qty || 1) + 'x ' + esc(i.name); }).join('\n')
+    + (o.buyer && o.buyer.payer ? '\nfrom ' + esc(o.buyer.payer) : '')
+    + (o.buyer && o.buyer.proof ? '\n' + esc((p.rail && p.rail.proof_label) || 'code') + ': ' + esc(o.buyer.proof) : '')
     + (o.buyer && o.buyer.note ? '\nNote: ' + esc(o.buyer.note) : '') + '</div>'
     + '<div><span class="badge ' + (o.status === 'paid' ? 'paid' : (o.status === 'cod' ? 'cod' : 'new')) + '">' + esc(o.status) + '</span> '
     + '<span class="badge">' + esc(o.service) + '</span>'
     + (o.prior_unpaid ? ' <span class="badge">' + o.prior_unpaid + ' unpaid before</span>' : '')
     + (o.confirm_url && o.status !== 'paid' ? ' <span class="badge">confirm link 72h</span>' : '')
+    // The asking is already done for them: a row that needs a code and has none says
+    // so, in the badge line, with the words to send.
+    + (p.rail && p.rail.proof === 'require' && !(o.buyer && o.buyer.proof) && o.status !== 'paid'
+        ? ' <span class="badge">no ' + esc(p.rail.proof_label || 'code') + ' — ask them</span>' : '')
     + '</div>'
     + (p.fee_absorbed_by_merchant ? '<div class="pay">payment cost you absorb: ' + p.fee_absorbed_by_merchant.toFixed(2) + ' (' + esc(p.rail && p.rail.label || '') + ')</div>' : '')
     + ((o.risk_flags || []).length ? '<div class="flags">⚠ ' + esc(o.risk_flags.join(' · ')) + '</div>' : '')
@@ -1337,9 +1365,10 @@ function say(where, t) { var e = q('#' + where); if (!e) return; e.classList.rem
 
 /* ------------------------------------------------------------- bookkeeping */
 function exportCsv() {
-  var head = 'code,when,status,name,phone,service,items,total,currency,pay_to,reference,flags\n';
+  var head = 'code,when,status,name,phone,service,items,total,currency,pay_to,reference,payer,proof_of_payment,flags\n';
   var body = S.orders.map(function (o) { if (!o) return ''; var p = o.pricing || {};
-    return [o.code, o.at, o.status, o.buyer.name, o.buyer.phone, o.service, (o.items || []).map(function (i) { return (i.qty || 1) + 'x ' + i.name; }).join(' + '), (p.total || 0).toFixed(2), S.store.currency || 'USD', S.store.pay_account || '', o.code, (o.risk_flags || []).join(' ')].map(csvq).join(','); }).join('\n');
+    return [o.code, o.at, o.status, o.buyer.name, o.buyer.phone, o.service, (o.items || []).map(function (i) { return (i.qty || 1) + 'x ' + i.name; }).join(' + '), (p.total || 0).toFixed(2), S.store.currency || 'USD', S.store.pay_account || '', o.code,
+           o.buyer.payer || '', o.buyer.proof || '', (o.risk_flags || []).join(' ')].map(csvq).join(','); }).join('\n');
   dl('tapstall-' + S.handle + '-' + new Date().toISOString().slice(0, 10) + '.csv', head + body);
 }
 function csvq(s) { s = String(s == null ? '' : s); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }

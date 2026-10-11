@@ -13,15 +13,18 @@
  * instead of a personal number.
  */
 export const RAILS = {
-  ecocash_usd: { label: 'EcoCash USD', dial: '*151#', pct: 0.014, imtt: 0.02, fixed: 0, type: 'manual', spec: 'phone', holder: true, till: true },
-  ecocash_zig: { label: 'EcoCash ZiG', dial: '*151#', pct: 0.02, imtt: 0.015, fixed: 0, type: 'manual', spec: 'phone', holder: true, till: true },
-  innbucks: { label: 'InnBucks', dial: '*155*4#', pct: 0.015, imtt: 0.02, fixed: 0, type: 'manual', spec: 'phone', holder: true, till: false },
-  onepay: { label: 'OnePay / OneMoney', dial: 'wallet app', pct: 0.015, imtt: 0.02, fixed: 0, type: 'manual', spec: 'phone', holder: true, till: false },
-  zipit: { label: 'Bank ZIPIT / RTGS', dial: 'bank app', pct: 0, imtt: 0.02, fixed: 0, type: 'manual', spec: 'bank', holder: true, till: false },
-  cash: { label: 'Cash on delivery / pickup', dial: '', pct: 0, imtt: 0, fixed: 0, type: 'cod', spec: 'none', holder: false, till: false },
-  payshap: { label: 'PayShap (SA)', dial: 'ShapID', pct: 0.005, imtt: 0, fixed: 0, type: 'manual', spec: 'shapid', holder: true, till: false },
-  ozow: { label: 'Ozow (SA)', dial: 'link', pct: 0.01, imtt: 0, fixed: 0, type: 'auto', spec: 'bank', holder: true, till: false },
-  payfast: { label: 'PayFast card (SA)', dial: 'hosted', pct: 0.029, imtt: 0, fixed: 1.0, type: 'auto', spec: 'link', holder: false, till: true },
+  ecocash_usd: { label: 'EcoCash USD', dial: '*151#', pct: 0.014, imtt: 0.02, fixed: 0, type: 'manual', spec: 'phone', holder: true, till: true, proof: 'ask' },
+  ecocash_zig: { label: 'EcoCash ZiG', dial: '*151#', pct: 0.02, imtt: 0.015, fixed: 0, type: 'manual', spec: 'phone', holder: true, till: true, proof: 'ask' },
+  innbucks: { label: 'InnBucks', dial: '*155*4#', pct: 0.015, imtt: 0.02, fixed: 0, type: 'manual', spec: 'phone', holder: true, till: false, proof: 'ask' },
+  onepay: { label: 'OnePay / OneMoney', dial: 'wallet app', pct: 0.015, imtt: 0.02, fixed: 0, type: 'manual', spec: 'phone', holder: true, till: false, proof: 'ask' },
+  // A ZIPIT with no reference is 40 transfers a day and one amount, so the
+  // built-in requires the code the bank prints: matching takes five seconds instead of
+  // asking every buyer who they paid from.
+  zipit: { label: 'Bank ZIPIT / RTGS', dial: 'bank app', pct: 0, imtt: 0.02, fixed: 0, type: 'manual', spec: 'bank', holder: true, till: false, proof: 'require' },
+  cash: { label: 'Cash on delivery / pickup', dial: '', pct: 0, imtt: 0, fixed: 0, type: 'cod', spec: 'none', holder: false, till: false, proof: 'none' },
+  payshap: { label: 'PayShap (SA)', dial: 'ShapID', pct: 0.005, imtt: 0, fixed: 0, type: 'manual', spec: 'shapid', holder: true, till: false, proof: 'ask' },
+  ozow: { label: 'Ozow (SA)', dial: 'link', pct: 0.01, imtt: 0, fixed: 0, type: 'auto', spec: 'bank', holder: true, till: false, proof: 'none' },
+  payfast: { label: 'PayFast card (SA)', dial: 'hosted', pct: 0.029, imtt: 0, fixed: 1.0, type: 'auto', spec: 'link', holder: false, till: true, proof: 'none' },
 };
 
 /**
@@ -34,6 +37,61 @@ export const RAILS = {
  * rail only has to answer two questions — what does the buyer dial, and what does
  * it cost them to move a rand/dollar/kyat through it.
  */
+/* ------------------------------------------------ how a payment gets proven */
+/**
+ * A manual rail is a phone the merchant looks at, and what makes an order findable
+ * in that phone is the code the buyer's app prints. Every method calls it something
+ * else and needs it to a different degree: EcoCash sends an SMS with a TxID, a ZIPIT
+ * transfer is untraceable without the reference the bank prints, a card through a
+ * hosted gateway needs nothing from anybody because the gateway confirms it itself.
+ * So the rail says how much it wants, and a merchant whose bank cannot match a
+ * payment without one can require it.
+ *
+ * Requiring it never blocks an order. An order without proof is still money on its
+ * way, and losing a sale to a form field is a worse trade than a flag on the ledger
+ * row that says what is missing — that is the whole order flow in one decision.
+ */
+export const PROOF_MODES = {
+  none:    { ask: false, label: 'No code needed — I will see it in the app' },
+  ask:     { ask: true,  label: 'Ask for the code their app shows (optional)' },
+  require: { ask: true,  label: 'They have to type that code before ordering' },
+};
+const PROOF_NOUN = {
+  phone:  { label: 'Code from the app', hint: 'What the wallet app or the confirmation SMS shows after it sends — not the order code' },
+  wallet: { label: 'Transaction ID',    hint: 'The TxID in the app’s receipt, usually 8-12 digits' },
+  shapid: { label: 'ShapID reference',  hint: 'The reference on the payment proof in your banking app' },
+  bank:   { label: 'Reference from your bank', hint: 'The reference your bank shows when the transfer goes out' },
+  link:   { label: 'Payment reference', hint: 'The receipt number on the confirmation page or email' },
+  none:   { label: 'Reference',         hint: 'The code on your payment confirmation' },
+};
+/** The number a payment came from, kept in the shape the rail needs: a wallet's is
+ *  digits, a bank's is "CABS 1234567890", and mangling either into the other is how
+ *  a merchant chases a payment that was always identifiable. */
+export function cleanPayer(v, spec) {
+  const t = String(v == null ? '' : v).trim();
+  if (!t) return '';
+  // 'loose' is capture time, before anyone knows which rail this order will be
+  // priced on: keep what the buyer typed, narrow it when it is printed.
+  if (spec === 'loose') return t.replace(/[^A-Za-z0-9 .+\/-]/g, '').replace(/\s+/g, ' ').slice(0, 30);
+  if (spec === 'bank' || spec === 'link') return t.replace(/[^A-Za-z0-9 .\/-]/g, '').replace(/\s+/g, ' ').slice(0, 30);
+  return t.replace(/[^\d+]/g, '').slice(0, 16);
+}
+/** Letters, digits, spaces and the punctuation a real reference carries. No
+ *  reshaping: a code is matched against what the bank or the SMS says, so the
+ *  digits a buyer typed are the digits the merchant needs — upper-casing or
+ *  stripping a dash is how a valid proof stops matching. */
+export const cleanProof = (v) => String(v == null ? '' : v).trim().replace(/[^A-Za-z0-9 ._\/-]/g, '').replace(/\s+/g, ' ').slice(0, 40);
+/** What a rail wants when its merchant has not said. Derived from the shapes: a
+ *  hand-checked wallet or phone payment asks, a bank transfer cannot be matched
+ *  without it, anything hosted confirms itself, and cash has nothing to prove. */
+export const proofDefault = (type, spec) => (type === 'cod' || type === 'auto' || spec === 'none' || spec === 'link')
+  ? 'none' : (spec === 'bank' ? 'require' : 'ask');
+export const proofNoun = (rail) => {
+  const r = rail && typeof rail === 'object' ? rail : {};
+  const d = PROOF_NOUN[r.spec] || PROOF_NOUN.none;
+  return { label: String(r.proof_label || '').trim().slice(0, 40) || d.label, hint: d.hint };
+};
+
 export function normaliseRail(def, key) {
   const d = def && typeof def === 'object' ? def : {};
   const label = String(d.label || '').trim().slice(0, 40);
@@ -44,8 +102,11 @@ export function normaliseRail(def, key) {
   const type = ['manual', 'auto', 'cod'].indexOf(d.type) >= 0 ? d.type : 'manual';
   const dial = String(d.dial || '').trim().slice(0, 40);
   const spec = RAIL_SPECS[d.spec] ? String(d.spec) : (type === 'cod' ? 'none' : 'wallet');
+  const proof = PROOF_MODES[d.proof] ? String(d.proof) : proofDefault(type, spec);
+  const plabel = String(d.proof_label || '').trim().slice(0, 40);
   return { key: key || 'custom', label, dial: dial || (type === 'auto' ? 'link' : 'wallet app'), pct, imtt, fixed, type,
-           spec, holder: d.holder !== false && type !== 'cod', till: d.till === true, added: true };
+           spec, holder: d.holder !== false && type !== 'cod', till: d.till === true,
+           proof, proof_label: plabel, added: true };
 }
 
 /* ───────────────────────── the number a buyer actually needs ─────────────────
@@ -493,7 +554,11 @@ export function priceOrder(st = {}, items = [], service = 'pickup', railKey = 'c
     // from *later*, when the store may have changed its rail config: a frozen order
     // that lost "this is a phone number, ask who it came from" would stop asking.
     rail: { key: railKey, label: rail.label, dial: rail.dial, pct: rail.pct, imtt: rail.imtt, fixed: rail.fixed, type: rail.type,
-            spec: rail.spec, holder: rail.holder, till: rail.till },
+            spec: rail.spec, holder: rail.holder, till: rail.till,
+            // proof rides in here for the same reason spec does: the slip is printed
+            // from this object later, and an order that arrived without a code still
+            // has to be able to say that this rail wanted one
+            proof: rail.proof || proofDefault(rail.type, rail.spec), proof_label: rail.proof_label || '' },
     fee: mode === 'pass' ? fee : 0,
     fee_absorbed_by_merchant: mode === 'absorb' ? fee : 0,
     surcharge_mode: mode,
@@ -524,6 +589,12 @@ export function payInstructions(st = {}, order = {}, pricing = {}) {
   const acct = cod ? 'pay on delivery' : (det.acct || 'not set — owner must fix');
   const cur = st.currency || 'USD';
   const to = det.till ? `${acct} (till ${det.till})` : acct;
+  // Printed as the buyer typed it, digits kept. A local number has no country code
+  // in it and inventing one is how a merchant phones a stranger's line.
+  const from = cleanPayer((order.buyer || {}).payer, det.spec);
+  const proofMode = rail.proof || proofDefault(rail.type, det.spec);
+  const pn = proofNoun({ spec: det.spec, proof_label: rail.proof_label });
+  const proof = cleanProof((order.buyer || {}).proof);
   const steps = cod
     ? ['Nothing to pay now — pay the runner or pay at pickup.']
     : [`Open ${rail.label}${rail.dial ? ' (' + rail.dial + ')' : ''}`,
@@ -531,17 +602,20 @@ export function payInstructions(st = {}, order = {}, pricing = {}) {
        // The confirmation screen's name is the only check a buyer can make before
        // money leaves, and a wallet swap looks exactly like a valid payment.
        ...(det.holder ? [`Check it reads “${det.holder}” — if it does not, do not send`] : []),
-       `Use reference: ${ref}`];
-  // Printed as the buyer typed it, digits kept. A local number has no country code
-  // in it and inventing one is how a merchant phones a stranger's line.
-  const from = String(((order.buyer || {}).payer || '')).replace(/[^\d+]/g, '').slice(0, 16);
+       `Use reference: ${ref}`,
+       // Said before they pay, because a code is easy to keep and impossible to
+       // recover after the app has been closed — and this line costs a buyer nothing.
+       ...(proofMode !== 'none' ? [`Keep the code the app shows after sending — ${pn.label.toLowerCase()} comes to this shop with it`] : [])];
   return {
     rail: rail.label, dial: rail.dial, account: acct, account_label: det.label, holder: det.holder,
     till: det.till, reference: ref, amount: pricing.pay_now, currency: cur,
     // Manual rails are the ones where "which number did he send from?" is the whole
     // reconciliation, so the buyer is asked — and the answer rides on the slip.
-    ask_payer: !cod && det.spec === 'phone' ? true : false,
+    ask_payer: !cod && rail.type !== 'auto' && ['phone', 'shapid', 'wallet', 'bank'].indexOf(det.spec) >= 0,
     payer_from: from,
+    // what the buyer's receipt and the merchant's ledger both show, plus the two
+    // words that tell a buyer where to look for it
+    proof: proof, proof_mode: proofMode, proof_label: pn.label, proof_hint: pn.hint,
     // A buyer who set hours expects to be told when nobody is home to see the alert.
     hours_note: (order.hours && order.hours.open === false && order.hours.label) || '',
     note: 'Pay the EXACT amount. The odd cents are what links your payment to your order — no screenshot needed.',
@@ -565,6 +639,13 @@ export function riskFlags(st = {}, order = {}, hist = {}) {
   // decide, instead of the buyer hitting a wall and going to a competitor.
   const now = order.hours && order.hours.known !== undefined ? order.hours : openNow(st);
   if (now && now.known && !now.open) f.push('sent while closed' + (now.label ? ' — ' + now.label : ''));
+  // The rail wanted a code and the buyer sent none: taken, flagged, and the merchant
+  // is told in one line what to ask for. Which beats refusing the order and punishing
+  // the buyer for it.
+  const pr = (order.pricing || {}).rail || {};
+  if (pr.proof === 'require' && !cleanProof((order.buyer || {}).proof)) {
+    f.push('no ' + proofNoun(pr).label.toLowerCase() + ' — ask them before sending');
+  }
   return f;
 }
 
@@ -582,7 +663,9 @@ export function waSummary(st = {}, o = {}) {
     // that quotes the store default while the slip says the EcoCash wallet is how a
     // payment ends up in the wrong account and nobody can say why.
     (p.rail || {}).type !== 'cod' ? (() => { const d = railAcctOf(st, (p.rail || {}).key, p.rail || {});
-      return `Pay ${p.pay_now} ${cur} to ${d.acct || '—'}${d.till ? ' (till ' + d.till + ')' : ''}${o.buyer && o.buyer.payer ? ' · from ' + String(o.buyer.payer).replace(/[^\d+]/g, '') : ''} ref ${o.code}`;
+      const pf = cleanProof((o.buyer || {}).proof);
+      const py = cleanPayer((o.buyer || {}).payer, d.spec || (p.rail || {}).spec);
+      return `Pay ${p.pay_now} ${cur} to ${d.acct || '—'}${d.till ? ' (till ' + d.till + ')' : ''}${py ? ' · from ' + py : ''} ref ${o.code}${pf ? ' · proof ' + pf : ''}`;
     })() : 'Paying on delivery',
     o.hours && o.hours.known && !o.hours.open ? `(sent while closed — ${o.hours.label})` : '',
     (o.buyer || {}).note ? `Note: ${o.buyer.note}` : '',
@@ -616,7 +699,12 @@ export function publicStore(st, catalog) {
                     pct: r.pct, imtt: r.imtt, fixed: r.fixed, added: !!r.added,
                     // the storefront asks for the sender's number only on rails where
                     // that is how a payment gets found, so it needs the shape here
-                    spec: r.spec || 'wallet' };
+                    spec: r.spec || 'wallet',
+                    ask_payer: r.type !== 'auto' && ['phone','shapid','wallet','bank'].indexOf(r.spec || 'wallet') >= 0,
+                    // and whether to ask for the app's code, what that shop calls it,
+                    // and whether they will not do without it
+                    proof: r.proof || proofDefault(r.type, r.spec || 'wallet'),
+                    proof_label: proofNoun(r).label, proof_hint: proofNoun(r).hint };
   // The buyer needs the number for the rail this shop actually takes; the other
   // five are nobody's business on a public page. So the derived one is published
   // and `rail_accts` itself never is.

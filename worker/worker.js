@@ -20,12 +20,13 @@ import {
   applyMenu, sanitizeMenu, menuPrice, openNow, cleanWeek, cleanRailAccts, hoursText,
   cleanImg, sniffImage, imgKeyOf, imgRefOf, newImgId, referencedImages, IMG_MAX_BYTES,
   IMG_TARGET_BYTES,
+  cleanProof, cleanPayer, proofNoun, PROOF_MODES,
   issueCap, verifyCap, randomKey, validateSettings, stageSettings, applyPending, maskField,
   EDITABLE_FIELDS, SOFT_FIELDS, sign, adminStore, normaliseRail, resolveRail,
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '0.6.6';
+const VERSION = '0.6.7';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 const MAX_ORDERS_KEPT = 200;
@@ -371,7 +372,12 @@ async function placeOrder(req, url, env, ctx) {
     // manual mobile-money rail the merchant's whole reconciliation is matching an
     // SMS alert to an order, and an alert with no number in it is a phone call.
     // Optional by design: a buyer who will not say gets the order anyway.
-    payer: digits((body.buyer || {}).payer || (body.buyer || {}).pay_from || (body.buyer || {}).from || '').replace(/\D/g, '').slice(0, 15),
+    payer: cleanPayer((body.buyer || {}).payer || (body.buyer || {}).pay_from || (body.buyer || {}).from, 'loose'),
+    // The code the buyer's app printed. Asked for because a manual rail is a phone
+    // the merchant reads, and on a bank transfer it is the only way in. Kept as
+    // typed, and never a reason to lose the order: a missing one is flagged instead.
+    proof: cleanProof((body.buyer || {}).proof || (body.buyer || {}).txid || (body.buyer || {}).tx_id
+                      || (body.buyer || {}).reference_given),
   };
   if (!buyer.name || !buyer.phone || buyer.phone.replace(/\D/g, '').length < 9) {
     return json({ ok: false, error: 'name and a valid WhatsApp number are required' }, 422);
@@ -475,6 +481,9 @@ async function persistOrder(env, st, order) {
   cur.unshift({
     id: order.id, code: order.code, at: order.at, total: order.pricing.total, name: order.buyer.name,
     phone: order.buyer.phone, service: order.service, status: order.status, flags: order.risk_flags,
+    // the two things that turn "an alert for 12.34 arrived" into a matched payment,
+    // on the row list so the ledger does not need the order document to answer
+    payer: order.buyer.payer || '', proof: order.buyer.proof || '',
     prior_unpaid: order.prior_unpaid,
   });
   await env.ORDERS.put(key, JSON.stringify(cur.slice(0, MAX_ORDERS_KEPT)));
@@ -2304,6 +2313,8 @@ function opsOrderLite(o) {
     total: o.pricing && o.pricing.total, pay_now: o.pricing && o.pricing.pay_now,
     currency: o.pricing && o.pricing.currency, rail: o.pricing && o.pricing.rail && o.pricing.rail.label,
     buyer: o.buyer ? { name: o.buyer.name, phone: o.buyer.phone } : null,
+    proof: (o.buyer && o.buyer.proof) || '', payer: (o.buyer && o.buyer.payer) || '',
+    proof_wanted: (o.pricing && o.pricing.rail && o.pricing.rail.proof) || '',
     items: (o.items || []).length, flags: o.risk_flags || [], marked_at: o.marked_at || null,
     pay_account: o.pay && o.pay.account, reference: o.pay && o.pay.reference,
   };
