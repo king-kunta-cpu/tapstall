@@ -230,7 +230,7 @@ ck "  · and the query repair still works where a query is read" '"ok":true' "$(
 ck "the screen asks for exactly two things" '^2$' "$(curl -s -m 30 "$ORIGIN/a" | grep -o 'id="f[KP]"' | wc -l | tr -d ' ')"
 ck "  · one button, and no paste-box for a link left behind" '^0$' "$(curl -s -m 30 "$ORIGIN/a" | grep -c 'id="fL"')"
 ck "  · and the PIN panel is where a PIN is changed" 'Your PIN' "$(curl -s -m 30 "$ORIGIN/a")"
-ck "the retired exchange door names its replacement" 'reset_pin\|retired' "$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"code":"junk"}' "$ORIGIN/api/login")"
+ck "the retired exchange door explains the change, in one sentence" 'retired' "$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"code":"junk"}' "$ORIGIN/api/login")"
 ck "  · and so does the retired recovery door" '^410$' "$(code -X POST -H 'content-type: application/json' -d '{}' "$ORIGIN/api/recover")"
 BAD1=$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"key":"'"$HANDLE"'","pin":"000000"}' "$ORIGIN/api/auth")
 BAD2=$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"key":"nomateshop9911","pin":"000000"}' "$ORIGIN/api/auth")
@@ -254,7 +254,7 @@ import sys,json
 d=json.load(sys.stdin)
 a=[x for x in (d.get('audit') or []) if x.get('act')=='pin' or x.get('act')=='login']
 print(json.dumps(a[0]) if a else '{}')" 2>/dev/null)
-ck "a sign-in and a PIN change are both in the merchant's own log" 'login\|pin' "$AUD"
+ck "the sign-in is in the merchant's own log, recorded as a PIN sign-in" '"via": ?"pin"' "$AUD"
 nk "  · and the log line holds no PIN, only the field name" '"pin": ?"[0-9]' "$AUD"
 ck "a login credential cannot be spent to confirm an order" '"link_expired"' "$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"v1.9999999999.eyJhIjoibG9naW4ifQ.deadbeef"}' "$ORIGIN/api/mark")"
 ck "a guessed legacy token is refused, not honoured" '^405$' "$(code "$ORIGIN/api/mark?handle=$HANDLE&token=not-the-key&id=x&status=paid")"

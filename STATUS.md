@@ -61,6 +61,17 @@ system, the ledger and the storefront — dozens of hard-won fixes and most of t
 **Migration.** Both tenants in KV (`mamatoe`, `kotaking`) pre-date the PIN, so each
 needs one `POST /ops/api/store {action:'reset_pin', handle}` to be handed a PIN; the
 console row reads `no PIN` until then and the drawer shows `PIN since <date>` after.
+
+**Measured on production after the deploy (run #40, `0.6.0` on both origins).**
+`scripts/prod_check.sh` → **138 passed, 0 blocked, 0 failed**, including a real
+sign-in from an empty cookie jar, the HttpOnly/SameSite=Strict/Secure flags, and
+`"kdf"|"salt"|"hash"` absent from the ledger payload. `/__selftest` reports
+`pin_kdf:true, pin_iters:8000`. The alias Worker is on the same version: page GETs
+301 to the canonical origin, and `POST /api/auth` is answered there rather than
+redirected, so an old saved URL still gets a merchant in. Both tenants were handed
+PINs through `reset_pin` and signed in (`mamatoe`: 30 orders read back, `kotaking`:
+9), and three deliberate wrong-PIN probes left `pinl:*` empty — `count:0` — which is
+the write-budget invariant, checked against the live namespace rather than the stub.
 `/api/register` mints the PIN itself and prints it on the same screen the store link
 is printed on, with Copy both / Send to myself on WhatsApp — the credential handover
 is part of signup now, not a step somebody has to remember.
