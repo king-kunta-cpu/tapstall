@@ -1276,6 +1276,7 @@ function bind(scope) {
     var txt = 'Hi ' + o.buyer.name + ", it's " + (S.store.shop_name || '') + '. Your order ' + o.code +
       ' (' + ((o.pricing && o.pricing.lines) || o.items || []).map(function (l) { return l.qty + 'x ' + l.name; }).join(', ') + ') is '
       + ((o.pricing && o.pricing.pay_now) || 0) + ' ' + (S.store.currency || 'USD') + '.';
+    if (o.ask) txt += '\n\n' + o.ask;      // the asking is already written; one tap, no composing
     window.open('https://wa.me/' + String(o.buyer.phone).replace(/\D/g, '') + '?text=' + encodeURIComponent(txt), '_blank');
   }; });
   qa('[data-cp]', root).forEach(function (b) { b.onclick = function () {
@@ -1288,7 +1289,8 @@ function orderSlip(o) {
   return (o.code || '') + '\n' + ((o.buyer || {}).name || '') + ' ' + ((o.buyer || {}).phone || '') + (o.buyer && o.buyer.address ? '\n' + o.buyer.address : '') + '\n'
     + (o.items || []).map(function (i) { return (i.qty || 1) + 'x ' + i.name; }).join('\n') + '\n'
     + 'Pay ' + (pay.amount != null ? pay.amount : (o.pricing || {}).pay_now) + ' ' + (pay.currency || S.store.currency || 'USD')
-    + ' → ' + (pay.account || S.store.pay_account || '') + ' ref ' + (pay.reference || o.code);
+    + ' → ' + (pay.account || S.store.pay_account || '') + ' ref ' + (pay.reference || o.code)
+    + (o.ask ? '\n' + o.ask : '');
 }
 function copyText(t) { if (navigator.clipboard) navigator.clipboard.writeText(t); }
 qa('#filters .sm').forEach(function (b) {

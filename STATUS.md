@@ -1,5 +1,65 @@
 # Tapstall — status
 
+## The message a merchant would have to type is typed for them (2026-10-12, v0.6.8)
+
+**The one tap rule, applied to the follow-up.** 0.6.7 put a flag on the ledger row —
+`no reference from your bank — ask them before sending` — and then left the merchant to
+compose the text themselves. That is the same five minutes of friction in a different
+place: knowing you should message someone and typing "hi, it's …, the code please" into
+a WhatsApp box, per order. So the ask is now written by the Worker and travels with the
+row as `order.ask`, and the two taps a merchant already has — **WhatsApp buyer** and
+**Copy the slip** — append it.
+
+**Why it is server-side.** The sentence depends on the rail *as frozen on the order*,
+not on whatever the shop's settings say today, and it has two readers (the message link
+and the copied slip) plus a third that will want it later (the mailer, the webhook). A
+second copy of a sentence is a second place to be rude in, so there is one function:
+`proofAsk` in `worker/core.js`, next to the policy it derives from. The page adds
+`if (o.ask)` and nothing else — a test asserts the shipped admin invents no sentence of
+its own, by grepping for the words it must not contain.
+
+**What it never does.** It is not written when the buyer answered (`proofAsk` returns
+`''`, the field is absent, the row is untouched — no badge, no nudge, nothing to act
+on), not written for a rail that needs nothing, and not written for an order whose rail
+carries neither a policy nor a shape: a label alone is not enough to claim to know what
+a shop needs. It is computed at read time rather than stored, so a merchant who renames
+what they call the field gets the new wording on yesterday's orders too — and a stored
+`ask` could go stale in a way the owner cannot fix. An order placed before any of this
+existed still gets the sentence, from the same `proofDefault` its slip used: the slip
+asked, so asking again is fair.
+
+**Wording.** Two lines, no apologies: `Need: Reference from your bank — your app shows
+it right after it sends. Send it here and I can confirm your order today.` for a rail
+that requires it, and for the optional case the generic lowercase word for the shape
+(`code`, `TxID`, `reference`, `receipt number`) rather than the merchant's label, because
+`send the Code from the app too` is what capitalising a name mid-sentence does. The
+merchant's own wording is used verbatim, and never re-cased, in the `Need:` line.
+
+**Verification.** `node --test tests/` → **162/162** (core 59, live 65, pages 28, limits
+10); production check gained a line that reads the merchant's own ledger payload and
+asks whether any row carries a sentence, which is blocked today only because the
+account has no KV writes left to make an order with.
+
+**The alias, fixed on the way (same release, no product code).** The previous brand's
+hostname is a redirect-only deployment whose entire behaviour is one plain-text var,
+`REDIRECT_TO`. The dependency-free publisher (`scripts/cf_publish.py`, used whenever
+`node_modules` is absent — which is how a sandbox and a lean CI both deploy) built its
+bindings from its command-line arguments alone, so an alias deployed through it came
+back as a **second full copy of the app**: store pages answered from the old host and
+`cron_owner` flipped to `true`, meaning the daily sweep was scheduled from two origins
+4× a day. `deploy.sh` printed `200 -> ` for that and moved on. Now: the fallback
+passes the var, `deploy.sh` warns loudly unless the alias answers `301`, and
+`prod_check.sh` asserts the `301` plus `cron_owner:false` in its ordinary run — verified
+live, `alias redirects a saved store link: 301 -> https://tapstall.simalidudu.workers.dev/s/mamatoe`
+and `{"cron_owner":false,"version":"0.6.8"}`. The alias's inherited schedule still
+exists (this token cannot delete it; the API refuses), and that is the documented
+design: `scheduled()` returns first when the var is set, which is the thing the var is
+for. A KV write budget spent on duplicate sweeps is how a $0 plan becomes an outage.
+
+**Unverified here, by nature:** what the composed WhatsApp message looks like on a phone
+(a `wa.me` link is opened by the browser) and whether the two sentences read well to a
+buyer. Both are copy, not behaviour, and both are one edit in `core.js` away.
+
 ## Every rail says how the money gets found (2026-10-12, v0.6.7)
 
 **The problem was the last five minutes, again.** A merchant on a hand-checked rail

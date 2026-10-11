@@ -1851,3 +1851,28 @@ test('a described method can demand its own code and name it', async () => {
     buyer: { name: 'No Code', phone: '0700000002' }, items: [{ name: 'Tea', price: 2 }] } });
   assert.match((miss.json.risk_flags || []).join(' '), /no m-pesa code/, 'and the flag speaks the same words back to the merchant: ' + JSON.stringify(miss.json.risk_flags));
 });
+
+test('the words to ask for a missing code are already written, on the row', async () => {
+  const h = 'zzask' + String(Date.now()).slice(-5);
+  const reg = await call('/api/register', { method: 'POST', body: {
+    handle: h, shop_name: 'Ask Test', whatsapp: '263771234567', rail: 'zipit', pay_account: '1234567890', currency: 'USD',
+  } });
+  assert.equal(reg.status, 201, reg.text);
+  const owed = await call('/api/order', { method: 'POST', ip: '196.21.0.11', body: { handle: h, service: 'pickup',
+    buyer: { name: 'Farai M', phone: '0780006677' }, items: [{ name: 'Box', price: 30 }] } });
+  assert.equal(owed.status, 201, owed.text);
+  const given = await call('/api/order', { method: 'POST', ip: '196.21.0.12', body: { handle: h, service: 'pickup',
+    buyer: { name: 'Farai M', phone: '0780006677', proof: 'REF-77' }, items: [{ name: 'Box', price: 30 }] } });
+  assert.equal(given.status, 201, given.text);
+
+  const key = JSON.parse(env.STORES._map.get('store:' + h).value).admin_token;
+  const dash = await call('/api/admin?handle=' + h, { headers: { 'x-tapstall-admin': key } });
+  assert.equal(dash.status, 200, dash.text);
+  const byId = (id) => dash.json.orders.find((o) => o.id === id);
+  const a = byId(owed.json.order.id), b = byId(given.json.order.id);
+  assert.match(a.ask, /^Need: Reference from your bank/, 'the row that owes one arrives with the sentence on it: ' + JSON.stringify(a.ask));
+  assert.equal(b.ask, undefined, 'the row that answered arrives as it always did — no nudge, no badge, nothing to act on');
+  assert.equal(JSON.parse(env.ORDERS._map.get('order:' + h + ':' + owed.json.order.id).value).ask, undefined,
+    'it is written at read time, not stored: a renamed field should not strand a sentence in an old order');
+  assert.ok(!/proof/i.test(a.ask.slice(0, 5)) || /Need/.test(a.ask), 'and it opens with what is needed, not with an apology');
+});

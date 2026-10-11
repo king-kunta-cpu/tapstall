@@ -57,12 +57,12 @@ export const PROOF_MODES = {
   require: { ask: true,  label: 'They have to type that code before ordering' },
 };
 const PROOF_NOUN = {
-  phone:  { label: 'Code from the app', hint: 'What the wallet app or the confirmation SMS shows after it sends — not the order code' },
-  wallet: { label: 'Transaction ID',    hint: 'The TxID in the app’s receipt, usually 8-12 digits' },
-  shapid: { label: 'ShapID reference',  hint: 'The reference on the payment proof in your banking app' },
-  bank:   { label: 'Reference from your bank', hint: 'The reference your bank shows when the transfer goes out' },
-  link:   { label: 'Payment reference', hint: 'The receipt number on the confirmation page or email' },
-  none:   { label: 'Reference',         hint: 'The code on your payment confirmation' },
+  phone:  { word: 'code', label: 'Code from the app', hint: 'What the wallet app or the confirmation SMS shows after it sends — not the order code' },
+  wallet: { word: 'TxID', label: 'Transaction ID',    hint: 'The TxID in the app’s receipt, usually 8-12 digits' },
+  shapid: { word: 'reference', label: 'ShapID reference',  hint: 'The reference on the payment proof in your banking app' },
+  bank:   { word: 'reference', label: 'Reference from your bank', hint: 'The reference your bank shows when the transfer goes out' },
+  link:   { word: 'receipt number', label: 'Payment reference', hint: 'The receipt number on the confirmation page or email' },
+  none:   { word: 'reference', label: 'Reference',    hint: 'The code on your payment confirmation' },
 };
 /** The number a payment came from, kept in the shape the rail needs: a wallet's is
  *  digits, a bank's is "CABS 1234567890", and mangling either into the other is how
@@ -89,8 +89,35 @@ export const proofDefault = (type, spec) => (type === 'cod' || type === 'auto' |
 export const proofNoun = (rail) => {
   const r = rail && typeof rail === 'object' ? rail : {};
   const d = PROOF_NOUN[r.spec] || PROOF_NOUN.none;
-  return { label: String(r.proof_label || '').trim().slice(0, 40) || d.label, hint: d.hint };
+  return { word: d.word, label: String(r.proof_label || '').trim().slice(0, 40) || d.label, hint: d.hint };
 };
+/**
+ * The sentence a merchant sends when the money is on its way and cannot be found.
+ * Written here, next to the policy it comes from, for two reasons: it depends on the
+ * rail as it was frozen on the order rather than on whatever the shop's settings say
+ * today, and more than one surface needs the same words (the ledger's WhatsApp
+ * button, the slip a merchant copies and pastes) — a second copy of a sentence is a
+ * second place to be rude in.
+ */
+export function proofAsk(order = {}) {
+  const rail = (order.pricing || {}).rail;
+  // No rail on the order means nothing was ever decided about proof, and inventing a
+  // policy for an order that never had one is how a merchant ends up apologising for
+  // a field nobody asked for.
+  // A sentence needs either the policy or the shape the policy came from. A label
+  // alone is neither, and writing “send the reference” about a rail we cannot read
+  // is worse than saying nothing.
+  if (!rail || (rail.proof == null && !rail.type && !rail.spec)) return '';
+  // The slip asked, so asking again is fair, even for an order placed before a
+  // merchant ever set a policy: mode falls back to the same default the slip used.
+  const mode = PROOF_MODES[rail.proof] ? rail.proof : proofDefault(rail.type, rail.spec);
+  if (mode === 'none') return '';
+  if (cleanProof((order.buyer || {}).proof)) return '';        // they answered; nobody is chased
+  const noun = proofNoun(rail);
+  return mode === 'require'
+    ? 'Need: ' + noun.label + ' — your app shows it right after it sends. Send it here and I can confirm your order today.'
+    : 'If your app gave you one, send the ' + noun.word + ' too — it is how I find your payment faster.';
+}
 
 export function normaliseRail(def, key) {
   const d = def && typeof def === 'object' ? def : {};

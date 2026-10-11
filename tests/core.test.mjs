@@ -677,3 +677,19 @@ test('the buyer’s page is told the policy and never a code', () => {
   assert.equal(auto.rail_info.proof, 'none');
   assert.equal(auto.rail_info.ask_payer, false, 'a hosted link has nothing to match, so the page asks nothing');
 });
+
+test('the ask is a sentence, not a second form to fill', () => {
+  const rail = (proof, extra) => ({ pricing: { rail: { proof, type: 'manual', spec: 'bank', ...(extra || {}) } } });
+  assert.equal(C.proofAsk({ buyer: {} }), '', 'an order with no rail says nothing — there is nothing to explain');
+  assert.equal(C.proofAsk({ ...rail('none'), buyer: {} }), '', 'a rail that needs nothing is never mentioned again');
+  assert.match(C.proofAsk({ ...rail('require'), buyer: {} }), /^Need: Reference from your bank/, 'a required code is asked for in the shop’s words');
+  assert.match(C.proofAsk(rail('ask'), { buyer: {} }) || C.proofAsk({ ...rail('ask'), buyer: {} }), /send the reference too/, 'an optional one is a courtesy line, not a demand');
+  assert.equal(C.proofAsk({ ...rail('require'), buyer: { proof: 'REF-1' } }), '', 'answered, so nobody is chased');
+  assert.ok(!/Please provide|kindly|at your earliest convenience/.test(C.proofAsk({ ...rail('require'), buyer: {} })), 'it reads like a person texting, because that is what it is');
+  // an order placed before any of this existed: the slip asked, so the follow-up may too
+  assert.match(C.proofAsk({ pricing: { rail: { type: 'manual', spec: 'bank' } }, buyer: {} }), /^Need: Reference/, 'the same default the slip used, from the same function');
+  assert.equal(C.proofAsk({ pricing: { rail: { type: 'cod', spec: 'none' } }, buyer: {} }), '', 'and cash is still cash');
+  const renamed = C.proofAsk({ pricing: { rail: { proof: 'require', type: 'manual', spec: 'phone', proof_label: 'M-Pesa code' } }, buyer: {} });
+  assert.match(renamed, /Need: M-Pesa code/, 'a renamed field is asked for by that name');
+  assert.ok(!/M-PESA CODE/.test(renamed), 'and the merchant’s capitalisation survives: it is their word, not a token');
+});

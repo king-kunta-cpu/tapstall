@@ -103,6 +103,17 @@ if [[ "$ROLE" == "alias" ]]; then
   exit 0
 fi
 
+# The previous brand's hostname is a live door: links already sent to merchants are
+# absolute. Alias *mode* has its own rigorous run, but nothing in the ordinary one
+# looked at the alias at all — which is how a fallback publisher dropping REDIRECT_TO
+# served the app twice and scheduled the sweep twice without a red line anywhere.
+LEG="${LEGACY_ORIGIN:-https://zimlink.simalidudu.workers.dev}"
+if [[ "$ORIGIN" != "$LEG" ]]; then
+  LH=$(curl -s -m 20 -o /dev/null -D - "$LEG/s/$HANDLE" | tr -d '\r')
+  ck "the old hostname still moves a saved store link, rather than serving the app twice" '^HTTP/[0-9.]+ 301' "$(printf '%s' "$LH" | head -1)"
+  ck "  · and stays out of the daily sweep" '"cron_owner":false' "$(curl -s -m 30 "$LEG/__selftest")"
+fi
+
 echo "[1] version, and the security primitives inside the Worker's own runtime"
 WANT_VER=$(grep -m1 "^const VERSION = " worker/worker.js | tr -dc '0-9.')
 ck "ping reports the version in this checkout ($WANT_VER)" "\"$WANT_VER\"" "$(curl -s -m 30 "$ORIGIN/__ping")"
@@ -563,6 +574,10 @@ fi
 ckw "  · it answers the field empty rather than inventing one" '"proof":[[:space:]]*""' "$ORD"
 ckw "  · and an ask-only rail never scolds a buyer for it" '^0$' "$(printf '%s' "$ORD" | grep -cE 'ask them before sending')"
 ckw "the merchant's ledger sees the field on the order document" '"proof":[[:space:]]*""' "$DASH"
+ckw "  · a row that owes a code arrives with the words to ask for it" '^yes$' "$(printf '%s' "$DASH" | python3 -c "
+import json,sys
+d = json.load(sys.stdin)
+print('yes' if any((o or {}).get('ask') for o in d.get('orders', [])) else 'no')" 2>/dev/null)"
 SHIP_S=$(cat pages/store.html)
 ck "the page we ship asks once, then lets the order through" 'id="fProof"' "$SHIP_S"
 ck "  · shown because the server said so, not from a list of rail names" "R\.proof !== 'none'" "$SHIP_S"

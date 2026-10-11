@@ -164,14 +164,24 @@ if [[ -n "${LEGACY_WORKER_NAME:-}" && "$LEGACY_WORKER_NAME" != "$WORKER_NAME" ]]
     # the bundle is normally cleaned up above; the dependency-free publisher needs
     # it, so rebuild rather than "succeed" at publishing nothing
     [[ -d .build ]] || bash scripts/build_bundle.sh .build
+    # TAPSTALL_CRON="" says "not scheduled", and REDIRECT_TO has to be passed here
+    # too: this publisher builds its bindings from its arguments, and the day it
+    # silently dropped that var the old hostname started serving the app itself and
+    # running the sweep a second time — which is also how a $0 account burns half
+    # its daily KV writes on nothing.
     CF_TOKEN="$CF_TOKEN" CF_ACCOUNT="$CF_ACCOUNT" WORKER_NAME="$LEGACY_WORKER_NAME" \
+      REDIRECT_TO="$BASE" TAPSTALL_CRON="" \
       python3 scripts/cf_publish.py "$LEGACY_WORKER_NAME" .build "kv:STORES:$STORES_ID" "kv:ORDERS:$ORDERS_ID" \
       || warn "alias publish failed"
   fi
   WORKER_NAME="$LEGACY_WORKER_NAME" put_secret ADMIN_SECRET "$ADMIN_SECRET" || warn "alias secret not set"
   OLD="https://$LEGACY_WORKER_NAME.$(workers_subdomain | tail -1).workers.dev"
   say "alias answers $OLD/__ping -> $(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$OLD/__ping")"
-  say "alias redirects a saved store link: $(curl -s -o /dev/null -w '%{http_code} -> %{redirect_url}' --max-time 20 "$OLD/s/mamatoe")"
+  # An assertion, not a log line: `200 ->` used to print here as a fact and the
+  # regression it described went by twice.
+  ALINK=$(curl -s -o /dev/null -w '%{http_code} -> %{redirect_url}' --max-time 20 "$OLD/s/mamatoe")
+  if [[ "$ALINK" == 301* ]]; then say "alias redirects a saved store link: $ALINK"
+  else warn "alias is NOT redirecting (got: $ALINK) — the old hostname is serving the app itself, so it lost REDIRECT_TO and the daily sweep runs from two origins"; fi
   # The alias inherited a cron schedule from the day it was the only Worker, and
   # this token cannot delete it (PUT /schedules -> success:false). That is safe
   # rather than sloppy: a Worker deployed with REDIRECT_TO returns from

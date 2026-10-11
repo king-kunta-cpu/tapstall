@@ -20,13 +20,13 @@ import {
   applyMenu, sanitizeMenu, menuPrice, openNow, cleanWeek, cleanRailAccts, hoursText,
   cleanImg, sniffImage, imgKeyOf, imgRefOf, newImgId, referencedImages, IMG_MAX_BYTES,
   IMG_TARGET_BYTES,
-  cleanProof, cleanPayer, proofNoun, PROOF_MODES,
+  cleanProof, cleanPayer, proofNoun, proofAsk, PROOF_MODES,
   issueCap, verifyCap, randomKey, validateSettings, stageSettings, applyPending, maskField,
   EDITABLE_FIELDS, SOFT_FIELDS, sign, adminStore, normaliseRail, resolveRail,
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '0.6.7';
+const VERSION = '0.6.8';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 const MAX_ORDERS_KEPT = 200;
@@ -760,7 +760,7 @@ async function adminView(req, url, env) {
       // should be able to see "changed 3 days ago" without the dashboard ever
       // holding a credential it could leak
       pin_set_at: st.pin ? (st.pin.set_at || null) : null },
-    orders: orders.filter(Boolean),
+    orders: orders.filter(Boolean).map(withAsk),
     // the owner sees the real queued value — cancelling is useless if they
     // cannot check what was typed — while the append-only log keeps it masked
     pending: st.pending ? { keys: Object.keys(st.pending.fields), apply_at: st.pending.apply_at, in_ms: Math.max(0, st.pending.apply_at - Date.now()), fields: st.pending.fields } : null,
@@ -2307,6 +2307,16 @@ async function opsStoreDetail(url, env) {
     queued: st.pending ? { keys: Object.keys(st.pending.fields), apply_at: st.pending.apply_at, in_ms: Math.max(0, st.pending.apply_at - Date.now()), fields: st.pending.fields } : null,
   }, 200, { 'Cache-Control': 'no-store' });
 }
+/* A row that owes the shop a payment code carries the words to ask for it, written by
+ * the same function the slip came from. Read-time on purpose: the sentence depends on
+ * the rail as frozen on the order, and a merchant who renames what they call it should
+ * not have to wait for a re-price to get the new wording. */
+function withAsk(o) {
+  if (!o) return o;
+  const a = proofAsk(o);
+  return a ? { ...o, ask: a } : o;
+}
+
 function opsOrderLite(o) {
   return {
     id: o.id, code: o.code, at: o.at, status: o.status, service: o.service,

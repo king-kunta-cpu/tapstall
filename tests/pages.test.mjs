@@ -416,3 +416,13 @@ test('the merchant’s CSV has one header name per value, or Excel shifts the bo
   assert.equal(cols.length, n, 'header says ' + cols.length + ' columns, the row writes ' + n + ': ' + cols.join('|'));
 });
 
+
+test('the ask for a missing code is in the message a merchant already has a button for', () => {
+  const a = page('admin');
+  const from = a.indexOf("qa('[data-wa]', root)");
+  assert.ok(from > 0, 'the WhatsApp buyer button is still there');
+  const body = a.slice(from, a.indexOf('};', from));
+  assert.ok(/if \(o\.ask\) txt \+= /.test(body), 'its message appends whatever the server wrote, when the server wrote something');
+  assert.ok(!/Need:/.test(body) && !/send the code/i.test(body), 'the page invents no sentence of its own — one authority, in the Worker');
+  assert.ok(/o\.buyer && o\.ask|o\.ask \? '\\n' \+ o\.ask/.test(a), 'the copied slip carries it too, because that is the other half of the same tap');
+});

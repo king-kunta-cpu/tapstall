@@ -180,6 +180,12 @@ verified ZW/SA tariffs) but it is now a **default, not the whole answer**:
   document and the list row only — `/s/<handle>/config.json` publishes the policy and
   never a buyer's reference, because there is no buyer on a store page.
 
+- **And the follow-up is written.** A row that owes a code carries `ask`: one or two
+  sentences, produced by `proofAsk` in `core.js` from the rail frozen on that order, and
+  appended by the two taps a merchant already has — *WhatsApp buyer* and *Copy the slip*.
+  Nothing is stored (a renamed field updates yesterday's wording), nothing is said when
+  the buyer answered or the rail needs nothing, and the page never invents its own copy.
+
 An invalid description at sign-up becomes `cash` rather than a rejected
 registration: a merchant who never opens the shop is worse than one whose slip
 says "pay on collection" until they fix it.
@@ -306,7 +312,7 @@ see and cancel, and because revoking takes one press.
 | Health / diagnostics | `…/__ping`, `…/__selftest`, `…/__selftest?scheduled=1` |
 | Rail table | `…/rails` |
 | Prove one merchant's login, right now | `./scripts/try_login.sh <store name> <PIN>` — signs in from an empty cookie jar, shows the cookie flags, reads the dashboard with nothing but that cookie, and reports whether any PIN material came back. A login is not one-use, so running it does not spend anything |
-| Production check (141 assertions, run it any time) | `./scripts/prod_check.sh` — needs the KV read token for the crawler probe, works with `HANDLE=` set to any store, and `PIN=` to walk the whole front door |
+| Production check (194 assertions today, run it any time) | `./scripts/prod_check.sh` — needs the KV read token for the crawler probe, works with `HANDLE=` set to any store, and `PIN=` to walk the whole front door |
 | Deploy log of the last CI run | `https://raw.githubusercontent.com/king-kunta-cpu/tapstall/main/ci-deploy.log` |
 | Re-run a failed deploy | `POST /repos/king-kunta-cpu/tapstall/actions/runs/<id>/rerun-failed-jobs` with the repo PAT — the one Actions call that works (job *logs* are not readable with it, which is why `ci-deploy.log` and step annotations exist). `deploy-pages` fails on GitHub's side from time to time — "Fetching artifact metadata failed… re-run the deployment at a later time" — and a rerun is the whole fix; the Worker job is unaffected, so the product stays live and current while the mirror lags a run |
 
@@ -315,25 +321,34 @@ One measurement worth knowing before you trust it: `cron:last` lives in KV, so
 *both* origins report the same heartbeat — the value cannot tell you who swept. The
 field that does is `/__selftest`'s `cron_owner` (`true` on `tapstall`, `false` on the
 alias), which is what `deploy.sh` checks and what the test suite proves by watching
-every `cron:*` write while `REDIRECT_TO` is set.
+every `cron:*` write while `REDIRECT_TO` is set. That var is the alias's *only*
+behaviour, so both publishers have to carry it: the day the dependency-free one
+(`cf_publish.py`, used when `node_modules` is absent) built its bindings from its
+arguments alone, it shipped the alias without it — the old hostname started serving
+the app itself and the sweep ran from two origins, four times a day, quietly. Both
+paths pass it now, `deploy.sh` refuses to call an alias healthy on a `200`, and
+`prod_check.sh` asserts the `301` and the `cron_owner:false` in its ordinary run, so
+this cannot regress between two people noticing.
 
 ## Verified
 
-`node --test tests/` → **142 pass** (49 unit on `core.js` — money, menu, rails,
-hours, image references and sniffing; 60 driving the real bundled Worker against an
-in-memory KV — the full journey plus the authority model: forged/expired/revoked
-codes, inert GETs, the 15-minute hold, masked audit, cross-origin refusal, every
-`/ops` gate, lever and template rule, and an upload that is stored, served, refused
-and swept; 23 on the shipped HTML — script compiles, ids resolve, endpoints routed,
-console buttons backed by Worker actions, a picture path cannot escape its
-attribute — and 10 on the limits a caller cannot talk past: the per-IP order rate,
-the lockout, the KV quota). Deployed and exercised on the real Worker:
+`node --test tests/` → **162 pass** (59 unit on `core.js` — money, menu, rails,
+hours, image references and sniffing, and every rail's proof policy with the
+dashboard's mirror of it compared cell by cell; 65 driving the real bundled Worker
+against an in-memory KV — the full journey plus the authority model: forged/expired/
+revoked codes, inert GETs, the 15-minute hold, masked audit, cross-origin refusal,
+every `/ops` gate, lever and template rule, an upload that is stored, served, refused
+and swept, and a payment code that round-trips from the buyer's thumb to the ledger
+row without ever meeting a public page; 28 on the shipped HTML — script compiles, ids
+resolve, endpoints routed, console buttons backed by Worker actions, a picture path
+cannot escape its attribute, a CSV header has one name per column; and 10 on the
+limits a caller cannot talk past: the per-IP order rate, the lockout, the KV quota). Deployed and exercised on the real Worker:
 two tenants (Harare/USD/EcoCash, Durban/ZAR/PayShap), order → one-tap paid,
 cross-tenant isolation, expiry → cron suspension → 503 → webhook → reinstated
 (`plan: annual`, 746 days). `/__selftest` reports bindings, all five templates,
-pricing, and a `secret_leak_check`. `scripts/prod_check.sh` (92 checks,
-several of them per-tenant loops) against the live Worker at v0.5.0 → **125 passed,
-0 blocked, 0 failed**: nine sections, covering the crawler prefetch, the 405s, the CORS split, the
+pricing, and a `secret_leak_check`. `scripts/prod_check.sh` (194 assertions today,
+several of them per-tenant loops) against the live Worker at v0.6.8 → **154 passed,
+40 blocked, 0 failed**: eleven sections, covering the crawler prefetch, the 405s, the CORS split, the
 15-minute hold, masked audit, revocation, self-serve recovery, cross-tenant
 refusal and — from v0.4.0 — the two consoles: money pages present in KV, `/ops`
 refusing an anonymous reader, the cookie's flags, a lever needing the confirm
