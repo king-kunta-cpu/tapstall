@@ -70,9 +70,10 @@ pages/public/         what GitHub Pages uploads: _headers, the sample CSV, and
                       index.html/fees.html are copied in by CI from pages/, never
                       committed here (two consumers, one source)
 scripts/ui_kit.py     inlines kit.css into every page; `check` is the drift gate
-tests/core.test.mjs   28 unit tests on the money and the parser
-tests/live.test.mjs   34 tests that run the real handler + cron against a stub KV
-tests/pages.test.mjs  14 tests on the shipped HTML itself (no browser needed)
+tests/core.test.mjs   32 unit tests on the money, the parser and the menu layer
+tests/live.test.mjs   50 tests that run the real handler + cron against a stub KV
+tests/limits.test.mjs 10 tests on the free-tier budgets (writes, sizes, locks)
+tests/pages.test.mjs  19 tests on the shipped HTML itself (no browser needed)
 scripts/deploy.sh     one command: tests → KV → templates → bundle → deploy → triggers → self-check
 scripts/build_bundle.sh   inlines core.js into .build/worker.js, ESM syntax check
 scripts/cf_publish.py     dependency-free publisher (fallback when wrangler is absent)

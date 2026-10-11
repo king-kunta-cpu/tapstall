@@ -74,6 +74,12 @@ details.box[open]>summary{border-bottom:1px solid #eef2f6}
 details.box .in{padding:.5rem 0 .7rem}
 .chips{display:flex;gap:.35rem;flex-wrap:wrap;margin:.4rem 0}
 .chips .on{background:#0b0f14;color:#fff;border-color:#0b0f14}
+#menuEdit .mrow{display:flex;flex-wrap:wrap;gap:.3rem;align-items:center;padding:.3rem 0;border-bottom:1px solid #eef2f6}
+#menuEdit .mrow .nm{flex:1 1 40%;min-width:8rem}
+#menuEdit .mrow .nm i{font-style:normal;color:#65788b;font-size:12px}
+#menuEdit .pr{width:6.4rem;padding:.3rem .4rem;text-align:right;border:1px solid #cfd8e0;border-radius:4px;font:inherit}
+#menuEdit .added{background:#f7fbf8}
+#menuEdit .hint{width:100%;margin-top:.15rem}
 </style>
 </head>
 <body>
@@ -142,6 +148,31 @@ details.box .in{padding:.5rem 0 .7rem}
     <div class="notice warn hide" id="menuWarn" style="margin-top:.4rem"></div>
     <div class="flags hide" id="shopWarn"></div>
     <div id="menuList" style="margin-top:.3rem"></div>
+
+    <details class="box" id="detMenu">
+      <summary id="menuSum">Edit items here — price, sold out, hide, add one</summary>
+      <div class="in">
+        <p class="hint" style="margin-top:0">Your sheet stays the base. What you change here wins over the row it came from and is on the store page at once; Revert hands a row back to the sheet. Nothing here needs Google.</p>
+        <div id="menuEdit"></div>
+        <div style="display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;margin-top:.6rem">
+          <button class="sm" id="menuSave" disabled>Save</button>
+          <button class="sm sec" id="menuAdd">Add an item</button>
+          <button class="sm sec" id="menuClear">Revert everything to my sheet</button>
+          <span class="hint" id="menuMsg"></span>
+        </div>
+        <div class="hide" id="menuNew" style="margin-top:.5rem">
+          <div class="two">
+            <div class="f"><label>name</label><input id="mNm" placeholder="Whole goat"></div>
+            <div class="f"><label>price</label><input id="mPr" inputmode="decimal" placeholder="40"></div>
+          </div>
+          <div class="two">
+            <div class="f"><label>group</label><input id="mGp" placeholder="Specials"></div>
+            <div class="f"><label>photo URL (optional)</label><input id="mIm" placeholder="https://…"></div>
+          </div>
+          <button class="sm" id="nGo">Add it to the list below</button>
+        </div>
+      </div>
+    </details>
 
     <details class="box" id="detSet">
       <summary>Change what buyers see and where they pay</summary>
@@ -356,11 +387,159 @@ function load() {
 }
 function reFeed() {
   var b = q('#menuReload'); b.textContent = 'reading…';
-  api('/s/' + S.handle + '/feed.json').then(function (r) {
+  // fresh=1 because this button exists for one reason: the merchant has just typed
+  // into the sheet and wants to see it. Everything else on the page can wait for
+  // the cache, because cache_seconds is what the storefront runs on now.
+  api('/s/' + S.handle + '/feed.json?fresh=1').then(function (r) {
     S.feed = (r.j && r.j.products) || []; b.textContent = 'Re-read my sheet';
-    renderShop();
+    MDRAFT = null;                              // the sheet moved: rebuild the draft from the store's copy
+    renderShop(); menuRows();
   });
 }
+
+/* ------------------------------------------------------------------ menu edits
+ * The store's own copy of its menu. The sheet stays the base and this is only the
+ * difference from it, which is what makes "Revert this row" a real promise: the
+ * row was never overwritten, the override was dropped. Nothing in here needs a
+ * Google account, and nothing in here decides a price the buyer can order at —
+ * menuPrice() in the worker does, from this stored menu.
+ * ------------------------------------------------------------------ */
+function draftFrom(saved) {
+  var m = saved || {};
+  return { over: JSON.parse(JSON.stringify(m.over || {})), hide: (m.hide || []).slice(),
+           extra: JSON.parse(JSON.stringify(m.extra || [])), order: (m.order || []).slice() };
+}
+function draftTouched(d) { return Object.keys(d.over).length + d.hide.length + d.extra.length + (d.order.length ? 1 : 0); }
+function isNewId(id) { return String(id || '').indexOf('dash-') === 0; }
+function extraIdx(d, id) { for (var i = 0; i < d.extra.length; i++) if (d.extra[i].id === id) return i; return -1; }
+/** Mirror of applyMenu() so the list shows what the store page will show. */
+function mergeFeed(feed, d) {
+  var over = d.over || {}, out = [];
+  (feed || []).forEach(function (p) {
+    if (d.hide.indexOf(p.id) >= 0) return;
+    var o = over[p.id] || {}, q = {}; for (var k in p) q[k] = p[k];
+    if (o.name) q.name = o.name;
+    if (o.cat) q.cat = o.cat;
+    if (typeof o.price === 'number') q.price = o.price;
+    if (typeof o.available === 'boolean') q.available = o.available;
+    q.edited = !!Object.keys(o).length;
+    out.push(q);
+  });
+  d.extra.forEach(function (x) {
+    out.push({ id: x.id, name: x.name, cat: x.cat || '', price: Number(x.price) || 0,
+               available: x.available !== false, desc: x.desc || '', img: x.img || '', edited: true });
+  });
+  if (d.order.length) {
+    var w = d.order.slice(), pos = {};
+    out.forEach(function (p, i) { pos[p.id] = w.indexOf(p.id) >= 0 ? w.indexOf(p.id) : 1e3 + i; });
+    out.sort(function (a, b) { return (pos[a.id] || 0) - (pos[b.id] || 0); });
+  }
+  return out;
+}
+function setEdit(id, patch) {
+  if (!MDRAFT) MDRAFT = draftFrom(S.store.menu);
+  var i = extraIdx(MDRAFT, id);
+  if (i >= 0) { for (var k in patch) MDRAFT.extra[i][k === 'out' ? 'available' : k] = patch[k]; if (patch.price != null) MDRAFT.extra[i].price = patch.price; }
+  else {
+    var row = MDRAFT.over[id] || {};
+    for (var j in patch) row[j] = patch[j];
+    if (patch.out !== undefined) { row.available = !patch.out; delete row.out; }
+    MDRAFT.over[id] = row;
+  }
+  menuRows();
+}
+function moveItem(list, id, dir) {
+  if (!MDRAFT) MDRAFT = draftFrom(S.store.menu);
+  if (!MDRAFT.order.length) MDRAFT.order = list.map(function (p) { return p.id; });
+  var at = MDRAFT.order.indexOf(id), to = at + dir;
+  if (at < 0 || to < 0 || to >= MDRAFT.order.length) return;
+  MDRAFT.order.splice(to, 0, MDRAFT.order.splice(at, 1)[0]);
+  menuRows();
+}
+function menuRows() {
+  var box = q('#menuEdit'); if (!box || !q('#detMenu').open) return;
+  if (!MDRAFT) MDRAFT = draftFrom(S.store.menu);
+  var list = mergeFeed(S.feed || [], MDRAFT), d = MDRAFT;
+  var hidden = (S.feed || []).filter(function (p) { return d.hide.indexOf(p.id) >= 0; });
+  box.innerHTML = list.map(function (p) {
+    var fresh = isNewId(p.id);
+    return '<div class="mrow' + (fresh ? ' added' : '') + '" data-id="' + esc(p.id) + '">'
+      + '<span class="nm">' + esc(p.name) + (p.cat ? ' <i>· ' + esc(p.cat) + '</i>' : '')
+      + (p.edited ? ' <span class="badge">edited here</span>' : (fresh ? ' <span class="badge">new</span>' : '')) + '</span>'
+      + '<input class="pr" data-k="price" inputmode="decimal" value="' + Number(p.price || 0).toFixed(2) + '">'
+      + '<button class="sm" data-k="out">' + (p.available === false ? 'Back in stock' : 'Sold out') + '</button>'
+      + (fresh ? '<button class="sm" data-k="drop">Delete</button>' : '<button class="sm" data-k="hide">Hide</button>')
+      + '<button class="sm" data-k="up" title="move up">↑</button><button class="sm" data-k="down" title="move down">↓</button>'
+      + (p.edited ? '<button class="sm sec" data-k="revert">Revert</button>' : '')
+      + '</div>';
+  }).join('')
+    + (hidden.length ? '<div class="hint">hidden by you: ' + hidden.map(function (p) {
+        return esc(p.name) + ' <button class="sm" data-k="show" data-id="' + esc(p.id) + '">show it again</button>';
+      }).join(' · ') + '</div>' : '')
+    + (list.length ? '' : '<p class="hint">Nothing to show yet — add your sheet link, or press Add an item below and the store will run on what you typed here.</p>');
+  var touched = draftTouched(d);
+  q('#menuSave').disabled = !touched;
+  q('#menuSave').textContent = touched ? 'Save ' + touched + ' change' + (touched > 1 ? 's' : '') : 'Save';
+  q('#menuSum').textContent = touched ? 'Your menu — ' + touched + ' change' + (touched > 1 ? 's' : '') + ' made here' : 'Edit items here — price, sold out, hide, add one';
+}
+q('#detMenu').addEventListener('toggle', function () { menuRows(); });
+q('#menuEdit').onchange = function (e) {
+  var t = e.target; if (!t || !t.classList || !t.classList.contains('pr')) return;
+  var id = t.parentNode.getAttribute('data-id'), v = Number(t.value);
+  if (!isFinite(v) || v < 0) { menuMsg('That price is not a number.', true); return; }
+  setEdit(id, { price: Math.round(v * 100) / 100 });
+};
+q('#menuEdit').onclick = function (e) {
+  var b = e.target; if (!b || !b.getAttribute || !b.getAttribute('data-k')) return;
+  if (!MDRAFT) MDRAFT = draftFrom(S.store.menu);
+  var k = b.getAttribute('data-k');
+  var id = b.getAttribute('data-id') || (b.parentNode && b.parentNode.getAttribute('data-id'));
+  var list = mergeFeed(S.feed || [], MDRAFT), p = null;
+  for (var i = 0; i < list.length; i++) if (list[i].id === id) p = list[i];
+  if (k === 'out') setEdit(id, { out: p.available !== false });
+  else if (k === 'hide') { MDRAFT.hide.push(id); menuRows(); }
+  else if (k === 'show') { MDRAFT.hide = MDRAFT.hide.filter(function (x) { return x !== id; }); menuRows(); }
+  else if (k === 'drop') { MDRAFT.extra = MDRAFT.extra.filter(function (x) { return x.id !== id; }); menuRows(); }
+  else if (k === 'revert') {
+    delete MDRAFT.over[id];
+    MDRAFT.hide = MDRAFT.hide.filter(function (x) { return x !== id; });
+    MDRAFT.extra = MDRAFT.extra.filter(function (x) { return x.id !== id; });
+    MDRAFT.order = MDRAFT.order.filter(function (x) { return x !== id; });
+    menuMsg('That row is back to your sheet.', false); menuRows();
+  }
+  else if (k === 'up') moveItem(list, id, -1);
+  else if (k === 'down') moveItem(list, id, 1);
+};
+function menuMsg(t, bad) { var m = q('#menuMsg'); if (!m) return; m.textContent = t || ''; m.style.color = bad ? '#a2141f' : '#0a6b33'; }
+q('#menuAdd').onclick = function () { var n = q('#menuNew'); n.classList.toggle('hide'); if (!n.classList.contains('hide')) q('#mNm').focus(); };
+q('#nGo').onclick = function () {
+  if (!MDRAFT) MDRAFT = draftFrom(S.store.menu);
+  var nm = q('#mNm').value.trim(), pr = Number(q('#mPr').value);
+  if (!nm) return menuMsg('Give it a name first.', true);
+  if (!isFinite(pr) || pr <= 0) return menuMsg('Give it a price above zero — a free item is usually a typo.', true);
+  MDRAFT.extra.push({ id: 'dash-' + Date.now().toString(36), name: nm, cat: q('#mGp').value.trim(),
+                      price: Math.round(pr * 100) / 100, img: q('#mIm').value.trim(), available: true });
+  q('#mNm').value = q('#mPr').value = q('#mGp').value = q('#mIm').value = '';
+  q('#menuNew').classList.add('hide');
+  menuMsg('Added below — press Save to put it on the store.', false); menuRows();
+};
+q('#menuSave').onclick = function () {
+  if (!MDRAFT) return;
+  q('#menuSave').disabled = true; menuMsg('saving…', false);
+  api('/api/menu', { handle: S.handle, menu: MDRAFT }, { confirm: '1' }).then(function (r) {
+    if (!r.j || !r.j.ok) { menuMsg((r.j && r.j.error) || 'not saved — sign in again if that is what it says', true); q('#menuSave').disabled = false; return; }
+    MDRAFT = null; load();
+    menuMsg(r.j.note || 'Saved.', false);
+  });
+};
+q('#menuClear').onclick = function () {
+  q('#menuClear').disabled = true; menuMsg('reverting…', false);
+  api('/api/menu', { handle: S.handle, menu: {} }, { confirm: '1' }).then(function (r) {
+    q('#menuClear').disabled = false;
+    if (!r.j || !r.j.ok) return menuMsg((r.j && r.j.error) || 'not saved', true);
+    MDRAFT = null; load(); menuMsg(r.j.note || 'Back to the sheet.', false);
+  });
+};
 
 /* --------------------------------------------------------------- settings */
 var LABEL = {
@@ -577,18 +756,19 @@ function renderShop() {
   if (S.store.rail === 'cash') warns.push('Method is cash / on delivery: nothing to reconcile online, count the driver at the end of the day.');
   var sw = q('#shopWarn');
   sw.classList.toggle('hide', !warns.length); sw.innerHTML = warns.map(function (t) { return '⚠ ' + esc(t); }).join('<br>');
-  var n = feed.length, out = feed.filter(function (p) { return p.out; }).length;
+  var n = feed.length, out = feed.filter(function (p) { return p.available === false; }).length;
   q('#menuN').textContent = n ? (n + ' items' + (out ? ' · ' + out + ' out of stock' : '')) : 'No menu loaded';
-  q('#menuSub').textContent = n ? 're-read every ' + (S.store.feed_cache_seconds || 120) + 's' : (S.store.feed_error || 'add your Google Sheet link under “Change what buyers see”');
+  q('#menuSub').textContent = n ? 'sheet re-read every ' + (S.store.cache_seconds || 120) + 's' : (S.store.feed_error || 'add your Google Sheet link under “Change what buyers see”');
   q('#menuOpen').href = S.store.feed_url || '#';
   q('#menuList').innerHTML = feed.slice(0, 8).map(function (p) {
-    return '<div class="menuRow"><span>' + esc(p.name) + (p.category ? ' <span class="hint">· ' + esc(p.category) + '</span>' : '')
-      + (p.out ? ' <span class="badge bad">out</span>' : '') + '</span><b>' + Number(p.price || 0).toFixed(2) + '</b></div>';
+    return '<div class="menuRow"><span>' + esc(p.name) + (p.cat ? ' <span class="hint">· ' + esc(p.cat) + '</span>' : '')
+      + (p.available === false ? ' <span class="badge bad">out</span>' : '') + '</span><b>' + Number(p.price || 0).toFixed(2) + '</b></div>';
   }).join('') + (feed.length > 8 ? '<div class="hint" style="padding-top:.3rem">+ ' + (feed.length - 8) + ' more in your sheet</div>' : '');
   var w = q('#menuWarn');
-  if (!n) { w.classList.remove('hide'); w.innerHTML = '0 items, so buyers see an empty shop. ' + esc(S.store.feed_error || 'Check the sheet is shared as “anyone with the link — Viewer”, and that row 1 is the header row.') + ' Then press Re-read.'; }
+  if (!n) { w.classList.remove('hide'); w.innerHTML = (S.store.feed_url ? '0 items, so buyers see an empty shop. ' + esc(S.store.feed_error || 'Check the sheet is shared as “anyone with the link — Viewer”, and that row 1 is the header row.') + ' Then press Re-read.' : 'Nothing on the shelf yet. Press “Add an item” below and type them in — a Google Sheet is optional here, not a requirement.') + ' '; }
   else if (S.store.feed_error) { w.classList.remove('hide'); w.textContent = 'Loaded, but: ' + S.store.feed_error; }
   else w.classList.add('hide');
+  menuRows();      // the editor lists the same rows, so it refreshes with them
 }
 
 /* --------------------------------------------------------------- plan/link */

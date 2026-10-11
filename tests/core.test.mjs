@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as C from '../worker/core.js';
+const { sanitizeMenu, sanitizeMenuEdit, applyMenu, menuPrice } = C;
 
 /* ---------- CSV parsing (the merchant's Google Sheet) ---------- */
 test('parseCSV: quoted fields, doubled quotes, embedded commas/newlines', () => {
@@ -270,4 +271,66 @@ test('publicStore is an allowlist, so a new field is private by default', () => 
   const admin = JSON.stringify(C.adminStore(st));
   assert.ok(!admin.includes('admin_url') && !admin.includes('auth_gen') && !admin.includes('"pending"'), 'the owner payload drops credentials too');
   assert.ok(admin.includes('new_secret_field'), 'but shows the owner their own record');
+});
+
+/* ------------------------------------------------------------- the store's menu
+ * A dashboard that edits items is only safe if the server re-prices from what it
+ * stored, so these tests are the boundary: what may be written, how it merges, and
+ * that a cart's numbers do not survive contact with it.
+ * -------------------------------------------------------------------------- */
+test('sanitizeMenu keeps only what applyMenu can use', () => {
+  const m = sanitizeMenu({
+    over: { a: { price: '12.50', out: 'true', name: '  Trimmed  ' }, b: {}, junk: { price: 'x' } },
+    hide: ['c', 42, ''], extra: [{ name: 'Goat', price: 40, cat: 'S' }, { name: '', price: 5 }],
+    order: ['b', 'a', 'b'], note: 'y'.repeat(900),
+  });
+  assert.equal(m.over.a.price, 12.5, 'a price typed as text is still a price');
+  assert.equal(m.over.a.available, false, 'out:true becomes available:false');
+  assert.equal(m.over.a.name, 'Trimmed');
+  assert.ok(!m.over.b, 'an empty edit is dropped, not stored as a row of defaults');
+  assert.ok(!m.over.junk, 'a row with no id-relevant field is dropped');
+  assert.deepEqual(m.hide, ['c', '42'], 'hide is a list of ids and only ids');
+  assert.equal(m.extra.length, 1, 'an item with no name cannot be added');
+  assert.deepEqual(m.order, ['b', 'a'], 'order is deduped');
+  assert.equal(m.note.length, 160, 'the note is clamped, not whatever was posted');
+  assert.equal(sanitizeMenu(null).set_at ? 1 : 0, 1, 'a missing body is still a valid empty menu');
+});
+
+test('a price-only edit survives the round trip — the common case', () => {
+  const m = sanitizeMenu({ over: { chicken: { price: 8.5 } } });
+  const merged = applyMenu([{ id: 'chicken', name: 'Chicken & rice', price: 5.5, available: true }], m);
+  assert.equal(merged[0].price, 8.5, 'no name in the payload must not lose the price');
+  assert.equal(merged[0].edited, true);
+});
+
+test('applyMenu merges without touching the rows it was given', () => {
+  const sheet = [{ id: 'a', name: 'A', price: 1, available: true }, { id: 'b', name: 'B', price: 2, available: false }];
+  const frozen = JSON.stringify(sheet);
+  const out = applyMenu(sheet, { over: { a: { price: 5 } }, extra: [{ id: 'x', name: 'X', price: 9 }], hide: ['b'] });
+  assert.equal(JSON.stringify(sheet), frozen, 'the cached sheet rows are never mutated by an edit');
+  assert.deepEqual(out.map((p) => p.id), ['a', 'x']);
+  assert.equal(out[0].price, 5);
+  assert.ok(out.every((p) => p !== undefined));
+});
+
+test('menuPrice re-prices a cart instead of trusting it', () => {
+  const menu = [{ id: 'a', name: 'A', price: 5.5, available: true, opts: [{ name: 'Size', choices: [{ label: 'S' }, { label: 'L', up: 2 }] }], addons: [{ name: 'Cheese', price: 1.5 }] }];
+  const bad = menuPrice(menu, [{ id: 'a', name: 'A', price: 0.01, qty: 2, options: [{ label: 'L', up: 99 }], addons: [{ name: 'Cheese', price: 99 }] }]);
+  assert.equal(bad.authoritative, true);
+  assert.equal(bad.items[0].price, 5.5, 'the line price comes from the menu');
+  assert.equal(bad.items[0].options[0].up, 2, 'so does the option');
+  assert.deepEqual(bad.items[0].addons, [1.5], 'so does the add-on, as a price list');
+  assert.ok(bad.repriced, 'and the difference is reported');
+  assert.ok(bad.notes.some((n) => /price/i.test(n) || /option/i.test(n)), 'with a note the merchant can read');
+
+  const off = menuPrice(menu, [{ id: 'gone', name: 'Whatever', price: 1, qty: 1 }]);
+  assert.equal(off.unknown, 1, 'an item that is not on this menu is counted');
+  assert.ok(!off.authoritative || off.unknown, 'never silently accepted');
+
+  const noMenu = menuPrice([], [{ id: 'a', name: 'A', price: 3, qty: 1 }]);
+  assert.equal(noMenu.authoritative, false, 'a store with no menu on file cannot be held to one');
+  assert.equal(noMenu.items[0].price, 3, 'its cart is passed through, flagged upstream instead of refused');
+
+  const qty = menuPrice(menu, [{ id: 'a', price: 5.5, qty: 1e6 }]);
+  assert.ok(qty.items[0].qty <= 99, 'a quantity is bounded on the way in too');
 });

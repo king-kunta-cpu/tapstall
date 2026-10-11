@@ -39,6 +39,10 @@ const MENU = [
   '1,Chicken & rice,Main,5.50,USD,"Size:Small,Large:2|Spice:mild,hot","Cheese:1.5|Egg:0.5",yes,1',
   '2,2 litre Coke,Drinks,2.50,USD,,,,yes',
   '3,Sold out item,Drinks,3.00,USD,,,,no,',
+  '4,Jollof and chicken,Main,100.00,USD,,,,yes',
+  '5,Waakye,Main,50.00,USD,,,,yes',
+  '6,Waakye special,Main,12.50,USD,,,,yes',
+  'a,a,Main,1.00,USD,,,,no',
 ].join('\n');
 
 function kvStub() {
@@ -148,7 +152,7 @@ test('register creates a live store with no operator involvement', async () => {
   });
   assert.equal(r.status, 201, r.text);
   assert.equal(r.json.ok, true);
-  assert.equal(r.json.products_loaded, 3, 'merchant sees instantly that the sheet parsed');
+  assert.equal(r.json.products_loaded, 7, 'merchant sees instantly that the sheet parsed — 7 rows, 7 counted');
   assert.equal(r.json.feed_error, null, 'feed error surfaced to the merchant');
   assert.ok(!r.json.admin_url, 'the stored dashboard link is gone with the login scheme that needed it');
   assert.ok(/^[0-9]{6}$/.test(String(r.json.pin)), 'the merchant gets a six-digit PIN');
@@ -195,7 +199,7 @@ test('menu comes from the feed and honours options, add-ons and stock', async ()
   assert.equal(p[0].opts[1].choices.length, 2, 'second option group survives the comma inside it');
   assert.deepEqual(p[0].addons.map((a) => a.price), [1.5, 0.5], 'add-on prices');
   assert.equal(p[0].popular, true, 'popular flag honoured');
-  assert.equal(p.length, 3, `3 rows in, 3 out (got ${p.length})`);
+  assert.equal(p.length, 7, `7 rows in, 7 out (got ${p.length})`);
 });
 
 test('order: unique cents, absorbed rail fee, WhatsApp summary, one-tap link', async () => {
@@ -1332,4 +1336,121 @@ test('a guessing flood is cheap to the tenant, and an operator can undo it', asy
   const spaced = await loginWithPin('mamatoe', ' 246 813 ');
   assert.equal(spaced.r.status, 200, 'pasted “246 813” from a chat message is the same PIN');
   store.pin = '246813'; store.cookie = nowIn.cookie;
+});
+
+/* ------------------------------------------------------------------ the menu
+ * The reason this whole block exists: placeOrder used to hand the posted cart to
+ * priceOrder, and every number in that cart came from the browser. The storefront's
+ * JS is public, so "1 leg of lamb, 0.01" arrived with valid unique cents and a real
+ * reference the merchant's exact-amount method would have honoured. A store-owned
+ * menu is what makes it impossible, so the tests below drive the same path a buyer
+ * does and check the money, not the markup.
+ * ------------------------------------------------------------------ */
+test('the menu is written like any other money move', async () => {
+  const anon = await call('/api/menu', { method: 'POST', body: { handle: 'mamatoe', menu: {} } });
+  assert.equal(anon.status, 401, 'a stranger cannot reprice a shop: ' + anon.text);
+  assert.ok(anon.json.need_login, 'and is sent to sign in, not left guessing');
+
+  const noHdr = await call('/api/menu', { method: 'POST', cookie: store.cookie, body: { handle: 'mamatoe', menu: { hide: ['1'] } } });
+  assert.equal(noHdr.status, 403, 'the session alone is not enough: prices need the explicit confirm header');
+
+  const other = await call('/api/menu', { method: 'POST', confirm: true, headers: { cookie: 'tp_sess=' + DEAD_LINK.split('.')[1] + '.x' }, body: { handle: 'mamatoe', menu: {} } });
+  assert.ok(other.status === 401 || other.status === 403, `a forged session is refused (${other.status})`);
+});
+
+test('a dashboard edit changes the shelf, the feed and the money — in one save', async () => {
+  const r = await call('/api/menu', { method: 'POST', cookie: store.cookie, confirm: true, body: {
+    handle: 'mamatoe',
+    menu: { over: { '1': { price: '9.75', desc: 'new recipe' }, '3': { out: false, name: 'Fridge Coke' } },
+            hide: ['2'], extra: [{ name: 'Whole goat', price: 40, cat: 'Specials' }] },
+  } });
+  assert.equal(r.status, 200, r.text);
+  assert.equal(r.json.edits, 4, 'two price/stock overrides, one hide and one new row, counted back to the merchant');
+  assert.equal(r.json.items, 7, '7 sheet rows − 1 hidden + 1 added here');
+  assert.ok(/next load/i.test(r.json.note), 'and they are told when buyers see it');
+  assert.ok(/sheet/i.test(r.json.note), 'with the promise that the sheet was not touched');
+
+  const feed = await call('/s/mamatoe/feed.json?fresh=1');
+  const by = Object.fromEntries(feed.json.products.map((p) => [p.id, p]));
+  assert.equal(by['1'].price, 9.75, 'the dashboard price is the price');
+  assert.equal(by['3'].price, 3, 'an untouched row keeps the sheet price next to it');
+  assert.equal(by['1'].edited, true, 'the row says it came from here');
+  assert.ok(!by['2'], 'a row hidden in the dashboard is off the shelf, not marked sold out');
+  assert.equal(by['3'].name, 'Fridge Coke', 'a row can be renamed without opening Google');
+  assert.equal(by['3'].available, true, 'and put back in stock even though the sheet says no');
+  assert.ok(by['goat'] || feed.json.products.some((p) => p.name === 'Whole goat'), 'an item typed here is sellable with no sheet row at all');
+
+  const page = await call('/s/mamatoe');
+  assert.equal(page.status, 200);
+  assert.ok(/var CFG = \{/.test(page.text), 'the storefront page still renders');
+  // The page ships no item names at all — the buyer's browser asks feed.json for
+  // them. Proved here rather than assumed, because it is what makes a menu edit
+  // instant: no HTML to rebuild, no edge cache to bust, nothing to wait for.
+  assert.ok(!/Whole goat|2 litre Coke/.test(page.text), 'no menu is baked into the served HTML, so the shelf is live the moment it is saved');
+
+  const audit = (await call('/api/admin?handle=mamatoe', { cookie: store.cookie })).json.audit;
+  const hit = audit.find((a) => a.act === 'menu');
+  assert.ok(hit, 'the write is in the log the merchant can read');
+  assert.equal(hit.via, 'sess', 'and it says who did it');
+
+  // --- and now the money -------------------------------------------------
+  const tamper = await call('/api/order', { method: 'POST', ip: '196.0.0.41', body: {
+    handle: 'mamatoe', service: 'pickup', buyer: { name: 'Price Tester', phone: '263780000111' },
+    items: [{ id: '1', name: 'Chicken & rice', price: 0.01, qty: 3 }],
+  } });
+  assert.equal(tamper.status, 201, tamper.text);
+  assert.equal(Number(tamper.json.pricing.itemsTotal), 29.25, '3 × the menu price, not 3 × the browser price (1c each)');
+  assert.ok(tamper.json.risk_flags.some((f) => /price/i.test(f)), 'the merchant is told the cart arrived with different numbers: ' + JSON.stringify(tamper.json.risk_flags));
+  // The response echoes no cart on purpose — pricing.lines is what the payment
+  // instruction was built from, so that is where the number the buyer is told to
+  // send actually lives.
+  assert.equal(Number(tamper.json.pricing.lines[0].unit), 9.75, 'the unit price the till will check is the menu’s');
+  assert.equal(tamper.json.pricing.lines[0].qty, 3, 'the quantity stays the buyer’s');
+  const paid = await call('/api/admin?handle=mamatoe', { cookie: store.cookie });
+  const row = paid.json.orders.find((o) => o.id === tamper.json.order.id);
+  assert.equal(Number(row.pricing.itemsTotal), 29.25, 'and so does the ledger row the export is built from');
+  assert.equal(row.items[0].name, 'Chicken & rice', 'with the menu’s name, not whatever the browser called it');
+
+  const invented = await call('/api/order', { method: 'POST', ip: '196.0.0.42', body: {
+    handle: 'mamatoe', service: 'pickup', buyer: { name: 'Add on Man', phone: '263780000112' },
+    items: [{ id: '1', name: 'Chicken & rice', price: 9.75, qty: 1, options: [{ label: 'Extra everything', up: 500 }], addons: [{ name: 'Gold leaf', price: 400 }] }],
+  } });
+  assert.equal(invented.status, 201, invented.text);
+  assert.equal(Number(invented.json.pricing.itemsTotal), 9.75, 'a made-up option and add-on are worth nothing, and the line still costs the menu price: ' + JSON.stringify(invented.json.pricing));
+
+  const gone = await call('/api/order', { method: 'POST', ip: '196.0.0.43', body: {
+    handle: 'mamatoe', service: 'pickup', buyer: { name: 'Ghost Buyer', phone: '263780000113' },
+    items: [{ id: '2', name: '2 litre Coke', price: 2.5, qty: 1 }],
+  } });
+  assert.equal(gone.status, 422, 'an item the merchant hid cannot be ordered by guessing its old id');
+  assert.ok(/refresh|reload/i.test(gone.json.error), 'and the buyer is told what to do about it, not handed a 500');
+});
+
+test('reverting hands every row back to the sheet', async () => {
+  const back = await call('/api/menu', { method: 'POST', cookie: store.cookie, confirm: true, body: { handle: 'mamatoe', menu: {} } });
+  assert.equal(back.status, 200, back.text);
+  assert.equal(back.json.edits, 0, 'nothing is overridden any more');
+  const feed = await call('/s/mamatoe/feed.json?fresh=1');
+  const by = Object.fromEntries(feed.json.products.map((p) => [p.id, p]));
+  assert.equal(by['1'].price, 5.5, 'the sheet price is back');
+  assert.ok(by['2'], 'the hidden row is on the shelf again');
+  assert.ok(!by['goat'] && !feed.json.products.some((p) => p.name === 'Whole goat'), 'and the row added here goes with it');
+  const st = JSON.parse(env.STORES._map.get('store:mamatoe').value);
+  assert.ok(!st.menu || !(Object.keys(st.menu.over || {}).length + (st.menu.hide || []).length + (st.menu.extra || []).length),
+    'no empty shell left in the store document');
+});
+
+test('a store with no menu at all is priced from the browser and says so', async () => {
+  // Kotaking has no feed in this harness; the honest behaviour is to accept the cart
+  // — a shop that typed nothing into Google still has to be able to trade — and to
+  // put on the order that there was nothing to check it against.
+  const reg = await call('/api/register', { method: 'POST', body: { shop_name: 'No Menu Yet', handle: 'nomenuyet', whatsapp: '263770000115', owner_email: 'nomenu@example.com' } });
+  assert.equal(reg.status, 201, reg.text);
+  const r = await call('/api/order', { method: 'POST', ip: '196.0.0.44', body: {
+    handle: 'nomenuyet', service: 'pickup', buyer: { name: 'No Menu', phone: '263780000115' },
+    items: [{ id: 'x', name: 'Whatever', price: 12, qty: 1 }],
+  } });
+  assert.equal(r.status, 201, r.text);
+  assert.equal(Number(r.json.pricing.subtotal), 12, 'the browser price is used, because there is nothing else to use');
+  assert.ok(r.json.risk_flags.some((f) => /no menu/i.test(f)), 'but the order says so out loud: ' + JSON.stringify(r.json.risk_flags));
 });

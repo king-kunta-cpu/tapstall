@@ -17,12 +17,13 @@
 import {
   RAILS, round2, clamp, slug, digits, isEmail, validHandle, parseCSV, normalizeFeedUrl,
   parseProducts, priceOrder, payInstructions, riskFlags, waSummary, publicStore, hash,
+  applyMenu, sanitizeMenu, menuPrice,
   issueCap, verifyCap, randomKey, validateSettings, stageSettings, applyPending, maskField,
   EDITABLE_FIELDS, SOFT_FIELDS, sign, adminStore, normaliseRail, resolveRail,
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '0.6.3';
+const VERSION = '0.6.4';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 const MAX_ORDERS_KEPT = 200;
@@ -183,11 +184,15 @@ async function route(req, url, env, ctx) {
   if ((m = p.match(/^\/s\/([a-z0-9][a-z0-9-]{1,30})\/feed\.json$/))) {
     const st = await getStore(env, m[1]);
     if (!st) return json({ ok: false, error: 'no_store' }, 404);
-    return json({ ok: true, products: await loadProducts(st, env, true) });
+    // Cached by default now, and ?fresh=1 means it: the storefront is the hot path,
+     // and a sheet that has not changed in two minutes does not need to be asked
+     // again by every buyer. The dashboard's own Re-read button passes fresh=1, so
+     // "I just edited the sheet" still answers immediately.
+    return json({ ok: true, products: await loadProducts(st, env, url.searchParams.get('fresh') === '1') });
   }
 
   // ---- merchant authority: a code becomes a cookie, and only POSTs act ----
-  const MUT = /^\/api\/(mark|settings|settings\/revert|revoke|auth|pin\/change|pin\/reset|login|logout|recover)$/;
+  const MUT = /^\/api\/(mark|settings|settings\/revert|menu|revoke|auth|pin\/change|pin\/reset|login|logout|recover)$/;
   // /api/mark answers its own 405, because it also has to recognise a v0.2
   // ?token= link and trade it for a session rather than dead-end the merchant.
   const selfHandled = p === '/api/mark';
@@ -213,6 +218,7 @@ async function route(req, url, env, ctx) {
   if (p === '/api/admin') return adminView(req, url, env);
   if (p === '/api/settings' && req.method === 'POST') return settingsEdit(req, url, env);
   if (p === '/api/settings/revert' && req.method === 'POST') return revertPending(req, url, env);
+  if (p === '/api/menu' && req.method === 'POST') return menuEdit(req, env);
   if (p === '/api/revoke' && req.method === 'POST') return revokeKeys(req, url, env);
 
   // The one-tap confirm link: GET renders an inert page, the browser posts.
@@ -306,9 +312,15 @@ async function writeStore(env, st) {
 }
 
 /* --------------------------------------------------------------- products */
+/**
+ * The store's menu: whatever the sheet said, with this store's own dashboard edits
+ * laid over it. The cache holds the sheet as fetched — the edits are applied on the
+ * way out, never inside the cache — so "Revert this row to my sheet" is a matter of
+ * dropping an override, and a sheet that comes back tomorrow still arrives clean.
+ */
 async function loadProducts(st, env, force) {
   const ms = (st.cache_seconds || 120) * 1000;
-  if (!force && st.feed_cache && st.feed_cache.at && Date.now() - st.feed_cache.at < ms) return st.feed_cache.products;
+  if (!force && st.feed_cache && st.feed_cache.at && Date.now() - st.feed_cache.at < ms) return applyMenu(st.feed_cache.products, st.menu);
   let products = [], error = null;
   try {
     const feed = normalizeFeedUrl(st.feed_url);
@@ -325,7 +337,7 @@ async function loadProducts(st, env, force) {
   // A quota day leaves the storefront re-fetching per hit instead of 503-ing at
   // every buyer who only wanted to see what is on offer.
   try { await writeStore(env, st); } catch (e) { /* uncached today, correct today */ }
-  return products;
+  return applyMenu(products, st.menu);
 }
 
 
@@ -359,8 +371,16 @@ async function placeOrder(req, url, env, ctx) {
   const items = Array.isArray(body.items) ? body.items.slice(0, 40) : [];
   if (!items.length) return json({ ok: false, error: 'cart empty' }, 422);
 
+  // The menu prices the order. The browser said what it wanted to pay, which is not
+  // the same thing: the storefront's own JS is public, and a one-cent "leg of lamb"
+  // with valid unique cents and a real reference used to be a deliverable order.
+  const products = await loadProducts(st, env);
+  const priced = menuPrice(products, items);
+  if (priced.authoritative && priced.unknown) {
+    return json({ ok: false, error: 'Some of that is not on ' + (st.shop_name || st.handle) + '’s menu any more. Reload the page and send it again.', fields: { items: priced.notes.slice(0, 5) } }, 422);
+  }
   const railKey = st.rail || 'cash';
-  const pricing = priceOrder(st, items, service, railKey, await railsCatalog(env));
+  const pricing = priceOrder(st, priced.items, service, railKey, await railsCatalog(env));
   const cap = Number(st.max_order_value) || 0;
   if (cap && pricing.total > cap) return json({ ok: false, error: `order over this shop's limit of ${cap} ${st.currency || 'USD'}` }, 422);
 
@@ -373,10 +393,14 @@ async function placeOrder(req, url, env, ctx) {
   const order = {
     id, code, service, at: new Date().toISOString(), handle: st.handle,
     buyer, when: String(body.when || 'asap').slice(0, 40),
-    pricing, items,
+    // The names and prices on the slip are the menu's, so what the merchant reads,
+    // what the buyer was told to send and what the ledger holds cannot disagree.
+    pricing, items: priced.authoritative ? priced.items : items,
     buyer_hash: buyerHash.slice(0, 16), prior_orders: hist.count, prior_unpaid: hist.unpaid,
     status: railKey === 'cash' ? 'cod' : 'awaiting_payment',
-    risk_flags: [],
+    // What the merchant has to know: the cart arrived with different numbers than
+    // the menu (so: check it), or this store has no menu to check against at all.
+    risk_flags: priced.authoritative ? priced.notes.slice(0, 6) : ['no menu on file: priced from the browser'],
   };
   /* Freeze the payment details onto the order. The merchant's dashboard, the
    * WhatsApp handoff and the notification all read the slip, not the store — so
@@ -564,7 +588,12 @@ async function register(req, url, env) {
   const handle = slug(String(b.handle || b.shop_name || '')).slice(0, 30);
   if (!validHandle(handle)) return json({ ok: false, error: 'handle: 2-30 chars, lowercase a-z 0-9 and dashes' }, 422);
   if (!b.shop_name) return json({ ok: false, error: 'shop_name required' }, 422);
-  if (!/^https?:\/\//.test(String(b.feed_url || ''))) return json({ ok: false, error: 'feed_url must be a public Google Sheet link' }, 422);
+  // A Google Sheet is one way to stock a shelf, not a precondition of trading: a
+  // merchant who types their items into the dashboard opens the same store with the
+  // same money rules. A value that is not a link at all is still refused, because a
+  // typo'd sheet is how "0 items" and a silent lost week of orders begins.
+  const fed = String(b.feed_url || '').trim();
+  if (fed && !/^https?:\/\//.test(fed)) return json({ ok: false, error: 'feed_url must be a public Google Sheet link — or leave it blank and type your items in the dashboard' }, 422);
   if (!digits(b.whatsapp || b.phone || '')) return json({ ok: false, error: 'WhatsApp number required (with country code)' }, 422);
   if (await getStore(env, handle)) return json({ ok: false, error: 'handle already taken — try another, or use your renew link' }, 409);
 
@@ -578,7 +607,7 @@ async function register(req, url, env) {
     whatsapp: digits(b.whatsapp || b.phone).replace(/\D/g, '').slice(0, 15),
     location: String(b.location || '').slice(0, 90),
     hours: String(b.hours || '').slice(0, 60),
-    feed_url: String(b.feed_url).slice(0, 400),
+    feed_url: fed.slice(0, 400),
     currency: String(b.currency || 'USD').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3),
     zig_rate: Number(b.zig_rate) || 0,
     tax_pct: clamp(Number(b.tax_pct), 0, 40) || 0,
@@ -614,12 +643,12 @@ async function register(req, url, env) {
   st.pin = await pinRecord(pin);
   await env.STORES.put('store:' + handle, JSON.stringify(st));
   await env.STORES.put('renew:' + renewToken, JSON.stringify({ handle, made: Date.now() }));
-  const products = await loadProducts(st, env, true);
+  const products = await loadProducts(st, env);          // cache honoured; a menu edit is applied after it, so it shows at once
   const err = st.feed_cache && st.feed_cache.error;
   if (st.owner_email) {
     try {
       await sendMail(env, st.owner_email, `Your ${st.shop_name} store is live`,
-        `Store: ${url.origin}/s/${handle}\nSign in at ${url.origin}/a with key ${handle} and PIN ${pin} — that is the whole method.\nManage orders there. Edit your menu any time (it updates itself within ~2 min): ${st.feed_url}\n\n${products.length} products loaded. ${err ? 'FEED WARNING: ' + err : ''}\nFree until ${new Date(st.paid_until).toDateString()}. Renew (no monthly billing): ${st.renew_url}`);
+        `Store: ${url.origin}/s/${handle}\nSign in at ${url.origin}/a with key ${handle} and PIN ${pin} — that is the whole method.\nManage orders there. ${st.feed_url ? `Edit your menu any time (it updates itself within ~2 min): ${st.feed_url}` : 'Add your items in the dashboard under Shop → Edit items here — no spreadsheet needed.'}\n\n${products.length} products loaded. ${err ? 'FEED WARNING: ' + err : ''}\nFree until ${new Date(st.paid_until).toDateString()}. Renew (no monthly billing): ${st.renew_url}`);
     } catch (e) {}
   }
   return json({
@@ -630,8 +659,12 @@ async function register(req, url, env) {
     products_loaded: products.length, feed_error: err || null,
     free_until: new Date(st.paid_until).toISOString(),
     note: products.length
-      ? 'Live. Put the link in your WhatsApp/IG bio and status. Update your Google Sheet to change prices — no one needs to touch this for you.'
-      : 'Store is live but 0 products loaded. Share your Sheet as "Anyone with the link — Viewer" and make sure row 1 is: id,name,category,price,currency,image,description,options,addons,stock,popular',
+      // Either door is offered, because both are real now: the sheet is one way to
+      // change a price, the dashboard is the other, and neither waits on an operator.
+      ? 'Live. Put the link in your WhatsApp/IG bio and status. Change a price or mark something sold out in the dashboard any time, or edit your Google Sheet — both are the same shelf.'
+      : (st.feed_url
+        ? 'Store is live but 0 products loaded. Share your Sheet as "Anyone with the link — Viewer" and make sure row 1 is: id,name,category,price,currency,image,description,options,addons,stock,popular'
+        : 'Live with an empty shelf. Open the dashboard, Shop → Edit items here, and type your items in — a Google Sheet is optional here, not required.'),
   }, 201);
 }
 
@@ -1320,6 +1353,46 @@ async function pinLogin(req, env) {
 
 /** Changing your PIN needs your current PIN: a borrowed cookie must not be able to
  *  take the account over by swapping the only secret. */
+/**
+ * The store's own menu edits: { over: { row: {price,out,name…} }, hide: [ids],
+ * extra: [items], order: [ids] }. Signed in like any other write — session cookie
+ * or API key, plus the confirm header — and applied instantly rather than held:
+ * a sold-out sign and a price are the merchant's own loss to get wrong, not a way
+ * to move today's money somewhere else, and a buyer who pays a stale number is
+ * refused at the till by menuPrice, not quietly underpaid.
+ */
+async function menuEdit(req, env) {
+  const b = await readBody(req);
+  const who = await identify(req, env, b.handle || urlHandle(req));
+  if (!who || !who.st) return json({ ok: false, error: 'no store' }, 404);
+  const lr = lockRes(who); if (lr) return lr;
+  if (who.anonymous || who.bad) return json({ ok: false, need_login: true, error: 'sign in first' }, 401);
+  // Same rule as a settings write: a browser session can be planted by a form on
+  // someone else's page, so the dashboard has to say so out loud with a header.
+  // An API key is already a secret the merchant keeps, not a cookie a page has.
+  if (who.via === 'sess' && (reqHeader(req, 'x-tapstall-confirm') || '') !== '1') {
+    return json({ ok: false, error: 'missing x-tapstall-confirm header' }, 403);
+  }
+  const st = who.st;
+  const was = st.menu || {};
+  const next = sanitizeMenu(b.menu);
+  const touched = Object.keys(next.over).length + next.hide.length + next.extra.length + (next.order.length ? 1 : 0);
+  if (!touched) delete st.menu; else st.menu = next;
+  await writeStore(env, st);
+  await pushAudit(env, st, {
+    act: 'menu', via: who.via, ip: ipOf(req),
+    before: { edits: Object.keys(was.over || {}).length + (was.hide || []).length + (was.extra || []).length },
+    after: { edits: touched },
+  });
+  const eff = await loadProducts(st, env);
+  return json({
+    ok: true, edits: touched, items: eff.length,
+    note: touched
+      ? 'Saved on the store, so buyers see it on their next load. Nothing in your sheet was touched — a row you edited here keeps this value until you press Revert on it.'
+      : 'Everything is back to your sheet: no row is overridden here any more.',
+  });
+}
+
 async function pinChange(req, env) {
   const b = await readBody(req);
   const who = await identify(req, env, b.handle || urlHandle(req));
@@ -1358,9 +1431,16 @@ async function pinReset(req, env) {
   const wa = digits(String(b.whatsapp || '')).replace(/\D/g, '');
   const okWho = (st.owner_email && isEmail(email) && timingSafeEq(String(st.owner_email).toLowerCase(), email))
              || (st.whatsapp && wa && timingSafeEq(String(st.whatsapp).replace(/\D/g, ''), wa));
-  const field = st.pay_account ? 'pay_account' : 'feed_url';
+  // Second detail, in order of how well it is kept: the pay account (on slips, not
+  // on the page), then the sheet link, then — for a store that has set neither yet,
+  // which is every store in its first hour if it came here without a sheet — the
+  // owner address it signed up with. Weaker than the other two and honest about it:
+  // an address is not secret, and a stranger still has to know this store's key.
+  const field = st.pay_account ? 'pay_account' : (st.feed_url ? 'feed_url' : 'owner_email');
   const proof = String(b[field] || b.pay_account || b.feed_url || '').trim();
-  const okProof = !!st[field] && !!proof && timingSafeEq(String(st[field]), proof);
+  const want = String(field === 'owner_email' ? st.owner_email : st[field]).trim();
+  const okProof = !!want && !!proof && timingSafeEq(field === 'owner_email' ? want.toLowerCase() : want,
+                                                 field === 'owner_email' ? proof.toLowerCase() : proof);
   if (!okWho || !okProof) {
     await pinFail(env, handle);            // one counter, in memory; see pinLogin
     return json({ ok: false, need_login: true, error: 'Those details do not match this store.' }, 403);

@@ -1,5 +1,82 @@
 # Tapstall — status
 
+## The shelf belongs to the store now (2026-10-11, v0.6.4)
+
+You opened `mamatoe`, looked at the Shop card and said the quiet part: *4 items ·
+re-read every 120s* — **"i need to edit the store and items in the dashboard,
+especially items. no need for opening sheet."** Building that is what found the
+hole underneath it, so this entry is in that order: the hole, then the door.
+
+**The hole.** `placeOrder` took `body.items` from the browser and handed it to
+`priceOrder`, whose per-line `price`, `options[].up` and `addons[]` were all read
+off the posted cart. The storefront's JavaScript is public. So this was a
+deliverable order, end to end, with a real payment instruction:
+
+```
+POST /api/order  { items: [{ name: "Whole leg of lamb", price: 0.01, qty: 40 }] }
+→ 201 · unique cents computed on 0.40 · reference minted · merchant's method is
+  "the exact amount arrived, so it is theirs" → 40 legs of lamb for 40 cents
+```
+
+Nothing in the 0.6.x hardening touched it, because every path *around* it was
+tightened (sessions, PINs, confirm headers, holds on money fields) while the money
+itself still entered from the client. A dashboard that can edit items is the fix,
+not a feature next to the fix: prices had to stop being the browser's property.
+
+**The door.** `worker/core.js` gained a menu layer; `worker/worker.js` one route.
+
+| Piece | What it does |
+|---|---|
+| `sanitizeMenu` / `sanitizeMenuEdit` | What a posted menu may contain: 200 rows, clamped prices, ids that fit a key, `out:true` → `available:false`. A half-typed row is dropped rather than 500-ing the save |
+| `applyMenu` | Sheet rows + the store's edits = the shelf. Non-mutating, so the cached sheet stays the sheet and Revert is a real promise |
+| `menuPrice` | Prices a cart off that shelf: id first, name as the fallback, invented add-ons and choices worth 0, qty 1..99. A stale cart is re-priced and *named*, not refused |
+| `POST /api/menu` | Signed in like any other write (session **or** API key) and it needs the `x-tapstall-confirm` header, because repricing a shop moves money by proxy |
+| `loadProducts` | The single seam: it returns `applyMenu(products, st.menu)`, so `/s/<h>/feed.json`, the storefront page and the order path cannot disagree about what is on the shelf |
+| `placeOrder` | Prices from `menuPrice`, stores the menu's names and prices on the slip, and puts `repriced X: 0.01 → 9.75` in `risk_flags` so the merchant sees the cart arrive with different numbers |
+
+**Also in this release, because the item editor made them reachable:**
+
+- **A Google Sheet is now optional.** `POST /api/register` refused to make a store
+  without one. `feed_url` blank is legal now (a *malformed* one is still refused —
+  a typo is how "0 items" and a lost week of orders starts), the first message to a
+  new merchant tells a sheetless owner where to type, and the empty-shelf warning in
+  the dashboard says *"Add an item below"* instead of *"share your Sheet"*.
+- **PIN recovery had a dead end.** Its second detail was `pay_account`, else
+  `feed_url` — and a brand-new store with neither could not recover its PIN at all.
+  `owner_email` is the third option, and it says which one it asked for.
+- **Two labels in the dashboard were reading keys the API never sends** (`p.out`,
+  `p.category`), so the "out of stock" badge and the group name in the item list
+  have never once displayed. They now read `available`/`cat`.
+- **`cache_seconds` is real.** The storefront used to re-fetch your sheet on every
+  page view (and the dashboard printed a refresh interval that governed nothing);
+  both now honour the setting, and only the dashboard's **Re-read my sheet** forces
+  a fetch. A *menu edit* still shows instantly, because overrides are applied after
+  the cache, never inside it.
+- **The Shop card prints the number it promised**: the cache interval comes from
+  your store's setting now, not a hardcoded 120.
+
+**Proved, not asserted:** `node --test tests/` is **111/111** (was 103 — 32 core,
+50 live, 10 limits, 19 pages). Four of the new ones drive the actual HTTP handler:
+a cart of 3 × 0.01 becomes 29.25 and the ledger row agrees; an invented
+"Extra everything +500" and a "Gold leaf 400" add-on come to exactly the menu's
+9.75; a row hidden in the dashboard returns 422 with *"reload the page"* rather
+than a 500; and `nomenuyet`, a store registered with no sheet at all, still trades
+— with `no menu on file: priced from the browser` written on the order so nobody
+pretends it was checked.
+
+Four existing tests had to change, and it is worth saying why rather than burying
+it: they ordered `Jollof and chicken`, `Waakye`, `Waakye special` and `a` at round
+prices because ordering an invented item used to be free. Those rows are now in
+the stub sheet at the same prices, so each test still tests its own thing (rails,
+fees, receipt-vs-preview) and the money rule stays airtight with no exception
+flavoured "for tests".
+
+**Not done, still owed from your five:** image upload with browse-and-drop,
+real opening hours (days × from/to), a payment number per rail with mobile-money
+handled properly, and the rest of the production pass. The email transport is still
+`email: false` — that one needs a verified sending domain from you and nothing I
+write can substitute for it.
+
 ## The dashboard became one page (2026-10-11, v0.6.1)
 
 Same instruction as the login, applied to what is behind it: *"completely trash

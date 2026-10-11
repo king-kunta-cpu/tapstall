@@ -553,3 +553,185 @@ export function maskField(k, v) {
   if (k === 'pay' || k === 'secret') return '••••';
   return s.length > 8 ? s.slice(0, 4) + '…' + s.slice(-2) : s;
 }
+
+/* ─────────────────────────── the menu, owned by the store ───────────────────
+ *
+ * The Google Sheet stays what it is: the merchant's spreadsheet, re-read on a
+ * timer. What the dashboard adds is a second layer on top of it, because the two
+ * things a merchant actually wants to do at 19:00 on a Friday — "the 2L Coke is
+ * gone" and "raise the half-leg to 8" — must not require opening a spreadsheet,
+ * waiting for a cache, or knowing what a column is called. A row edited here wins
+ * over the row it came from; everything untouched keeps coming from the sheet.
+ */
+
+export const MENU_CAP = 200;                  // items held in the store document
+const MENU_ITEM = (x, opts) => {
+  const o = x && typeof x === 'object' ? x : {};
+  const name = String(o.name == null ? '' : o.name).trim().slice(0, 80);
+  if (!name) return null;
+  const id = opts && opts.forced ? String(o.id || '') : String(o.id || slug(name));
+  const out = {
+    id: id.slice(0, 60),
+    name,
+    cat: String(o.cat == null ? o.category == null ? 'Menu' : o.category : o.cat).trim().slice(0, 40) || 'Menu',
+    price: round2(clamp(Number(o.price) || 0, 0, 100000)),
+    cur: String(o.cur || o.currency || 'USD').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 6) || 'USD',
+    desc: String(o.desc || '').trim().slice(0, 240),
+    img: /^https?:\/\/\S+$/.test(String(o.img || '').trim()) ? String(o.img).trim().slice(0, 400) : '',
+    available: o.out === true ? false : o.available === false ? false : true,
+    popular: !!o.popular,
+  };
+  out.opts = (Array.isArray(o.opts) ? o.opts : []).slice(0, 4).map((g) => {
+    const gg = g && typeof g === 'object' ? g : {};
+    const label = String(gg.name || '').trim().slice(0, 40);
+    const choices = (Array.isArray(gg.choices) ? gg.choices : []).slice(0, 12).map((c) => {
+      const cc = c && typeof c === 'object' ? c : { label: c };
+      return { label: String(cc.label == null ? '' : cc.label).trim().slice(0, 40), up: round2(clamp(Number(cc.up) || 0, 0, 10000)) };
+    }).filter((c) => c.label);
+    return label && choices.length ? { name: label, choices } : null;
+  }).filter(Boolean);
+  out.addons = (Array.isArray(o.addons) ? o.addons : []).slice(0, 8).map((a) => {
+    const aa = a && typeof a === 'object' ? a : { name: a };
+    const nm = String(aa.name == null ? '' : aa.name).trim().slice(0, 40);
+    return nm ? { name: nm, price: round2(clamp(Number(aa.price) || 0, 0, 10000)) } : null;
+  }).filter(Boolean);
+  return out;
+};
+
+/** One row's worth of edits. Deliberately not MENU_ITEM: the most common edit a
+ *  merchant makes is a price or a sold-out tick on a row that already has a name
+ *  in the sheet, and an editor that requires the name to be resent would throw the
+ *  whole edit away. Absent means "unchanged", so nothing here may default a value. */
+export function sanitizeMenuEdit(input) {
+  const o = input && typeof input === 'object' ? input : {};
+  const c = {};
+  if (o.name != null && String(o.name).trim()) c.name = String(o.name).trim().slice(0, 80);
+  if (o.cat != null && String(o.cat).trim()) c.cat = String(o.cat).trim().slice(0, 40);
+  if (o.price != null && String(o.price).trim() !== '' && isFinite(Number(o.price))) c.price = round2(clamp(Number(o.price), 0, 100000));
+  if (o.desc != null) c.desc = String(o.desc).trim().slice(0, 240);
+  if (o.img != null) c.img = /^https?:\/\/\S+$/.test(String(o.img).trim()) ? String(o.img).trim().slice(0, 400) : '';
+  const sold = o.out === true || o.out === 'true' || o.out === 1;
+  const back = o.out === false || o.out === 'false' || o.out === 0 || o.available === true;
+  if (sold) c.available = false; else if (back) c.available = true;
+  if (o.popular != null) c.popular = !(o.popular === false || o.popular === 'false' || o.popular === 0);
+  if (Array.isArray(o.opts)) c.opts = MENU_ITEM({ name: 'x', opts: o.opts }, {}).opts;
+  if (Array.isArray(o.addons)) c.addons = MENU_ITEM({ name: 'x', addons: o.addons }, {}).addons;
+  return c;
+}
+
+/** Clean a posted menu into what may be stored. Unknown shapes fall away rather
+ *  than throwing: a half-typed item must not 500 a save. */
+export function sanitizeMenu(input) {
+  const m = input && typeof input === 'object' ? input : {};
+  const out = { over: {}, hide: [], extra: [], order: [], set_at: new Date().toISOString() };
+  const over = m.over && typeof m.over === 'object' ? m.over : {};
+  for (const k of Object.keys(over).slice(0, MENU_CAP)) {
+    const clean = sanitizeMenuEdit(over[k]);
+    if (Object.keys(clean).length) out.over[String(k).slice(0, 60)] = clean;
+  }
+  const hide = new Set((Array.isArray(m.hide) ? m.hide : []).map((x) => String(x).slice(0, 60)).filter(Boolean));
+  out.hide = [...hide].slice(0, MENU_CAP);
+  const seen = new Set();
+  for (const x of (Array.isArray(m.extra) ? m.extra : []).slice(0, MENU_CAP)) {
+    const item = MENU_ITEM(x, {});
+    if (!item || !item.id || seen.has(item.id)) continue;
+    seen.add(item.id); item.menu_item = true; out.extra.push(item);
+  }
+  const order = (Array.isArray(m.order) ? m.order : []).map((x) => String(x).slice(0, 60)).filter(Boolean);
+  out.order = [...new Set(order)].slice(0, MENU_CAP * 2);
+  if (m.note != null) out.note = String(m.note).trim().slice(0, 160);
+  return out;
+}
+
+/** The store's own edits, laid over whatever the sheet returned. Read-only with
+ *  respect to both inputs, because the cached sheet rows are shared. */
+export function applyMenu(products, menu) {
+  const m = menu && typeof menu === 'object' ? menu : {};
+  const over = m.over && typeof m.over === 'object' ? m.over : {};
+  const hide = new Set(Array.isArray(m.hide) ? m.hide : []);
+  const base = (Array.isArray(products) ? products : []).filter((p) => p && p.id && !hide.has(p.id));
+  const merged = base.map((p) => {
+    const o = over[p.id];
+    if (!o) return p;
+    const next = { ...p };
+    if (o.name) next.name = o.name;
+    if (o.cat) next.cat = o.cat;
+    if (isFinite(Number(o.price))) next.price = round2(Number(o.price));
+    if (o.desc != null) next.desc = o.desc;
+    if (o.img) next.img = o.img;
+    if (Array.isArray(o.opts) && o.opts.length) next.opts = o.opts;
+    if (Array.isArray(o.addons)) next.addons = o.addons;
+    if (typeof o.available === 'boolean') next.available = o.available;
+    if (typeof o.popular === 'boolean') next.popular = o.popular;
+    next.edited = true;
+    return next;
+  });
+  const extras = (Array.isArray(m.extra) ? m.extra : []).filter((x) => x && x.id && !hide.has(x.id));
+  let all = merged.concat(extras).slice(0, MENU_CAP);
+  const order = Array.isArray(m.order) ? m.order : null;
+  if (order && order.length) {
+    const rank = new Map();
+    order.forEach((id, i) => { if (!rank.has(id)) rank.set(id, i); });
+    all = all.slice().sort((a, b) => (rank.has(a.id) ? rank.get(a.id) : 1e9) - (rank.has(b.id) ? rank.get(b.id) : 1e9));
+  }
+  return all;
+}
+
+/**
+ * Price a cart from the menu, not from the browser.
+ *
+ * Until now the posted `price` was the price, which meant anyone who opened the
+ * storefront's devtools could order a whole leg of lamb for a cent and be handed a
+ * payment instruction for a cent — with valid unique cents, a real reference, and a
+ * merchant whose whole method is "the exact amount arrived, so it is theirs". The
+ * posted item is a lookup here: id first, name as the fallback. Quantity, which
+ * options and which add-ons are chosen stay the buyer's; the numbers come from the
+ * store. A cart built before a price change is re-priced, not refused, and the
+ * difference is named on the order so the merchant can see what happened.
+ */
+export function menuPrice(products, items) {
+  const list = Array.isArray(products) ? products.filter(Boolean) : [];
+  const byId = new Map(), byName = new Map();
+  for (const p of list) {
+    if (p.id && !byId.has(String(p.id))) byId.set(String(p.id), p);
+    const nm = String(p.name || '').toLowerCase().trim();
+    if (nm && !byName.has(nm)) byName.set(nm, p);
+  }
+  const out = [], notes = [];
+  let unknown = 0, authoritative = list.length > 0;
+  for (const raw of (Array.isArray(items) ? items : []).slice(0, 40)) {
+    const it = raw && typeof raw === 'object' ? raw : {};
+    const key = String(it.name || '').toLowerCase().trim();
+    const p = (it.id != null ? byId.get(String(it.id)) : null) || byName.get(key);
+    if (!p) {
+      unknown++;
+      out.push({ id: String(it.id || '').slice(0, 60), name: String(it.name || 'item').slice(0, 80), price: round2(Number(it.price) || 0), qty: Math.max(1, Math.min(99, Number(it.qty) || 1)) });
+      notes.push('off-menu: ' + String(it.name || 'item').slice(0, 40));
+      continue;
+    }
+    const opts = (Array.isArray(p.opts) ? p.opts : []);
+    const chosen = (Array.isArray(it.options) ? it.options : []).slice(0, opts.length + 2).map((sel) => {
+      const label = String((sel && sel.label) != null ? sel.label : (sel == null ? '' : sel)).trim();
+      for (const grp of opts) for (const ch of (grp && grp.choices) || []) {
+        if (String(ch.label).trim() === label) return { label: ch.label, up: round2(Number(ch.up) || 0) };
+      }
+      return null;                                        // a choice not on the menu is worth nothing
+    }).filter(Boolean);
+    const addons = (Array.isArray(p.addons) ? p.addons : []);
+    const picked = (Array.isArray(it.addons) ? it.addons : []).slice(0, addons.length + 2).map((x) => {
+      const nm = String((x && x.name) != null ? x.name : (x == null ? '' : x)).trim();
+      const hit = addons.find((a) => String(a.name).trim() === nm);
+      return hit ? round2(Number(hit.price) || 0) : null;
+    }).filter((v) => v != null && v > 0);
+    const sentPrice = round2(Number(it.price) || 0);
+    const menuPrice_ = round2(Number(p.price) || 0);
+    if (sentPrice !== menuPrice_) notes.push('repriced ' + p.name + ': ' + sentPrice.toFixed(2) + ' → ' + menuPrice_.toFixed(2));
+    if (p.available === false) notes.push('sold out when ordered: ' + p.name);
+    out.push({
+      id: p.id, name: p.name, price: menuPrice_, cur: p.cur,
+      qty: Math.max(1, Math.min(99, Number(it.qty) || 1)),
+      options: chosen, addons: picked,
+    });
+  }
+  return { items: out, notes, unknown, authoritative, repriced: notes.some((n) => n.indexOf('repriced') === 0) };
+}
