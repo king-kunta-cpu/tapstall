@@ -547,6 +547,8 @@ function rows() {
 
 /* ----------------------------------------------------------------- drawer */
 function open(h) { D.sel = h; rows(); detail(h); }
+var LEVER_PIN = null;      // a PIN the console just minted: held long enough to draw once, then dropped
+
 function detail(h) {
   q('#drawer').innerHTML = '<p class="muted">loading ' + esc(h) + '…</p>';
   api('/ops/api/store?handle=' + encodeURIComponent(h)).then(function (r) {
@@ -582,6 +584,28 @@ function detail(h) {
       + ((r.j.audit || []).length ? r.j.audit.slice(0, 6).map(function (a) {
         return '<div class="menuRow"><span>' + esc(String(a.at).slice(0, 16).replace('T', ' ')) + ' · ' + esc(a.act) + ' · ' + esc(a.via || '') + '</span><span class="small">' + esc((a.fields || []).join(',')) + '</span></div>';
       }).join('') : '<p class="muted">nothing recorded</p>');
+    // The lever's answer arrives before this reload finishes, and the reload
+    // wipes the drawer — so the PIN is drawn here, after the new markup is in,
+    // and never again. (Rendering it in the click handler meant it lived for the
+    // length of one repaint: the digits vanished before anybody could copy them.)
+    if (LEVER_PIN && LEVER_PIN.key === h) {
+      var pin = LEVER_PIN.pin, note = LEVER_PIN.note || '';
+      var msg = 'Tapstall sign-in for ' + (s.shop_name || h) + '\n'
+        + 'Your store page: ' + (s.store_url || (location.origin + '/s/' + h)) + '\n'
+        + 'Order desk (sign in there): ' + location.origin + '/a\n'
+        + 'Key — your store name: ' + h + '\n'
+        + 'PIN: ' + pin + '\n'
+        + 'Change the PIN any time inside the dashboard. Lose it and there is nobody to wait for: tap “I lost my PIN” on the sign-in screen and a new one is set from your own store details.';
+      q('#leverOut').innerHTML = '<div class="notice ok" style="margin-top:.5rem">'
+        + '<div class="small muted">new sign-in for ' + esc(h) + ' — shown once, here, and then nowhere</div>'
+        + '<div class="mono" style="font-size:1.6rem;letter-spacing:.22rem;text-align:center;margin:.25rem 0">' + esc(pin) + '</div>'
+        + '<div class="row" style="gap:.35rem;flex-wrap:wrap"><button class="sm" id="cpPin">Copy PIN</button><button class="sm" id="cpMsg">Copy the message to send</button><button class="sm sec" id="xsPin">Dismiss</button></div>'
+        + '<p class="small muted" style="margin:.4rem 0 0">' + esc(note) + '</p></div>';
+      q('#cpPin').onclick = function () { if (navigator.clipboard) navigator.clipboard.writeText(pin); this.textContent = 'Copied ✓'; };
+      q('#cpMsg').onclick = function () { if (navigator.clipboard) navigator.clipboard.writeText(msg); this.textContent = 'Copied — paste into WhatsApp ✓'; };
+      q('#xsPin').onclick = function () { q('#leverOut').innerHTML = ''; };
+      LEVER_PIN = null;
+    }
     q('#drawer').onclick = function (e) {
       var b = e.target.closest('[data-act]'); if (!b) return;
       var act = b.getAttribute('data-act');
@@ -593,13 +617,9 @@ function detail(h) {
         var j = r2.j || {};
         if (!j.ok) { toast(j.error || 'refused', true); return; }
         if (act === 'reset_pin') {
-          // shown once, here, and then nowhere: the drawer is reloaded from the
-          // store doc, which holds only the hash
-          q('#leverOut').innerHTML = '<div style="text-align:center;border:1px dashed var(--line-2);border-radius:10px;padding:.6rem;margin-top:.4rem">'
-            + '<div class="small muted">sign-in for ' + esc(j.key || h) + '</div>'
-            + '<div class="mono" style="font-size:1.55rem;letter-spacing:.2rem;margin:.15rem 0">' + esc(String(j.pin || '—')) + '</div>'
-            + '<div class="small">' + esc(j.note || '') + ' <button class="sm" id="cpL">copy PIN</button></div></div>';
-          q('#cpL').onclick = function () { navigator.clipboard.writeText(j.pin); this.textContent = '✓'; };
+          // hand it to the drawer render instead of writing it now: that render is
+          // about to replace this DOM, and it is the one place the box can survive
+          LEVER_PIN = { key: j.key || h, pin: String(j.pin || '—'), note: j.note || '' };
           load(); detail(h);
           return;
         }
