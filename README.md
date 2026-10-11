@@ -286,7 +286,8 @@ see and cancel, and because revoking takes one press.
 | Rate calculator | `…/fees` (also on Pages, shareable with query-string state) |
 | Health / diagnostics | `…/__ping`, `…/__selftest`, `…/__selftest?scheduled=1` |
 | Rail table | `…/rails` |
-| Production check (70 assertions, run it any time) | `./scripts/prod_check.sh` — needs the KV read token for the crawler probe, works with `HANDLE=` set to any store |
+| Prove one merchant's login, right now | `./scripts/try_login.sh <store name> <PIN>` — signs in from an empty cookie jar, shows the cookie flags, reads the dashboard with nothing but that cookie, and reports whether any PIN material came back. A login is not one-use, so running it does not spend anything |
+| Production check (138 assertions, run it any time) | `./scripts/prod_check.sh` — needs the KV read token for the crawler probe, works with `HANDLE=` set to any store, and `PIN=` to walk the whole front door |
 | Deploy log of the last CI run | `https://raw.githubusercontent.com/king-kunta-cpu/tapstall/main/ci-deploy.log` |
 | Re-run a failed deploy | `POST /repos/king-kunta-cpu/tapstall/actions/runs/<id>/rerun-failed-jobs` with the repo PAT — the one Actions call that works (job *logs* are not readable with it, which is why `ci-deploy.log` and step annotations exist). `deploy-pages` fails on GitHub's side from time to time — "Fetching artifact metadata failed… re-run the deployment at a later time" — and a rerun is the whole fix; the Worker job is unaffected, so the product stays live and current while the mirror lags a run |
 

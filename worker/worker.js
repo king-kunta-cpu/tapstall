@@ -22,7 +22,7 @@ import {
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '0.6.1';
+const VERSION = '0.6.2';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 const MAX_ORDERS_KEPT = 200;
@@ -1396,7 +1396,7 @@ async function settingsEdit(req, url, env) {
   const who = await identify(req, env, b.handle || url.searchParams.get('handle'));
   if (!who || !who.st) return json({ ok: false, error: 'no store' }, 404);
   const lr = lockRes(who); if (lr) return lr;
-    if (who.anonymous) return json({ ok: false, error: 'sign in from your dashboard link first', need_login: true }, 401);
+  if (who.anonymous) return json({ ok: false, need_login: true, error: 'Not signed in: open /a and sign in with your store name and PIN. (Or send your API key as x-tapstall-admin, which is what a script should do.)' }, 401);
   if (who.bad) { await authFail(env, who.handle); return json({ ok: false, error: 'bad key or revoked session' }, 403); }
   // A cookie is ambient authority, so require a header a cross-site form
   // cannot set. SameSite=Strict already blocks most of that; this is the belt.

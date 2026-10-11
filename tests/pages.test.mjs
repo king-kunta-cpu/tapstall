@@ -245,3 +245,25 @@ test('the sign-in card stays two fields, one button, zero instructions', () => {
       'the retired credential came back: ' + dead);
   }
 });
+
+test('no shipped sentence still tells a merchant to use a link', () => {
+  // 0.6.0 deleted link sign-in. The failure mode after that is not the code, it is
+  // a *sentence*: one stale error string or help line keeps teaching the old method
+  // to somebody who has to be told the new one, and it survives every API test.
+  const forbidden = [/lost your link/i, /dashboard link/i, /login link/i, /paste the (whole )?link/i,
+    /link (we|that we) (sent|emailed)/i, /fresh link/i, /sign in by link to/i];
+  const files = ['worker/worker.js', 'worker/core.js'].concat(PAGES.map((n) => {
+    try { src(n); return 'pages/src/' + n + '.html'; } catch (e) { return 'pages/' + n + '.html'; }
+  })).concat(['pages/public/a.html', 'pages/public/onboard.html']);
+  for (const rel of files) {
+    const txt = readFileSync(join(root, rel), 'utf8');
+    txt.split('\n').forEach((line, i) => {
+      const code = line.replace(/\/\*.*?\*\//g, '');
+      if (/^\s*(\*|\/\/)/.test(code.trim()) || /^\s*\/\/|^\s*\*/.test(line)) return;   // comments tell the story; they are allowed
+      if (/retired|used to|no longer|instead of|was a link|never|not a secret/i.test(code)) return;
+      for (const re of forbidden) {
+        assert.ok(!re.test(code), rel + ':' + (i + 1) + ' still says ' + JSON.stringify(re) + ' → ' + line.trim().slice(0, 110));
+      }
+    });
+  }
+});
