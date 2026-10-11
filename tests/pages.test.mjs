@@ -168,8 +168,9 @@ test('the dashboard preview frames the store page, the one page allowed to be fr
   // preview starts pointing somewhere else, it goes blank and the header
   // exception is then nothing but a hole — so the two halves are asserted together.
   const html = page('admin');
-  assert.match(html, /var url = location\.origin \+ '\/s\/' \+ S\.handle;/);
+  assert.match(html, /location\.origin \+ '\/s\/' \+ S\.handle;/);   // the shape is the point, not which line builds it
   assert.match(html, /q\('#shareFrame'\)\.src = url;/);
+  assert.ok(!/iframe[^>]*src="\/api/.test(html), 'the preview must not frame an API answer');
 });
 
 test('the mirror never links to a page it does not have', () => {

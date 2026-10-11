@@ -1,5 +1,46 @@
 # Tapstall — status
 
+## The dashboard became one page (2026-10-11, v0.6.1)
+
+Same instruction as the login, applied to what is behind it: *"completely trash
+the existing customer login **and customer dashboard** … no over complicated
+system."* Six tabs and four explanatory paragraphs became **four cards on one
+scroll**, because on a phone at a counter a tab is a decision and a paragraph is
+a chore.
+
+| Before | Now |
+|---|---|
+| Tabs: Orders · Menu · Store settings · Plan · Share · Log & security | One page: **Today**, **Shop**, **Your store link**, **Sign-in** — nothing to navigate, the day's work is at the top |
+| A row of order buttons: `Mark paid · Undo · Cancel · WhatsApp buyer · Copy details` | One wide green **Paid — money arrived** per waiting order; undo, cancel, message the buyer and copy the slip are one tap down inside the row |
+| Four stats counting the whole ledger (orders, value, cash due, flagged) | Four stats about *today*: to confirm, taken today, cash to count, flagged — and the flagged box only turns red when something is flagged |
+| `<p class="hint">` sermons about the 15-minute hold, the sheet being the menu, what a buyer sees | The hold marks the field it governs (`· 15-min hold`), the queued banner counts down, and the buyer preview is a disclosure that answers the question instead of describing it |
+| `#feedWarn` warning strip + a second menu panel + a duplicate menu-link box | One Shop card: item count, when it re-reads, the error if there is one, `Re-read my sheet`, and the sheet link living in the settings grid like every other field |
+
+Nothing was **removed** from what a merchant can do: mark/undo/cancel, the five
+filters (cancelled got added, it was only reachable as a stat before), re-read
+feed, all 26 editable fields with their held/soft split, custom rail, cancel
+queued, export CSV, print day sheet, QR poster, status text, buyer preview,
+plan/renew/paused notice, masked log, change PIN, sign out here, sign out every
+device + new API key. What changed is where each thing lives and how many words
+it takes.
+
+Server side: **not one byte of the contract moved.** Same `POST /api/admin`
+payload, same `/api/mark`, same 15-minute hold, same rails, same audit. This is
+a front-end rebuild on purpose — the API and its 46 live tests are what carry the
+money rules, and re-deriving them under a new skin would have thrown away every
+fix they encode. `VERSION` 0.6.0 → 0.6.1 because the merchant-visible surface
+changed; `/a` is the whole product and it was rewritten.
+
+Verification, and its edge: 102/102 across four suites (28 core, 10 limits, 46
+live, 18 page checks) — which for this file means the inlined JS parses (`new Function`),
+every `q('#id')` it reaches for exists in the markup, no id is duplicated, no
+remote script or stylesheet is loaded, the preview still frames only `/s/<handle>`,
+and the sign-in card still meets the two-fields-one-button-zero-instructions bar.
+What that does **not** prove is runtime rendering in a browser: no browser or DOM
+library exists in this sandbox, so nothing here clicked a button. The first
+`↻ refresh` on a real phone is the remaining check, and it is the one thing I
+cannot do from here — the live page is at `/a`, and `mamatoe` / `499078` signs in.
+
 ## The front door became a key and a PIN (2026-10-11, v0.6.0)
 
 The magic-link scheme was not weak in theory — a 105-character HMAC capability,

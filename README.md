@@ -184,8 +184,8 @@ Log & security).
 per job: KPI strip and attention queue (nothing is blocked, here is what wants a
 look); a searchable tenant table with a per-tenant drawer carrying every lever
 (+7d, +30d, grant a year, reset to free, pause, reinstate, clear a queued
-settings change, clear filed references, issue a dashboard link, revoke every
-link and key); the template editor, which publishes to KV at once and restores
+settings change, clear filed references, hand out a new sign-in PIN, revoke
+every session and key); the template editor, which publishes to KV at once and restores
 from `git main` in one press; the health panel (the Worker's own self-test, the
 cron heartbeat, the Pages mirror, the last CI line); and a change log that shows
 merchant writes masked next to operator writes attributed.
@@ -194,7 +194,7 @@ Three rules hold it together, and each is tested:
 
 * **Nothing on either suite is required for a customer to be onboarded, to order,
   or to be paid.** The console is oversight. A merchant's own recovery path
-  ("Lost your link?") never routes through the operator, which is what keeps the
+  ("I lost my PIN") never routes through the operator, which is what keeps the
   no-participation rule true.
 * **Every lever needs a second click.** `POST /ops/api/*` mutations refuse
   without `x-tapstall-confirm: 1`, which a stray `<img>` cannot send, and each one
@@ -234,9 +234,9 @@ key and cookie a store has ever issued.
 |---|---|---|
 | Dashboard | `?handle=x&token=<40-bit key>` in every URL, in logs, in the merchant's own notification text | one-time code → `HttpOnly SameSite=Strict` cookie (12 h) |
 | Confirm an order | `GET /api/mark?token=…` — a prefetching bot could mark it paid | `GET /c/<cap>` renders an inert page that POSTs; `GET /api/mark` → 405 |
-| Lifetime of a link | forever | 72 h confirm · 15 min undo · 7 d login code |
+| Lifetime of a link | forever | 72 h confirm · 15 min undo · 12 h session, and no login link at all since 0.6.0 |
 | Read a store's dashboard link from a handle | `/api/lookup` handed it out | `/api/lookup` returns public health only |
-| Payout details | no self-serve path at all (`409 handle already taken`) | `POST /api/settings`, 15-minute hold on money fields, masked audit, self-serve "lost your link" |
+| Payout details | no self-serve path at all (`409 handle already taken`) | `POST /api/settings`, 15-minute hold on money fields, masked audit, self-serve PIN reset |
 | Cross-origin | `Access-Control-Allow-Origin: *` on every response | `*` on buyer/public paths only; admin/mutation paths send none |
 
 Two rules hold the design together: **a GET can only ever return a page, never

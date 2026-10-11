@@ -229,7 +229,7 @@ ck "  · same when a mailer escaped the &" 'retired' "$(curl -sL -m 30 "$ORIGIN/
 ck "  · and the query repair still works where a query is read" '"ok":true' "$(curl -s -m 30 "$ORIGIN/api/lookup?handle=$HANDLE&amp;x=1")"
 ck "the screen asks for exactly two things" '^2$' "$(curl -s -m 30 "$ORIGIN/a" | grep -o 'id="f[KP]"' | wc -l | tr -d ' ')"
 ck "  · one button, and no paste-box for a link left behind" '^0$' "$(curl -s -m 30 "$ORIGIN/a" | grep -c 'id="fL"')"
-ck "  · and the PIN panel is where a PIN is changed" 'Your PIN' "$(curl -s -m 30 "$ORIGIN/a")"
+ck "  · and the PIN panel is where a PIN is changed" 'Change your PIN' "$(curl -s -m 30 "$ORIGIN/a")"
 ck "the retired exchange door explains the change, in one sentence" 'retired' "$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"code":"junk"}' "$ORIGIN/api/login")"
 ck "  · and so does the retired recovery door" '^410$' "$(code -X POST -H 'content-type: application/json' -d '{}' "$ORIGIN/api/recover")"
 BAD1=$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"key":"'"$HANDLE"'","pin":"000000"}' "$ORIGIN/api/auth")

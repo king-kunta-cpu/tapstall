@@ -182,22 +182,29 @@ main > .wrap.narrow { max-width: 34rem }
   body.dark button.ok { background: var(--accent); color: #fff }
 }
 
-.top{background:#0b0f14;color:#fff;padding:.8rem 1rem;position:sticky;top:0;z-index:5}
+.top{background:#0b0f14;color:#fff;padding:.7rem 1rem;position:sticky;top:0;z-index:5}
 .top .in{max-width:44rem;margin:0 auto;display:flex;justify-content:space-between;align-items:center;gap:.6rem}
 .top b{font-size:.95rem}
 .top a{color:#8fd4ff;font-size:.8rem;text-decoration:none}
-main{background:#f4f6f8;min-height:80vh;padding:1rem;border-radius:16px 16px 0 0;margin-top:.4rem}
+main{background:#f4f6f8;min-height:80vh;padding:1rem 1rem 3rem;border-radius:16px 16px 0 0;margin-top:.4rem}
 .wrap{max-width:44rem;margin:0 auto}
+.card h3{display:flex;justify-content:space-between;align-items:baseline;gap:.5rem}
+.card h3 .sm{font-weight:500}
 
-.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:.5rem;margin-bottom:.8rem}
-background:#fff;border:1px solid #e6ebf0;border-radius:12px;padding:.55rem .6rem}
-
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:.5rem;margin:.5rem 0 .7rem}
+.stat{background:#fff;border:1px solid #e6ebf0;border-radius:12px;padding:.5rem .55rem}
+.stat b{display:block;font-size:1.2rem;font-variant-numeric:tabular-nums;line-height:1.2}
+.stat span{font-size:.68rem;color:#65788b}
+.stat.hot b{color:#8a5b00}
+.stat.bad b{color:#b00020}
 
 input,select{padding:.6rem .7rem;border:1px solid #dde3e9;border-radius:10px;font:inherit;width:100%;background:#fff}
 button{font:inherit;background:#0b0f14;color:#fff;border:0;border-radius:10px;padding:.6rem .8rem;font-weight:600}
 button.sm{background:#fff;color:#101418;border:1px solid #cfd8e0;font-size:.78rem;padding:.35rem .55rem;font-weight:500}
 button.ok{background:#0b5b34}
+button.big{width:100%;padding:.7rem;font-size:.95rem}
 button.danger{background:#fff;color:#b00020;border:1px solid #e8c4c8}
+
 .o{border:1px solid #e6ebf0;border-radius:12px;padding:.7rem;margin-bottom:.55rem;background:#fff}
 .o.flag{border-color:#f3c3c9;background:#fffafa}
 .o .h{display:flex;justify-content:space-between;gap:.5rem;align-items:baseline;flex-wrap:wrap}
@@ -205,34 +212,23 @@ button.danger{background:#fff;color:#b00020;border:1px solid #e8c4c8}
 .o .t{font-size:.74rem;color:#65788b}
 .o .m{font-weight:700;font-variant-numeric:tabular-nums}
 .o .it{font-size:.84rem;margin:.4rem 0;color:#33404d;white-space:pre-wrap}
-
+.o .acts{display:flex;gap:.4rem;margin-top:.5rem;flex-wrap:wrap}
+.o .pay{font-size:.78rem;background:#f7f9fb;border-radius:8px;padding:.4rem .5rem;margin-top:.4rem;color:#33404d}
+.o details{margin-top:.45rem}
+.o summary{font-size:.74rem;color:#42566a;cursor:pointer}
 .paid{background:#e8f7ef;border-color:#bfe6d0;color:#0b5b34}
 .new{background:#fff6e0;border-color:#f0d9a8;color:#8a5b00}
 .cod{background:#eef3f8;border-color:#cfdcea;color:#33526f}
 .flags{font-size:.72rem;color:#b00020;margin-top:.35rem;font-weight:600}
-.acts{display:flex;gap:.4rem;margin-top:.5rem;flex-wrap:wrap}
-.pay{font-size:.78rem;background:#f7f9fb;border-radius:8px;padding:.4rem .5rem;margin-top:.4rem;color:#33404d}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:.5rem}
 
-
-
-
-[data-tab]{display:none}
-body[data-tab="orders"] [data-tab~="orders"]{display:block}
-body[data-tab="menu"] [data-tab~="menu"]{display:block}
-body[data-tab="settings"] [data-tab~="settings"]{display:block}
-body[data-tab="plan"] [data-tab~="plan"]{display:block}
-body[data-tab="share"] [data-tab~="share"]{display:block}
-body[data-tab="log"] [data-tab~="log"]{display:block}
-body[data-tab="orders"] #list{display:block}
-.tabs{margin:.1rem 0 .7rem}
-.menuRow{display:flex;justify-content:space-between;gap:.5rem;border-top:1px solid var(--line);padding:.4rem 0;font-size:.84rem}
+.line{display:flex;justify-content:space-between;align-items:center;gap:.5rem;padding:.5rem 0;border-top:1px solid #eef2f6;font-size:.86rem}
+.line:first-of-type{border-top:0}
+.line b{font-variant-numeric:tabular-nums}
+.line .k{font-size:.72rem;color:#65788b;display:block;font-weight:400}
+.link{display:block;text-align:center;border:1px dashed var(--line-2);border-radius:10px;padding:.55rem;font-family:ui-monospace,Menlo,monospace;font-size:.8rem;text-decoration:none;margin-top:.4rem;word-break:break-all}
+.menuRow{display:flex;justify-content:space-between;gap:.5rem;border-top:1px solid var(--line);padding:.35rem 0;font-size:.82rem}
 .menuRow b{font-variant-numeric:tabular-nums}
-.qr{display:grid;grid-template-columns:1fr;gap:.5rem}
-.qr img{width:100%;max-width:15rem;border:1px solid var(--line);border-radius:var(--r)}
-.swatch{display:inline-block;width:.65rem;height:.65rem;border-radius:3px;background:var(--accent);margin-right:.3rem}
-.pill{display:inline-flex;gap:.35rem;align-items:center;font-size:.72rem;background:#eef3f8;border:1px solid #cfdcea;border-radius:999px;padding:.2rem .55rem;color:#33526f}
-
 .hold{background:#fff6e0;border:1px solid #f0d9a8;border-radius:12px;padding:.7rem;margin-bottom:.8rem}
 .hold b{font-variant-numeric:tabular-nums}
 .f{margin:.35rem 0}
@@ -241,9 +237,18 @@ body[data-tab="orders"] #list{display:block}
 .aud{font-size:.75rem;border-top:1px solid #eef2f6;padding:.35rem 0;color:#33404d}
 .aud span{color:#65788b}
 .mono{font-family:ui-monospace,Menlo,monospace;word-break:break-all;background:#f4f7fa;border-radius:8px;padding:.4rem;font-size:.75rem}
-
 .hint{font-size:.75rem;color:#65788b}
-.stat{background:#fff;border:1px solid #e6ebf0;border-radius:12px;padding:.55rem .6rem}
+.hide{display:none}
+.empty{text-align:center;color:#65788b;font-size:.85rem;padding:1rem .5rem}
+details.box{border:1px solid #e6ebf0;border-radius:12px;background:#fff;padding:.15rem .7rem;margin:.45rem 0}
+details.box>summary{padding:.55rem 0;font-weight:600;font-size:.88rem;cursor:pointer;list-style:none}
+details.box>summary::-webkit-details-marker{display:none}
+details.box>summary:after{content:"+";float:right;color:#65788b;font-weight:400}
+details.box[open]>summary:after{content:"–"}
+details.box[open]>summary{border-bottom:1px solid #eef2f6}
+details.box .in{padding:.5rem 0 .7rem}
+.chips{display:flex;gap:.35rem;flex-wrap:wrap;margin:.4rem 0}
+.chips .on{background:#0b0f14;color:#fff;border-color:#0b0f14}
 </style>
 </head>
 <body>
@@ -278,141 +283,126 @@ body[data-tab="orders"] #list{display:block}
 
 <div id="app" class="hide">
   <div class="hold hide" id="pend"></div>
-  <div class="stats">
-    <div class="stat"><b id="sN">0</b><span>orders</span></div>
-    <div class="stat"><b id="sV">0</b><span>value</span></div>
-    <div class="stat"><b id="sC">0</b><span>cash due</span></div>
-    <div class="stat"><b id="sF">0</b><span>flagged</span></div>
-  </div>
 
-  <div class="card" id="storeCard" data-tab="orders">
-    <div style="display:flex;justify-content:space-between;gap:.6rem;align-items:center;flex-wrap:wrap">
-      <div><b id="sName"></b><div class="hint" id="sPlan"></div></div>
-      <div style="display:flex;gap:.4rem;flex-wrap:wrap">
-        <button class="sm" id="openStore">View store</button>
-        <button class="sm" id="reloadFeed">Reload my menu</button>
-        <button class="sm" id="refresh" title="New orders can take up to a minute to appear in the list">↻ Refresh</button>
-        <button class="sm" id="printDay">Print today</button>
-        <button class="sm" id="exportCsv">Export CSV</button>
+  <!-- ─────────────────────────── today ─────────────────────────── -->
+  <div class="card" id="today">
+    <h3>Today <button class="sm" id="refresh" title="New orders can take up to a minute to appear">↻ refresh</button></h3>
+    <div class="stats">
+      <div class="stat hot"><b id="sN">0</b><span>to confirm</span></div>
+      <div class="stat"><b id="sV">0</b><span>taken today</span></div>
+      <div class="stat"><b id="sC">0</b><span>cash to count</span></div>
+      <div class="stat" id="sFw"><b id="sF">0</b><span>flagged</span></div>
+    </div>
+    <div id="toDo"></div>
+    <details class="box" id="detAll">
+      <summary id="allSum">All orders</summary>
+      <div class="in">
+        <div class="chips" id="filters">
+          <button class="sm on" data-f="all">All</button>
+          <button class="sm" data-f="new">Waiting</button>
+          <button class="sm" data-f="flag">Flagged</button>
+          <button class="sm" data-f="paid">Paid</button>
+          <button class="sm" data-f="cancel">Cancelled</button>
+        </div>
+        <div id="list"></div>
       </div>
-    </div>
-    <div class="hint" id="feedWarn" style="margin-top:.4rem"></div>
-  </div>
-
-  <div class="card" data-tab="settings">
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem">
-      <h3 style="margin:0">Store settings</h3>
-      <button class="sm" id="tabs" data-open="0">Show</button>
-    </div>
-    <div id="panel" class="hide">
-      <p class="hint" style="margin:.5rem 0">Hours, tagline and logo save the moment you press Save. Anything that moves money — the payment account, the rail, the fee, the currency, your WhatsApp number, the menu link — is queued for 15 minutes so a leaked link can never reroute today’s takings in silence, and you can cancel it inside that window. Today’s orders keep the details printed on their slip either way.</p>
-      <div id="fields"></div>
-      <div style="display:flex;gap:.5rem;margin-top:.6rem;flex-wrap:wrap">
-        <button id="saveSt">Save</button>
-        <button class="sm" id="revertBtn">Cancel queued changes</button>
-        <span class="hint" id="saveMsg" style="align-self:center"></span>
-      </div>
-    </div>
-  </div>
-
-  <div class="card" data-tab="log">
-    <h3>Recent changes</h3>
-    <div id="audit" class="hint">—</div>
-  </div>
-
-  <div class="card" data-tab="plan">
-    <h3>Your PIN</h3>
-    <p class="hint" style="margin-top:0">Six digits, typed once a day, and the only thing between a stranger and your orders. Changing it here keeps <i>this</i> device signed in and changes nothing else; if you think somebody knows it, use “I lost my PIN” on the sign-in screen instead — that resets it <i>and</i> signs every other device out.</p>
-    <div class="f"><label>current PIN</label><input id="cP" type="password" inputmode="numeric" maxlength="8"></div>
-    <div class="f"><label>new PIN</label><input id="nP" type="password" inputmode="numeric" maxlength="8"></div>
-    <div class="f"><label>type the new one again</label><input id="nP2" type="password" inputmode="numeric" maxlength="8"></div>
-    <div style="display:flex;gap:.5rem;margin-top:.4rem"><button class="sm" id="pGo">Change PIN</button><span class="hint" id="pinSet" style="align-self:center"></span></div>
-    <div id="pOut"></div>
-  </div>
-
-  <div class="card" data-tab="log">
-    <h3>If this device falls into the wrong hands</h3>
-    <p class="hint" style="margin-top:0">One press kills every session on every device and replaces the API key that your own tooling uses. Your PIN is untouched — change that above. Buyers keep ordering; nothing else breaks.</p>
-    <div style="display:flex;gap:.5rem;flex-wrap:wrap"><button class="danger" id="revBtn">Sign out every device &amp; new API key</button><button class="sm" id="sgnOut">Sign out here</button></div>
-    <div id="revOut"></div>
-  </div>
-
-  <nav class="tabs" id="viewTabs" role="tablist" aria-label="Which part of the shop">
-    <button role="tab" aria-selected="true" data-t="orders">Orders</button>
-    <button role="tab" aria-selected="false" data-t="menu">Menu</button>
-    <button role="tab" aria-selected="false" data-t="settings">Store settings</button>
-    <button role="tab" aria-selected="false" data-t="plan">Plan</button>
-    <button role="tab" aria-selected="false" data-t="share">Share</button>
-    <button role="tab" aria-selected="false" data-t="log">Log &amp; security</button>
-  </nav>
-  <div class="card flat" data-tab="orders">
-    <div style="display:flex;gap:.4rem;flex-wrap:wrap" id="filters">
-      <button class="sm on" data-f="all">All</button>
-      <button class="sm" data-f="new">To confirm</button>
-      <button class="sm" data-f="flag">Flagged</button>
-      <button class="sm" data-f="paid">Paid</button>
-    </div>
-  </div>
-  <div id="list"></div>
-  <section class="card" data-tab="menu">
-    <h3>Menu</h3>
-    <p class="muted" style="margin-top:0">Your sheet is the menu. Save the row order, prices, stock and photos there and the store re-reads it on its own — this panel only tells you what is loaded and lets you force a look.</p>
-    <div class="grid c3" id="menuStats"></div>
-    <div class="row" style="margin-top:.6rem">
-      <button class="sm" id="menuReload">Re-read my sheet now</button>
-      <a class="sm" style="text-decoration:none" id="menuOpen" href="#" target="_blank">Open the sheet</a>
-      <button class="sm sec" id="menuCopy">Copy column layout</button>
-    </div>
-    <div id="menuList" style="margin-top:.5rem"></div>
-    <div class="notice warn hide" id="menuWarn" style="margin-top:.6rem"></div>
-    <details style="margin-top:.6rem">
-      <summary class="muted">Column layout, if you are building the sheet now</summary>
-      <p class="mono" style="margin:.4rem 0">id,name,category,price,currency,options,addons,stock,popular</p>
-      <p class="muted" style="font-size:.74rem">options: <span class="mono">Size:Small,Large:2|Spice:mild,hot</span> (colon = price bump, pipe = new group) · addons: <span class="mono">Cheese:1.5|Fried egg:0.5</span> · stock: <span class="mono">yes</span> or <span class="mono">no</span> · popular: <span class="mono">1</span>. A photo goes in the <span class="mono">image</span> column as a full URL.</p>
-      <a class="sm" style="text-decoration:none;display:inline-block;margin-top:.3rem" href="/data/sample-menu.csv" download>Download a CSV you can paste from</a>
     </details>
-    <div class="f" style="margin-top:.6rem">
-      <label for="menuUrl">Menu source (this is a money-adjacent field: 15-minute hold, cancellable)</label>
-      <div class="row"><input id="menuUrl" placeholder="https://docs.google.com/spreadsheets/d/…"><button class="sm" id="menuUrlSave" style="flex:0 0 auto">Save</button></div>
-    </div>
-  </section>
+  </div>
 
-  <section class="card" data-tab="plan">
-    <h3>Plan</h3>
-    <div class="grid c3" id="planStats"></div>
-    <p class="muted" id="planNote" style="margin-top:.5rem"></p>
-    <div class="row" style="margin-top:.5rem">
-      <a class="sm" style="text-decoration:none" id="planRenew" href="#">Renew for 60 USD / year</a>
-      <button class="sm sec" id="planExport">Export my orders as CSV</button>
-    </div>
-    <div class="notice info hide" id="planPaused" style="margin-top:.6rem"><b>Paused.</b> Buyers see a clear reason instead of a dead button, and nothing is deleted. One payment switches it back within a minute — no approval, no ticket.</div>
-  </section>
+  <!-- ─────────────────────────── shop ─────────────────────────── -->
+  <div class="card" id="shop">
+    <h3>Shop <span class="hint" id="planTag"></span></h3>
+    <div class="line"><span><b id="menuN">0 items</b><span class="k" id="menuSub">menu</span></span>
+      <span style="display:flex;gap:.35rem;flex-wrap:wrap"><button class="sm" id="menuReload">Re-read my sheet</button><a class="sm" style="text-decoration:none" id="menuOpen" href="#" target="_blank">Open sheet</a></span></div>
+    <div class="notice warn hide" id="menuWarn" style="margin-top:.4rem"></div>
+    <div class="flags hide" id="shopWarn"></div>
+    <div id="menuList" style="margin-top:.3rem"></div>
 
-  <section class="card" data-tab="share">
-    <h3>Share</h3>
-    <p class="muted" style="margin-top:0">One link does the whole job: put it in your WhatsApp business profile, your Instagram bio, and print the QR for the counter.</p>
-    <a class="link" id="shareLn" href="#" target="_blank" style="text-align:center;border:1px dashed var(--line-2);border-radius:10px;padding:.55rem;font-family:var(--mono);font-size:.8rem;text-decoration:none;display:block">—</a>
-    <div class="row" style="margin-top:.5rem">
-      <button class="sm" id="shareCopy">Copy store link</button>
-      <button class="sm sec" id="shareStatus">WhatsApp status text</button>
-      <button class="sm sec" id="sharePoster">Print QR poster</button>
+    <details class="box" id="detSet">
+      <summary>Change what buyers see and where they pay</summary>
+      <div class="in">
+        <div id="fields"></div>
+        <div style="display:flex;gap:.5rem;margin-top:.6rem;flex-wrap:wrap">
+          <button id="saveSt">Save</button>
+          <button class="sm" id="revertBtn">Cancel queued changes</button>
+          <span class="hint" id="saveMsg" style="align-self:center"></span>
+        </div>
+        <p class="hint" style="margin-top:.5rem">Anything marked <span class="n" style="font-size:.68rem;color:#8a5b00">· 15-min hold</span> goes live 15 minutes from now, and you can cancel it inside that window. Today’s orders keep the details printed on their slip either way.</p>
+        <details style="margin-top:.4rem"><summary class="hint">Sheet columns, if you are building it now</summary>
+          <p class="mono" style="margin:.4rem 0">id,name,category,price,currency,options,addons,stock,popular</p>
+          <p class="hint">options <span class="mono">Size:Small,Large:2|Spice:mild,hot</span> · addons <span class="mono">Cheese:1.5|Fried egg:0.5</span> · stock <span class="mono">yes</span>/<span class="mono">no</span> · popular <span class="mono">1</span> · photo in an <span class="mono">image</span> column, full URL.</p>
+          <a class="sm" style="text-decoration:none;display:inline-block;margin-top:.3rem" href="/data/sample-menu.csv" download>Download a CSV to paste from</a>
+        </details>
+      </div>
+    </details>
+
+    <details class="box" id="detPrev">
+      <summary>What a buyer sees right now</summary>
+      <div class="in"><iframe id="shareFrame" title="your store" style="width:100%;height:22rem;border:1px solid var(--line);border-radius:var(--r);background:#fff"></iframe></div>
+    </details>
+  </div>
+
+  <!-- ─────────────────────────── link & books ─────────────────────────── -->
+  <div class="card" id="linkCard">
+    <h3>Your store link</h3>
+    <a class="link" id="shareLn" href="#" target="_blank">—</a>
+    <div class="chips" style="margin-top:.5rem">
+      <button class="sm" id="shareCopy">Copy link</button>
+      <button class="sm" id="shareStatus">Status text</button>
+      <button class="sm" id="sharePoster">QR poster</button>
+      <button class="sm" id="printDay">Print today</button>
+      <button class="sm" id="exportCsv">Export CSV</button>
     </div>
-    <div class="notice ok hide" id="shareOut" style="margin-top:.6rem"></div>
-    <h3 style="margin-top:1rem">What a buyer sees</h3>
-    <p class="muted" style="margin-top:0">They pick items, choose sizes or add-ons, see the exact amount including your payment cost, and get step-by-step instructions with a reference that matches their transfer to your order. Nothing to install, nothing to remember.</p>
-    <iframe id="shareFrame" title="your store" style="width:100%;height:22rem;border:1px solid var(--line);border-radius:var(--r);background:#fff;margin-top:.4rem"></iframe>
-  </section>
+    <div class="notice ok hide" id="shareOut" style="margin-top:.4rem"></div>
+  </div>
+
+  <!-- ─────────────────────────── access ─────────────────────────── -->
+  <div class="card" id="access">
+    <h3>Sign-in</h3>
+    <div class="line"><span><b class="mono" style="display:inline" id="keyOut">—</b><span class="k">your key — your store name, not a secret</span></span><button class="sm" id="cpKey">Copy</button></div>
+    <div class="line"><span><b id="pinState">—</b><span class="k">your PIN — six digits, and only you should have it</span></span><button class="sm" id="pinBtn">Change</button></div>
+    <div class="notice info hide" id="pinAlert" style="margin-top:.4rem"></div>
+    <details class="box hide" id="detPin">
+      <summary>Change your PIN</summary>
+      <div class="in">
+        <div class="f"><label>current PIN</label><input id="cP" type="password" inputmode="numeric" maxlength="8"></div>
+        <div class="two">
+          <div class="f"><label>new PIN</label><input id="nP" type="password" inputmode="numeric" maxlength="8"></div>
+          <div class="f"><label>type it again</label><input id="nP2" type="password" inputmode="numeric" maxlength="8"></div>
+        </div>
+        <div style="display:flex;gap:.5rem;margin-top:.4rem;flex-wrap:wrap"><button class="sm" id="pGo">Change PIN</button><button class="sm" id="lostLn">I lost it</button></div>
+        <div id="pOut"></div>
+      </div>
+    </details>
+    <div class="line"><span><b id="devN">This device</b><span class="k">signing out here only ends this one</span></span>
+      <span style="display:flex;gap:.35rem;flex-wrap:wrap"><button class="sm" id="sgnOut">Sign out here</button><button class="danger sm" id="revBtn">Sign out every device</button></span></div>
+    <div id="revOut"></div>
+
+    <details class="box" id="detPlan">
+      <summary>Plan</summary>
+      <div class="in">
+        <div class="stats" style="grid-template-columns:repeat(3,1fr);margin-top:.2rem" id="planStats"></div>
+        <p class="hint" id="planNote" style="margin-top:.4rem"></p>
+        <div class="chips"><a class="sm" style="text-decoration:none" id="planRenew" href="#">Renew for 60 USD / year</a></div>
+        <div class="notice info hide" id="planPaused" style="margin-top:.4rem"><b>Paused.</b> Buyers see a clear reason instead of a dead button, and nothing is deleted. One payment switches it back within a minute.</div>
+      </div>
+    </details>
+    <details class="box" id="detLog">
+      <summary>Recent changes</summary>
+      <div class="in"><div id="audit" class="hint">—</div></div>
+    </details>
+  </div>
 </div>
 </div></main>
 <script>
 var S = { handle: '', orders: [], store: {}, filter: 'all', pendTimer: null };
 var q = function (s) { return document.querySelector(s); };
-var qa = function (s) { return Array.prototype.slice.call(document.querySelectorAll(s)); };
+var qa = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
 function esc(x) { return String(x == null ? '' : x).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
 
 /* Every write carries two things: the ambient session cookie (HttpOnly, never
  * readable from this script) and an explicit header a cross-site form cannot
- * set. The URL never carries a credential any more. */
+ * set. The URL never carries a credential — that is what the PIN replaced. */
 function api(path, body) {
   return fetch(path, body === undefined ? { method: 'GET', credentials: 'same-origin' }
     : { method: 'POST', credentials: 'same-origin',
@@ -421,10 +411,6 @@ function api(path, body) {
     .then(function (r) { return r.text().then(function (t) { var j = null; try { j = JSON.parse(t); } catch (e) {} return { s: r.status, j: j, t: t }; }); });
 }
 
-var WHY = {
-  badkey: 'That link carries your store key, and the key on this store has changed since it was written down — so there is nothing to trade. Use “Lost your link?” below, or paste the whole link from the newest message we sent you.',
-  nostore: 'No store by that name is on this platform, so there is nothing to open. Check the spelling, or start a store from the sign-up page.'
-};
 function showWhy(t) {
   var d = q('#why');
   if (!t) { if (d) d.classList.add('hide'); return; }
@@ -433,12 +419,11 @@ function showWhy(t) {
 }
 (function boot() {
   var u = new URL(location.href);
-  // Links died with the old login. Say that plainly to anybody arriving from a
-  // saved bookmark instead of leaving them at a form they have to guess at.
+  // Somebody arriving from a saved link must not be left at a form they have to
+  // guess at. That is the only time this screen says anything about itself.
   if (u.searchParams.get('code') || u.searchParams.get('token')) {
     showWhy('Signing in by link has been retired. Your store name is your key now — type it with your PIN above. Forgot the PIN? “I lost my PIN” sets a new one from your own store details.');
   }
-  q('#tabs').onclick = function () { var p = q('#panel'); var open = p.classList.toggle('hide'); this.textContent = open ? 'Show' : 'Hide'; };
   q('#lostBtn').onclick = function () { q('#lost').classList.toggle('hide'); };
   q('#rGo').onclick = recover;
   q('#outLn').onclick = q('#sgnOut').onclick = signOut;
@@ -446,6 +431,12 @@ function showWhy(t) {
   q('#fK').onkeydown = q('#fP').onkeydown = function (e) { if (e.key === 'Enter') signIn(); };
   q('#revBtn').onclick = revoke;
   q('#pGo').onclick = changePin;
+  q('#pinBtn').onclick = function () { var d = q('#detPin'); d.classList.remove('hide'); d.open = true; q('#cP').focus(); };
+  q('#lostLn').onclick = function () {
+    q('#login').classList.remove('hide'); q('#lost').classList.remove('hide');
+    q('#rH').value = S.handle; q('#fK').value = S.handle;
+    q('#login').scrollIntoView({ block: 'start' });
+  };
   load();
 })();
 
@@ -478,6 +469,7 @@ function changePin() {
     if (!r.j || !r.j.ok) { out.innerHTML = '<div class="flags">' + esc((r.j && r.j.error) || 'Not changed') + '</div>'; return; }
     out.innerHTML = '<div class="hint">' + esc(r.j.note || 'Changed.') + '</div>';
     q('#cP').value = q('#nP').value = q('#nP2').value = '';
+    q('#pinState').textContent = 'set today';
   });
 }
 function recover() {
@@ -503,45 +495,46 @@ function load() {
     var j = res.j;
     if (!j || !j.ok) {
       if (res.s === 401 || (j && j.need_login)) { q('#login').classList.remove('hide'); q('#app').classList.add('hide'); return; }
-      alert('Dashboard not opened: ' + ((j && j.error) || res.s)); return;
+      showWhy('Dashboard not opened: ' + ((j && j.error) || 'something on our side, code ' + res.s));
+      q('#login').classList.remove('hide'); q('#app').classList.add('hide'); return;
     }
     q('#login').classList.add('hide'); q('#app').classList.remove('hide');
     S.store = j.store || {}; S.store.pending = j.pending || null;
     S.orders = j.orders || []; S.audit = j.audit || [];
     S.editable = j.editable || []; S.soft = j.soft_fields || [];
     S.handle = S.handle || (S.store.handle || '');
-    q('#ttl').textContent = (S.store.shop_name || S.handle) + ' · orders';
-    q('#sName').textContent = S.store.shop_name || S.handle;
+    var today = new Date().toDateString();
+    S.todays = S.orders.filter(function (o) { return o && new Date(o.at).toDateString() === today; });
+    var name = S.store.shop_name || S.handle;
+    q('#ttl').textContent = name;
+    document.title = name + ' · Tapstall';
     var left = Math.ceil(((S.store.paid_until || 0) - Date.now()) / 864e5);
-    q('#sPlan').textContent = (S.store.plan || 'free') + ' · ' + (left > 0 ? left + ' days left' : 'expired — renew to keep the store live') + ' · ' + (S.store.currency || 'USD');
-    q('#openStore').onclick = function () { window.open('/s/' + S.handle, '_blank'); };
-    q('#reloadFeed').onclick = function () {
-      api('/s/' + S.handle + '/feed.json').then(function (r) {
-        S.feed = (r.j && r.j.products) || [];
-        renderMenu();
-        alert('Menu reloaded: ' + S.feed.length + ' products. Your store shows changes within 2 minutes without anyone touching it.');
-      });
-    };
-    api('/s/' + S.handle + '/feed.json').then(function (r) { S.feed = (r.j && r.j.products) || []; });
+    q('#planTag').textContent = (left > 0 ? left + ' days left' : 'expired — renew to keep taking orders') + ' · ' + (S.store.currency || 'USD');
+    if (S.store.renew_url) q('#renewLn').href = S.store.renew_url;
+    q('#keyOut').textContent = S.handle;
+    q('#cpKey').onclick = function () { if (navigator.clipboard) navigator.clipboard.writeText(S.handle); this.textContent = 'Copied ✓'; };
+    q('#pinState').textContent = S.store.pin_set_at ? 'set ' + String(S.store.pin_set_at).slice(0, 10) : 'not set yet';
+    var al = q('#pinAlert');
+    if (!S.store.pin_set_at) { al.classList.remove('hide'); al.innerHTML = 'No PIN on this store yet — change it above to set the first one, or use “I lost my PIN” on the sign-in screen.'; }
+    else al.classList.add('hide');
+    q('#refresh').onclick = function () { this.textContent = '…'; load(); };
     q('#exportCsv').onclick = exportCsv;
-    q('#refresh').onclick = function () { this.textContent = 'Reloading…'; load(); };
     q('#printDay').onclick = printDay;
     q('#saveSt').onclick = saveSettings;
-    q('#revertBtn').onclick = function () { api('/api/settings/revert', { handle: S.handle }).then(function () { load(); }); };
-    if (S.store.renew_url) q('#renewLn').href = S.store.renew_url;
-    var warns = [];
-    if (!S.store.pay_account && S.store.rail !== 'cash') warns.push('No payment number/account set — customers cannot pay. Fix it in Store settings below, section “Money”.');
-    if (S.store.rail === 'cash') warns.push('Rail = cash/COD: no online payment is expected, and drivers must be reconciled by hand.');
-    if ((S.orders || []).length > 45) warns.push('Dashboard keeps the last 200 orders in free storage — export older ones monthly.');
-    q('#feedWarn').textContent = warns.join('  ·  '); q('#feedWarn').style.color = warns.length ? '#b00020' : '';
-    renderFields(); renderAudit(); renderPending(); render(); renderMenu(); renderPlan(); renderShare();
-    q('#viewTabs').onclick = function (e) {
-      var b = e.target.closest('button[data-t]'); if (!b) return;
-      document.body.setAttribute('data-tab', b.getAttribute('data-t'));
-      Array.prototype.forEach.call(this.querySelectorAll('button'), function (x) { x.setAttribute('aria-selected', String(x === b)); });
-    };
-    if (!document.body.getAttribute('data-tab')) document.body.setAttribute('data-tab', 'orders');
+    q('#revertBtn').onclick = function () { api('/api/settings/revert', { handle: S.handle }).then(load); };
+    q('#menuReload').onclick = reFeed;
+    // the menu is the shop's own public feed endpoint; read it once so the Shop
+    // card is not lying about an empty menu before the first re-read
+    api('/s/' + S.handle + '/feed.json').then(function (r) { S.feed = (r.j && r.j.products) || []; renderShop(); });
+    renderFields(); renderPending(); renderOrders(); renderShop(); renderPlan(); renderShare(); renderAudit();
   }).catch(function () { q('#login').classList.remove('hide'); });
+}
+function reFeed() {
+  var b = q('#menuReload'); b.textContent = 'reading…';
+  api('/s/' + S.handle + '/feed.json').then(function (r) {
+    S.feed = (r.j && r.j.products) || []; b.textContent = 'Re-read my sheet';
+    renderShop();
+  });
 }
 
 /* --------------------------------------------------------------- settings */
@@ -551,7 +544,7 @@ var LABEL = {
   whatsapp: 'Your WhatsApp (buyers reach you)', pay_account: 'Payment account / number customers pay', rail: 'Payment rail', surcharge_mode: 'Who pays the payment cost',
   currency: 'Currency', zig_rate: 'ZiG exchange rate', tax_pct: 'Tax %', delivery_fee: 'Delivery fee', free_over: 'Free delivery over',
   max_order_value: 'Flag orders over', cod_review_above: 'Review cash orders over', cache_seconds: 'Menu cache (seconds)', feed_url: 'Menu sheet link',
-  notify_webhook: 'Order webhook (URL)', notify_email: 'Notify this email of orders', owner_email: 'Owner email (used to recover your link)',
+  notify_webhook: 'Order webhook (URL)', notify_email: 'Notify this email of orders', owner_email: 'Owner email (also lets you reset your own PIN)',
   unique_change: 'Add unique odd cents to every amount', require_optin: 'Ask buyers before saving their number',
   reference_format: 'Payment reference', order_prefix: 'Order code prefix'
 };
@@ -566,13 +559,13 @@ function renderFields() {
       f = '<div class="f"><label>' + esc(LABEL[k] || k) + (inst ? '' : ' <span class="n">· 15-min hold</span>') + '</label>'
         + '<select data-k="' + k + '"><option value="1"' + (v ? ' selected' : '') + '>yes</option><option value="0"' + (!v ? ' selected' : '') + '>no</option></select></div>';
     } else if (k === 'rail' || k === 'surcharge_mode') {
-      var opts = k === 'rail' ? Object.keys(S.rails || {}).length ? Object.keys(S.rails) : ['cash', 'ecocash_usd', 'ecocash_zig', 'payfast', 'payshap', 'yoco'] : ['absorb', 'pass'];
+      var opts = k === 'rail' ? (Object.keys(S.rails || {}).length ? Object.keys(S.rails) : ['cash', 'ecocash_usd', 'ecocash_zig', 'payfast', 'payshap', 'yoco']) : ['absorb', 'pass'];
       f = '<div class="f"><label>' + esc(LABEL[k]) + (inst ? '' : ' <span class="n">· 15-min hold</span>') + '</label><select data-k="' + k + '">'
         + opts.map(function (o) { return '<option' + (o === v ? ' selected' : '') + '>' + o + '</option>'; }).join('') + '</select></div>';
     } else if (k === 'rail_def') {
-      // Only shown as a form once “custom” is the chosen rail; otherwise it is
-      // one quiet line telling them where it came from. The description is what
-      // buyers are quoted, so it is held like any other money change.
+      // Only shown as a form once “custom” is the chosen rail; otherwise it is one
+      // quiet line saying where it came from. The description is what buyers are
+      // quoted, so it is held like any other money change.
       var d = v || {}, on = S.store.rail === 'custom';
       f = '<div class="f"><label>' + esc(LABEL.rail_def) + ' <span class="n">· 15-min hold</span></label>'
         + '<div class="row">'
@@ -582,7 +575,7 @@ function renderFields() {
         + '<span style="width:5rem"><input data-rd="fixed" type="number" step="0.01" min="0" placeholder="+ fixed" value="' + esc(d.fixed != null ? d.fixed : '') + '"></span>'
         + '</div><p class="hint">' + (on
           ? 'This wording and these numbers go on the buyer’s slip. Percent is their fee, “+ fixed” is per payment. Leave everything blank and orders say “pay on collection”.'
-          : 'Not used while a listed method is selected. Choose “My own method (I describe it)” in the rail list above and this becomes what buyers are told.') + '</p></div>';
+          : 'Not used while a listed method is selected. Choose “My own method (I describe it)” above and this becomes what buyers are told.') + '</p></div>';
     } else {
       var num = typeof v === 'number';
       f = '<div class="f"><label>' + esc(LABEL[k] || k) + (inst ? '' : ' <span class="n">· 15-min hold</span>') + '</label>'
@@ -625,10 +618,10 @@ function saveSettings() {
       q('#saveMsg').innerHTML = '<span style="color:#b00020">' + esc(e) + '</span>';
       return;
     }
-    q('#saveMsg').textContent = (r.j.applied_now || []).length ? 'Saved instantly: ' + r.j.applied_now.join(', ') : '';
+    q('#saveMsg').textContent = (r.j.applied_now || []).length ? 'Saved: ' + r.j.applied_now.join(', ') : '';
     if ((r.j.held || []).length) q('#saveMsg').textContent += ' · queued: ' + r.j.held.join(', ');
     load();
-    setTimeout(load, 16000);
+    setTimeout(load, 16000);          // one more look, so a held change shows as applied
   });
 }
 function renderPending() {
@@ -639,13 +632,13 @@ function renderPending() {
   el.classList.remove('hide');
   el.innerHTML = '<b>' + (ms > 0 ? Math.floor(ms / 60000) + ':' + String(Math.floor(ms / 1000) % 60).padStart(2, '0') : 'now') + '</b> until your queued change goes live: '
     + esc(Object.keys(p.fields || {}).join(', ')) + ' → ' + esc(Object.keys(p.fields || {}).map(function (k) { return k + ' ' + p.fields[k]; }).join(', '))
-    + '<div style="display:flex;gap:.4rem;margin-top:.4rem;flex-wrap:wrap"><button class="sm" id="rev2">Cancel it</button><button class="sm" id="op2">Apply now is not possible by design — cancel, or wait</button></div>'
-    + '<div class="hint" style="margin-top:.4rem">Buyers who ordered before the change still pay the details on their slip.</div>';
+    + '<div style="display:flex;gap:.4rem;margin-top:.4rem;flex-wrap:wrap"><button class="sm" id="rev2">Cancel it</button><span class="hint" style="align-self:center">Buyers who ordered before the change pay the details on their slip.</span></div>';
   q('#rev2').onclick = function () { api('/api/settings/revert', { handle: S.handle }).then(load); };
   if (ms > 0) S.pendTimer = setInterval(function () { if (ms <= 0) { load(); return; } ms -= 1000; renderPending(); }, 1000);
 }
 function renderAudit() {
   var a = S.audit || [];
+  q('#detLog').querySelector('summary').textContent = 'Recent changes (' + a.length + ')';
   q('#audit').innerHTML = a.length ? a.slice(0, 12).map(function (r) {
     var ch = r.changed || r.staged ? ((r.changed || 0) + ' applied, ' + (r.staged || 0) + ' queued') : '';
     var diff = r.fields && r.before ? r.fields.map(function (k) { return k + ': ' + esc(r.before[k] || '—') + ' → ' + esc(r.after[k] || '—'); }).join('<br>') : '';
@@ -655,144 +648,161 @@ function renderAudit() {
 function revoke() {
   if (!confirm('This signs out every device that has your dashboard open — including this one, on its next refresh — and replaces your API key. Your PIN is not touched, so you can sign straight back in with it. Continue?')) return;
   api('/api/revoke', { handle: S.handle }).then(function (r) {
-    if (!r.j || !r.j.ok) { alert((r.j && r.j.error) || 'failed'); return; }
+    if (!r.j || !r.j.ok) { q('#revOut').innerHTML = '<div class="flags">' + esc((r.j && r.j.error) || 'did not go through') + '</div>'; return; }
     q('#revOut').innerHTML = '<div class="hint" style="margin-top:.5rem">Done. Sign in again with ' + esc(S.handle) + ' and your PIN — this device is signed out, every other one too.</div>'
       + '<div class="hint" style="margin-top:.4rem">New API key for your own tools: <b>' + esc(r.j.api_key) + '</b> (send it as <code>x-tapstall-admin</code>). ' + esc(r.j.note || '') + '</div>';
   });
 }
 
 /* ----------------------------------------------------------------- orders */
-function render() {
-  var rows = S.orders.filter(function (o) {
+function open(o) { return o.status !== 'paid' && o.status !== 'cancelled'; }
+function renderOrders() {
+  var todays = S.todays || [];
+  var due = todays.filter(open), cod = todays.filter(function (o) { return o.status === 'cod'; });
+  var tot = todays.reduce(function (a, o) { return a + ((o.pricing && o.pricing.total) || 0); }, 0);
+  var fl = S.orders.filter(function (o) { return o && (o.risk_flags || []).length; }).length;
+  q('#sN').textContent = due.length; q('#sV').textContent = tot.toFixed(2);
+  q('#sC').textContent = cod.length; q('#sF').textContent = fl;
+  q('#sFw').className = 'stat' + (fl ? ' bad' : '');
+  q('#allSum').textContent = 'All orders (' + S.orders.length + ')';
+  q('#toDo').innerHTML = due.length ? due.slice(0, 12).map(row).join('')
+    : (S.orders.length ? '<div class="hint" style="padding:.3rem 0">Nothing waiting. Every order today is either paid or cancelled.</div>'
+      : '<div class="empty">No orders yet.<br><button class="sm" id="firstShare" style="margin-top:.4rem">Copy my store link</button></div>');
+  if (q('#firstShare')) q('#firstShare').onclick = function () { copyText(storeUrl()); this.textContent = 'Copied ✓'; };
+  q('#list').innerHTML = rowsShown().length ? rowsShown().map(row).join('')
+    : '<div class="empty">Nothing in this view.</div>';
+  bind(due.length ? q('#toDo') : null); bind(q('#list'));
+}
+function rowsShown() {
+  return S.orders.filter(function (o) {
     if (!o) return false;
     if (S.filter === 'all') return true;
     if (S.filter === 'flag') return (o.risk_flags || []).length > 0;
     if (S.filter === 'paid') return o.status === 'paid';
-    if (S.filter === 'new') return o.status !== 'paid' && o.status !== 'cancelled';
-    return true;
+    if (S.filter === 'cancel') return o.status === 'cancelled';
+    return open(o);
   });
-  var tot = 0, cod = 0, fl = 0;
-  S.orders.forEach(function (o) { if (!o) return; tot += (o.pricing && o.pricing.total) || 0; if (o.status === 'cod') cod += 1; if ((o.risk_flags || []).length) fl += 1; });
-  q('#sN').textContent = S.orders.length; q('#sV').textContent = tot.toFixed(0); q('#sC').textContent = cod; q('#sF').textContent = fl;
-  q('#list').innerHTML = rows.length ? rows.map(function (o) {
-    var p = o.pricing || {};
-    return '<div class="o' + ((o.risk_flags || []).length ? ' flag' : '') + '">' +
-      '<div class="h"><div><span class="c">' + esc(o.code) + '</span> <span class="t">' + new Date(o.at).toLocaleString() + '</span></div>' +
-      '<div class="m">' + (p.pay_now || p.total || 0).toFixed(2) + ' ' + esc(S.store.currency || 'USD') + '</div></div>' +
-      '<div style="margin-top:.35rem"><span class="badge ' + (o.status === 'paid' ? 'paid' : (o.status === 'cod' ? 'cod' : 'new')) + '">' + esc(o.status) + '</span> ' +
-      '<span class="badge">' + esc(o.service) + '</span>' +
-      (o.prior_unpaid ? ' <span class="badge">' + o.prior_unpaid + ' unpaid before</span>' : '') +
-      (o.confirm_url ? ' <span class="badge">confirm link 72h</span>' : '') +
-      '</div>' +
-      '<div class="it">' + esc(o.buyer && o.buyer.name) + ' · ' + esc(o.buyer && o.buyer.phone) + (o.buyer && o.buyer.address ? ' · ' + esc(o.buyer.address) : '') + '\n' +
-      (o.items || []).map(function (i) { return (i.qty || 1) + 'x ' + esc(i.name); }).join('\n') +
-      (o.buyer && o.buyer.note ? '\nNote: ' + esc(o.buyer.note) : '') + '</div>' +
-      (p.fee_absorbed_by_merchant ? '<div class="pay">payment cost you absorb on this order: ' + p.fee_absorbed_by_merchant.toFixed(2) + ' (' + esc(p.rail && p.rail.label || '') + ')</div>' : '') +
-      ((o.risk_flags || []).length ? '<div class="flags">⚠ ' + esc(o.risk_flags.join(' · ')) + '</div>' : '') +
-      '<div class="acts">' +
-      (o.status !== 'paid' && o.status !== 'cancelled' ? '<button class="sm ok" data-pay="' + esc(o.id) + '">Mark paid</button>' : '') +
-      (o.status === 'paid' ? '<button class="sm" data-reopen="' + esc(o.id) + '">Undo — unpaid</button>' : '') +
-      (o.status !== 'cancelled' ? '<button class="sm" data-cancel="' + esc(o.id) + '">Cancel</button>' : '') +
-      '<button class="sm" data-wa="' + esc(o.id) + '">WhatsApp buyer</button>' +
-      '<button class="sm" data-cp="' + esc(o.id) + '">Copy details</button>' +
-      '</div></div>';
-  }).join('') : '<div class="card empty">No orders in this view yet. Share your store link: /s/' + esc(S.handle) + '</div>';
-
-  qa('[data-pay]').forEach(function (b) { b.onclick = function () { mark(b.getAttribute('data-pay'), 'paid'); }; });
-  qa('[data-cancel]').forEach(function (b) { b.onclick = function () { mark(b.getAttribute('data-cancel'), 'cancelled'); }; });
-  qa('[data-reopen]').forEach(function (b) { b.onclick = function () { mark(b.getAttribute('data-reopen'), 'awaiting_payment'); }; });
-  qa('[data-wa]').forEach(function (b) { b.onclick = function () {
-    var o = byId(b.getAttribute('data-wa')); if (!o || !o.buyer.phone) return;
+}
+function row(o) {
+  var p = o.pricing || {};
+  return '<div class="o' + ((o.risk_flags || []).length ? ' flag' : '') + '">'
+    + '<div class="h"><div><span class="c">' + esc(o.code) + '</span> <span class="t">' + new Date(o.at).toLocaleString() + '</span></div>'
+    + '<div class="m">' + (p.pay_now || p.total || 0).toFixed(2) + ' ' + esc(S.store.currency || 'USD') + '</div></div>'
+    + '<div class="it">' + esc(o.buyer && o.buyer.name) + (o.buyer && o.buyer.phone ? ' · ' + esc(o.buyer.phone) : '')
+    + (o.buyer && o.buyer.address ? ' · ' + esc(o.buyer.address) : '') + '\n'
+    + (o.items || []).map(function (i) { return (i.qty || 1) + 'x ' + esc(i.name); }).join('\n')
+    + (o.buyer && o.buyer.note ? '\nNote: ' + esc(o.buyer.note) : '') + '</div>'
+    + '<div><span class="badge ' + (o.status === 'paid' ? 'paid' : (o.status === 'cod' ? 'cod' : 'new')) + '">' + esc(o.status) + '</span> '
+    + '<span class="badge">' + esc(o.service) + '</span>'
+    + (o.prior_unpaid ? ' <span class="badge">' + o.prior_unpaid + ' unpaid before</span>' : '')
+    + (o.confirm_url && o.status !== 'paid' ? ' <span class="badge">confirm link 72h</span>' : '')
+    + '</div>'
+    + (p.fee_absorbed_by_merchant ? '<div class="pay">payment cost you absorb: ' + p.fee_absorbed_by_merchant.toFixed(2) + ' (' + esc(p.rail && p.rail.label || '') + ')</div>' : '')
+    + ((o.risk_flags || []).length ? '<div class="flags">⚠ ' + esc(o.risk_flags.join(' · ')) + '</div>' : '')
+    + (open(o) ? '<button class="ok big" data-pay="' + esc(o.id) + '" style="margin-top:.5rem">Paid — money arrived</button>' : '')
+    + '<details><summary>undo, cancel, message the buyer</summary><div class="acts">'
+    + (o.status === 'paid' ? '<button class="sm" data-reopen="' + esc(o.id) + '">Undo — not paid</button>' : '')
+    + (o.status !== 'cancelled' ? '<button class="sm" data-cancel="' + esc(o.id) + '">Cancel</button>' : '')
+    + '<button class="sm" data-wa="' + esc(o.id) + '">WhatsApp buyer</button>'
+    + '<button class="sm" data-cp="' + esc(o.id) + '">Copy slip</button>'
+    + '</div></details></div>';
+}
+function bind(scope) {
+  var root = scope || document;
+  qa('[data-pay]', root).forEach(function (b) { b.onclick = function () { mark(b.getAttribute('data-pay'), 'paid', b); }; });
+  qa('[data-cancel]', root).forEach(function (b) { b.onclick = function () { mark(b.getAttribute('data-cancel'), 'cancelled', b); }; });
+  qa('[data-reopen]', root).forEach(function (b) { b.onclick = function () { mark(b.getAttribute('data-reopen'), 'awaiting_payment', b); }; });
+  qa('[data-wa]', root).forEach(function (b) { b.onclick = function () {
+    var o = byId(b.getAttribute('data-wa')); if (!o || !o.buyer || !o.buyer.phone) return;
     var txt = 'Hi ' + o.buyer.name + ", it's " + (S.store.shop_name || '') + '. Your order ' + o.code +
-      ' (' + (o.pricing.lines || []).map(function (l) { return l.qty + 'x ' + l.name; }).join(', ') + ') is ' + o.pricing.pay_now + ' ' + (S.store.currency || 'USD') + '.';
+      ' (' + ((o.pricing && o.pricing.lines) || o.items || []).map(function (l) { return l.qty + 'x ' + l.name; }).join(', ') + ') is '
+      + ((o.pricing && o.pricing.pay_now) || 0) + ' ' + (S.store.currency || 'USD') + '.';
     window.open('https://wa.me/' + String(o.buyer.phone).replace(/\D/g, '') + '?text=' + encodeURIComponent(txt), '_blank');
   }; });
-  qa('[data-cp]').forEach(function (b) { b.onclick = function () {
-    var o = byId(b.getAttribute('data-cp'));
-    var t = (o.code) + '\n' + o.buyer.name + ' ' + o.buyer.phone + (o.buyer.address ? '\n' + o.buyer.address : '') +
-      '\n' + (o.items || []).map(function (i) { return (i.qty || 1) + 'x ' + i.name; }).join('\n') +
-      '\nPay ' + ((o.pay || {}).amount != null ? o.pay.amount : o.pricing.pay_now) + ' ' + ((o.pay || {}).currency || S.store.currency || 'USD')
-      + ' → ' + ((o.pay || {}).account || S.store.pay_account || '') + ' ref ' + ((o.pay || {}).reference || o.code);
-    if (navigator.clipboard) navigator.clipboard.writeText(t).then(function () { b.textContent = 'Copied ✓'; });
+  qa('[data-cp]', root).forEach(function (b) { b.onclick = function () {
+    var o = byId(b.getAttribute('data-cp')); if (!o) return;
+    copyText(orderSlip(o)); b.textContent = 'Copied ✓';
   }; });
-  qa('#filters .sm').forEach(function (b) {
-    b.onclick = function () { S.filter = b.getAttribute('data-f'); qa('#filters .sm').forEach(function (x) { x.classList.toggle('on', x === b); x.style.background = x === b ? '#0b0f14' : '#fff'; x.style.color = x === b ? '#fff' : '#101418'; }); render(); };
+}
+function orderSlip(o) {
+  var pay = o.pay || {};
+  return (o.code || '') + '\n' + ((o.buyer || {}).name || '') + ' ' + ((o.buyer || {}).phone || '') + (o.buyer && o.buyer.address ? '\n' + o.buyer.address : '') + '\n'
+    + (o.items || []).map(function (i) { return (i.qty || 1) + 'x ' + i.name; }).join('\n') + '\n'
+    + 'Pay ' + (pay.amount != null ? pay.amount : (o.pricing || {}).pay_now) + ' ' + (pay.currency || S.store.currency || 'USD')
+    + ' → ' + (pay.account || S.store.pay_account || '') + ' ref ' + (pay.reference || o.code);
+}
+function copyText(t) { if (navigator.clipboard) navigator.clipboard.writeText(t); }
+qa('#filters .sm').forEach(function (b) {
+  b.onclick = function () { S.filter = b.getAttribute('data-f'); qa('#filters .sm').forEach(function (x) { x.classList.toggle('on', x === b); }); q('#list').innerHTML = rowsShown().length ? rowsShown().map(row).join('') : '<div class="empty">Nothing in this view.</div>'; bind(q('#list')); };
+});
+function byId(id) { for (var i = 0; i < S.orders.length; i++) if (S.orders[i] && S.orders[i].id === id) return S.orders[i]; return null; }
+function mark(id, status, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  api('/api/mark', { handle: S.handle, id: id, status: status }).then(function (r) {
+    if (!r.j || !r.j.ok) { if (btn) { btn.disabled = false; btn.textContent = 'Paid — money arrived'; } q('#toDo').insertAdjacentHTML('afterbegin', '<div class="flags">' + esc((r.j && r.j.error) || 'did not save') + '</div>'); return; }
+    load();
   });
 }
-function renderMenu() {
+
+/* ------------------------------------------------------------------ shop */
+function renderShop() {
   var feed = S.feed || [];
-  q('#menuStats').innerHTML = '<div class="stat"><b>' + feed.length + '</b><span>items loaded</span></div>'
-    + '<div class="stat"><b>' + (feed.filter(function (p) { return p.out; }).length) + '</b><span>out of stock</span></div>'
-    + '<div class="stat"><b>' + (S.store.feed_cache_seconds || 120) + 's</b><span>re-read every</span></div>';
+  var warns = [];
+  if (!S.store.pay_account && S.store.rail !== 'cash' && S.store.rail !== 'custom') warns.push('No payment account set, so buyers are told nothing about how to pay. Fix it under “Change what buyers see”, field “Payment account”.');
+  if (S.store.rail === 'cash') warns.push('Method is cash / on delivery: nothing to reconcile online, count the driver at the end of the day.');
+  var sw = q('#shopWarn');
+  sw.classList.toggle('hide', !warns.length); sw.innerHTML = warns.map(function (t) { return '⚠ ' + esc(t); }).join('<br>');
+  var n = feed.length, out = feed.filter(function (p) { return p.out; }).length;
+  q('#menuN').textContent = n ? (n + ' items' + (out ? ' · ' + out + ' out of stock' : '')) : 'No menu loaded';
+  q('#menuSub').textContent = n ? 're-read every ' + (S.store.feed_cache_seconds || 120) + 's' : (S.store.feed_error || 'add your Google Sheet link under “Change what buyers see”');
   q('#menuOpen').href = S.store.feed_url || '#';
-  q('#menuUrl').value = S.store.feed_url || '';
-  q('#menuList').innerHTML = feed.slice(0, 40).map(function (p) {
-    return '<div class="menuRow"><span>' + esc(p.name) + (p.category ? ' <span class="muted">· ' + esc(p.category) + '</span>' : '')
+  q('#menuList').innerHTML = feed.slice(0, 8).map(function (p) {
+    return '<div class="menuRow"><span>' + esc(p.name) + (p.category ? ' <span class="hint">· ' + esc(p.category) + '</span>' : '')
       + (p.out ? ' <span class="badge bad">out</span>' : '') + '</span><b>' + Number(p.price || 0).toFixed(2) + '</b></div>';
-  }).join('') || '<p class="muted">Nothing loaded yet.</p>';
+  }).join('') + (feed.length > 8 ? '<div class="hint" style="padding-top:.3rem">+ ' + (feed.length - 8) + ' more in your sheet</div>' : '');
   var w = q('#menuWarn');
-  if (!feed.length) { w.classList.remove('hide'); w.innerHTML = '0 items. ' + esc(S.store.feed_error || 'Check the sheet is shared as “anyone with the link — Viewer”, and that row 1 is the header row.') + ' Then press Re-read.'; }
+  if (!n) { w.classList.remove('hide'); w.innerHTML = '0 items, so buyers see an empty shop. ' + esc(S.store.feed_error || 'Check the sheet is shared as “anyone with the link — Viewer”, and that row 1 is the header row.') + ' Then press Re-read.'; }
   else if (S.store.feed_error) { w.classList.remove('hide'); w.textContent = 'Loaded, but: ' + S.store.feed_error; }
   else w.classList.add('hide');
-  q('#menuReload').onclick = function () {
-    var b = this; b.textContent = 'reading…';
-    api('/s/' + S.handle + '/feed.json').then(function (r) {
-      S.feed = (r.j && r.j.products) || []; b.textContent = 'Re-read my sheet now'; renderMenu();
-      alert('Sheet re-read: ' + S.feed.length + ' items. Your store shows it within ' + (S.store.feed_cache_seconds || 120) + ' seconds, no one else needed.');
-    });
-  };
-  q('#menuCopy').onclick = function () {
-    var t = 'id,name,category,price,currency,options,addons,stock,popular';
-    if (navigator.clipboard) navigator.clipboard.writeText(t).then(function () { q('#menuCopy').textContent = 'Copied ✓'; });
-  };
-  q('#menuUrlSave').onclick = function () {
-    api('/api/settings', { handle: S.handle, feed_url: q('#menuUrl').value.trim() }).then(function (r) {
-      if (!r.j || !r.j.ok) { alert((r.j && r.j.error) || 'did not save'); return; }
-      alert((r.j.note || 'Saved.') + (r.j.held && r.j.held.length ? ' (menu source is queued: it goes live after the hold, and you can cancel it.)' : ''));
-      load();
-    });
-  };
 }
+
+/* --------------------------------------------------------------- plan/link */
 function renderPlan() {
   var left = Math.ceil(((S.store.paid_until || 0) - Date.now()) / 864e5);
   var tot = S.orders.reduce(function (a, o) { return a + ((o && o.pricing && o.pricing.total) || 0); }, 0);
   q('#planStats').innerHTML = '<div class="stat"><b>' + (left > 0 ? left : '0') + '</b><span>days left</span></div>'
-    + '<div class="stat"><b>' + (S.store.plan || 'free60') + '</b><span>plan</span></div>'
+    + '<div class="stat"><b>' + esc(S.store.plan || 'free60') + '</b><span>plan</span></div>'
     + '<div class="stat"><b>' + tot.toFixed(2) + '</b><span>' + esc(S.store.currency || 'USD') + ' on record</span></div>';
   q('#planNote').textContent = left > 30
     ? 'Nothing to do. Renewal is one payment a year, and the store keeps its menu, history and links exactly as they are.'
-    : (left > 0 ? 'Ends in ' + left + ' days. Renew whenever — it stacks, so paying early loses nothing.' : 'Expired: the store is answering buyers with a “renew” notice.');
+    : (left > 0 ? 'Ends in ' + left + ' days. Renew whenever — it stacks, so paying early loses nothing.' : 'Expired: buyers are shown a renew notice instead of the menu.');
   q('#planRenew').href = S.store.renew_url || '/onboard';
   q('#planPaused').classList.toggle('hide', !S.store.suspended);
-  q('#planExport').onclick = exportCsv;
 }
+function storeUrl() { return location.origin + '/s/' + S.handle; }
 function renderShare() {
-  var url = location.origin + '/s/' + S.handle;
+  var url = storeUrl();
   q('#shareLn').textContent = url; q('#shareLn').href = url;
   q('#shareFrame').src = url;
-  q('#shareCopy').onclick = function () { if (navigator.clipboard) navigator.clipboard.writeText(url).then(function () { q('#shareOut').classList.remove('hide'); q('#shareOut').textContent = 'Copied. Now: WhatsApp business profile → “Short description”, and your Instagram bio.'; }); };
+  q('#shareCopy').onclick = function () { copyText(url); this.textContent = 'Copied ✓'; };
   q('#shareStatus').onclick = function () {
     var txt = (S.store.shop_name || S.handle) + ' is taking orders here → ' + url + '\nPick what you want, send the exact amount, the odd cents tell me it is you. No app, no login.';
-    if (navigator.clipboard) navigator.clipboard.writeText(txt).then(function () { q('#shareOut').classList.remove('hide'); q('#shareOut').textContent = 'Status text copied — paste it into your WhatsApp status or broadcast list.'; });
+    copyText(txt); this.textContent = 'Copied ✓';
   };
   q('#sharePoster').onclick = function () {
-    var w = window.open('', '_blank'); if (!w) { alert('Allow pop-ups to print'); return; }
+    var w = window.open('', '_blank'); if (!w) { say('shareOut', 'Allow pop-ups to print'); return; }
     w.document.write('<!doctype html><meta charset=utf-8><title>' + esc(S.store.shop_name || S.handle) + '</title><body style="font:16px system-ui;margin:0;padding:2rem;text-align:center">'
       + '<h1 style="font-size:1.7rem;margin:.2rem 0">' + esc(S.store.shop_name || S.handle) + '</h1><p style="color:#555;margin:.2rem 0 1rem">Order ahead — no app, no login</p>'
       + '<img alt="QR" src="https://api.qrserver.com/v1/create-qr-code/?size=420x420&data=' + encodeURIComponent(url) + '" style="width:min(70vw,420px)">'
       + '<p style="font-family:ui-monospace,monospace;word-break:break-all">' + esc(url) + '</p>'
-      + '<p style="color:#777;font-size:.85rem">Tape it on the counter. When the menu changes, you edit your sheet — this poster stays correct.</p>'
+      + '<p style="color:#777;font-size:.85rem">Tape it on the counter. When the menu changes you edit your sheet — this poster stays correct.</p>'
       + '<scr' + 'ipt>window.onload=function(){window.print()}<' + '/scr' + 'ipt></body>');
     w.document.close();
   };
 }
-function byId(id) { for (var i = 0; i < S.orders.length; i++) if (S.orders[i] && S.orders[i].id === id) return S.orders[i]; return null; }
-function mark(id, status) {
-  api('/api/mark', { handle: S.handle, id: id, status: status }).then(function (r) {
-    if (!r.j || !r.j.ok) { alert((r.j && r.j.error) || 'failed'); return; }
-    load();
-  });
-}
+function say(where, t) { var e = q('#' + where); if (!e) return; e.classList.remove('hide'); e.textContent = t; }
+
+/* ------------------------------------------------------------- bookkeeping */
 function exportCsv() {
   var head = 'code,when,status,name,phone,service,items,total,currency,pay_to,reference,flags\n';
   var body = S.orders.map(function (o) { if (!o) return ''; var p = o.pricing || {};
@@ -807,22 +817,22 @@ function dl(name, text) {
 function printDay() {
   var today = new Date().toDateString();
   var rows = S.orders.filter(function (o) { return o && new Date(o.at).toDateString() === today; });
-  var w = window.open('', '_blank'); if (!w) { alert('Allow pop-ups to print'); return; }
+  var w = window.open('', '_blank'); if (!w) { say('shareOut', 'Allow pop-ups to print'); return; }
   var tot = rows.reduce(function (a, o) { return a + ((o.pricing || {}).total || 0); }, 0);
   var cod = rows.filter(function (o) { return o.status === 'cod'; }).reduce(function (a, o) { return a + ((o.pricing || {}).total || 0); }, 0);
-  w.document.write('<!doctype html><meta charset=utf-8><title>Day sheet</title><body style="font:14px ui-monospace,Menlo,monospace;padding:1.2rem">' +
-    '<h2>' + esc(S.store.shop_name || S.handle) + ' — ' + today + '</h2>' +
-    '<p>Orders: ' + rows.length + ' · Total: ' + tot.toFixed(2) + ' ' + esc(S.store.currency || 'USD') + ' · Cash to reconcile: ' + cod.toFixed(2) + '</p><hr>' +
-    rows.map(function (o) { var p = o.pricing || {};
-      return '<p><b>' + esc(o.code) + '</b> ' + new Date(o.at).toLocaleTimeString().slice(0,5) + ' · ' + esc(o.buyer.name) + ' · ' + esc(o.buyer.phone) +
-        (o.buyer.address ? ' · ' + esc(o.buyer.address) : '') +
-        '<br>&nbsp;&nbsp;' + esc((o.items || []).map(function (i) { return (i.qty || 1) + 'x ' + i.name; }).join(', ')) +
-        '<br>&nbsp;&nbsp;menu ' + (p.total || 0).toFixed(2) + ' · collect ' + (p.pay_now || 0).toFixed(2) + ' ' + (S.store.currency || 'USD') +
-        ' via ' + esc((o.pay && o.pay.rail) || (p.rail || {}).label || 'cash') + ' [' + esc((o.pay && o.pay.account) || S.store.pay_account || '') + '] ref ' + esc((o.pay && o.pay.reference) || o.code) +
-        '<br>&nbsp;&nbsp;<b>' + esc(o.status) + '</b>' + ((o.risk_flags || []).length ? ' ⚠ ' + esc(o.risk_flags.join(', ')) : '') + '</p>';
-    }).join('') +
-    '<p><i>Driver cash to reconcile at end of day: ' + cod.toFixed(2) + ' ' + esc(S.store.currency || 'USD') + '</i></p>' +
-    '<scr' + 'ipt>window.onload=function(){window.print()}</' + 'script></body>');
+  w.document.write('<!doctype html><meta charset=utf-8><title>Day sheet</title><body style="font:14px ui-monospace,Menlo,monospace;padding:1.2rem">'
+    + '<h2>' + esc(S.store.shop_name || S.handle) + ' — ' + today + '</h2>'
+    + '<p>Orders: ' + rows.length + ' · Total: ' + tot.toFixed(2) + ' ' + esc(S.store.currency || 'USD') + ' · Cash to reconcile: ' + cod.toFixed(2) + '</p><hr>'
+    + rows.map(function (o) { var p = o.pricing || {};
+      return '<p><b>' + esc(o.code) + '</b> ' + new Date(o.at).toLocaleTimeString().slice(0, 5) + ' · ' + esc(o.buyer.name) + ' · ' + esc(o.buyer.phone)
+        + (o.buyer.address ? ' · ' + esc(o.buyer.address) : '')
+        + '<br>&nbsp;&nbsp;' + esc((o.items || []).map(function (i) { return (i.qty || 1) + 'x ' + i.name; }).join(', '))
+        + '<br>&nbsp;&nbsp;menu ' + (p.total || 0).toFixed(2) + ' · collect ' + (p.pay_now || 0).toFixed(2) + ' ' + (S.store.currency || 'USD')
+        + ' via ' + esc((o.pay && o.pay.rail) || (p.rail || {}).label || 'cash') + ' [' + esc((o.pay && o.pay.account) || S.store.pay_account || '') + '] ref ' + esc((o.pay && o.pay.reference) || o.code)
+        + '<br>&nbsp;&nbsp;<b>' + esc(o.status) + '</b>' + ((o.risk_flags || []).length ? ' ⚠ ' + esc(o.risk_flags.join(', ')) : '') + '</p>';
+    }).join('')
+    + '<p><i>Driver cash to reconcile at end of day: ' + cod.toFixed(2) + ' ' + esc(S.store.currency || 'USD') + '</i></p>'
+    + '<scr' + 'ipt>window.onload=function(){window.print()}</' + '/scr' + 'ipt></body>');
   w.document.close();
 }
 </script>
