@@ -49,23 +49,29 @@ it is what the Email binding will allow, not a brand choice. The orphan namespac
 `zimlink-store` (b32c2fe9…) is still there for you to delete. `LEGACY_WORKER_NAME`
 is one line to remove once the old hostname stops getting traffic.
 
-## Live right now (measured 2026-10-10, 13:2x UTC)
+## Live right now (measured 2026-10-11, 13:0x UTC — after the KV republish)
+
+The rename is finished on the surfaces, not only in git: the eight pages that were
+waiting on the day's write budget are published, and every brand-sensitive path now
+answers `0` matches for `ZimLink`. `scripts/prod_check.sh` → **125 passed, 0 blocked,
+0 failed**, the first fully green run of it (every earlier one had ~15 write assertions
+the quota turned off).
 
 | What | Where | Proof |
 |---|---|---|
-| Worker (canonical) | `https://tapstall.simalidudu.workers.dev` | `/__ping` → `{"ok":true,"version":"0.5.0"}` |
-| Previous hostname | `https://zimlink.simalidudu.workers.dev` | same build (`/__ping` → 0.5.0); `GET /s/mamatoe`, `/a?code=…`, `/ops` → `301` to the canonical origin; `POST /api/order` is **not** redirected — it answers `503 who:"buyer"` because today's writes are gone, which is the point: a rename never eats a request body |
-| Onboarding | `/onboard` | 35,692 B served vs 38,180 B in git: the KV copy predates the rename and cannot be republished until the day's writes return (`429`/`10048`, measured) — the page still works because `fillPage` fills either marker spelling |
-| Operator console | `/ops` | old copy served, session hook filled (`"signed_in":false`); a live `tp_ops` cap reads `/ops/api/state` → 2 stores, 0 attention, no `admin_token`; **the same cap under `zl_ops` → 200**; login sets `tp_ops` and clears `zl_ops` |
-| Markets & rails | `/rails`, `/ops/api/rails` | 9 built-in + 0 added = 10 live; `/ops/api/rails` → `401` anonymous, `422` for a label-less rail; `rail_catalogue_ok`, `rail_custom_ok`, `rail_price_with_own` all true in `/__selftest` |
-| Money pages from KV | `tpl:confirm`, `tpl:renew`, `tpl:ops` | all eight `tpl_*` true, so nothing is on the inline fallback |
-| Rate calculator | `/fees?aov=7&n=140&…&m=zw` | 200, 11,117 B (git is 11,119 — the two bytes are the brand in `<title>`) |
-| Landing + calculator mirror | `https://king-kunta-cpu.github.io/tapstall/` | `/` and `/fees` 200, titled "Tapstall calculator" (Pages is built from git, so it moved with the commit). The old `…/zimlink/` path is `404`, which is exactly why `PAGES_URL` and `REPO_RAW` changed in the same release. `/onboard` was `404` too — see the mirror paragraph below |
-| Mirror sign-up link | measured 2026-10-10 | `pages/index.html` and `pages/fees.html` both carry `href="/onboard"`. On the Worker that is a template; on Pages it was nothing, because `pages/public/_redirects` held `/onboard /onboard 200` — a Netlify convention that GitHub Pages does not implement. Fixed with a real handoff file and a test that walks every internal link on the mirror against the artifact |
-| Demo tenants | `/s/mamatoe`, `/s/kotaking` | 4 products from each store's own CSV; `feed.json` answers 200 on a day with no KV writes; `config.json` carries `rail_info` |
+| Worker (canonical) | `https://tapstall.simalidudu.workers.dev` | `/__ping` → `{"ok":true,"version":"0.5.0"}`; `/__selftest` → `ok:true`, only `email` false (no SMTP is a choice, not a gap) |
+| Brand sweep, served | `/`, `/fees`, `/onboard`, `/ops`, `/s/mamatoe`, `/s/kotaking`, `/a` | `0` matches for `ZimLink` on each, and `0` matches for `*/null` — the literal signature of a config hook nobody filled |
+| Titles, as a customer sees them | same seven paths | `Tapstall — a WhatsApp store your customers can actually pay` · `What your WhatsApp orders actually cost you — Tapstall calculator` · `Tapstall — set up your WhatsApp order desk` · `Tapstall Store` · `Tapstall · operator` |
+| KV vs git, byte for byte | `tpl:store onboard admin fees index confirm renew ops` | published today: `store 25,301 → 26,714`, `onboard 35,692 → 38,180`, `admin 49,711 → 51,908`, `fees 11,117 → 11,119`, `index 2,997 → 2,998`, `confirm 17,115 → 17,119`, `renew 17,621 → 17,626`, `ops 37,364 → 42,228` — right-hand figures are git's sizes, so served == shipped. `sample-menu.csv` was skipped as identical, which is the same code path a re-run takes |
+| Previous hostname | `https://zimlink.simalidudu.workers.dev` | same build. `/`, `/fees`, `/onboard`, `/ops`, `/s/mamatoe`, `/a?code=…`, `/c/abc`, `/renew/x` → `301` to the canonical origin with the **query preserved**; `POST /api/login`, `/api/order`, `/api/lookup` → `401`, `422`, `404` — answered by the app, never bounced, because a rename must not eat a request body |
+| Operator console | `/ops` | served copy is the renamed one; a live `tp_ops` cap reads `/ops/api/state` → 2 stores, 0 attention, no `admin_token`; the same cap under **`zl_ops` → 200**; login sets `tp_ops` and clears `zl_ops` |
 | Merchant API | `/api/admin?handle=mamatoe` | `200` with 22 orders, `via:"key"`, under **either** `x-tapstall-admin` or `x-zimlink-admin`; no header → `401` |
-| CI/CD | `.github/workflows/deploy.yml` | run #27 `success` at 0.5.0 on the renamed repo: tests → templates (refused, warned) → Worker → **alias Worker** → cron → Pages |
-| Selftest | `/__selftest` | `ok:false` for one honest reason — its own write probe — reported as `kv_write_blocked:{reason:"quota",retry_in_sec:…}` beside the other 30+ answers |
+| Markets & rails | `/rails`, `/ops/api/rails` | 9 built-in + 0 added = 10 live; `401` anonymous, `422` for a label-less rail; `rail_catalogue_ok`, `rail_custom_ok`, `rail_price_with_own` true |
+| Landing + calculator mirror | `https://king-kunta-cpu.github.io/tapstall/` | `/` and `/fees` 200; `index.html` 2,998 B and `fees.html` 11,119 B **byte-identical to git** (CI copies them into the artifact, so the mirror cannot carry a stale draft). The old `…/zimlink/` path is `404`, which is why `PAGES_URL` and `REPO_RAW` moved in the same release |
+| Mirror sign-up link | `/tapstall/onboard` | `200` on both `onboard` and `onboard.html`, handing off to `…workers.dev/onboard` and keeping the query string. It was `404` until today — see the mirror paragraph below |
+| Alias cron | `/__selftest` on each origin | canonical `cron_owner:true`, alias `cron_owner:false`: the alias still *carries* the inherited schedule (this token cannot delete one) and ignores it in code, so one KV is swept once a day |
+| Demo tenants | `/s/mamatoe`, `/s/kotaking` | 4 products from each store's own CSV; `config.json` carries `rail_info`; `feed.json` 200 |
+| CI/CD | `.github/workflows/deploy.yml` | run #32 `success` on both jobs at 0.5.0: tests → templates → Worker → **alias Worker** → cron → Pages (`deploy-pages` failed three times on GitHub's side with *Fetching artifact metadata failed*; a `rerun-failed-jobs` call is the whole fix) |
 
 ## Verified on production, not only in tests
 

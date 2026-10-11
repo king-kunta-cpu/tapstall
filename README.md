@@ -290,12 +290,16 @@ see and cancel, and because revoking takes one press.
 | Deploy log of the last CI run | `https://raw.githubusercontent.com/king-kunta-cpu/tapstall/main/ci-deploy.log` |
 | Re-run a failed deploy | `POST /repos/king-kunta-cpu/tapstall/actions/runs/<id>/rerun-failed-jobs` with the repo PAT — the one Actions call that works (job *logs* are not readable with it, which is why `ci-deploy.log` and step annotations exist). `deploy-pages` fails on GitHub's side from time to time — "Fetching artifact metadata failed… re-run the deployment at a later time" — and a rerun is the whole fix; the Worker job is unaffected, so the product stays live and current while the mirror lags a run |
 
-`STATUS.md` records what has been proven on production, the one item still
-waiting on a clock (the cron heartbeat), and the deliberate limits.
+`STATUS.md` records what has been proven on production and the deliberate limits.
+One measurement worth knowing before you trust it: `cron:last` lives in KV, so
+*both* origins report the same heartbeat — the value cannot tell you who swept. The
+field that does is `/__selftest`'s `cron_owner` (`true` on `tapstall`, `false` on the
+alias), which is what `deploy.sh` checks and what the test suite proves by watching
+every `cron:*` write while `REDIRECT_TO` is set.
 
 ## Verified
 
-`node --test tests/` → **94 pass** (28 unit on `core.js`, 42 driving the real
+`node --test tests/` → **96 pass** (28 unit on `core.js`, 42 driving the real
 bundled Worker against an in-memory KV — the full journey plus the authority
 model: forged/expired/revoked codes, inert GETs, the 15-minute hold, masked
 audit, cross-origin refusal, and now every `/ops` gate, lever and template rule;
@@ -306,7 +310,8 @@ two tenants (Harare/USD/EcoCash, Durban/ZAR/PayShap), order → one-tap paid,
 cross-tenant isolation, expiry → cron suspension → 503 → webhook → reinstated
 (`plan: annual`, 746 days). `/__selftest` reports bindings, all five templates,
 pricing, and a `secret_leak_check`. `scripts/prod_check.sh` (92 checks,
-several of them per-tenant loops) against the live Worker at v0.5.0: nine sections, covering the crawler prefetch, the 405s, the CORS split, the
+several of them per-tenant loops) against the live Worker at v0.5.0 → **125 passed,
+0 blocked, 0 failed**: nine sections, covering the crawler prefetch, the 405s, the CORS split, the
 15-minute hold, masked audit, revocation, self-serve recovery, cross-tenant
 refusal and — from v0.4.0 — the two consoles: money pages present in KV, `/ops`
 refusing an anonymous reader, the cookie's flags, a lever needing the confirm
