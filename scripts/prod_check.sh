@@ -51,6 +51,48 @@ code() { curl -s -m 30 -o /dev/null -w '%{http_code}' "$@"; }
 echo "target: $ORIGIN"
 echo "store:  $HANDLE"
 
+# ---- alias mode -------------------------------------------------------------
+# The previous brand's hostname is a redirect alias now. Running this harness
+# against it as if it were the app produced 20 red lines about pages that are
+# *supposed* to 301, which buries the only question an alias has to answer: does
+# it move people without losing anything, and does it stay out of the scheduled
+# work? So the role is detected, not assumed — `ORIGIN=https://zimlink…` picks up
+# alias mode on its own, and ROLE=alias forces it.
+CANON="${CANON:-https://tapstall.simalidudu.workers.dev}"
+ROLE="${ROLE:-auto}"
+if [[ "$ROLE" == "auto" ]]; then
+  if [[ "$(code "$ORIGIN/onboard")" == "301" ]]; then ROLE=alias; else ROLE=app; fi
+fi
+if [[ "$ROLE" == "alias" ]]; then
+  AV=$(grep -m1 "^const VERSION = " worker/worker.js | tr -dc '0-9.')
+  echo "mode: redirect alias — page paths must 301 to $CANON; everything else is answered here"
+  ck "an alias runs the same build as the app ($AV)" "\"$AV\"" "$(curl -s -m 30 "$ORIGIN/__ping")"
+  ck "an alias says it does not own the daily sweep" '"cron_owner":false' "$(curl -s -m 60 "$ORIGIN/__selftest")"
+  for path in / /fees /onboard /ops "/s/$HANDLE" "/a?code=xyz" /renew/abc /c/abc /rails /data/sample-menu.csv; do
+    HD=$(curl -s -m 30 -D - -o /dev/null "$ORIGIN$path" | tr -d '\r')
+    ck "$path moves" '^HTTP/[0-9.]+ 301' "$(printf '%s' "$HD" | head -1)"
+    # `?` and `.` are regex characters, and the query in `/a?code=xyz` is exactly
+    # the sort of thing an ERE eats, so the pair is checked as two plain substrings.
+    LOC=$(printf '%s' "$HD" | grep -i '^location:' | tr -d '[:space:]')
+    ck "  · $path arrives at the canonical origin" "location:${CANON}" "$LOC"
+    case "$path" in
+      *\?*) ck "  · $path keeps its query string" "${path#*\?}" "$LOC" ;;
+    esac
+  done
+  ck "a POST is never bounced, because a redirect eats the body" '^401$' "$(code -X POST -H 'content-type: application/json' -d '{"code":"junk"}' "$ORIGIN/api/login")"
+  ck "the buyer's order POST is answered here" '^(400|422|503)$' "$(code -X POST -H 'content-type: application/json' -d '{}' "$ORIGIN/api/order")"
+  ck "a data read is served, not redirected" '"ok":true' "$(curl -s -m 30 "$ORIGIN/api/lookup?handle=$HANDLE")"
+  BODY=$(curl -sL -m 60 "$ORIGIN/s/$HANDLE")
+  ck "following an old store link lands on a real store page" "$HANDLE" "$BODY"
+  ck "  · and that page carries no old brand" '^0$' "$(printf '%s' "$BODY" | grep -ci zimlink)"
+  ck "  · with every config hook filled" '^0$' "$(printf '%s' "$BODY" | grep -c '\*/null')"
+  ck "  · and the store config the buyer's page needs reads fine here too" '"rail_info"' "$(curl -sL -m 30 "$ORIGIN/s/$HANDLE/config.json")"
+  echo
+  printf '%s\n' "alias: passed: $pass   failed: $fail"
+  [[ $fail -eq 0 ]] || exit 1
+  exit 0
+fi
+
 echo "[1] version, and the security primitives inside the Worker's own runtime"
 WANT_VER=$(grep -m1 "^const VERSION = " worker/worker.js | tr -dc '0-9.')
 ck "ping reports the version in this checkout ($WANT_VER)" "\"$WANT_VER\"" "$(curl -s -m 30 "$ORIGIN/__ping")"
