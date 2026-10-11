@@ -43,8 +43,10 @@ const MENU = [
 
 function kvStub() {
   const m = new Map();
+  let writes = 0;                                 // the free plan allows 1,000 a day, total
   return {
     _map: m,
+    get _writes() { return writes; },
     async get(key, type) {
       if (!m.has(key)) return null;
       const v = m.get(key).value;
@@ -53,6 +55,7 @@ function kvStub() {
       return v;
     },
     async put(key, value, opts) {
+      writes++;
       m.set(key, { value: typeof value === 'string' ? value : JSON.stringify(value), exp: opts?.expirationTtl });
     },
     async delete(key) { m.delete(key); },
@@ -104,13 +107,14 @@ async function call(path, { method = 'GET', body, cookie, confirm, headers, ip }
 /** A form post, the way a page with no JavaScript (or a `<noscript>` fallback) sends one. */
 function form(o) { return Object.keys(o).map((k) => encodeURIComponent(k) + '=' + encodeURIComponent(o[k])).join('&'); }
 /** Sign in the way the merchant's browser does: exchange the emailed code for a cookie. */
-async function loginWithCode(adminUrl) {
-  const code = new URL(adminUrl, 'https://tapstall.test').searchParams.get('code');
-  const r = await call('/api/login', { method: 'POST', body: { code } });
+/** The merchant way in since 0.6.0: a key (the store name) and a PIN. */
+async function loginWithPin(key, pin) {
+  const r = await call('/api/auth', { method: 'POST', body: { key, pin } });
   const set = (r.headers.getSetCookie?.() || [])[0] || '';
   const m = set.match(/tp_sess=([^;]+)/);
   return { r, cookie: m ? 'tp_sess=' + m[1] : null };
 }
+const DEAD_LINK = 'v1.9999999999.eyJhIjoibG9naW4ifQ.deadbeef';   // what a pre-0.6 bookmark holds
 
 let store = {};
 
@@ -146,11 +150,12 @@ test('register creates a live store with no operator involvement', async () => {
   assert.equal(r.json.ok, true);
   assert.equal(r.json.products_loaded, 3, 'merchant sees instantly that the sheet parsed');
   assert.equal(r.json.feed_error, null, 'feed error surfaced to the merchant');
-  assert.ok(!/token=/.test(r.json.admin_url), 'no master key in the dashboard URL any more');
-  const code = new URL(r.json.admin_url, 'https://tapstall.test').searchParams.get('code');
-  assert.ok(code && code.startsWith('v1.'), 'dashboard link is a signed capability: ' + code);
+  assert.ok(!r.json.admin_url, 'the stored dashboard link is gone with the login scheme that needed it');
+  assert.ok(/^[0-9]{6}$/.test(String(r.json.pin)), 'the merchant gets a six-digit PIN');
+  assert.equal(r.json.key, 'mamatoe', 'the key is the store name, which they already know');
   assert.ok(!JSON.stringify(r.json).includes('admin_token'), 'register response does not echo the API key');
-  store = { handle: r.json.handle, code, admin_url: r.json.admin_url, renew_url: r.json.renew_url };
+  assert.ok(!JSON.stringify(r.json).includes('kdf'), 'nor does it echo the PIN record: only the PIN itself, once');
+  store = { handle: r.json.handle, key: r.json.key, pin: r.json.pin, renew_url: r.json.renew_url, code: DEAD_LINK };
   assert.match(store.handle, /^mamatoe$/);
   assert.ok(r.json.store_url.includes('/s/mamatoe'), 'store_url returned');
 });
@@ -233,26 +238,27 @@ test('the dashboard needs a session: the code opens it, nothing else does', asyn
   assert.equal(anon.json.need_login, true);
   const bad = await call('/api/admin?handle=mamatoe', { cookie: 'tp_sess=v1.9999999999.eyJhIjoic2VzcyJ9.deadbeef' });
   assert.equal(bad.status, 403, 'a forged or expired cookie is refused: ' + bad.text);
-  const s = await loginWithCode(store.admin_url);
+  const s = await loginWithPin(store.key, store.pin);
   assert.equal(s.r.status, 200, s.r.text);
-  assert.ok(s.cookie && s.cookie.startsWith('tp_sess='), 'login sets a session cookie');
+  assert.ok(s.cookie && s.cookie.startsWith('tp_sess='), 'the PIN opens a session cookie');
   const sc = s.r.headers.get('set-cookie') || '';
   assert.match(sc, /HttpOnly/, 'the dashboard page script cannot read it back');
   assert.match(sc, /SameSite=Strict/, 'cross-site requests never carry it');
   assert.match(sc, /Secure/, 'and it is only ever sent over https');
   assert.match(sc, /Max-Age=43200/, 'and it dies after 12 hours');
   store.cookie = s.cookie;
-  const replay = await call('/api/login', { method: 'POST', body: { code: store.code + 'x' } });
-  assert.equal(replay.status, 401, 'a tampered code is refused');
-  const legacy = await call('/a?handle=mamatoe&token=whatever');
-  assert.equal(legacy.status, 302, 'a stale token link is not honoured');
-  assert.match(legacy.headers.get('location'), /^\/a\?why=badkey$/,
-    'and it lands on the login card carrying the reason, so nobody has to ask what to paste');
-  const card = await call(legacy.headers.get('location'));
-  assert.equal(card.status, 200, 'the card is served');
-  assert.match(card.text, /id="why"/, 'and there is a slot on it for the explanation');
-  const ghost = await call('/a?handle=nobody-here&token=whatever');
-  assert.match(ghost.headers.get('location'), /why=nostore/, 'an unknown store says that, not “bad key”');
+  const replay = await call('/api/auth', { method: 'POST', body: { key: store.key, pin: '000000' } });
+  assert.equal(replay.status, 401, 'a wrong PIN is refused');
+  assert.equal(replay.json.error, 'Store name or PIN is wrong.');
+  const ghost = await call('/api/auth', { method: 'POST', body: { key: 'no-such-store-9', pin: '123456' } });
+  assert.equal(ghost.status, 401, 'and an unknown key does not report a missing store');
+  assert.equal(ghost.json.error, replay.json.error, 'byte for byte the same answer, so the form is not a directory');
+  const link = await call('/api/login', { method: 'POST', body: { code: DEAD_LINK } });
+  assert.equal(link.status, 410, 'the retired link endpoint answers instead of 404-ing');
+  assert.match(link.json.error, /store name and PIN/, 'and says what to do instead');
+  const card = await call('/a?code=' + DEAD_LINK);
+  assert.equal(card.status, 200, 'an old bookmark still loads the card');
+  assert.match(card.text, /retired/, 'and tells them on the page, not in an alert that vanishes');
 });
 
 test('buyer fingerprint is hashed, and repeat-buyer risk is tracked', async () => {
@@ -282,7 +288,8 @@ test('a confirm link is inert until a browser posts it', async () => {
   assert.equal(o1.status, 'awaiting_payment', 'fetching the link changed nothing');
 
   const dash0 = await call('/api/admin?handle=mamatoe', { cookie: store.cookie });
-  assert.ok(!dash0.json.store.admin_url, 'the dashboard payload never hands out a login code');
+  assert.ok(!dash0.json.store.admin_url, 'the dashboard payload hands out no login credential of any kind');
+  assert.ok(!JSON.stringify(dash0.json.store).includes('kdf'), 'nor the PIN record: salt, hash and iteration count stay in storage');
 
   // and now the browser posts, which is the only thing that can move it
   const cap = markPath.slice('/c/'.length);
@@ -354,9 +361,9 @@ test('a throttled store can still confirm an order with a valid link', async () 
   assert.equal(owner.status, 200, 'the real owner gets in even mid-lockout: ' + owner.text);
   assert.equal(await env.STORES.get('lock:mamatoe'), null, 'and a correct key clears the counter');
   await env.STORES.put('lock:mamatoe', String(12));
-  const legacyLocked = await call('/a?handle=mamatoe&token=' + liveKey);
-  assert.equal(legacyLocked.status, 302, 'a correct legacy ?token= link still trades up during a lockout');
-  assert.equal((await env.STORES.get('lock:mamatoe')), null, 'and clears it too');
+  const pinMid = await loginWithPin('mamatoe', store.pin);
+  assert.equal(pinMid.r.status, 200, 'a filled key counter does not shut the owner out of the PIN door either: ' + pinMid.r.text);
+  assert.equal(await env.STORES.get('lock:mamatoe'), null, 'and a correct PIN clears it, as a correct key does');
   await env.STORES.delete('lock:mamatoe');
   const back = await call('/api/admin?handle=mamatoe', { cookie: store.cookie });
   assert.equal(back.status, 200, 'a valid session clears the counter');
@@ -485,25 +492,43 @@ test('settings: a queued change lands on the next read, and old slips keep old d
   assert.ok(!JSON.stringify(o.pay).includes('0785551122'), 'yesterday’s buyer is never told to pay a new account');
 });
 
-test('losing the link does not need an operator: knowledge recovery + lockout', async () => {
-  const wrong = await call('/api/recover', { method: 'POST', body: { handle: 'mamatoe', owner_email: 'nobody@example.com', pay_account: '0785551122' } });
+test('losing the PIN does not need an operator: two details, a new PIN, and every other device dies', async () => {
+  // The whole argument for the PIN model is that the way back in is *knowledge*,
+  // not a message that may or may not arrive. These are the two things on the store.
+  const wrong = await call('/api/pin/reset', { method: 'POST', body: { key: 'mamatoe', owner_email: 'nobody@example.com', pay_account: '0785551122' } });
   assert.equal(wrong.status, 403, 'one right answer is not enough: ' + wrong.text);
-  const partial = await call('/api/recover', { method: 'POST', body: { handle: 'mamatoe', owner_email: 'owner@example.com', pay_account: '0123' } });
+  const partial = await call('/api/pin/reset', { method: 'POST', body: { key: 'mamatoe', owner_email: 'owner@example.com', pay_account: '0123' } });
   assert.equal(partial.status, 403, 'nor the other one alone');
-  for (let i = 0; i < 12; i++) await call('/api/recover', { method: 'POST', body: { handle: 'mamatoe', owner_email: 'a@b.com', pay_account: 'x' } });
-  const locked = await call('/api/recover', { method: 'POST', body: { handle: 'mamatoe', owner_email: 'owner@example.com', pay_account: '0785551122' } });
-  assert.equal(locked.status, 429, 'a 40-bit guess is not searchable: rate-limited per store');
-  await env.STORES.delete('lock:mamatoe');               // as a successful login would
+  assert.ok(!partial.json.pin, 'and a refusal never leaks a candidate PIN');
 
-  const ok = await call('/api/recover', { method: 'POST', body: { handle: 'mamatoe', owner_email: 'owner@example.com', pay_account: '0785551122' } });
+  const genBefore = JSON.parse(env.STORES._map.get('store:mamatoe').value).auth_gen;
+  const pinBefore = JSON.parse(env.STORES._map.get('store:mamatoe').value).pin.hash;
+  const ok = await call('/api/pin/reset', { method: 'POST', body: { key: 'mamatoe', owner_email: 'owner@example.com', pay_account: '0785551122' } });
   assert.equal(ok.status, 200, ok.text);
-  assert.match(ok.json.dashboard_url, /\/a\?code=v1\./, 'a fresh, expiring link, no human involved');
-  assert.equal(ok.json.emailed, false, 'no mail transport in this test, so it is shown once instead');
-  const reopened = await loginWithCode(ok.json.dashboard_url);
-  assert.equal(reopened.r.status, 200, 'and it works');
+  assert.match(String(ok.json.pin), /^[0-9]{6}$/, 'a generated PIN, shown once, to the person who proved the details');
+  const st = JSON.parse(env.STORES._map.get('store:mamatoe').value);
+  assert.notEqual(st.auth_gen, genBefore, 'and the generation is bumped: every session that existed is now refused');
+  assert.notEqual(st.pin.hash, pinBefore, 'the old PIN stops working at the same moment');
+  assert.ok(!JSON.stringify(st.pin).includes(String(ok.json.pin)), 'only the hash of the new one is stored');
+  const stale = await call('/api/admin?handle=mamatoe', { cookie: store.cookie });
+  assert.equal(stale.status, 403, 'including this test’s own live session — a reset is a reset');
+  const reopened = await loginWithPin('mamatoe', ok.json.pin);
+  assert.equal(reopened.r.status, 200, 'and the new PIN works immediately');
+  store.pin = ok.json.pin; store.cookie = reopened.cookie;
+
+  // and the door itself is rate-limited per store, in tiers, without touching the
+  // tenant's write budget: 12 wrong guesses must not be 12 KV writes
+  const puts0 = env.STORES._puts || null;
+  for (let i = 0; i < 12; i++) {
+    await call('/api/pin/reset', { method: 'POST', body: { key: 'mamatoe', owner_email: 'a@b.com', pay_account: 'x' } });
+  }
+  const frozen = await call('/api/pin/reset', { method: 'POST', body: { key: 'mamatoe', owner_email: 'owner@example.com', pay_account: '0785551122' } });
+  assert.equal(frozen.status, 429, 'twelve tries and the store is frozen, whoever you are: ' + frozen.text);
+  assert.ok(frozen.json.retry_in_sec > 0, 'with a stated wait, so the screen can count down instead of shrugging');
+  if (puts0 !== null) assert.ok(puts0.after - puts0.before <= 4, 'and the freeze cost at most a few writes, not one per guess');
 });
 
-test('one write revokes every link, session and key for a store', async () => {
+test('one write revokes every session and key for a store', async () => {
   const before = await call('/api/admin?handle=mamatoe', { cookie: store.cookie });
   assert.equal(before.status, 200, 'session is live to start with');
   const genBefore = JSON.parse(env.STORES._map.get('store:mamatoe').value).auth_gen;
@@ -515,23 +540,21 @@ test('one write revokes every link, session and key for a store', async () => {
   assert.notEqual(r.json.api_key, keyBefore, 'the old key is dead');
   const st = JSON.parse(env.STORES._map.get('store:mamatoe').value);
   assert.notEqual(st.auth_gen, genBefore, 'generation bumped — every outstanding code and cookie is now invalid');
-  assert.ok(!/token=/.test(r.json.dashboard_url), 'the replacement link is a code, not a key');
+  assert.ok(!r.json.dashboard_url, 'and the response hands out no login link, because there is no such thing any more');
 
   const stale = await call('/api/admin?handle=mamatoe', { cookie: store.cookie });
   assert.equal(stale.status, 403, 'the old session is refused immediately: ' + stale.text);
   const staleCode = await call('/api/login', { method: 'POST', body: { code: store.code } });
-  assert.equal(staleCode.status, 401, 'and so is the link that was emailed out weeks ago');
-  assert.match(staleCode.json.error, /revoked/, 'with an explanation: ' + staleCode.json.error);
-
-  const fresh = await loginWithCode(r.json.dashboard_url);
-  assert.equal(fresh.r.status, 200, 'the new link signs in');
+  assert.equal(staleCode.status, 410, 'and a link from before 0.6.0 is retired, not resurrected');
+  const fresh = await loginWithPin('mamatoe', store.pin);
+  assert.equal(fresh.r.status, 200, 'revoking a *key* does not lock the owner out of their own shop: the PIN still works');
   store.cookie = fresh.cookie;
   const byKey = await call('/api/admin?handle=mamatoe', { headers: { 'x-tapstall-admin': r.json.api_key } });
   assert.equal(byKey.status, 200, 'the API key works for machine clients');
   assert.equal(byKey.json.via, 'key');
   const wrongKey = await call('/api/admin?handle=mamatoe', { headers: { 'x-tapstall-admin': keyBefore } });
   assert.equal(wrongKey.status, 403, 'only the current key does');
-  assert.match(r.json.dashboard_url, /^https:\/\/tapstall\.test\/a\?code=/, 'absolute, so it can be saved anywhere');
+  assert.match(r.json.note, /PIN still signs you in/, 'and says plainly that the PIN was not touched');
 });
 
 test('admin surfaces are not readable cross-origin, buyer ones are', async () => {
@@ -550,14 +573,17 @@ test('admin surfaces are not readable cross-origin, buyer ones are', async () =>
   assert.equal(page.headers.get('access-control-allow-origin'), null, 'the confirm page is same-origin only');
 });
 
-test('a stale v0.2 GET confirm link upgrades itself instead of acting', async () => {
+test('a stale v0.2 GET confirm link is inert, and the page it lands on explains itself', async () => {
   // exactly what is sitting in merchants’ WhatsApp history from the old version
   const key = JSON.parse(env.STORES._map.get('store:mamatoe').value).admin_token;
   const dash0 = await call('/api/admin?handle=mamatoe', { cookie: store.cookie });
   const openOrder = (dash0.json.orders || []).find((o) => o.status !== 'paid') || (dash0.json.orders || [])[0];
   const stale = await call(`/api/mark?handle=mamatoe&token=${key}&id=${openOrder.id}&status=paid`, { method: 'GET' });
   assert.equal(stale.status, 302, 'the merchant is not dead-ended: ' + stale.text);
-  assert.match(stale.headers.get('location'), /^\/a\?handle=mamatoe&token=/, 'traded for a login code, not applied');
+  assert.match(stale.headers.get('location'), /^\/a\?handle=mamatoe&token=/, 'sent to the sign-in screen, not applied');
+  const landing = await call(stale.headers.get('location'));
+  assert.equal(landing.status, 200, 'and that screen loads: ' + landing.text.slice(0, 120));
+  assert.match(landing.text, /retired/, 'naming the change instead of leaving them holding an old link');
   const after = await call('/api/admin?handle=mamatoe', { cookie: store.cookie });
   const same = after.json.orders.find((o) => o.id === openOrder.id);
   assert.equal(same.status, openOrder.status, 'and the order was NOT touched by the fetch');
@@ -578,20 +604,25 @@ test('recovery works for a shop that never gave an email and takes cash', async 
   assert.ok(!st.owner_email && !st.pay_account, 'no email, no payout account — the awkward case');
   assert.match(st.renew_url.split('/').pop(), /^[a-z0-9]{14}$/, 'and its renew token is path-safe');
 
-  const nope = await call('/api/recover', { method: 'POST', body: { handle: 'tinotuck', whatsapp: '263710002222', pay_account: 'guess' } });
+  const pinFromSignup = r.json.pin;
+  assert.match(String(pinFromSignup), /^[0-9]{6}$/, 'a cash shop gets a PIN like any other, on the same screen');
+  const nope = await call('/api/pin/reset', { method: 'POST', body: { key: 'tinotuck', whatsapp: '263710002222', pay_account: 'guess' } });
   assert.equal(nope.status, 403, 'a cash shop cannot be recovered by guessing an account');
-  const yes = await call('/api/recover', { method: 'POST', body: { handle: 'tinotuck', whatsapp: '263710002222', feed_url: 'https://stub/menu.csv' } });
+  assert.ok(!nope.json.pin, 'and a refusal carries no PIN');
+  const yes = await call('/api/pin/reset', { method: 'POST', body: { key: 'tinotuck', whatsapp: '263710002222', feed_url: 'https://stub/menu.csv' } });
   assert.equal(yes.status, 200, yes.text);
-  assert.equal(yes.json.proved_by, 'whatsapp', 'the number on the store is the contact half');
-  assert.equal(yes.json.second_factor, 'feed_url', 'the sheet link is the secret half');
-  assert.equal(yes.json.emailed, false, 'nothing to email, so it is shown once');
-  const s = await loginWithCode(yes.json.dashboard_url);
-  assert.equal(s.r.status, 200, 'and the self-served link opens the dashboard');
-  const wrongNum = await call('/api/recover', { method: 'POST', body: { handle: 'tinotuck', whatsapp: '26371009999', feed_url: 'https://stub/menu.csv' } });
+  assert.match(String(yes.json.pin), /^[0-9]{6}$/, 'the number is the contact half, the sheet link the secret half');
+  assert.match(yes.json.note, /other devices are signed out/i, 'and it says plainly what just happened');
+  const s = await loginWithPin('tinotuck', yes.json.pin);
+  assert.equal(s.r.status, 200, 'and the new PIN opens the dashboard');
+  const admin = await call('/api/admin?handle=tinotuck', { cookie: s.cookie });
+  assert.equal(admin.status, 200, 'with an ordinary session, no link involved');
+  const wrongNum = await call('/api/pin/reset', { method: 'POST', body: { key: 'tinotuck', whatsapp: '26371009999', feed_url: 'https://stub/menu.csv' } });
   assert.equal(wrongNum.status, 403, 'a neighbour with the same sheet link pattern still fails');
-  assert.equal(wrongNum.json.tries_left, 11, 'and is told how many goes are left');
+  assert.match(wrongNum.json.error, /do not match/, 'with words that do not say which half was wrong');
   await env.STORES.delete('store:tinotuck');
   await env.STORES.delete('lock:tinotuck');
+  await env.STORES.delete('pinl:tinotuck');
 });
 
 test('renew links are path-safe: a token can never contain a character the route rejects', async () => {
@@ -825,18 +856,22 @@ test('every lever needs a deliberate second click, and each one is logged twice'
 
   const rev = await call('/ops/api/store', { method: 'POST', cookie: c, confirm: true, body: { handle: 'mamatoe', action: 'revoke' } });
   assert.equal(rev.json.ok, true, rev.text);
-  // revoke's whole point: the link that was sitting in a WhatsApp thread is
-  // now a dead end, at one KV write, with no email needed from anybody
-  const sess = await loginWithCode(store.admin_url);
-  assert.notEqual(sess.r.status, 200, 'the code from before the revoke no longer opens a session');
-  assert.ok(!sess.cookie, 'and no session cookie is issued for it');
+  assert.ok(!rev.json.dashboard_url, 'and it hands out no login link, because there is no such thing');
+  // revoke's whole point: every session a store had is dead, at one KV write, with
+  // no email to anyone and nothing for the merchant to install. And — the part the
+  // link model could not manage — the owner is not the one who has to wait.
+  const sess = await call('/api/admin?handle=mamatoe', { cookie: store.cookie });
+  assert.equal(sess.status, 403, 'the session from before the revoke is refused immediately: ' + sess.text);
+  const reentry = await loginWithPin(store.key || 'mamatoe', store.pin);
+  assert.equal(reentry.r.status, 200, 'the PIN was not touched, so the merchant is not locked out by their own safety lever');
   const withOld = await call('/api/settings', { method: 'POST', cookie: 'tp_sess=' + (store.code || '').slice(-20), confirm: true, body: { tagline: 'should not land' } });
   assert.notEqual(withOld.status, 200, 'a made-up cookie does not reach settings either');
-  const fresh = await call('/ops/api/store', { method: 'POST', cookie: c, confirm: true, body: { handle: 'mamatoe', action: 'link' } });
-  assert.equal(fresh.json.ok, true, 'the link lever hands the merchant a working way back-in');
-  assert.match(fresh.json.dashboard_url, /\/a\?code=v1\./, 'a capability, not a token=');
-  const again = await loginWithCode(fresh.json.dashboard_url);
-  assert.ok(again.cookie, 'the new link works immediately, with nothing installed or approved');
+  const fresh = await call('/ops/api/store', { method: 'POST', cookie: c, confirm: true, body: { handle: 'mamatoe', action: 'reset_pin' } });
+  assert.equal(fresh.json.ok, true, 'the reset lever is how an operator hands a tenant back their shop');
+  assert.match(String(fresh.json.pin), /^[0-9]{6}$/, 'a new PIN, shown once');
+  const again = await loginWithPin('mamatoe', fresh.json.pin);
+  store.pin = fresh.json.pin;
+  assert.ok(again.cookie, 'and it works immediately, with nothing installed or approved');
   const now = await call('/api/settings', { method: 'POST', cookie: again.cookie, confirm: true, body: { handle: 'mamatoe', tagline: 'Back in the saddle' } });
   assert.equal(now.status, 200, JSON.stringify(now.json));
   store.cookie = again.cookie;
@@ -1048,19 +1083,27 @@ test('a lever posted to a read endpoint is refused, not answered with ok:true', 
   // a suspend, a revoke or a notify happened when nothing was dispatched.
   const c = 'tp_ops=' + opsCookie;
   const wrong = await call('/ops/api/state', { method: 'POST', cookie: c, confirm: true,
-    body: { handle: 'mamatoe', action: 'link' } });
+    body: { handle: 'mamatoe', action: 'reset_pin' } });
   assert.equal(wrong.status, 400, wrong.text.slice(0, 160));
   assert.equal(wrong.json.ok, false);
   assert.equal(wrong.json.use, '/ops/api/store', 'and it names the door that works');
   assert.match(wrong.json.error, /changed nothing/);
-  assert.ok(!wrong.json.dashboard_url, 'the read endpoint must not pretend to have issued a link');
+  assert.ok(!wrong.json.pin, 'the read endpoint must not pretend to have issued a PIN');
   const read = await call('/ops/api/state', { cookie: c });
   assert.equal(read.status, 200, 'the poll itself is untouched');
   assert.ok(Array.isArray(read.json.stores), 'and still lists the tenants');
   const right = await call('/ops/api/store', { method: 'POST', cookie: c, confirm: true,
-    body: { handle: 'mamatoe', action: 'link' } });
+    body: { handle: 'mamatoe', action: 'reset_pin' } });
   assert.equal(right.status, 200, right.text.slice(0, 160));
-  assert.match(right.json.dashboard_url, /\/a\?code=v1\./, 'the same lever on the right path still works');
+  assert.match(String(right.json.pin), /^[0-9]{6}$/, 'the same lever on the right path works, and the PIN is shown once');
+  store.pin = right.json.pin;
+  const retired = await call('/ops/api/store', { method: 'POST', cookie: c, confirm: true,
+    body: { handle: 'mamatoe', action: 'link' } });
+  assert.equal(retired.status, 410, 'and the link lever stays visibly dead rather than silently meaning something else');
+  assert.match(retired.json.error, /reset_pin/, 'naming the lever that replaced it');
+  const usable = await loginWithPin('mamatoe', store.pin);
+  assert.equal(usable.r.status, 200, 'the console-issued PIN is immediately usable');
+  store.cookie = usable.cookie;
 });
 
 test('a link whose & was escaped by a mailer still opens the dashboard', async () => {
@@ -1069,17 +1112,15 @@ test('a link whose & was escaped by a mailer still opens the dashboard', async (
   // the same characters with the separator spelled as an entity — but it renames the
   // parameter, so the page used to load, find no credential, and ask for the link the
   // merchant is standing there holding. This is that bug, as a test.
-  const key = JSON.parse(env.STORES._map.get('store:mamatoe').value).admin_token;
-  const clean = await call('/a?handle=mamatoe&token=' + key);
-  assert.equal(clean.status, 302, 'the real spelling trades the key for a code');
-  const amp = await call('/a?handle=mamatoe&amp;token=' + key);
-  assert.equal(amp.status, 302, 'and so does the escaped one');
-  assert.match(amp.headers.get('location'), /\?code=v1\./, 'to the same shape');
-  const dbl = await call('/a?handle=mamatoe&amp;amp;token=' + key);
-  assert.equal(dbl.status, 302, 'twice-escaped, as a copy out of rendered HTML gives you');
-  const r = await call('/api/login', { method: 'POST', body: { code: amp.headers.get('location').split('code=')[1] } });
-  assert.equal(r.status, 200, 'and the session follows from the mailer-mangled link');
-  assert.ok(r.cookie.startsWith('tp_sess='), 'with the ordinary cookie');
+  const clean = await call('/api/lookup?handle=mamatoe');
+  assert.equal(clean.json.ok, true, 'the real spelling finds the shop');
+  const amp = await call('/api/lookup?handle=mamatoe&amp;x=1');
+  assert.equal(amp.json.ok, true, 'and so does the escaped one, because the separator is repaired before parsing');
+  const dbl = await call('/api/lookup?handle=mamatoe&amp;amp;x=1');
+  assert.equal(dbl.json.ok, true, 'twice-escaped, as a copy out of rendered HTML gives you');
+  const old = await call('/a?handle=mamatoe&amp;token=' + JSON.parse(env.STORES._map.get('store:mamatoe').value).admin_token);
+  assert.equal(old.status, 200, 'an old saved link from a phone lands on the sign-in card, not a blank page');
+  assert.match(old.text, /id="login"/);
 });
 
 test('the store page is frameable by the dashboard and by nobody else', async () => {
@@ -1248,4 +1289,47 @@ test('ping is cheap and versioned', async () => {
   const r = await call('/__ping');
   assert.equal(r.json.ok, true);
   assert.match(r.json.version, /^\d+\.\d+\.\d+$/);
+});
+
+test('a guessing flood is cheap to the tenant, and an operator can undo it', async () => {
+  // The one property a login throttle must never lose on $0 hosting: a hostile
+  // trickle may not be able to spend a store's 1,000 KV writes a day, because that
+  // is the budget the order path runs on. So the counting is done in memory and a
+  // write happens only when the store crosses into a longer freeze.
+  const wrongPin = String((Number(store.pin) + 1) % 1000000).padStart(6, '0');
+  assert.notEqual(wrongPin, store.pin, 'the test cannot accidentally use the right PIN');
+  const before = env.STORES._writes;
+  for (let i = 0; i < 60; i++) await call('/api/auth', { method: 'POST', body: { key: 'mamatoe', pin: wrongPin } });
+  const spent = env.STORES._writes - before;
+  assert.ok(spent <= 6, '60 wrong PINs cost ' + spent + ' KV writes, not 60');
+  assert.ok(await env.STORES.get('pinl:mamatoe'), 'the freeze is persisted, so a fresh isolate inherits it');
+  const frozen = await call('/api/auth', { method: 'POST', body: { key: 'mamatoe', pin: store.pin } });
+  assert.equal(frozen.status, 429, 'and past the first tier the door is shut for everyone: ' + frozen.text);
+  assert.match(frozen.json.error, /I lost my PIN|reset/i, 'it still says how to get back in');
+  assert.ok(!await env.STORES.get('lock:mamatoe'), 'and it was the PIN counter that filled, not the shared one');
+
+  const leaky = JSON.stringify([await (await call('/api/admin?handle=mamatoe', { cookie: store.cookie })).json,
+    await (await call('/ops/api/state', { cookie: 'tp_ops=' + opsCookie })).json]);
+  assert.ok(!/kdf|salt|"hash"/.test(leaky), 'no PIN material in any payload, console included');
+  assert.ok(!/\b0123456\b|\d{6}/.test(String(frozen.text).match(/pin"\s*:\s*"\d+/) || ''), 'and a refusal carries no candidate');
+
+  const c = 'tp_ops=' + opsCookie;
+  const fresh = await call('/ops/api/store', { method: 'POST', cookie: c, confirm: true, body: { handle: 'mamatoe', action: 'reset_pin' } });
+  assert.equal(fresh.status, 200, 'an operator can un-stick a frozen tenant without touching KV by hand: ' + fresh.text);
+  const inNow = await loginWithPin('mamatoe', fresh.json.pin);
+  assert.equal(inNow.r.status, 200, 'the new PIN works straight away');
+  store.pin = fresh.json.pin; store.cookie = inNow.cookie;
+
+  const chg = await call('/api/pin/change', { method: 'POST', cookie: inNow.cookie,
+    body: { handle: 'mamatoe', current: fresh.json.pin, next: '246813' } });
+  assert.equal(chg.status, 200, chg.text);
+  const stays = await call('/api/admin?handle=mamatoe', { cookie: inNow.cookie });
+  assert.equal(stays.status, 200, 'changing a PIN does not sign the device you changed it from out of the shop');
+  const old = await loginWithPin('mamatoe', fresh.json.pin);
+  assert.equal(old.r.status, 401, 'but the old PIN is dead from that moment');
+  const nowIn = await loginWithPin('mamatoe', '246813');
+  assert.equal(nowIn.r.status, 200, 'and the new one is live, typed with spaces if need be');
+  const spaced = await loginWithPin('mamatoe', ' 246 813 ');
+  assert.equal(spaced.r.status, 200, 'pasted “246 813” from a chat message is the same PIN');
+  store.pin = '246813'; store.cookie = nowIn.cookie;
 });

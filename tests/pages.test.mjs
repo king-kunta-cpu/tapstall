@@ -223,3 +223,24 @@ test('the mirror marketing page is the shipped one, not a copy that drifted', ()
       `pages/public/${name} belongs to CI's copy step; committing it re-opens the drift`);
   }
 });
+
+test('the sign-in card stays two fields, one button, zero instructions', () => {
+  // Link sign-in was deleted because explaining it was harder than using it. That
+  // is the bar this screen has to keep meeting, so it is written down as a test:
+  // nothing to read before you act, and the only text that appears on its own is
+  // the text that names a failure.
+  const card = src('admin').match(/<div class="card" id="login">([\s\S]*?)\n<\/div>/);
+  assert.ok(card, 'the admin page lost its #login card');
+  const front = card[1].split('<div id="lost"')[0];          // the recovery form is allowed to explain itself
+  assert.equal([...front.matchAll(/<input /g)].length, 2, 'a store name and a PIN — a third box is a step back');
+  assert.equal([...front.matchAll(/<button(?![^>]*class="sm")[^>]*>/g)].length, 1, 'one button; the escape hatch is link-styled, not a second primary');
+  assert.ok(!/<p class="hint">/.test(front), 'no paragraph of instructions above the fields');
+  assert.match(front, /id="why"[^>]*class="hide"|class="hide"[^>]*id="why"/, 'the explanation slot exists but starts hidden');
+  assert.match(front, /id="fK"/); assert.match(front, /id="fP"/);
+  assert.match(front, /type="password"/, 'the PIN is not typed into a box a shoulder can read off');
+  assert.match(front, /inputmode="numeric"/, 'and it opens the number pad on a phone');
+  for (const dead of ['code', 'token', 'link', 'magic']) {
+    assert.ok(!new RegExp('id="f' + dead[0].toUpperCase() + '"|name="' + dead + '"').test(front),
+      'the retired credential came back: ' + dead);
+  }
+});

@@ -19,9 +19,10 @@ import {
   parseProducts, priceOrder, payInstructions, riskFlags, waSummary, publicStore, hash,
   issueCap, verifyCap, randomKey, validateSettings, stageSettings, applyPending, maskField,
   EDITABLE_FIELDS, SOFT_FIELDS, sign, adminStore, normaliseRail, resolveRail,
+  genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '0.5.3';
+const VERSION = '0.6.0';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 const MAX_ORDERS_KEPT = 200;
@@ -81,7 +82,8 @@ function fillPage(html, pairs) {
 
 /* ---- authority model (see core.js: "a GET must never move money") ---- */
 const HOLD_MS = 15 * 60 * 1000;      // money-moving settings land after this hold
-const CODE_TTL = 7 * 24 * 3600;       // dashboard link lifetime
+// 0.6.0: link sign-in and its 7-day lifetime are gone. The credential is a PIN;
+// the only token a browser holds is the 12-hour session cookie.
 const MARK_TTL = 72 * 3600;           // per-order confirm link lifetime
 const UNDO_TTL = 15 * 60;             // tap-back to reverse a confirmation
 const SESS_TTL = 12 * 3600;           // signed-in browser session
@@ -185,16 +187,24 @@ async function route(req, url, env, ctx) {
   }
 
   // ---- merchant authority: a code becomes a cookie, and only POSTs act ----
-  const MUT = /^\/api\/(mark|settings|settings\/revert|revoke|login|logout|recover)$/;
+  const MUT = /^\/api\/(mark|settings|settings\/revert|revoke|auth|pin\/change|pin\/reset|login|logout|recover)$/;
   // /api/mark answers its own 405, because it also has to recognise a v0.2
   // ?token= link and trade it for a session rather than dead-end the merchant.
   const selfHandled = p === '/api/mark';
   if (MUT.test(p) && req.method !== 'POST' && !selfHandled) {
     return json({ ok: false, error: 'method_not_allowed', why: 'This endpoint changes state, so it never answers GET.' }, 405, { Allow: 'POST' });
   }
-  if (p === '/api/login' && req.method === 'POST') return loginExchange(req, env);
+  if (p === '/api/auth' && req.method === 'POST') return pinLogin(req, env);
+  if (p === '/api/pin/change' && req.method === 'POST') return pinChange(req, env);
+  if (p === '/api/pin/reset' && req.method === 'POST') return pinReset(req, env);
   if (p === '/api/logout' && req.method === 'POST') return withCookie(json({ ok: true, signed_out: true }), ...KILL_COOKIES);
-  if (p === '/api/recover' && req.method === 'POST') return recoverLink(req, url, env);
+  // The link sign-in is retired. A saved bookmark or an old welcome message is
+  // answered, not 404-ed, because the only honest thing to say to somebody
+  // holding a dead link is what to do instead.
+  if (p === '/api/login' || p === '/api/recover') {
+    return json({ ok: false, retired: true, need_login: true,
+      error: 'Sign-in by link has been retired. Open /a and sign in with your store name and PIN — or tap “I lost my PIN” there to set a new one.' }, 410);
+  }
 
   if (p === '/api/order' && req.method === 'POST') return placeOrder(req, url, env, ctx);
   if (p === '/api/register' && req.method === 'POST') return register(req, url, env);
@@ -248,7 +258,7 @@ async function route(req, url, env, ctx) {
     if (req.method === 'POST') return opsGate(req, env, () => opsRailsWrite(req, env));
     return opsGate(req, env, () => opsRailsRead(env));
   }
-  if (p === '/ops/api/link') return req.method === 'POST' ? opsGate(req, env, () => opsIssueLink(req, env)) : json({ ok: false, error: 'method_not_allowed' }, 405, { Allow: 'POST' });
+  if (p === '/ops/api/link') return json({ ok: false, retired: true, error: 'Retired with link sign-in: reset a merchant’s PIN with action “reset_pin” on /ops/api/store.' }, 410);
   if ((m = p.match(/^\/renew\/([A-Za-z0-9_-]{6,40})$/))) return renewPage(env, m[1]);
   if (p === '/api/admin-put' && req.method === 'POST') return adminPut(req, env);
 
@@ -456,7 +466,7 @@ async function notify(env, st, order) {
         `New order ${order.code} — ${order.pricing.pay_now} ${st.currency || 'USD'}`,
         `Buyer: ${order.buyer.name} (${order.buyer.phone})\n${waSummary(st, order)}\nFlags: ${(order.risk_flags || []).join(', ') || 'none'}\n`
         + `Open this to confirm (it needs your browser, nothing else): ${order.confirm_url || ''}\n`
-        + `Dashboard: ${st.admin_url || ''}`
+        + `Dashboard: ${env.PUBLIC_ORIGIN || ''}/a with your store name and PIN`
       ));
     } catch (e) { /* email optional */ }
   }
@@ -481,7 +491,10 @@ async function markPaid(req, url, env) {
       if (lst && lst.admin_token && timingSafeEq(String(lst.admin_token), String(legacy))) {
         return redirect(`/a?handle=${lh}&token=${encodeURIComponent(legacy)}`);
       }
-      if (lst) await authFail(env, lh);   // guessing at an old-style link is a credential failure
+      // Guessing at an old-style link is a credential failure, counted — but once
+      // the store is frozen the count is full anyway, and a per-request write there
+      // is a free way to spend a tenant's daily write budget.
+      if (lst && !(await lockedOut(env, lh))) await authFail(env, lh);
     }
     return json({ ok: false, error: 'method_not_allowed', why: 'Confirm links are opened, not fetched. Open the link in a browser and it posts itself, and the page shows you the money first.' }, 405, { Allow: 'POST' });
   }
@@ -593,7 +606,12 @@ async function register(req, url, env) {
     term_days: FREE_DAYS,
   };
   st.renew_url = `${url.origin}/renew/${renewToken}`;
-  st.admin_url = await issueLogin(env, st, url.origin);
+  /* The merchant's whole way in, created here and shown once: a key (their store
+     name, already public in the storefront URL) and a six-digit PIN that exists in
+     this response and the welcome email and nowhere else. Nothing about signing in
+     expires, so nothing about it can go stale in an inbox or be mangled by a mailer. */
+  const pin = genPin();
+  st.pin = await pinRecord(pin);
   await env.STORES.put('store:' + handle, JSON.stringify(st));
   await env.STORES.put('renew:' + renewToken, JSON.stringify({ handle, made: Date.now() }));
   const products = await loadProducts(st, env, true);
@@ -601,13 +619,14 @@ async function register(req, url, env) {
   if (st.owner_email) {
     try {
       await sendMail(env, st.owner_email, `Your ${st.shop_name} store is live`,
-        `Store: ${url.origin}/s/${handle}\nManage orders: ${st.admin_url}\nEdit your menu any time (it updates itself within ~2 min): ${st.feed_url}\n\n${products.length} products loaded. ${err ? 'FEED WARNING: ' + err : ''}\nFree until ${new Date(st.paid_until).toDateString()}. Renew (no monthly billing): ${st.renew_url}`);
+        `Store: ${url.origin}/s/${handle}\nSign in at ${url.origin}/a with key ${handle} and PIN ${pin} — that is the whole method.\nManage orders there. Edit your menu any time (it updates itself within ~2 min): ${st.feed_url}\n\n${products.length} products loaded. ${err ? 'FEED WARNING: ' + err : ''}\nFree until ${new Date(st.paid_until).toDateString()}. Renew (no monthly billing): ${st.renew_url}`);
     } catch (e) {}
   }
   return json({
     ok: true, handle,
     store_url: `${url.origin}/s/${handle}`,
-    admin_url: st.admin_url, renew_url: st.renew_url,
+    key: handle, pin, renew_url: st.renew_url,
+    pin_note: 'Show this PIN to nobody. Change it inside the dashboard any time; if it is lost, “I lost my PIN” on the sign-in screen resets it from the store’s own details — no operator, no waiting.',
     products_loaded: products.length, feed_error: err || null,
     free_until: new Date(st.paid_until).toISOString(),
     note: products.length
@@ -662,7 +681,11 @@ async function adminView(req, url, env) {
     // No admin_url here on purpose: a login code inside a JSON body turns any
     // XSS on the dashboard into a saved 7-day credential. The session cookie is
     // HttpOnly, so the page itself cannot read it back.
-    store: { ...adminStore(st), feed_url: st.feed_url, renew_url: st.renew_url, dashboard_path: '/a' },
+    store: { ...adminStore(st), feed_url: st.feed_url, renew_url: st.renew_url, dashboard_path: '/a',
+      // the *date* the PIN was set, not anything about it: an owner scanning this
+      // should be able to see "changed 3 days ago" without the dashboard ever
+      // holding a credential it could leak
+      pin_set_at: st.pin ? (st.pin.set_at || null) : null },
     orders: orders.filter(Boolean),
     // the owner sees the real queued value — cancelling is useless if they
     // cannot check what was typed — while the append-only log keeps it masked
@@ -811,7 +834,7 @@ async function renewPage(env, token) {
       suspended: st ? !!st.suspended : false,
       orders: rows.length, gmv: Math.round(rows.reduce((a, r) => a + (Number(r.total) || 0), 0) * 100) / 100,
       price: PRICE_USD, store_url: st ? '/s/' + st.handle : '/onboard',
-      pay_url: st ? (st.admin_url || '/a') : '/onboard',
+      pay_url: st ? '/a' : '/onboard',
     };
     return html(fillPage(custom, [['TAPSTALL_RENEW', data]]));
   }
@@ -831,7 +854,7 @@ b{font-variant-numeric:tabular-nums}</style>
 <div class=card>
   <p>Plan: <b>${esc(st.plan)}</b> · ${left > 0 ? `<b>${left}</b> days left` : '<b style="color:#b00">expired — store paused</b>'}</p>
   <p>Orders recorded: <b>${rows.length}</b> · value <b>${gmv.toFixed(2)} ${esc(st.currency || 'USD')}</b></p>
-  <p>Store URL: <a href="/s/${esc(st.handle)}">/s/${esc(st.handle)}</a> · <a href="${esc(st.admin_url || '/a')}">orders dashboard</a></p>
+  <p>Store URL: <a href="/s/${esc(st.handle)}">/s/${esc(st.handle)}</a> · <a href="/a">orders dashboard</a> (sign in with ${esc(st.handle)} and your PIN)</p>
 </div>
 <div class=card>
   <h3 style="margin:.2rem 0 .6rem">Renew ${PRICE_USD} USD for 365 days</h3>
@@ -852,7 +875,14 @@ document.getElementById('pay').onclick=async()=>{
 /* guarded template upload — lets deploy stay one command; key is a Worker secret */
 async function adminPut(req, env) {
   const b = await req.json().catch(() => null) || {};
-  if (!env.ADMIN_SECRET || b.secret !== env.ADMIN_SECRET) return json({ ok: false, error: 'unauthorised' }, 403);
+  // Constant-time, and counted against the same small cooldown as every other door
+  // that answers yes/no to a secret: the key is 48 random characters, so this is
+  // about not handing a script a free oracle, not about the odds.
+  if (!env.ADMIN_SECRET || !timingSafeEq(String(b.secret || ''), String(env.ADMIN_SECRET))) {
+    if (!(await lockedOut(env, '__put'))) await authFail(env, '__put');
+    return json({ ok: false, error: 'unauthorised' }, 403);
+  }
+  await authClear(env, '__put');
   if (!/^tpl:(store|onboard|admin|fees|index|sample-menu)$/.test(String(b.key || ''))) return json({ ok: false, error: 'bad key' }, 422);
   if (String(b.value || '').length < 200 || String(b.value || '').length > 400000) return json({ ok: false, error: 'bad size' }, 422);
   await env.STORES.put(b.key, b.value);
@@ -888,6 +918,12 @@ async function selftest(env) {
     // whose cron is this? an alias answers redirects and skips the sweep, and the
     // deploy check reads this instead of trusting that the schedule was deleted
     cron_owner: !env.REDIRECT_TO };
+  /* Login is one PBKDF2 comparison, so the runtime having WebCrypto's deriveBits
+     is a health question, not a detail: without it every merchant in the country
+     fails to sign in and every status page says green. */
+  try { t.pin_kdf = (await pinOk('246813', await pinRecord('246813'))) === true; }
+  catch (e) { t.pin_kdf = false; t.pin_kdf_error = String((e && e.message) || e); }
+  t.pin_iters = PIN_ITER;
   if (env.STORES) {
     const beat = await env.STORES.get('cron:last', 'json');
     t.cron_heartbeat = beat ? { at: beat.at, minutes_ago: Math.round((Date.now() - (beat.unix || 0)) / 60000) } : 'never run';
@@ -1166,29 +1202,11 @@ async function identify(req, env, handle) {
 /** 429 for a store whose key is being guessed; null everywhere else. */
 function lockRes(who) {
   return who && who.locked
-    ? json({ ok: false, error: 'too many failed attempts with that key — wait 10 minutes, or open the dashboard link' }, 429)
+    ? json({ ok: false, error: 'too many failed attempts with that key — wait for the freeze to pass, or reset the PIN with the store’s own details' }, 429)
     : null;
 }
 
-async function issueLogin(env, st, origin) {
-  const cap = await issueCap(env.ADMIN_SECRET || 'dev-secret',
-    { a: 'login', h: st.handle, g: String(st.auth_gen || '0') }, CODE_TTL);
-  return `${origin}/a?code=${cap}`;
-}
 
-async function loginExchange(req, env) {
-  const b = await readBody(req);
-  const p = await verifyCap(env.ADMIN_SECRET || 'dev-secret', String(b.code || ''));
-  if (!p || p.a !== 'login') return json({ ok: false, error: 'that sign-in link has expired — open a fresh one from your notification, or use "Lost your link?"' }, 401);
-  const st = await getStore(env, p.h);
-  if (!st) return json({ ok: false, error: 'no store' }, 404);
-  if (String(p.g) !== String(st.auth_gen || '0')) return json({ ok: false, error: 'this link was revoked' }, 401);
-  const sess = await issueCap(env.ADMIN_SECRET || 'dev-secret',
-    { a: 'sess', h: st.handle, g: String(st.auth_gen || '0') }, SESS_TTL);
-  await authClear(env, st.handle);
-  return withCookie(json({ ok: true, handle: st.handle, valid_for_sec: SESS_TTL }),
-    ...sessCookie(sess));
-}
 
 /** `&amp;` and friends, repaired to a clean query. Loops because a link escaped
  *  twice (`&amp;amp;`) is exactly what a Markdown-to-HTML-to-clipboard round trip
@@ -1201,22 +1219,174 @@ function unescapeQuery(url) {
   return new URL(url.origin + url.pathname + s + (url.hash || ''));
 }
 
-/** Legacy `?handle=..&token=..` links still work, but trade down to a code. */
-async function adminEntry(req, url, env) {
-  const legacy = url.searchParams.get('token');
-  if (legacy && !url.searchParams.get('code')) {
-    const handle = slug(url.searchParams.get('handle') || '');
-    const st = await getStore(env, handle);
-    if (st && st.admin_token && timingSafeEq(String(st.admin_token), String(legacy))) {
-      await authClear(env, handle);
-      return redirect(await issueLogin(env, st, url.origin));
-    }
-    if (st && await lockedOut(env, handle)) return json({ ok: false, error: 'too many failed attempts — wait 10 minutes' }, 429);
-    if (st) await authFail(env, handle);
-    // Sent to the login card *with a reason*. Bouncing a merchant to a bare form
-    // after their key stopped matching is what makes them ask what to paste.
-    return redirect('/a?why=' + (st ? 'badkey' : 'nostore'));
+/* ---------------------------------------------------------------------------
+ * Key + PIN. This replaced the dashboard-link sign-in wholesale.
+ *
+ * A six-digit PIN is 10^6, and the login form is an oracle, so the defence is the
+ * throttle rather than the hash: Worker CPU on the free plan is capped at 10 ms a
+ * request, and PBKDF2 at a strong iteration count costs 60 ms+ (measured — see
+ * core.js), so `PIN_ITER` stays modest and is documented as such. What makes the
+ * scheme safe to operate is that guesses are bounded *per store*, in memory, and
+ * persisted only when a freeze tier is entered — which also means a guesser cannot
+ * spend the tenant's 1,000 KV writes a day and freeze real orders as a side effect.
+ * -------------------------------------------------------------------------*/
+const PIN_TIERS = [[6, 60], [10, 600], [15, 3600], [22, 43200]];
+const pinMem = new Map();                      // handle -> { n, tier, until }
+
+function pinTier(n) {
+  let out = { tier: -1, secs: 0 };
+  for (let i = 0; i < PIN_TIERS.length; i++) if (n >= PIN_TIERS[i][0]) out = { tier: i, secs: PIN_TIERS[i][1] };
+  return out;
+}
+
+async function pinLockedOut(env, handle) {
+  const now = Math.floor(Date.now() / 1000);
+  const m = pinMem.get(handle);
+  if (m && m.until > now) return m.until - now;
+  if (!env.STORES) return 0;
+  const held = await env.STORES.get('pinl:' + handle, 'json');
+  const left = held && held.until ? Math.max(0, held.until - now) : 0;
+  if (left) pinMem.set(handle, { n: m && m.n ? m.n : 99, tier: held.tier == null ? -1 : held.tier, until: now + left });
+  return left;
+}
+
+/** Records a bad try. Returns the seconds the store is now frozen for. */
+async function pinFail(env, handle) {
+  const prev = pinMem.get(handle) || { n: 0, tier: -1, until: 0 };
+  const n = prev.n + 1;
+  const t = pinTier(n);
+  const now = Math.floor(Date.now() / 1000);
+  const until = t.secs ? now + t.secs : 0;
+  pinMem.set(handle, { n, tier: t.tier, until });
+  if (t.tier > prev.tier && env.STORES) {
+    try { await env.STORES.put('pinl:' + handle, JSON.stringify({ until, tier: t.tier, n }), { expirationTtl: t.secs + 120 }); } catch (e) {}
   }
+  return Math.max(0, until - now);
+}
+
+async function pinClear(env, handle) {
+  pinMem.delete(handle);
+  if (!env.STORES) return;
+  const held = await env.STORES.get('pinl:' + handle);       // reads are free; only delete if it exists
+  if (held) { try { await env.STORES.delete('pinl:' + handle); } catch (e) {} }
+}
+
+/**
+ * `key` is the store name and is not a secret — it is in the storefront URL. What
+ * is secret is the PIN, and the two branches below (store exists / does not) do the
+ * same work and answer the same words, so the form cannot be used to enumerate
+ * tenants. The freeze never reports remaining tries: a guesser learns nothing.
+ */
+async function pinLogin(req, env) {
+  const b = await readBody(req);
+  const handle = slug(String(b.key || b.handle || ''));
+  const pin = PIN_NORMALIZE(b.pin);
+  if (!handle || !pin) return json({ ok: false, need_login: true, error: 'Enter your store name and your PIN.' }, 400);
+  const frozen = await pinLockedOut(env, handle);
+  const st = await getStore(env, handle);
+  // The first freeze lasts a minute, which is short enough to be worth paying a KDF
+  // for rather than shutting the owner out of their own shop: inside tier 1 the PIN
+  // is still verified, so six guesses fired by a script cannot lock the merchant out
+  // of the login. Past that tier nothing is computed at all, so a sustained flood
+  // stops costing this worker anything. Either way a refusal stays a refusal.
+  const checked = (!frozen || frozen <= PIN_TIERS[0][1])
+    ? ((st && st.pin) ? await pinOk(pin, st.pin) : await pinMiss(pin)) : false;
+  if (!st || !st.pin || !checked) {
+    // Only the tiered PIN counter is touched here. Writing the shared `lock:` key
+    // on every wrong PIN would hand an attacker the tenant's KV write budget — the
+    // 1,000/day the order path needs — at a cost of one request each, which is the
+    // failure mode measured on production in 0.5.2. A *correct* PIN still clears it.
+    await pinFail(env, handle);
+    if (frozen) {
+      return json({ ok: false, need_login: true, retry_in_sec: frozen, error: 'Too many tries for that store — '
+        + (frozen >= 90 ? 'frozen for ' + Math.ceil(frozen / 60) + ' more minutes' : frozen + ' more seconds')
+        + '. When it thaws, sign in — or use “I lost my PIN” below to set a new one from your store details.' }, 429);
+    }
+    return json({ ok: false, need_login: true, error: 'Store name or PIN is wrong.' }, 401);
+  }
+  const sess = await issueCap(env.ADMIN_SECRET || 'dev-secret',
+    { a: 'sess', h: st.handle, g: String(st.auth_gen || '0') }, SESS_TTL);
+  await authClear(env, handle);
+  await pinClear(env, handle);
+  await pushAudit(env, st, { act: 'login', via: 'pin', ip: ipOf(req) });
+  // A PIN set while PIN_ITER was lower is upgraded on the spot, so ratcheting the
+  // cost never requires locking a merchant out to change a number in a file.
+  if (st.pin.iters !== PIN_ITER) {
+    const better = await pinRecord(pin);
+    if (better) { st.pin = better; await writeStore(env, st); }
+  }
+  return withCookie(json({ ok: true, handle: st.handle, valid_for_sec: SESS_TTL }), ...sessCookie(sess));
+}
+
+/** Changing your PIN needs your current PIN: a borrowed cookie must not be able to
+ *  take the account over by swapping the only secret. */
+async function pinChange(req, env) {
+  const b = await readBody(req);
+  const who = await identify(req, env, b.handle || urlHandle(req));
+  if (!who || !who.st) return json({ ok: false, error: 'no store' }, 404);
+  const lr = lockRes(who); if (lr) return lr;
+  if (who.anonymous || who.bad) return json({ ok: false, need_login: true, error: 'sign in first' }, 401);
+  const st = who.st;
+  if (!st.pin || !await pinOk(String(b.current || ''), st.pin)) {
+    await pinFail(env, st.handle);
+    return json({ ok: false, error: 'Your current PIN is not right, so nothing was changed.' }, 403);
+  }
+  const next = PIN_NORMALIZE(b.next);
+  if (!validPin(next)) return json({ ok: false, error: 'A new PIN is 6 to 8 digits.' }, 422);
+  if (next === PIN_NORMALIZE(b.current)) return json({ ok: false, error: 'That is the PIN you already have.' }, 422);
+  st.pin = await pinRecord(next);
+  await writeStore(env, st);
+  await pinClear(env, st.handle);
+  await pushAudit(env, st, { act: 'pin', via: who.via, fields: ['pin'], ip: ipOf(req) });
+  return json({ ok: true, changed: 'PIN', note: 'It works from the next sign-in. This device stays as it is.' });
+}
+
+/**
+ * The forgotten-PIN path, which needs nobody: prove the two things only the owner
+ * holds — the contact on the store and the payout account (the menu link for a
+ * cash shop) — and a new PIN is set on the spot. Every other session dies with it,
+ * because this is the door you use when somebody else might know your PIN.
+ */
+async function pinReset(req, env) {
+  const b = await readBody(req);
+  const handle = slug(String(b.key || b.handle || ''));
+  const st = await getStore(env, handle);
+  if (!st) return json({ ok: false, need_login: true, error: 'No store with that name.' }, 404);
+  const frozen = await pinLockedOut(env, handle);
+  if (frozen) return json({ ok: false, need_login: true, error: 'Too many attempts — wait ' + Math.ceil(frozen / 60) + ' minutes.', retry_in_sec: frozen }, 429);
+  const email = String(b.owner_email || '').toLowerCase().trim();
+  const wa = digits(String(b.whatsapp || '')).replace(/\D/g, '');
+  const okWho = (st.owner_email && isEmail(email) && timingSafeEq(String(st.owner_email).toLowerCase(), email))
+             || (st.whatsapp && wa && timingSafeEq(String(st.whatsapp).replace(/\D/g, ''), wa));
+  const field = st.pay_account ? 'pay_account' : 'feed_url';
+  const proof = String(b[field] || b.pay_account || b.feed_url || '').trim();
+  const okProof = !!st[field] && !!proof && timingSafeEq(String(st[field]), proof);
+  if (!okWho || !okProof) {
+    await pinFail(env, handle);            // one counter, in memory; see pinLogin
+    return json({ ok: false, need_login: true, error: 'Those details do not match this store.' }, 403);
+  }
+  let next = PIN_NORMALIZE(b.new_pin || b.pin);
+  if (!next) next = genPin();
+  else if (!validPin(next)) return json({ ok: false, error: 'A PIN is 6 to 8 digits.' }, 422);
+  st.pin = await pinRecord(next);
+  st.auth_gen = Date.now().toString(36);
+  delete st.pending;
+  await writeStore(env, st);
+  await pinClear(env, handle); await authClear(env, handle);
+  await pushAudit(env, st, { act: 'pin_reset', via: 'owner', fields: ['pin', 'auth_gen'], ip: ipOf(req) });
+  return json({ ok: true, handle, pin: next,
+    note: 'That is your PIN now, everywhere. Sign in with your store name and it — other devices are signed out.' });
+}
+
+function urlHandle(req) {
+  try { return new URL(req.url).searchParams.get('handle') || ''; } catch (e) { return ''; }
+}
+
+/* `/a` is the sign-in screen and the dashboard in one file; with the PIN model it
+   needs no query parameter at all, so there is nothing to trade and nothing to
+   leak. `?code=`/`?token=` links from before 0.6.0 are dead ends by design and the
+   page says so. */
+async function adminEntry(req, url, env) {
   return html(await tpl(env, 'admin'));
 }
 
@@ -1306,8 +1476,8 @@ async function revokeKeys(req, url, env) {
   await writeStore(env, st);
   await pushAudit(env, st, { act: 'revoke', via: who.via, ip: ipOf(req) });
   const res = json({
-    ok: true, dashboard_url: await issueLogin(env, st, url.origin), api_key: st.admin_token,
-    note: 'Every older link, session and API key for this store is dead. Save the new ones; the old key stops working immediately.',
+    ok: true, api_key: st.admin_token,
+    note: 'Every session and API key for this store is dead — the new key is above. Your PIN still signs you in; change it inside the dashboard if you think somebody knows it.',
   });
   return withCookie(res, ...KILL_COOKIES);
 }
@@ -1317,44 +1487,6 @@ async function revokeKeys(req, url, env) {
  * that are on no public page: the owner email and the payment account. With a
  * mail binding it also arrives by email; without one it is shown once here.
  */
-async function recoverLink(req, url, env) {
-  const b = await readBody(req);
-  const handle = slug(String(b.handle || ''));
-  const st = await getStore(env, handle);
-  if (!st) return json({ ok: false, error: 'no store with that name' }, 404);
-  if (await lockedOut(env, handle)) return json({ ok: false, error: 'too many attempts — wait 10 minutes' }, 429);
-  /* Two things only the owner holds. The first is whichever contact exists on
-   * the store (email, else the WhatsApp buyers use); the second is the payout
-   * account — or, for a cash shop that has none, the menu sheet link. Neither
-   * appears in any public response any more, so the pair is a real secret and
-   * the reset needs no operator. */
-  const email = String(b.owner_email || '').toLowerCase().trim();
-  const wa = digits(String(b.whatsapp || '')).replace(/\D/g, '');
-  const okEmail = !!st.owner_email && isEmail(email) && timingSafeEq(String(st.owner_email).toLowerCase(), email);
-  const okWa = !!st.whatsapp && !!wa && timingSafeEq(String(st.whatsapp).replace(/\D/g, ''), wa);
-  const secretField = st.pay_account ? 'pay_account' : 'feed_url';
-  const proof = String(b[secretField] || b.pay_account || b.feed_url || '').trim();
-  const okProof = !!st[secretField] && !!proof && timingSafeEq(String(st[secretField]), proof);
-  if (!(okEmail || okWa) || !okProof) {
-    const n = await authFail(env, handle);
-    return json({ ok: false, error: 'those details do not match this store', tries_left: Math.max(0, LOCK_MAX - n) }, 403);
-  }
-  await authClear(env, handle);
-  const link = await issueLogin(env, st, url.origin);
-  let sent = false;
-  if (env.EMAIL && (st.owner_email || st.notify_email)) {
-    try {
-      await sendMail(env, st.owner_email || st.notify_email, 'Your Tapstall dashboard link',
-        `A fresh dashboard link (valid 7 days):\n${link}\n\nIf you did not ask for this, open it and press "Revoke links & API key" at once.`);
-      sent = true;
-    } catch (e) { /* shown here instead */ }
-  }
-  return json({
-    ok: true, dashboard_url: link, emailed: sent,
-    proved_by: okEmail ? 'owner_email' : 'whatsapp', second_factor: secretField,
-    note: sent ? 'Emailed, and shown once here.' : 'Copy it now — it is not shown again. A lost link never needs anyone’s help: the same two details always remake it.',
-  });
-}
 
 /* ------------------------------------------------------------------ audit */
 async function pushAudit(env, st, row) {
@@ -1615,6 +1747,9 @@ function opsSummarise(st, rows) {
     feed_error: st.feed_cache ? (st.feed_cache.error || null) : 'never fetched',
     notify_email: !!st.notify_email, owner_email: st.owner_email ? maskField('notify_email', st.owner_email) : null,
     pay_account_set: !!st.pay_account, whatsapp_set: !!st.whatsapp,
+    // can this tenant sign in at all? a store migrated from link login has no PIN
+    // until the owner resets it or the operator sets one — say so on the tile.
+    has_pin: !!(st.pin && st.pin.hash), pin_set_at: st.pin ? (st.pin.set_at || null) : null,
     has_pending: !!(st.pending && st.pending.fields && Object.keys(st.pending.fields).length),
     pending_apply_at: st.pending ? st.pending.apply_at : null,
     orders: rows.length, orders_today: today.length,
@@ -1771,9 +1906,22 @@ async function opsStoreAction(req, env) {
     });
   }
   if (act === 'link') {
-    const link = await issueLogin(env, st, new URL(req.url).origin);
-    await pushOpsLog(env, { act: 'link', handle, note: 'issued a dashboard link for the merchant', ip: ipOf(req) });   // best-effort
-    return json({ ok: true, dashboard_url: link, note: 'Paste this to them once; it opens a 12-hour session and dies in 7 days.' });
+    // An error rather than a synonym: this lever used to hand out a login link, and
+    // quietly *resetting a merchant's PIN* under the same name would be a destructive
+    // surprise for any script still calling it.
+    return json({ ok: false, error: 'Link sign-in was retired in 0.6.0. Use action “reset_pin”: it gives you a new PIN to read out, and signs out every device that had the old one.' }, 410);
+  }
+  if (act === 'reset_pin') {
+    const pin = genPin();
+    st.pin = await pinRecord(pin);
+    st.auth_gen = Date.now().toString(36);          // every session it had is dead from now on
+    delete st.pending;
+    await writeStore(env, st);
+    await pinClear(env, handle); await authClear(env, handle);
+    await pushOpsLog(env, { act: 'reset_pin', handle, note: 'PIN reset; all sessions signed out', ip: ipOf(req) });   // best-effort
+    await pushAudit(env, st, { act: 'pin_reset', via: 'ops', fields: ['pin', 'auth_gen'], ip: ipOf(req) });
+    return json({ ok: true, handle, key: handle, pin,
+      note: 'Read the PIN out once; after that it exists nowhere but in their phone. They can change it themselves inside the dashboard.' });
   }
 
   const before = { plan: st.plan, paid_until: st.paid_until, suspended: !!st.suspended };
@@ -1787,7 +1935,7 @@ async function opsStoreAction(req, env) {
   else if (act === 'clear_pending') { delete st.pending; done = 'reverted a queued settings change'; }
   else if (act === 'clear_refs') { await env.STORES.delete('ref:' + handle); delete st.pending_ref_note; done = 'cleared the payment references the merchant filed'; }
   else if (act === 'revoke') { st.auth_gen = Date.now().toString(36); st.admin_token = randomKey(16); delete st.pending; done = 'revoked every link, key and cookie'; }
-  else return json({ ok: false, error: 'unknown action', actions: ['suspend', 'reinstate', 'extend7', 'extend30', 'grant_year', 'reset_free', 'clear_pending', 'clear_refs', 'revoke', 'notify', 'link'] }, 422);
+  else return json({ ok: false, error: 'unknown action', actions: ['suspend', 'reinstate', 'extend7', 'extend30', 'grant_year', 'reset_free', 'clear_pending', 'clear_refs', 'revoke', 'notify', 'reset_pin'] }, 422);
 
   await writeStore(env, st);
   const after = { plan: st.plan, paid_until: st.paid_until, suspended: !!st.suspended };
@@ -1803,16 +1951,10 @@ async function opsStoreAction(req, env) {
 
 function opsMaskTerm(o) { return { plan: o.plan, suspended: o.suspended, paid_until: o.paid_until ? new Date(o.paid_until).toISOString().slice(0, 10) : null }; }
 
-async function opsIssueLink(req, env) {
-  const b = await readBody(req);
-  const st = await getStore(env, slug(String(b.handle || '')));
-  if (!st) return json({ ok: false, error: 'no store' }, 404);
-  return json({ ok: true, dashboard_url: await issueLogin(env, st, new URL(req.url).origin) });
-}
 
-/** Everything the operator might need to see about one store, and nothing
- *  that would let a browser session become a credential (no admin_token, no
- *  raw admin_url — the link is issued deliberately, via the link lever). */
+/** Everything the operator might need to see about one store, and nothing that
+ *  would let a console session become a credential: no `admin_token`, no PIN hash,
+ *  no salt. A PIN is reset deliberately (action `reset_pin`), never read out. */
 /**
  * The rail catalogue, editable. `built_in` is what ships in code; the editor
  * holds only the additions, so a mistake here can always be emptied back to the

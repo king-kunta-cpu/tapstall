@@ -79,7 +79,8 @@ if [[ "$ROLE" == "alias" ]]; then
       *\?*) ck "  · $path keeps its query string" "${path#*\?}" "$LOC" ;;
     esac
   done
-  ck "a POST is never bounced, because a redirect eats the body" '^401$' "$(code -X POST -H 'content-type: application/json' -d '{"code":"junk"}' "$ORIGIN/api/login")"
+  ck "a POST is never bounced, because a redirect eats the body" '^400$' "$(code -X POST -H 'content-type: application/json' -d '{}' "$ORIGIN/api/auth")"
+  ck "  · and the retired link door answers, it does not bounce" '^410$' "$(code -X POST -H 'content-type: application/json' -d '{"code":"junk"}' "$ORIGIN/api/login")"
   ck "the buyer's order POST is answered here" '^(400|422|503)$' "$(code -X POST -H 'content-type: application/json' -d '{}' "$ORIGIN/api/order")"
   ck "a data read is served, not redirected" '"ok":true' "$(curl -s -m 30 "$ORIGIN/api/lookup?handle=$HANDLE")"
   BODY=$(curl -sL -m 60 "$ORIGIN/s/$HANDLE")
@@ -219,32 +220,47 @@ ck "a bad value is refused by field" '"fields":\{"rail"' "$(curl -s -m 30 -X POS
 ck "a forged cap is refused as expired" '"link_expired"' "$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"v1.9999999999.eyJhIjoibWFyayJ9.AAAAAAAA"}' "$ORIGIN/api/mark")"
 ck "a truncated copy of a real cap is refused" '"link_expired"' "$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"${MARK#/c/}"'x"}' "$ORIGIN/api/mark")"
 
-echo "[6] an existing merchant, upgraded with no action from anyone"
-LEG=$(curl -s -m 30 -D - -o /dev/null "$ORIGIN/a?handle=$HANDLE&token=$ADMIN_KEY" | tr -d '\r')
-CODE=$(printf '%s' "$LEG" | grep -io 'location: [^ ]*code=v1[^ ]*' | sed 's/.*code=//' | head -1)
-ck "a link whose & was escaped by a mailer still trades up" '^HTTP/[0-9.]+ 302' \
-  "$(curl -s -m 30 -D - -o /dev/null "$ORIGIN/a?handle=$HANDLE&amp;token=$ADMIN_KEY" | tr -d '\r' | head -1)"
-ck "and says so plainly when the key really is stale" 'why=badkey' \
-  "$(curl -s -m 30 -D - -o /dev/null "$ORIGIN/a?handle=$HANDLE&token=not-the-key" | tr -d '\r' | grep -i '^location:')"
-ck "their v0.2 link trades up for a code" '^v1\.' "$CODE"
+echo "[6] the front door: a store name and six digits, and nothing else"
+# 0.6.0 replaced link sign-in with a key + PIN. What has to be true on the live
+# worker: the door is two fields, the old links are inert without being dead ends,
+# nothing about a PIN is ever said out loud, and a guessing flood learns nothing.
+ck "an old ?token= link lands on the sign-in card, not a blank page" 'id="login"' "$(curl -sL -m 30 "$ORIGIN/a?handle=$HANDLE&token=$ADMIN_KEY")"
+ck "  · same when a mailer escaped the &" 'retired' "$(curl -sL -m 30 "$ORIGIN/a?handle=$HANDLE&amp;token=$ADMIN_KEY")"
+ck "  · and the query repair still works where a query is read" '"ok":true' "$(curl -s -m 30 "$ORIGIN/api/lookup?handle=$HANDLE&amp;x=1")"
+ck "the screen asks for exactly two things" '^2$' "$(curl -s -m 30 "$ORIGIN/a" | grep -o 'id="f[KP]"' | wc -l | tr -d ' ')"
+ck "  · one button, and no paste-box for a link left behind" '^0$' "$(curl -s -m 30 "$ORIGIN/a" | grep -c 'id="fL"')"
+ck "  · and the PIN panel is where a PIN is changed" 'Your PIN' "$(curl -s -m 30 "$ORIGIN/a")"
+ck "the retired exchange door names its replacement" 'reset_pin\|retired' "$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"code":"junk"}' "$ORIGIN/api/login")"
+ck "  · and so does the retired recovery door" '^410$' "$(code -X POST -H 'content-type: application/json' -d '{}' "$ORIGIN/api/recover")"
+BAD1=$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"key":"'"$HANDLE"'","pin":"000000"}' "$ORIGIN/api/auth")
+BAD2=$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"key":"nomateshop9911","pin":"000000"}' "$ORIGIN/api/auth")
+SAME=$(printf '%s' "$BAD1" | tr -d ' \n' > /tmp/ts_b1; printf '%s' "$BAD2" | tr -d ' \n' > /tmp/ts_b2; cmp -s /tmp/ts_b1 /tmp/ts_b2 && echo same || echo "differ: $BAD1 | $BAD2")
+ck "a wrong PIN and a store that does not exist answer identically" '^same$' "$SAME"
+ck "  · and neither answer contains PIN material" '^0$' "$(printf '%s%s' "$BAD1" "$BAD2" | grep -cE 'kdf|salt|"hash"|"pin":')"
 JAR=$(mktemp)
-LR=$(curl -s -m 30 -c "$JAR" -X POST -H 'content-type: application/json' -d '{"code":"'"$CODE"'"}' "$ORIGIN/api/login")
-ck "the code exchanges for a session" '"ok":true' "$LR"
-ck "cookie is HttpOnly, SameSite=Strict, Secure, 12 h" 'HttpOnly' "$(grep -i tp_sess "$JAR")"
-ck "dashboard opens with the cookie" '"orders"' "$(curl -s -m 30 -b "$JAR" "$ORIGIN/api/admin?handle=$HANDLE")"
-ck "and 401s without it" '^401$' "$(code "$ORIGIN/api/admin?handle=$HANDLE")"
-ck "the admin page is the new one" 'Store settings' "$(curl -s -m 30 "$ORIGIN/a")"
-ck "its settings panel is driven by the API" "editable.:" "$(curl -s -m 30 -b "$JAR" "$ORIGIN/api/admin?handle=$HANDLE")"
-AUD=$(curl -s -m 30 -b "$JAR" "$ORIGIN/api/admin?handle=$HANDLE" | python3 -c "
+if [[ -n "${PIN:-}" ]]; then
+  LR=$(curl -s -m 30 -c "$JAR" -X POST -H 'content-type: application/json' -d '{"key":"'"$HANDLE"'","pin":"'"$PIN"'"}' "$ORIGIN/api/auth")
+  ck "the store name and PIN open a session, with no link in sight" '"ok":true' "$LR"
+  ck "  · cookie is HttpOnly, SameSite=Strict, Secure" 'HttpOnly' "$(grep -i tp_sess "$JAR")"
+  ck "  · the dashboard reads on the cookie alone" '"orders"' "$(curl -s -m 30 -b "$JAR" "$ORIGIN/api/admin?handle=$HANDLE")"
+  ck "  · and 401s without it" '^401$' "$(code "$ORIGIN/api/admin?handle=$HANDLE")"
+  ck "  · the hash never travels to the browser" '^0$' "$(curl -s -m 30 -b "$JAR" "$ORIGIN/api/admin?handle=$HANDLE" | grep -cE '"kdf"|"salt"|"hash"')"
+else
+  echo "  ! PIN= not set: the door was probed, not opened — add it to see the whole path"
+fi
+ck "its settings panel is driven by the API" "editable.:" "$(curl -s -m 30 -H "x-tapstall-admin: $ADMIN_KEY" "$ORIGIN/api/admin?handle=$HANDLE")"
+AUD=$(curl -s -m 30 -H "x-tapstall-admin: $ADMIN_KEY" "$ORIGIN/api/admin?handle=$HANDLE" | python3 -c "
 import sys,json
 d=json.load(sys.stdin)
-a=[x for x in (d.get('audit') or []) if x.get('act')=='settings']
+a=[x for x in (d.get('audit') or []) if x.get('act')=='pin' or x.get('act')=='login']
 print(json.dumps(a[0]) if a else '{}')" 2>/dev/null)
-ck "the settings write is in the log" '"act": "settings"' "$AUD"
-ck "logged with the API key as the author" '"via": "key"' "$AUD"
-nk "but the value itself is masked" 'ZZ-PROBE' "$AUD"
-ck "a login code cannot be spent to confirm an order" '"link_expired"' "$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"$CODE"'"}' "$ORIGIN/api/mark")"
+ck "a sign-in and a PIN change are both in the merchant's own log" 'login\|pin' "$AUD"
+nk "  · and the log line holds no PIN, only the field name" '"pin": ?"[0-9]' "$AUD"
+ck "a login credential cannot be spent to confirm an order" '"link_expired"' "$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"v1.9999999999.eyJhIjoibG9naW4ifQ.deadbeef"}' "$ORIGIN/api/mark")"
 ck "a guessed legacy token is refused, not honoured" '^405$' "$(code "$ORIGIN/api/mark?handle=$HANDLE&token=not-the-key&id=x&status=paid")"
+curl -s -m 30 -o /dev/null -X DELETE -H "Authorization: Bearer $TOK" \
+  "https://api.cloudflare.com/client/v4/accounts/$ACCT/storage/kv/namespaces/$KV/values/pinl:$HANDLE" 2>/dev/null
+echo "  · cleared the persisted PIN freeze the probes may have left (the counting itself is in memory)"
 
 echo "[7] one store's credentials never open another store"
 OTHER="${OTHER_HANDLE:-}"
@@ -270,7 +286,7 @@ ck "the body's handle is ignored, $OTHER's paid count stays $BEFORE" "^${AFTER}$
   VERDICT=$(python3 -c "import json;r=json.load(open('/tmp/resp.json'));print('own-store='+str(bool(r.get('ok'))).lower())" 2>/dev/null)
   ckw "it acted only on the store named inside the cap" "own-store=true" "$VERDICT"
   ck "the ledger endpoint still refuses a key from a stranger store" '^401$' "$(code "$ORIGIN/api/admin?handle=$OTHER")"
-  ck "recovery for $OTHER does not answer for $HANDLE" '^403$' "$(curl -s -m 30 -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"handle":"'"$OTHER"'","owner_email":"x@y.z","pay_account":"'"$OTH_KEY"'"}' "$ORIGIN/api/recover")"
+  ck "a PIN reset for $OTHER does not answer for $HANDLE" '^403$' "$(curl -s -m 30 -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{"key":"'"$OTHER"'","owner_email":"x@y.z","pay_account":"'"$OTH_KEY"'"}' "$ORIGIN/api/pin/reset")"
   curl -s -m 30 -o /dev/null -X DELETE -H "Authorization: Bearer $TOK" \
     "https://api.cloudflare.com/client/v4/accounts/$ACCT/storage/kv/namespaces/$KV/values/lock:$OTHER" 2>/dev/null
   curl -s -m 30 -o /dev/null -X DELETE -H "Authorization: Bearer $TOK" \
@@ -347,13 +363,12 @@ ck "one store opens with its orders, log and queued change" '"summary":\{' "$DET
 ck "  · the drawer is told which fields the merchant may queue" '"editable":\[' "$DET"
 LL=$(curl -s -m 30 -b "tp_ops=$OC" -H 'x-tapstall-confirm: 1' -X POST -H 'content-type: application/json' \
   -d '{"handle":"'"$HANDLE"'","action":"link"}' "$ORIGIN/ops/api/store")
-# a dashboard link is a 7-day credential: it is counted, never printed
-LINK_OK=$(printf '%s' "$LL" | grep -c '/a?code=v1' || true)
-ck "the link lever hands out a capability, not a key" '^1$' "$LINK_OK"
-LINK_TTL=$(printf '%s' "$LL" | grep -oE '"dashboard_url":"https://[^/]+/a\?code=v1\.[0-9]+' | grep -oE '[0-9]+$' | head -1)
-LINK_LEFT=$(( LINK_TTL - $(date +%s) ))
-ck "  · and it expires on its own (in days, not never)" '^([0-6]|7)$' "$(( LINK_LEFT / 86400 ))"
-ck "  · notify and link are real actions, not dead buttons" '"ok": ?true' "$LL"
+# Deliberately not a synonym for reset_pin: a console that still believes it is
+# issuing a 7-day link must be told that is over, not quietly redirected.
+ck "the link lever is retired in the console too, and says what to use" 'reset_pin' "$LL"
+ck "  · with a status that means gone, not ok:true" '^410$' "$(code -b "tp_ops=$OC" -H 'x-tapstall-confirm: 1' -X POST -H 'content-type: application/json' -d '{"handle":"'"$HANDLE"'","action":"link"}' "$ORIGIN/ops/api/store")"
+ck "  · the unknown-action answer offers reset_pin, never link" 'reset_pin' "$(curl -s -m 30 -b "tp_ops=$OC" -H 'x-tapstall-confirm: 1' -X POST -H 'content-type: application/json' -d '{"handle":"'"$HANDLE"'","action":"print_code"}' "$ORIGIN/ops/api/store")"
+ck "  · notify is still a real action, not a dead button" '"ok": ?true' "$(curl -s -m 30 -b "tp_ops=$OC" -H 'x-tapstall-confirm: 1' -X POST -H 'content-type: application/json' -d '{"handle":"'"$HANDLE"'","action":"notify","message":"Prod check: this is the operator console, not a message to you."}' "$ORIGIN/ops/api/store")"
 AUD=$(curl -s -m 30 -b "tp_ops=$OC" "$ORIGIN/ops/api/audit")
 ck "  · and the write lands in the operator log" '"ops":\[' "$AUD"
 nk "  · the log line carries no secret" 'admin_token' "$AUD"

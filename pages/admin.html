@@ -251,16 +251,27 @@ body[data-tab="orders"] #list{display:block}
 <main><div class="wrap">
 
 <div class="card" id="login">
-  <h3>Open your dashboard</h3>
-  <p class="hint" style="margin-top:0">Paste the dashboard link we sent you. It opens a session on this device only — no password to reuse, and the link stops working after 7 days, so a screenshot of it cannot be used later. If the link is old, use “Lost your link?” below.</p>
+  <h3>Sign in to your order desk</h3>
+  <!-- No explanation paragraph, deliberately: a screen that has to describe its own
+       method is a screen that has already lost. The labels say it, and the #why slot
+       appears only when something specific went wrong. -->
   <div id="why" class="hide" style="margin:.5rem 0 0;padding:.5rem .65rem;border-left:3px solid #d9822b;background:#fff8ef;color:#6b4a12;border-radius:.3rem"></div>
-  <input id="fL" placeholder="https://…/a?code=…" autocomplete="off" autocapitalization="off" spellcheck="false">
-  <div style="display:flex;gap:.5rem;margin-top:.6rem"><button id="go">Open</button><button class="sm" id="lostBtn">Lost your link?</button></div>
+  <div class="two">
+    <div class="f"><label>store name — your key</label><input id="fK" placeholder="mamatoe" autocomplete="username" autocapitalize="off" spellcheck="false"></div>
+    <div class="f"><label>PIN</label><input id="fP" type="password" inputmode="numeric" autocomplete="current-password" maxlength="8" placeholder="6 digits"></div>
+  </div>
+  <div style="display:flex;gap:.5rem;margin-top:.6rem"><button id="go">Open my dashboard</button><button class="sm" id="lostBtn">I lost my PIN</button></div>
   <div id="lost" class="hide" style="margin-top:.7rem;border-top:1px solid #eef2f6;padding-top:.6rem">
-    <p class="hint" style="margin:0 0 .4rem">Answer the two things only you know — the owner email and the payment account on the store — and a fresh link is made right now. Nothing to wait for, nobody to ask.</p>
-    <div class="f"><label>store name</label><input id="rH" placeholder="mamatoe"></div>
-    <div class="two"><div class="f"><label>owner email</label><input id="rE" placeholder="you@example.com"></div><div class="f"><label>payment account / number</label><input id="rP"></div></div>
-    <button class="sm" id="rGo">Send me a new link</button>
+    <p class="hint" style="margin:0 0 .4rem">Two things only the owner has: the contact on the store and the account buyers pay into. Type them and a new PIN is set right here — no email to wait for, nobody to ask. Every <i>other</i> device is signed out when you do this, so a PIN somebody else learned stops working.</p>
+    <div class="two">
+      <div class="f"><label>store name</label><input id="rH" placeholder="mamatoe" autocapitalize="off" spellcheck="false"></div>
+      <div class="f"><label>new PIN (leave empty to be given one)</label><input id="rN" type="password" inputmode="numeric" maxlength="8" placeholder="6 to 8 digits"></div>
+    </div>
+    <div class="two">
+      <div class="f"><label>owner email or WhatsApp</label><input id="rE" placeholder="you@example.com, or 26377000000"></div>
+      <div class="f"><label>payout account, or the menu link</label><input id="rP"></div>
+    </div>
+    <button class="sm" id="rGo">Set my new PIN</button>
     <div id="rOut"></div>
   </div>
 </div>
@@ -309,10 +320,20 @@ body[data-tab="orders"] #list{display:block}
     <div id="audit" class="hint">—</div>
   </div>
 
+  <div class="card" data-tab="plan">
+    <h3>Your PIN</h3>
+    <p class="hint" style="margin-top:0">Six digits, typed once a day, and the only thing between a stranger and your orders. Changing it here keeps <i>this</i> device signed in and changes nothing else; if you think somebody knows it, use “I lost my PIN” on the sign-in screen instead — that resets it <i>and</i> signs every other device out.</p>
+    <div class="f"><label>current PIN</label><input id="cP" type="password" inputmode="numeric" maxlength="8"></div>
+    <div class="f"><label>new PIN</label><input id="nP" type="password" inputmode="numeric" maxlength="8"></div>
+    <div class="f"><label>type the new one again</label><input id="nP2" type="password" inputmode="numeric" maxlength="8"></div>
+    <div style="display:flex;gap:.5rem;margin-top:.4rem"><button class="sm" id="pGo">Change PIN</button><span class="hint" id="pinSet" style="align-self:center"></span></div>
+    <div id="pOut"></div>
+  </div>
+
   <div class="card" data-tab="log">
-    <h3>If this device or link falls into the wrong hands</h3>
-    <p class="hint" style="margin-top:0">One press kills every outstanding dashboard link, every session on every device and the API key, then gives you brand-new ones. Orders keep working; nothing else breaks.</p>
-    <div style="display:flex;gap:.5rem;flex-wrap:wrap"><button class="danger" id="revBtn">Revoke links &amp; API key</button><button class="sm" id="sgnOut">Sign out here</button></div>
+    <h3>If this device falls into the wrong hands</h3>
+    <p class="hint" style="margin-top:0">One press kills every session on every device and replaces the API key that your own tooling uses. Your PIN is untouched — change that above. Buyers keep ordering; nothing else breaks.</p>
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap"><button class="danger" id="revBtn">Sign out every device &amp; new API key</button><button class="sm" id="sgnOut">Sign out here</button></div>
     <div id="revOut"></div>
   </div>
 
@@ -411,50 +432,69 @@ function showWhy(t) {
   d.textContent = t; d.classList.remove('hide');
 }
 (function boot() {
-  var u = new URL(location.href), code = u.searchParams.get('code');
-  var whyKey = u.searchParams.get('why');
-  if (whyKey) showWhy(WHY[whyKey] || whyKey);
+  var u = new URL(location.href);
+  // Links died with the old login. Say that plainly to anybody arriving from a
+  // saved bookmark instead of leaving them at a form they have to guess at.
+  if (u.searchParams.get('code') || u.searchParams.get('token')) {
+    showWhy('Signing in by link has been retired. Your store name is your key now — type it with your PIN above. Forgot the PIN? “I lost my PIN” sets a new one from your own store details.');
+  }
   q('#tabs').onclick = function () { var p = q('#panel'); var open = p.classList.toggle('hide'); this.textContent = open ? 'Show' : 'Hide'; };
   q('#lostBtn').onclick = function () { q('#lost').classList.toggle('hide'); };
   q('#rGo').onclick = recover;
   q('#outLn').onclick = q('#sgnOut').onclick = signOut;
   q('#go').onclick = signIn;
-  q('#fL').onkeydown = function (e) { if (e.key === 'Enter') signIn(); };
+  q('#fK').onkeydown = q('#fP').onkeydown = function (e) { if (e.key === 'Enter') signIn(); };
   q('#revBtn').onclick = revoke;
-  if (code) {
-    // Exchange the one-time code for a cookie, then scrub it from the address
-    // bar and history so it cannot be copied, screenshotted or cached.
-    history.replaceState({}, '', '/a' + (u.searchParams.get('handle') ? '?handle=' + encodeURIComponent(u.searchParams.get('handle')) : ''));
-    api('/api/login', { code: code }).then(function (r) {
-      if (!r.j || !r.j.ok) { q('#login').classList.remove('hide'); showWhy((r.j && r.j.error) || 'That link did not work.'); return; }
-      S.handle = r.j.handle; load();
-    });
-  } else {
-    load();
-  }
+  q('#pGo').onclick = changePin;
+  load();
 })();
 
-function codeFrom(s) { var m = String(s || '').match(/code=([A-Za-z0-9._-]{20,})/); return m ? m[1] : null; }
+function digitsOnly(v) { return String(v || '').replace(/[^0-9]/g, '').slice(0, 8); }
 function signIn() {
-  var code = codeFrom(q('#fL').value);
-  if (!code) { alert('Paste the whole dashboard link (it contains code=…).'); return; }
+  var key = q('#fK').value.trim().toLowerCase(), pin = digitsOnly(q('#fP').value);
+  if (!key || pin.length < 6) { showWhy('Type your store name, then your PIN (6 digits).'); return; }
   q('#go').disabled = true; q('#go').textContent = 'Opening…';
-  api('/api/login', { code: code }).then(function (r) {
-    q('#go').disabled = false; q('#go').textContent = 'Open';
-    if (!r.j || !r.j.ok) { showWhy((r.j && r.j.error) || 'Could not open the dashboard.'); return; }
-    S.handle = r.j.handle; q('#fL').value = ''; load();
+  api('/api/auth', { key: key, pin: pin }).then(function (r) {
+    q('#go').disabled = false; q('#go').textContent = 'Open my dashboard';
+    if (!r.j || !r.j.ok) { showWhy((r.j && r.j.error) || 'Could not open the dashboard.'); q('#fP').value = ''; q('#fP').focus(); return; }
+    S.handle = r.j.handle; q('#fP').value = ''; showWhy(''); load();
+  });
+}
+function showPin(where, pin, extra) {
+  where.innerHTML = '<div class="hint" style="margin-top:.5rem">' + esc(extra || 'Here it is. It works now, on any device.') + '</div>'
+    + '<div class="mono" style="font-size:1.5rem;letter-spacing:.18rem;margin:.3rem 0">' + esc(pin) + '</div>'
+    + '<div style="display:flex;gap:.4rem"><button class="sm" id="cpP">Copy PIN</button><button class="sm" id="useP">Use it now</button></div>';
+  q('#cpP').onclick = function () { if (navigator.clipboard) navigator.clipboard.writeText(pin); this.textContent = 'Copied ✓'; };
+  q('#useP').onclick = function () { q('#fK').value = q('#rH').value || q('#fK').value; q('#fP').value = pin; q('#go').click(); };
+}
+function changePin() {
+  var cur = digitsOnly(q('#cP').value), a = digitsOnly(q('#nP').value), b = digitsOnly(q('#nP2').value);
+  var out = q('#pOut');
+  if (a.length < 6) { out.innerHTML = '<div class="flags">A PIN is 6 to 8 digits.</div>'; return; }
+  if (a !== b) { out.innerHTML = '<div class="flags">The two new PINs are not the same.</div>'; return; }
+  q('#pGo').disabled = true;
+  api('/api/pin/change', { handle: S.handle, current: cur, next: a }).then(function (r) {
+    q('#pGo').disabled = false;
+    if (!r.j || !r.j.ok) { out.innerHTML = '<div class="flags">' + esc((r.j && r.j.error) || 'Not changed') + '</div>'; return; }
+    out.innerHTML = '<div class="hint">' + esc(r.j.note || 'Changed.') + '</div>';
+    q('#cP').value = q('#nP').value = q('#nP2').value = '';
   });
 }
 function recover() {
-  api('/api/recover', { handle: q('#rH').value.trim().toLowerCase(), owner_email: q('#rE').value.trim(), pay_account: q('#rP').value.trim() })
-    .then(function (r) {
-      var o = q('#rOut');
-      if (!r.j || !r.j.ok) { o.innerHTML = '<div class="flags" style="margin-top:.4rem">' + esc((r.j && r.j.error) || 'Did not work') + '</div>'; return; }
-      o.innerHTML = '<div class="hint" style="margin-top:.5rem">' + esc(r.j.note || 'Here it is — valid 7 days.') + '</div><div class="mono"><a href="' + esc(r.j.dashboard_url) + '">' + esc(r.j.dashboard_url) + '</a></div>'
-        + '<div style="display:flex;gap:.4rem;margin-top:.4rem"><button class="sm" id="cpL">Copy link</button><button class="sm" id="opL">Open now</button></div>';
-      q('#cpL').onclick = function () { navigator.clipboard && navigator.clipboard.writeText(r.j.dashboard_url); this.textContent = 'Copied ✓'; };
-      q('#opL').onclick = function () { location.href = r.j.dashboard_url; };
-    });
+  var who = q('#rE').value.trim(), proof = q('#rP').value.trim();
+  var body = { key: q('#rH').value.trim().toLowerCase(), pay_account: proof, feed_url: proof };
+  // one box, because asking which kind of contact it is adds a decision for no
+  // safety: the store already holds exactly one of the two, and the Worker checks
+  // the value it has
+  if (who.indexOf('@') > 0) body.owner_email = who; else body.whatsapp = who.replace(/\D/g, '');
+  if (q('#rN').value.trim()) body.new_pin = digitsOnly(q('#rN').value);
+  q('#rGo').disabled = true;
+  api('/api/pin/reset', body).then(function (r) {
+    q('#rGo').disabled = false;
+    var o = q('#rOut');
+    if (!r.j || !r.j.ok) { o.innerHTML = '<div class="flags" style="margin-top:.4rem">' + esc((r.j && r.j.error) || 'Did not work') + '</div>'; return; }
+    showPin(o, r.j.pin, r.j.note || 'That is your PIN now.');
+  });
 }
 function signOut(e) { if (e) e.preventDefault(); api('/api/logout', {}).then(function () { location.href = '/a'; }); }
 
@@ -613,10 +653,10 @@ function renderAudit() {
   }).join('') : 'Nothing changed yet. Values are stored here masked — the log shows what moved, not the secret itself.';
 }
 function revoke() {
-  if (!confirm('This kills every dashboard link, every signed-in device and the API key for this store, then makes new ones. Continue?')) return;
+  if (!confirm('This signs out every device that has your dashboard open — including this one, on its next refresh — and replaces your API key. Your PIN is not touched, so you can sign straight back in with it. Continue?')) return;
   api('/api/revoke', { handle: S.handle }).then(function (r) {
     if (!r.j || !r.j.ok) { alert((r.j && r.j.error) || 'failed'); return; }
-    q('#revOut').innerHTML = '<div class="hint" style="margin-top:.5rem">Done. New dashboard link (save it, valid 7 days):</div><div class="mono"><a href="' + esc(r.j.dashboard_url) + '">' + esc(r.j.dashboard_url) + '</a></div>'
+    q('#revOut').innerHTML = '<div class="hint" style="margin-top:.5rem">Done. Sign in again with ' + esc(S.handle) + ' and your PIN — this device is signed out, every other one too.</div>'
       + '<div class="hint" style="margin-top:.4rem">New API key for your own tools: <b>' + esc(r.j.api_key) + '</b> (send it as <code>x-tapstall-admin</code>). ' + esc(r.j.note || '') + '</div>';
   });
 }

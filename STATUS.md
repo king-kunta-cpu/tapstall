@@ -1,5 +1,70 @@
 # Tapstall — status
 
+## The front door became a key and a PIN (2026-10-11, v0.6.0)
+
+The magic-link scheme was not weak in theory — a 105-character HMAC capability,
+7 days, one-use, revocable, no password to phish. It was weak in **explanation**.
+Asked how a merchant signs in, the honest answer was "a link is minted, emailed or
+shown, opened, traded for a code, which exchanges for a cookie, and if the `&`
+survives the chat app". A product whose onboarding sentence needs a diagram loses
+to a product whose sentence is: **"your key is `mamatoe`, your PIN is 482913."**
+
+So the customer login and its entry screens were deleted and rebuilt, not patched.
+
+| | |
+|---|---|
+| Sign in | one screen, two fields (`store name`, `PIN`), one button, no instructions |
+| The key | the store name — never a secret, it is already in `/s/<handle>` |
+| The PIN | 6 digits (7–8 allowed), `PIN_NORMALIZE` strips spaces and dashes so "482 913" pasted from a chat works |
+| At rest | `st.pin = {v,kdf:'pbkdf2-sha256',iters:8000,salt,hash,set_at}`, per-store salt, PBKDF2-SHA256 |
+| Sessions | `tp_sess` HMAC cap `{a:'sess',h,g}`, 12 h, killed by bumping `st.auth_gen` |
+| Wrong answer | `'Store name or PIN is wrong.'` — identical bytes for a wrong PIN and a store that does not exist (both branches run a KDF; the unknown store is checked against `PIN_GHOST`), so the form is not an enumeration oracle |
+| Freeze | per key: 6 wrong → 60 s, 10 → 10 min, 15 → 1 h, 22 → 12 h |
+| Lost it | "I lost my PIN" on the same screen: store name + the contact you gave + your payout account or menu-sheet link → new PIN, shown once, `auth_gen` bumped, every other device dead, throttle and queued change cleared. No operator, no waiting. |
+| Never sent | the PIN, the salt or the hash — not in any response, URL, log line or audit row (`PUBLIC_KEYS`/`adminStore` strip `pin`; the ledger records `fields:['pin']` and nothing else) |
+
+**Why 8,000 iterations and not "as many as possible".** This Worker has a 10 ms CPU
+ceiling per request. Measured warm on the runtime: 3k → 1.12 ms, 6k → 1.91 ms,
+10k → 3.04 ms, 20k → 5.62 ms; at 50k+ the request died with error 1102. 8k is the
+largest cost that cannot be turned into a cheap CPU attack by anyone who has learned
+a store name. Against it, 6 digits are worth ~1.6 years at the old unfrozen rate
+(1,728 guesses/day) and ~547 years at the rate the tiers actually allow, because
+only a tier *entry* is persisted — one KV write per escalation, never one per guess.
+That invariant is now a test: 60 wrong PINs cost ≤6 writes (they cost 60 before the
+last pass, which is the same bug that made `POST /api/register` return 503 the day
+the write budget ran out). Raising `PIN_ITER` later needs no migration: a PIN hashed
+at the old cost is re-hashed on the next successful sign-in.
+
+**What this gives up, stated plainly.** A 6-digit PIN is guessable by someone who can
+make enough tries, and the counting that prevents that lives in isolate memory with
+only the tier crossings in KV. An attacker who can spin unlimited fresh isolates —
+or who can read this KV namespace — is not stopped by it. The old scheme was
+unguessable. The exchange is deliberate: the attack that actually happened to this
+product was a merchant standing at a login box holding a mangled link, and every
+*other* axis moved forwards — no credential in a URL to be screenshotted, previewed
+by a crawler or pasted into a group chat, no 7-day link to expire mid-transaction,
+revocation still one write, and recovery no longer needs anybody.
+
+**Retired, each with a door that says so rather than a silent 404:** `?code=`,
+`?token=` trade-up, `st.admin_url`, `issueLogin`, `loginExchange`, `recoverLink`,
+`CODE_TTL`, `POST /api/login` → 410, `POST /api/recover` → 410,
+`POST /ops/api/link` → 410, and the ops `action:'link'` lever → 410 pointing at
+`reset_pin`. Deliberately *not* a synonym for `reset_pin`: a console that believes it
+is issuing a week-long credential must be told that is over. Buyers are untouched —
+`/c/<code>` confirm caps, `/renew/<token>`, `x-tapstall-admin` and the order path are
+the same code they shipped at 0.5.3.
+
+Kept on purpose: the orders panel, the pending/queued settings flow, the rails
+system, the ledger and the storefront — dozens of hard-won fixes and most of the
+101 tests live there, and none of them had anything to do with how you get in.
+
+**Migration.** Both tenants in KV (`mamatoe`, `kotaking`) pre-date the PIN, so each
+needs one `POST /ops/api/store {action:'reset_pin', handle}` to be handed a PIN; the
+console row reads `no PIN` until then and the drawer shows `PIN since <date>` after.
+`/api/register` mints the PIN itself and prints it on the same screen the store link
+is printed on, with Copy both / Send to myself on WhatsApp — the credential handover
+is part of signup now, not a step somebody has to remember.
+
 ## The rename: ZimLink → Tapstall (2026-10-10, v0.5.0)
 
 The name was a research artifact — Zimbabwe-shaped because that is where the

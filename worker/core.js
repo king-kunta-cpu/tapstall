@@ -279,7 +279,7 @@ export function publicStore(st, catalog) {
 /** What the signed-in owner may learn: everything except the credentials. */
 export function adminStore(st) {
   if (!st) return null;
-  const { admin_token, auth_gen, admin_url, feed_cache, pending, secret_hash, fw_secret, ...rest } = st;
+  const { admin_token, auth_gen, admin_url, pin, feed_cache, pending, secret_hash, fw_secret, ...rest } = st;
   return rest;
 }
 
@@ -351,6 +351,95 @@ export async function verifyCap(secret, cap, nowSec) {
 
 /** Detached signature over an arbitrary message (outbound webhook bodies). */
 export async function sign(secret, msg) { return hmacSig(secret, String(msg || '')); }
+
+/* ============================================================================
+ * The merchant's key and PIN.
+ *
+ * The model, in the words a merchant gets: *your key is your store name, your
+ * PIN is six digits, you type them once a day.* Everything else here exists to
+ * make that safe, because a six-digit secret typed into a form is a different
+ * animal from the 105-character links this product used before:
+ *
+ *   - 10^6 possibilities, and the server is an oracle. The defence is therefore
+ *     the *throttle*, not the hash: Worker CPU time on the free plan is capped at
+ *     10 ms per request (measured locally: PBKDF2-SHA256 costs ~4.5 ms at 10k
+ *     iterations, ~60 ms at 100k), so a serious KDF is unaffordable here and
+ *     `PIN_ITER` is deliberately modest. Raising it is one line on a paid plan.
+ *   - Guessing is bounded per *key*, not per IP, because IP rotation is free.
+ *     The counter lives in memory per isolate and is persisted only when a lock
+ *     tier is *entered* — see `pinFail` in worker.js — so an attacker hammering
+ *     from a thousand addresses cannot spend the tenant's 1,000 KV writes/day
+ *     (which is a denial of *orders*, not just of logins) and still gets only a
+ *     handful of tries per day before a 12-hour freeze.
+ *   - A key that does not exist costs the same work as one that does, and answers
+ *     with the same words, so the form is not a store-directory.
+ *
+ * The PIN is never stored in plaintext, never returned by any endpoint, never
+ * logged, and never appears in a URL — the four properties that made the old
+ * link scheme fragile.
+ * ==========================================================================*/
+
+export const PIN_MIN = 6;
+export const PIN_MAX = 8;
+export const PIN_ITER = 8000;               // measured: 2.4 ms per login, warm (see the note above)
+export const PIN_NORMALIZE = (v) => String(v == null ? '' : v).replace(/[\s.-]/g, '').slice(0, PIN_MAX);
+export const validPin = (v) => new RegExp('^\\d{' + PIN_MIN + ',' + PIN_MAX + '}$').test(PIN_NORMALIZE(v));
+
+function constEq(a, b) {
+  a = String(a); b = String(b);
+  if (a.length !== b.length) return false;
+  let r = 0;
+  for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return r === 0;
+}
+
+/** Six (or eight) digits, from the WebCrypto RNG, never a run like 000000. */
+export function genPin(len = PIN_MIN) {
+  const n = Math.min(PIN_MAX, Math.max(PIN_MIN, Math.floor(len) || PIN_MIN));
+  for (let guard = 0; guard < 64; guard++) {
+    const raw = new Uint8Array(n);
+    crypto.getRandomValues(raw);
+    let out = '';
+    for (let i = 0; i < n; i++) out += String(raw[i] % 10);
+    if (!/^(.)\1+$/.test(out) && !/0123456|1234567|2345678|3456789/.test(out)) return out;
+  }
+  return String(Date.now()).slice(-n);       // unreachable in practice
+}
+
+async function pbkdf2Hex(secret, salt, iters) {
+  const enc = new TextEncoder();
+  const base = await crypto.subtle.importKey('raw', enc.encode(String(secret)), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', hash: 'SHA-256', salt: enc.encode(String(salt)), iterations: Math.max(1000, iters | 0) },
+    base, 256);
+  return [...new Uint8Array(bits)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * What gets stored on the tenant. `salt` is per-store, so two shops that pick the
+ * same PIN do not share a hash; `kdf`/`iters` travel with it so a raised iteration
+ * count never invalidates an existing PIN, and a PIN set under a weaker setting can
+ * be re-hashed on the next successful login rather than forced on anyone.
+ */
+export async function pinRecord(pin, opts = {}) {
+  const p = PIN_NORMALIZE(pin);
+  if (!validPin(p)) return null;
+  const iters = Math.max(1000, Math.floor((opts && opts.iters) || PIN_ITER));
+  const salt = (opts && opts.salt) || randomKey(8);
+  return { v: 1, kdf: 'pbkdf2-sha256', iters, salt, hash: await pbkdf2Hex(p, salt, iters), set_at: new Date().toISOString() };
+}
+
+/** True only for the right PIN against a real record. Never throws. */
+export async function pinOk(pin, rec) {
+  if (!rec || !rec.hash || !rec.salt) return false;
+  const got = await pbkdf2Hex(PIN_NORMALIZE(pin), rec.salt, rec.iters || PIN_ITER);
+  return constEq(got, rec.hash);
+}
+
+/** A record of the right shape for a store that does not exist, so a probe costs
+ *  the same milliseconds as a hit and the difference cannot be measured. */
+export const PIN_GHOST = { v: 1, kdf: 'pbkdf2-sha256', iters: PIN_ITER, salt: 'tapstall-ghost-salt', hash: '0'.repeat(64) };
+export async function pinMiss(pin) { await pinOk(pin, PIN_GHOST); return false; }
 
 /* ------------------------------------------------------------ settings model */
 

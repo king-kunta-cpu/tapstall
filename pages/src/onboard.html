@@ -32,7 +32,10 @@ h1 small { display: block; font-size: .8rem; font-weight: 500; color: var(--ink-
 .live svg { width: 56px; height: 56px }
 .kv { display: grid; grid-template-columns: 1fr auto; gap: .3rem .6rem; font-size: .85rem }
 .kv div:nth-child(even) { text-align: right; font-variant-numeric: tabular-nums }
-.link { display: block; text-align: center; border: 1px dashed var(--line-2); border-radius: 10px; padding: .55rem; font-family: var(--mono); font-size: .8rem; text-decoration: none; margin-top: .4rem }
+.cred { border: 1px solid var(--line-2); border-radius: 14px; padding: .7rem .8rem; margin-top: .5rem; background: var(--bg-2, #fff) }
+  .credRow { display: flex; align-items: baseline; justify-content: space-between; gap: .6rem; margin: .3rem 0 }
+  .credRow b.big { font-size: 1.35rem; letter-spacing: .14rem }
+  .link { display: block; text-align: center; border: 1px dashed var(--line-2); border-radius: 10px; padding: .55rem; font-family: var(--mono); font-size: .8rem; text-decoration: none; margin-top: .4rem }
 .preview { border: 1px solid var(--line); border-radius: var(--r); padding: .7rem; background: linear-gradient(180deg, #fff, #fbfcfd) }
 .preview .ph { height: 2.4rem; border-radius: 10px; background: var(--chrome); color: #fff; display: flex; align-items: center; padding: 0 .6rem; font-weight: 600; font-size: .9rem; margin-bottom: .5rem }
 .preview .row2 { display: flex; justify-content: space-between; font-size: .82rem; padding: .3rem 0; border-bottom: 1px solid var(--line) }
@@ -145,9 +148,17 @@ h1 small { display: block; font-size: .8rem; font-weight: 500; color: var(--ink-
         <button type="button" class="sec" id="waShare">WhatsApp status text</button>
       </div>
       <div class="notice warn hide" id="feedWarn" style="margin-top:.7rem"></div>
-      <h3 style="margin-top:1rem">Save these two</h3>
-      <p class="muted" style="margin-top:0">The dashboard link opens a session on this device and expires after 7 days — by design, so a screenshot of it is not a permanent key to your shop. Lost it? “Lost your link?” on the dashboard remakes it from your email and payment details, with no one to ask.</p>
-      <a class="link" id="adminLink" href="#" >—</a>
+      <h3 style="margin-top:1rem">This is how you get back in</h3>
+      <div class="cred">
+        <div class="credRow"><span class="small muted">store name — you type it; it is not a secret</span><b class="mono big" id="credKey">—</b></div>
+        <div class="credRow"><span class="small muted">PIN — six digits, and only you should have it</span><b class="mono big" id="credPin">—</b></div>
+        <div class="grid c2" style="margin-top:.5rem">
+          <button type="button" class="sec" id="cpCred">Copy both</button>
+          <button type="button" class="sec" id="waSelf">Send them to myself on WhatsApp</button>
+        </div>
+      </div>
+      <p class="muted" style="margin-top:.5rem">Open <b class="mono">/a</b> on any phone, type those two, and you are in — that is the whole method. Lose the PIN and “I lost my PIN” on that screen gives you a new one from the details you just filled in, with nobody to ask. This page is the only place the PIN is ever printed, so put it somewhere you will find it.</p>
+      <h3 style="margin-top:.9rem">And save this one</h3>
       <a class="link" id="renewLink" href="#">—</a>
       <p class="muted" style="margin-top:.6rem">Free until <b id="freeUntil">—</b>. After that it is <b>60 USD a year</b>, once, and the store keeps the menu and history it already has.</p>
     </div>
@@ -313,9 +324,22 @@ q('#w').onsubmit = function (e) {
         : '<svg viewBox="0 0 48 48" fill="none" stroke="#8a5b00" stroke-width="3" stroke-linecap="round"><circle cx="24" cy="24" r="21" stroke-opacity=".22"/><path d="M24 15v12M24 32v1"/></svg>';
       q('#doneNote').textContent = j.note || '';
       q('#storeLink').textContent = j.store_url; q('#storeLink').href = j.store_url; q('#storeLink').dataset.set = '1';
-      q('#adminLink').textContent = 'dashboard link — tap to open'; q('#adminLink').href = j.admin_url;
+      q('#credKey').textContent = j.key || j.handle || '—';
+      q('#credPin').textContent = j.pin || 'ask the console to set one';
       q('#renewLink').textContent = 'renew link (save it): ' + j.renew_url; q('#renewLink').href = j.renew_url;
-      q('#openDash').onclick = function () { location.href = j.admin_url; };
+      q('#openDash').onclick = function () { location.href = '/a'; };
+      var credText = 'My Tapstall sign-in\nstore name: ' + (j.key || j.handle || '') + '\nPIN: ' + (j.pin || '')
+        + '\nOpen ' + location.origin + '/a and type both. Your store page: ' + location.origin + j.store_url;
+      q('#cpCred').onclick = function () {
+        if (!navigator.clipboard) { this.textContent = 'Copy not allowed here'; return; }
+        navigator.clipboard.writeText(credText).then(function () { q('#cpCred').textContent = 'Copied ✓'; });
+      };
+      q('#waSelf').onclick = function () {
+        var num = (val('whatsapp') || '').replace(/\D/g, '');
+        window.open('https://wa.me/' + num + '?text=' + encodeURIComponent(credText), '_blank');
+        q('#waSelf').textContent = 'Sent to yourself ✓';
+      };
+      q('#doneNote').textContent = (j.pin_note || '') + (j.note ? ' ' + j.note : '');
       q('#cpStore').onclick = function () { navigator.clipboard && navigator.clipboard.writeText(j.store_url); this.textContent = 'Copied ✓'; };
       q('#waShare').onclick = function () {
         var txt = 'Order ' + (j.store_url) + ' — ' + val('shop_name') + '. Pick what you want, send the exact amount to ' + (val('pay_account') || 'my number on the page') + ', and the odd cents tell me it is you. No app, no login.';

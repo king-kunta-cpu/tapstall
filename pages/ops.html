@@ -535,7 +535,7 @@ function rows() {
     var cls = s.left <= 0 ? 'bad' : (s.left <= 7 ? 'warn' : 'ok');
     return '<tr data-h="' + esc(s.handle) + '"' + (s.handle === D.sel ? ' class="sel"' : '') + '>'
       + '<td><span class="who">' + esc(s.shop_name || s.handle) + '</span><br><span class="small mono">/s/' + esc(s.handle) + '</span>'
-      + (s.suspended ? ' <span class="badge bad">paused</span>' : '') + (s.has_pending ? ' <span class="badge warn">queued</span>' : '') + (s.awaiting_ref ? ' <span class="badge">ref ×' + s.awaiting_ref + '</span>' : '') + '</td>'
+      + (s.suspended ? ' <span class="badge bad">paused</span>' : '') + (s.has_pending ? ' <span class="badge warn">queued</span>' : '') + (s.has_pin === false ? ' <span class="badge warn">no PIN</span>' : '') + (s.awaiting_ref ? ' <span class="badge">ref ×' + s.awaiting_ref + '</span>' : '') + '</td>'
       + '<td>' + esc(s.plan || 'free60') + (s.feed_products ? '' : ' <span class="badge bad">0 items</span>') + '</td>'
       + '<td class="n days ' + cls + '">' + (s.left > 365 ? Math.round(s.left / 30) + 'mo' : s.left) + '</td>'
       + '<td class="n">' + s.orders_today + '</td><td class="n">' + s.orders + '</td>'
@@ -554,7 +554,8 @@ function detail(h) {
     var s = r.j.summary, st = r.j.store || {}, o = r.j.orders || [];
     q('#drawer').innerHTML =
       '<div class="row between" style="align-items:baseline"><h3 style="margin:0">' + esc(s.shop_name) + '</h3><a class="sm" style="text-decoration:none" href="/s/' + esc(s.handle) + '" target="_blank">open store</a></div>'
-      + '<p class="small mono" style="margin:.2rem 0 .5rem">' + esc(s.handle) + ' · ' + esc(s.rail) + ' · ' + esc(s.currency) + (s.owner_email ? ' · ' + esc(s.owner_email) : ' · no email on file') + '</p>'
+      + '<p class="small mono" style="margin:.2rem 0 .5rem">' + esc(s.handle) + ' · ' + esc(s.rail) + ' · ' + esc(s.currency) + (s.owner_email ? ' · ' + esc(s.owner_email) : ' · no email on file')
+      + (s.has_pin ? ' · PIN since ' + esc(String(s.pin_set_at || '').slice(0, 10)) : ' · no PIN yet') + '</p>'
       + '<div class="grid c2">'
       + '<div class="stat"><b class="days ' + (s.left <= 0 ? 'bad' : s.left <= 7 ? 'warn' : 'ok') + '">' + s.left + '</b><span>days left</span></div>'
       + '<div class="stat"><b>' + s.orders + '</b><span>orders · ' + s.unpaid + ' unpaid</span></div>'
@@ -569,10 +570,10 @@ function detail(h) {
       + '<button data-act="grant_year">Grant a year</button><button data-act="reset_free">Reset to free 60</button>'
       + (r.j.queued ? '<button data-act="clear_pending">Clear queued change</button>' : '')
       + ((s.awaiting_reference || []).length ? '<button data-act="clear_refs">Clear references</button>' : '')
-      + '<button data-act="link">Issue dashboard link</button><button class="d" data-act="revoke">Revoke all links &amp; key</button>'
+      + '<button data-act="reset_pin">New sign-in PIN</button><button class="d" data-act="revoke">Revoke key &amp; sign out</button>'
       + '</div>'
       + '<div class="bar" style="margin-top:.4rem"><input id="noteBox" placeholder="optional message for the notify lever" style="flex:1"><button class="sm" data-act="notify">Notify store</button></div>'
-      + '<div id="linkOut"></div>'
+      + '<div id="leverOut"></div>'
       + '<h3 style="margin:.9rem 0 .3rem">Last ' + Math.min(6, o.length) + ' orders</h3>'
       + (o.length ? o.slice(0, 6).map(function (x) {
         return '<div class="menuRow"><span><b class="mono">' + esc(x.code) + '</b> ' + esc((x.buyer || {}).name || '') + ' · ' + esc(x.status) + (x.flags && x.flags.length ? ' ⚠' : '') + '</span><b>' + Number(x.pay_now || 0).toFixed(2) + '</b></div>';
@@ -584,16 +585,22 @@ function detail(h) {
     q('#drawer').onclick = function (e) {
       var b = e.target.closest('[data-act]'); if (!b) return;
       var act = b.getAttribute('data-act');
-      if (act === 'revoke' && !confirm('Revoke every dashboard link, session and API key for ' + h + '? The store keeps taking orders; the merchant gets a fresh link from you to paste once.')) return;
+      if (act === 'revoke' && !confirm('Revoke ' + h + '’s API key and sign out every device they have open? Their PIN still works — revoking a key is not meant to lock the owner out of their own shop. The store keeps taking orders either way.')) return;
+      if (act === 'reset_pin' && !confirm('Give ' + h + ' a new 6-digit PIN and sign out every device that has the old one? You will read the new PIN out once. It is not stored anywhere you can get it back afterwards — if they lose it, “I lost my PIN” on their sign-in screen resets it from their own store details, with nobody in the middle.')) return;
       b.disabled = true; var old = b.textContent; b.textContent = '…';
       api('/ops/api/store', { handle: h, action: act, message: (q('#noteBox') || {}).value || '' }).then(function (r2) {
         b.disabled = false; b.textContent = old;
         var j = r2.j || {};
         if (!j.ok) { toast(j.error || 'refused', true); return; }
-        if (act === 'link') {
-          q('#linkOut').innerHTML = '<a class="link" style="text-align:center;border:1px dashed var(--line-2);border-radius:10px;padding:.5rem;font-family:var(--mono);font-size:.74rem;text-decoration:none;display:block;margin-top:.4rem" href="' + esc(j.dashboard_url) + '">' + esc(j.dashboard_url) + '</a>'
-            + '<p class="small">' + esc(j.note || '') + ' <button class="sm" id="cpL">copy</button></p>';
-          q('#cpL').onclick = function () { navigator.clipboard.writeText(j.dashboard_url); this.textContent = '✓'; };
+        if (act === 'reset_pin') {
+          // shown once, here, and then nowhere: the drawer is reloaded from the
+          // store doc, which holds only the hash
+          q('#leverOut').innerHTML = '<div style="text-align:center;border:1px dashed var(--line-2);border-radius:10px;padding:.6rem;margin-top:.4rem">'
+            + '<div class="small muted">sign-in for ' + esc(j.key || h) + '</div>'
+            + '<div class="mono" style="font-size:1.55rem;letter-spacing:.2rem;margin:.15rem 0">' + esc(String(j.pin || '—')) + '</div>'
+            + '<div class="small">' + esc(j.note || '') + ' <button class="sm" id="cpL">copy PIN</button></div></div>';
+          q('#cpL').onclick = function () { navigator.clipboard.writeText(j.pin); this.textContent = '✓'; };
+          load(); detail(h);
           return;
         }
         toast(j.action || act + ' done');
