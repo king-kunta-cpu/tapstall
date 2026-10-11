@@ -53,13 +53,13 @@ is one line to remove once the old hostname stops getting traffic.
 
 The rename is finished on the surfaces, not only in git: the eight pages that were
 waiting on the day's write budget are published, and every brand-sensitive path now
-answers `0` matches for `ZimLink`. `scripts/prod_check.sh` → **125 passed, 0 blocked,
-0 failed**, the first fully green run of it (every earlier one had ~15 write assertions
-the quota turned off).
+answers `0` matches for `ZimLink`. `scripts/prod_check.sh` → **129 passed, 0 blocked,
+0 failed** at 0.5.1 — the first fully green stretch of runs (every earlier one had ~15
+write assertions the quota turned off).
 
 | What | Where | Proof |
 |---|---|---|
-| Worker (canonical) | `https://tapstall.simalidudu.workers.dev` | `/__ping` → `{"ok":true,"version":"0.5.0"}`; `/__selftest` → `ok:true`, only `email` false (no SMTP is a choice, not a gap) |
+| Worker (canonical) | `https://tapstall.simalidudu.workers.dev` | `/__ping` → `{"ok":true,"version":"0.5.1"}`; `/__selftest` → `ok:true`, only `email` false (no SMTP is a choice, not a gap) |
 | Brand sweep, served | `/`, `/fees`, `/onboard`, `/ops`, `/s/mamatoe`, `/s/kotaking`, `/a` | `0` matches for `ZimLink` on each, and `0` matches for `*/null` — the literal signature of a config hook nobody filled |
 | Titles, as a customer sees them | same seven paths | `Tapstall — a WhatsApp store your customers can actually pay` · `What your WhatsApp orders actually cost you — Tapstall calculator` · `Tapstall — set up your WhatsApp order desk` · `Tapstall Store` · `Tapstall · operator` |
 | KV vs git, byte for byte | `tpl:store onboard admin fees index confirm renew ops` | published today: `store 25,301 → 26,714`, `onboard 35,692 → 38,180`, `admin 49,711 → 51,908`, `fees 11,117 → 11,119`, `index 2,997 → 2,998`, `confirm 17,115 → 17,119`, `renew 17,621 → 17,626`, `ops 37,364 → 42,228` — right-hand figures are git's sizes, so served == shipped. `sample-menu.csv` was skipped as identical, which is the same code path a re-run takes |
@@ -72,6 +72,40 @@ the quota turned off).
 | Alias cron | `/__selftest` on each origin | canonical `cron_owner:true`, alias `cron_owner:false`: the alias still *carries* the inherited schedule (this token cannot delete one) and ignores it in code, so one KV is swept once a day |
 | Demo tenants | `/s/mamatoe`, `/s/kotaking` | 4 products from each store's own CSV; `config.json` carries `rail_info`; `feed.json` 200 |
 | CI/CD | `.github/workflows/deploy.yml` | run #32 `success` on both jobs at 0.5.0: tests → templates → Worker → **alias Worker** → cron → Pages (`deploy-pages` failed three times on GitHub's side with *Fetching artifact metadata failed*; a `rerun-failed-jobs` call is the whole fix) |
+
+## "Nothing loads" on the merchant dashboard (2026-10-11, 0.5.1)
+
+Reported while opening the tenant dashboard as a client. Measured in order, because
+that sentence fits three different failures:
+
+| Probe | Answer |
+|---|---|
+| `GET /a` | 200, 51,908 B; every id `boot()` touches exists, so the script does not throw |
+| `GET /a?handle=mamatoe&token=<legacy>` | `302` to `/a?code=v1…` — a pre-cap link trades itself for a fresh one |
+| `POST /api/login {code}` | 200 `{ok:true, valid_for_sec:43200}`, `tp_sess` set, `zl_sess` cleared |
+| `GET /api/admin?handle=mamatoe` with that cookie | 200, 23 orders, 27 editable fields, not suspended, `paid_until` 2026-12-08 |
+| `king-kunta-cpu.github.io/tapstall/a` | **404** — the mirror hosts `index`, `fees` and the `onboard` handoff, nothing else. A dashboard link opened *from the mirror* is the one way to get a genuinely empty screen |
+
+The dashboard opens. What did not work was **one panel inside it**: "this is your
+store" is `<iframe id="shareFrame">` pointed at `location.origin + '/s/' + handle`, and
+every response inherits `X-Frame-Options: DENY` + `frame-ancestors 'none'`, the
+storefront included, so the browser refused to paint it — a blank white box on every
+device for as long as the feature has existed. `FRAMEABLE` now allows same-origin
+framing on `/s/*` alone, derived from `SEC_HEADERS` rather than copied, and `/a`,
+`/ops`, `/onboard`, `/fees`, `/__selftest`, `/rails` keep refusing all framing.
+
+The fix then found the quieter bug. `hdr()` spread `SEC_HEADERS` in its original casing
+and merged overrides lower-cased, so the response carried `X-Frame-Options: DENY`
+**and** `x-frame-options: SAMEORIGIN`; `Headers` joins same-name values, so the storefront
+answered `DENY, SAMEORIGIN` — and two CSPs are *intersected* by the browser, the stricter
+winning. No per-route override had ever been able to replace a security header, which
+is also why the fix could have shipped looking like a policy that ignores its own
+exception. `hdr()` lower-cases both sides now, so an override replaces.
+
+`prod_check.sh` asserts the pair (storefront frameable, exactly one policy, `/a` still
+DENY) and the suite pins both ends: no joined header values, and the iframe's `src`
+beside the exception. That pairing is the point — if the preview ever embeds a
+different path, the framing exception stops being a feature and becomes a hole.
 
 ## Verified on production, not only in tests
 
