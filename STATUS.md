@@ -61,7 +61,7 @@ treats garbage as an empty day is a validator that deletes a shop's hours on a t
 A genuinely blank day still means closed, and `week: []` still means "take the week
 back off", because a setter that cannot unset is a trap.
 
-**Proved:** `node --test tests/` **124/124** (42 core · 53 live · 10 limits · 21
+**Proved:** `node --test tests/` **126/126** (42 core · 53 live · 10 limits · 21
 pages; was 111). Nine new production assertions in `prod_check.sh` run the same
 paths against a live store and leave nothing behind: the held `rail_accts` is
 verified *not* to be readable before its fuse, the week is verified to rewrite the
