@@ -71,6 +71,20 @@ the stub sheet at the same prices, so each test still tests its own thing (rails
 fees, receipt-vs-preview) and the money rule stays airtight with no exception
 flavoured "for tests".
 
+**Proved on production, not just in the harness.** `scripts/prod_check.sh` with
+`PIN=919414` → **141 passed, 0 blocked, 0 failed** (the harness grew from 138: it
+had to stop inventing its own probe item, and now orders mamatoe's first real shelf
+row and asserts the order came back priced `2.5` — the menu's number — plus a second
+order attempt for "Whole leg of lamb @ 0.01 × 5" that must be refused, which it is,
+with `Reload the page`). And on `kotaking`, live, from an empty jar: sign in with key
+and PIN, save a menu (`2 litre Coca-Cola → 1.11`, hide one row, add "Probe pie"),
+watch `/s/kotaking/feed.json` answer with `2 litre Coca-Cola@1.11* | Sadza + beef@6 |
+Vanilla ice cream@2/out | Probe pie@3.33`, order the hidden row and get the 422,
+then revert and find the feed **byte-identical to before** (`cmp` clean) with
+`menu(sess) ; menu(sess)` sitting in the audit log. One thing that check noticed on
+its own: `/api/menu` *without* the confirm header was answering 200 until a test said
+so — the price of a shop was one CSRF away from being anybody's to change.
+
 **Not done, still owed from your five:** image upload with browse-and-drop,
 real opening hours (days × from/to), a payment number per rail with mobile-money
 handled properly, and the rest of the production pass. The email transport is still

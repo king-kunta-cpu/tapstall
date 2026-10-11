@@ -167,13 +167,37 @@ echo "[4] prefetching a confirm link, as Slack/WhatsApp/WhatsApp-business do"
 STORE=$(curl -s -m 30 -H "Authorization: Bearer $TOK" "https://api.cloudflare.com/client/v4/accounts/$ACCT/storage/kv/namespaces/$KV/values/store:$HANDLE")
 ADMIN_KEY=$(printf '%s' "$STORE" | python3 -c "import sys,json;print(json.load(sys.stdin).get('admin_token',''))" 2>/dev/null)
 [[ -n "$ADMIN_KEY" ]] && echo "  · store doc read from KV (admin_token present)" || { echo "  ! could not read the store doc from KV"; }
+# The probe order is built from the store's own shelf, because since 0.6.4 that is
+# what a cart has to match: the menu prices the order, not the browser. Reading the
+# feed first also proves it is not merely 200 but priced — the old check could not
+# tell a live menu from a sheet that had quietly emptied.
+FEED=$(curl -s -m 30 "$ORIGIN/s/$HANDLE/feed.json?fresh=1")
+PROBE=$(printf '%s' "$FEED" | python3 -c '
+import sys, json
+try: p = (json.load(sys.stdin).get("products") or [])[0]
+except Exception: p = {}
+print(json.dumps({"id": str(p.get("id", "")), "name": str(p.get("name") or "prod check item"),
+                  "price": float(p.get("price") or 1), "qty": 1}))' 2>/dev/null)
+MP=$(printf '%s' "$PROBE" | python3 -c 'import sys,json;v=json.load(sys.stdin)["price"];print("%g" % v)' 2>/dev/null)
 ORD=$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{
   "handle":"'"$HANDLE"'","service":"pickup",
   "buyer":{"name":"prod check","phone":"0700000000","optin":true},
-  "items":[{"id":"prodcheck","name":"prod check item","price":0.01,"qty":1}]}' "$ORIGIN/api/order")
+  "items":['"$PROBE"']}' "$ORIGIN/api/order")
 ID=$(printf '%s' "$ORD" | python3 -c "import sys,json;print(json.load(sys.stdin)['order']['id'])" 2>/dev/null)
 MARK=$(printf '%s' "$ORD" | python3 -c "import sys,json;print(json.load(sys.stdin).get('mark_url',''))" 2>/dev/null)
 ckw "a probe order exists" '^/c/v1\.' "$MARK"
+ckw "  · priced off the shelf, not off the cart ($MP)" '"itemsTotal":'"$MP" "$ORD"
+# The other half of the same rule, and it writes nothing: a cart naming something the
+# menu does not carry is refused, in words a buyer can act on. This is the line that
+# used to read "5 legs of lamb at 0.01 each, invoice attached".
+TAMB=$(mktemp)
+TAMC=$(curl -s -m 30 -o "$TAMB" -w '%{http_code}' -X POST -H 'content-type: application/json' -d '{
+  "handle":"'"$HANDLE"'","service":"pickup",
+  "buyer":{"name":"tamper check","phone":"0700000001","optin":true},
+  "items":[{"id":"prodcheck-not-real","name":"Whole leg of lamb","price":0.01,"qty":5}]}' "$ORIGIN/api/order")
+ckw "a cart the menu does not know is refused, not priced" '^422$' "$TAMC"
+ck  "  · and the buyer is told what to do about it" 'Reload the page' "$(cat "$TAMB")"
+rm -f "$TAMB"
 nk "the confirm link carries no store credential" 'token=|admin_token|/api/mark' "$MARK"
 PAGE=$(curl -s -m 30 -A 'Mozilla/5.0 (compatible; Slackbot/1.0; +https://slack.com/faq)' -L "$ORIGIN$MARK")
 ckw "the bot gets a page, not a mutation" 'Mark .* paid' "$PAGE"
