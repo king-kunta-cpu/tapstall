@@ -253,6 +253,7 @@ body[data-tab="orders"] #list{display:block}
 <div class="card" id="login">
   <h3>Open your dashboard</h3>
   <p class="hint" style="margin-top:0">Paste the dashboard link we sent you. It opens a session on this device only — no password to reuse, and the link stops working after 7 days, so a screenshot of it cannot be used later. If the link is old, use “Lost your link?” below.</p>
+  <div id="why" class="hide" style="margin:.5rem 0 0;padding:.5rem .65rem;border-left:3px solid #d9822b;background:#fff8ef;color:#6b4a12;border-radius:.3rem"></div>
   <input id="fL" placeholder="https://…/a?code=…" autocomplete="off" autocapitalization="off" spellcheck="false">
   <div style="display:flex;gap:.5rem;margin-top:.6rem"><button id="go">Open</button><button class="sm" id="lostBtn">Lost your link?</button></div>
   <div id="lost" class="hide" style="margin-top:.7rem;border-top:1px solid #eef2f6;padding-top:.6rem">
@@ -399,8 +400,20 @@ function api(path, body) {
     .then(function (r) { return r.text().then(function (t) { var j = null; try { j = JSON.parse(t); } catch (e) {} return { s: r.status, j: j, t: t }; }); });
 }
 
+var WHY = {
+  badkey: 'That link carries your store key, and the key on this store has changed since it was written down — so there is nothing to trade. Use “Lost your link?” below, or paste the whole link from the newest message we sent you.',
+  nostore: 'No store by that name is on this platform, so there is nothing to open. Check the spelling, or start a store from the sign-up page.'
+};
+function showWhy(t) {
+  var d = q('#why');
+  if (!t) { if (d) d.classList.add('hide'); return; }
+  if (!d) return;
+  d.textContent = t; d.classList.remove('hide');
+}
 (function boot() {
   var u = new URL(location.href), code = u.searchParams.get('code');
+  var whyKey = u.searchParams.get('why');
+  if (whyKey) showWhy(WHY[whyKey] || whyKey);
   q('#tabs').onclick = function () { var p = q('#panel'); var open = p.classList.toggle('hide'); this.textContent = open ? 'Show' : 'Hide'; };
   q('#lostBtn').onclick = function () { q('#lost').classList.toggle('hide'); };
   q('#rGo').onclick = recover;
@@ -413,7 +426,7 @@ function api(path, body) {
     // bar and history so it cannot be copied, screenshotted or cached.
     history.replaceState({}, '', '/a' + (u.searchParams.get('handle') ? '?handle=' + encodeURIComponent(u.searchParams.get('handle')) : ''));
     api('/api/login', { code: code }).then(function (r) {
-      if (!r.j || !r.j.ok) { q('#login').classList.remove('hide'); alert(r.j && r.j.error || 'That link did not work'); return; }
+      if (!r.j || !r.j.ok) { q('#login').classList.remove('hide'); showWhy((r.j && r.j.error) || 'That link did not work.'); return; }
       S.handle = r.j.handle; load();
     });
   } else {
@@ -428,7 +441,7 @@ function signIn() {
   q('#go').disabled = true; q('#go').textContent = 'Opening…';
   api('/api/login', { code: code }).then(function (r) {
     q('#go').disabled = false; q('#go').textContent = 'Open';
-    if (!r.j || !r.j.ok) { alert((r.j && r.j.error) || 'Could not open the dashboard'); return; }
+    if (!r.j || !r.j.ok) { showWhy((r.j && r.j.error) || 'Could not open the dashboard.'); return; }
     S.handle = r.j.handle; q('#fL').value = ''; load();
   });
 }

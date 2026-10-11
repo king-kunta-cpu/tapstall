@@ -21,7 +21,7 @@ import {
   EDITABLE_FIELDS, SOFT_FIELDS, sign, adminStore, normaliseRail, resolveRail,
 } from './core.js';
 
-const VERSION = '0.5.2';
+const VERSION = '0.5.3';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 const MAX_ORDERS_KEPT = 200;
@@ -118,6 +118,13 @@ export default {
 };
 
 async function route(req, url, env, ctx) {
+  // A link that has been through an email client, a Markdown renderer, a chat
+  // preview or a copy-paste out of HTML often arrives with `&` written as
+  // `&amp;`. That silently renames the *second* parameter: `&token=` becomes
+  // `&amp;token=`, so the page loads, sees no credential, and asks you to paste
+  // the link you are already holding. Repaired once, here, because every reader
+  // of the query is downstream of it — the alias redirect included.
+  if (/(?:&|&#0*38;)(?:amp|#0*38);/i.test(url.search)) url = unescapeQuery(url);
   const p = url.pathname;
   const NOSTORE = { 'Cache-Control': 'no-store' };
 
@@ -1183,6 +1190,17 @@ async function loginExchange(req, env) {
     ...sessCookie(sess));
 }
 
+/** `&amp;` and friends, repaired to a clean query. Loops because a link escaped
+ *  twice (`&amp;amp;`) is exactly what a Markdown-to-HTML-to-clipboard round trip
+ *  produces, and a half-repaired query is as confusing as an unrepaired one. */
+function unescapeQuery(url) {
+  let s = String(url.search || '');
+  for (let i = 0; i < 3 && /&(?:amp|#0*38);/i.test(s); i++) {
+    s = s.replace(/&(?:amp|#0*38);/gi, '&').replace(/&&+/g, '&');
+  }
+  return new URL(url.origin + url.pathname + s + (url.hash || ''));
+}
+
 /** Legacy `?handle=..&token=..` links still work, but trade down to a code. */
 async function adminEntry(req, url, env) {
   const legacy = url.searchParams.get('token');
@@ -1195,7 +1213,9 @@ async function adminEntry(req, url, env) {
     }
     if (st && await lockedOut(env, handle)) return json({ ok: false, error: 'too many failed attempts — wait 10 minutes' }, 429);
     if (st) await authFail(env, handle);
-    return redirect('/a');
+    // Sent to the login card *with a reason*. Bouncing a merchant to a bare form
+    // after their key stopped matching is what makes them ask what to paste.
+    return redirect('/a?why=' + (st ? 'badkey' : 'nostore'));
   }
   return html(await tpl(env, 'admin'));
 }

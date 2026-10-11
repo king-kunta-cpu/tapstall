@@ -246,7 +246,13 @@ test('the dashboard needs a session: the code opens it, nothing else does', asyn
   assert.equal(replay.status, 401, 'a tampered code is refused');
   const legacy = await call('/a?handle=mamatoe&token=whatever');
   assert.equal(legacy.status, 302, 'a stale token link is not honoured');
-  assert.match(legacy.headers.get('location'), /^\/a$/, 'and it lands on the login card, not the ledger');
+  assert.match(legacy.headers.get('location'), /^\/a\?why=badkey$/,
+    'and it lands on the login card carrying the reason, so nobody has to ask what to paste');
+  const card = await call(legacy.headers.get('location'));
+  assert.equal(card.status, 200, 'the card is served');
+  assert.match(card.text, /id="why"/, 'and there is a slot on it for the explanation');
+  const ghost = await call('/a?handle=nobody-here&token=whatever');
+  assert.match(ghost.headers.get('location'), /why=nostore/, 'an unknown store says that, not “bad key”');
 });
 
 test('buyer fingerprint is hashed, and repeat-buyer risk is tracked', async () => {
@@ -1055,6 +1061,25 @@ test('a lever posted to a read endpoint is refused, not answered with ok:true', 
     body: { handle: 'mamatoe', action: 'link' } });
   assert.equal(right.status, 200, right.text.slice(0, 160));
   assert.match(right.json.dashboard_url, /\/a\?code=v1\./, 'the same lever on the right path still works');
+});
+
+test('a link whose & was escaped by a mailer still opens the dashboard', async () => {
+  // `?handle=x&token=y` typed into an email client, a Markdown renderer or a chat
+  // preview comes back as `?handle=x&amp;token=y`. That is not a broken link: it is
+  // the same characters with the separator spelled as an entity — but it renames the
+  // parameter, so the page used to load, find no credential, and ask for the link the
+  // merchant is standing there holding. This is that bug, as a test.
+  const key = JSON.parse(env.STORES._map.get('store:mamatoe').value).admin_token;
+  const clean = await call('/a?handle=mamatoe&token=' + key);
+  assert.equal(clean.status, 302, 'the real spelling trades the key for a code');
+  const amp = await call('/a?handle=mamatoe&amp;token=' + key);
+  assert.equal(amp.status, 302, 'and so does the escaped one');
+  assert.match(amp.headers.get('location'), /\?code=v1\./, 'to the same shape');
+  const dbl = await call('/a?handle=mamatoe&amp;amp;token=' + key);
+  assert.equal(dbl.status, 302, 'twice-escaped, as a copy out of rendered HTML gives you');
+  const r = await call('/api/login', { method: 'POST', body: { code: amp.headers.get('location').split('code=')[1] } });
+  assert.equal(r.status, 200, 'and the session follows from the mailer-mangled link');
+  assert.ok(r.cookie.startsWith('tp_sess='), 'with the ordinary cookie');
 });
 
 test('the store page is frameable by the dashboard and by nobody else', async () => {

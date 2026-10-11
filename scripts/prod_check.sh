@@ -222,6 +222,10 @@ ck "a truncated copy of a real cap is refused" '"link_expired"' "$(curl -s -m 30
 echo "[6] an existing merchant, upgraded with no action from anyone"
 LEG=$(curl -s -m 30 -D - -o /dev/null "$ORIGIN/a?handle=$HANDLE&token=$ADMIN_KEY" | tr -d '\r')
 CODE=$(printf '%s' "$LEG" | grep -io 'location: [^ ]*code=v1[^ ]*' | sed 's/.*code=//' | head -1)
+ck "a link whose & was escaped by a mailer still trades up" '^HTTP/[0-9.]+ 302' \
+  "$(curl -s -m 30 -D - -o /dev/null "$ORIGIN/a?handle=$HANDLE&amp;token=$ADMIN_KEY" | tr -d '\r' | head -1)"
+ck "and says so plainly when the key really is stale" 'why=badkey' \
+  "$(curl -s -m 30 -D - -o /dev/null "$ORIGIN/a?handle=$HANDLE&token=not-the-key" | tr -d '\r' | grep -i '^location:')"
 ck "their v0.2 link trades up for a code" '^v1\.' "$CODE"
 JAR=$(mktemp)
 LR=$(curl -s -m 30 -c "$JAR" -X POST -H 'content-type: application/json' -d '{"code":"'"$CODE"'"}' "$ORIGIN/api/login")
