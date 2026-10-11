@@ -14,7 +14,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="0; url=https://tapstall.simalidudu.workers.dev/onboard">
+<!-- The script keeps the query string, which matters: an invite link may carry a
+     code. A meta refresh cannot, so it waits a second and only fires if there is no JS. -->
+<meta http-equiv="refresh" content="1; url=https://tapstall.simalidudu.workers.dev/onboard">
 <title>Tapstall — the store builder is on the app</title>
 <style>
   body { font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;

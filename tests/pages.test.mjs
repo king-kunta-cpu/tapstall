@@ -196,12 +196,16 @@ test('the mirror never links to a page it does not have', () => {
   }
   assert.equal(pub('_redirects'), false,
     'a _redirects rule is a promise Pages does not keep; keeping the file invites trusting it');
-  for (const shape of ['onboard.html', 'onboard/index.html']) {
-    assert.ok(pub(shape), `${shape} is the handoff that makes the mirror's sign-up link work`);
+  for (const shape of ['onboard.html', 'onboard/index.html', 'a.html', 'a/index.html']) {
+    assert.ok(pub(shape), `${shape} is the handoff that makes the mirror's app link work`);
   }
-  const handoff = page('public/onboard').slice(0, 4000);
-  assert.match(handoff, /http-equiv="refresh"[^>]*url=https:\/\/tapstall\.[^/"]*\/onboard/,
-    'and it moves the visitor by two independent means, because a handoff nobody reads is a 404 with manners');
+  for (const [name, path] of [['public/onboard', 'onboard'], ['public/a', 'a']]) {
+    const handoff = page(name);
+    assert.match(handoff, new RegExp(`http-equiv="refresh" content="1; url=https:\\/\\/tapstall\\.[^/"]*\\/${path}`),
+      'it moves the visitor without JS too, but one second late on purpose');
+    assert.match(handoff, new RegExp(`location\\.replace\\('https:\\/\\/tapstall\\.[^']+\\/${path}' \\+ \\(location\\.search \\|\\| \\'\\'\\)`),
+      'and the JS move keeps the query string — for /a the query string is the credential');
+  }
 });
 
 test('the mirror marketing page is the shipped one, not a copy that drifted', () => {

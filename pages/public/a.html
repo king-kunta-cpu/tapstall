@@ -1,0 +1,48 @@
+<!doctype html>
+<!--
+  A handoff, not a copy of the dashboard.
+
+  The GitHub Pages mirror carries static marketing pages; /a needs the Worker (it
+  trades ?code= for a cookie via /api/login, then reads /api/admin). So this file
+  exists to make one link work instead of 404: people bookmark the dashboard, and a
+  bookmark made before the mirror existed — or typed from an email that mentioned
+  the Pages URL — should not be a dead end. Same reasoning as ../onboard.html, and
+  the same rule: keep the query string, because the code IS the query string.
+
+  Pages hosts files and ignores `_redirects` (Netlify syntax), which is why an
+  earlier attempt at this lived in that file and did nothing.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The script keeps the query string, which matters: an invite link may carry a
+     code. A meta refresh cannot, so it waits a second and only fires if there is no JS. -->
+<meta http-equiv="refresh" content="1; url=https://tapstall.simalidudu.workers.dev/a">
+<title>Tapstall — your dashboard is on the app</title>
+<style>
+  body { font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+         margin: 0; padding: 3rem 1.25rem; background: #0d1117; color: #e6edf3; }
+  main { max-width: 34rem; margin: 0 auto; }
+  a { color: #4cc9a6; }
+  p.note { color: #9198a1; font-size: .9rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Tapstall</h1>
+  <p>Take orders on WhatsApp. Free for 60 days.</p>
+  <p>Your order desk runs on the app, where the API lives.
+     <a href="https://tapstall.simalidudu.workers.dev/a">Open it</a>.</p>
+  <p class="note">If you got here from a link on this mirror, that link is meant to
+     move you to <code>tapstall.simalidudu.workers.dev/a</code>. Nothing about
+     your store is stored here — this page is static and reads nothing.</p>
+</main>
+<script>
+  // The meta refresh above works without JS; this makes the same move for the
+  // visitors whose browser ignores it, and keeps the query string, because a
+  // merchant arriving from a shared invite link may be carrying a code.
+  try { location.replace('https://tapstall.simalidudu.workers.dev/a' + (location.search || '')); } catch (e) {}
+</script>
+</body>
+</html>
