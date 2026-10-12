@@ -187,7 +187,18 @@ done
 curl -sf -A "Mozilla/5.0" --max-time 15 "$BASE/__ping" >/dev/null || die "worker did not answer /__ping"
 ok "worker live: $BASE"
 echo "--- /__selftest ---"
-curl -s -A "Mozilla/5.0" --max-time 30 "$BASE/__selftest" | jq '{version, kv_stores, kv_roundtrip, templates: {store: .tpl_store, onboard: .tpl_onboard, admin: .tpl_admin, fees: .tpl_fees, index: .tpl_index, confirm: .tpl_confirm, renew: .tpl_renew, ops: .tpl_ops}, pricing_absorb: .pricing.fee_absorbed_by_merchant, products: (.csv|length), feed_url_ok: (.feed_url_sheet != null), secret_leak_check}'
+# This print is a status line, not the deploy's verdict: the /__ping loop above is what
+# proves the Worker serves. Cloudflare's edge answered one of today's hiccups with an
+# HTML 504 page instead of JSON, and jq's exit code under pipefail turned a green release
+# red twice for that reason alone. So show the truth in whichever shape it arrived, and
+# let the publish decide the exit code.
+ST_BODY=$(curl -s -A "Mozilla/5.0" --max-time 30 "$BASE/__selftest" || true)
+if printf '%s' "$ST_BODY" | head -c 1 | grep -q '{'; then
+  printf '%s' "$ST_BODY" | jq '{version, kv_stores, kv_roundtrip, templates: {store: .tpl_store, onboard: .tpl_onboard, admin: .tpl_admin, fees: .tpl_fees, index: .tpl_index, confirm: .tpl_confirm, renew: .tpl_renew, ops: .tpl_ops}, pricing_absorb: .pricing.fee_absorbed_by_merchant, products: (.csv|length), feed_url_ok: (.feed_url_sheet != null), secret_leak_check}' \
+    || warn "selftest JSON did not parse — the raw bytes above are the report"
+else
+  warn "selftest answered no JSON (the edge is being itself): $(printf '%s' "$ST_BODY" | tr '\n' ' ' | head -c 140)"
+fi
 echo "--- routes ---"
 for r in / /onboard /fees /rails /ops /data/sample-menu.csv; do
   printf '  %-9s %s\n' "$r" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$BASE$r")"
@@ -232,7 +243,9 @@ if [[ -n "${LEGACY_WORKER_NAME:-}" && "$LEGACY_WORKER_NAME" != "$WORKER_NAME" ]]
   # rather than sloppy: a Worker deployed with REDIRECT_TO returns from
   # scheduled() without touching KV, which the alias's own selftest reports as
   # cron_owner:false — so the sweep still runs once a day, from one origin.
-  say "alias cron is inert: $(curl -s --max-time 20 "$OLD/__selftest" | jq -c '{cron_owner, version}' 2>/dev/null)"
+  # guarded for the same reason as the selftest print above: a 504 here is a shrug,
+  # not a red release, and the alias is not what a merchant's money runs through
+  say "alias cron is inert: $( { curl -s --max-time 20 "$OLD/__selftest" || true; } | jq -c '{cron_owner, version}' 2>/dev/null || printf 'not readable right now')"
   CF_TOKEN="$CF_TOKEN" CF_ACCOUNT="$CF_ACCOUNT" python3 scripts/set_triggers.py "$WORKER_NAME" "15 6,12,18,0 * * *" || warn "cron check failed on $WORKER_NAME"
 fi
 
