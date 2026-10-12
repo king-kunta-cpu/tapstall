@@ -48,6 +48,18 @@ limiter before a cap is looked at. Worker 0.8.0 on both hostnames. `pages/store.
 waits on the 00:20 UTC publish, which now carries 0.7.5's keeping, 0.7.9's box and this
 re-pointing in one put.
 
+**CI #74's red was the edge, not this build.** `templates → KV` died on a Cloudflare 504 (code
+7009, "Upstream service unavailable") for the `tpl:store` put, and the publisher's rule — *a
+refused write where KV differs from git is fatal* — could not tell that from a stale page. It now
+waits a 5xx out (three attempts, 3s then 6s) and keeps the fatal verdict for after the waiting,
+while a spent quota (429/10048) still stops on sight rather than hammering a budget that cannot
+unspend itself. Proven against the shipped `kv_put_tpl` with `CF_API_BASE` pointed at a stand-in
+origin: 504,504,200 → `^ index 0 -> 3236 bytes` after 10s; 429/10048 → one attempt in 0s; always
+504 → the new message, exit 0. Applying that patch also briefly ate lib.sh's prologue —
+`require_cmd`, `die`, the KV namespace titles — which `bash -n` and all 212 tests walked past;
+`scripts/deploy.sh --check` caught it, which is why it now runs before every release note is
+written.
+
 ## The field is on the receipt, not one tap away (2026-10-12, v0.7.9)
 
 **The instruction, read for the fifth time, says *from the receipt page*.** Four releases had

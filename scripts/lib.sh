@@ -105,28 +105,55 @@ kv_put_tpl() { # <namespace_id> <names...>
     [[ "$name" == *.csv ]] && file="pages/$name"
     [[ -f "$file" ]] || die "missing $file"
     CF_TOKEN="$CF_TOKEN" CF_ACCOUNT="$CF_ACCOUNT" KV_NS="$ns" TPL="$name" FILE="$file" python3 - <<'PYEOF'
-import os, urllib.error, urllib.request
+import os, time, urllib.error, urllib.request
 tok  = os.environ["CF_TOKEN"]; acct = os.environ["CF_ACCOUNT"]
 ns   = os.environ["KV_NS"];    name = os.environ["TPL"]; fn = os.environ["FILE"]
 key  = "tpl:" + (name[:-4] if name.endswith(".csv") else name)     # sample-menu.csv -> tpl:sample-menu
 body = open(fn, "rb").read()
-base = "https://api.cloudflare.com/client/v4/accounts/%s/storage/kv/namespaces/%s" % (acct, ns)
+api  = os.environ.get("CF_API_BASE", "https://api.cloudflare.com/client/v4")
+base = "%s/accounts/%s/storage/kv/namespaces/%s" % (api, acct, ns)
+
+# Two failure shapes look identical in a log and must not be handled alike. A spent quota
+# (429 / code 10048) cannot be retried into success, and hammering it spends patience for
+# nothing; a 504 from the KV upstream (code 7009) is Cloudflare being itself for a few
+# seconds, and it is the only reason a green release has gone red on this step. So one is
+# fatal-on-sight and the other is waited out. `CF_API_BASE` exists so the difference can be
+# tested against a stand-in origin instead of argued about; nothing in production sets it.
+TRANSIENT = ("504", "502", "503", "7009", "timed out", "Upstream service unavailable",
+             "Temporary Failure", "Service Unavailable")
+QUOTA = ("429", "10048", "free usage limit", "limit exceeded")
+def transient(t): return any(x in t for x in TRANSIENT)
+def quota(t):     return any(x in t for x in QUOTA)
+def why(e):
+    # The quota refusal is a 429 whose *body* carries code 10048, and a 5xx from the upstream
+    # says nothing in str(HTTPError) either: both live in the response body. Reading it once,
+    # here, is what lets a spent budget stop on sight and an unavailable upstream be waited out.
+    # (Learned by being wrong twice: CI died on run #22 reading only str(e), and on run #74
+    # treating a 7009 as a defect in the page it was trying to publish.)
+    parts = [str(e), repr(getattr(e, "reason", ""))]
+    rd = getattr(e, "read", None)
+    if callable(rd):
+        try: parts.append(rd().decode("utf-8", "replace")[:400])
+        except Exception: pass
+    return " ".join(parts)
 
 def read():
-    req = urllib.request.Request(base + "/values/" + key, headers={"Authorization": "Bearer " + tok})
-    try:
-        with urllib.request.urlopen(req, timeout=60) as r:
-            return r.read()
-    except urllib.error.HTTPError as e:
-        if e.code == 404: return None
-        raise
+    for try_no in (1, 2, 3):
+        try:
+            req = urllib.request.Request(base + "/values/" + key, headers={"Authorization": "Bearer " + tok})
+            with urllib.request.urlopen(req, timeout=60) as r:
+                return r.read()
+        except urllib.error.HTTPError as e:
+            if e.code == 404: return None
+            if try_no == 3 or not transient(why(e)): raise
+            time.sleep(2 * try_no)
 
 cur = read()
 if cur == body:
     print("  = %-14s already current in KV (%d bytes), no write spent" % (name, len(body)))
 else:
     err = None
-    for _ in (1, 2):
+    for try_no in (1, 2, 3):
         try:
             req = urllib.request.Request(base + "/values/" + key, data=body, method="PUT",
                                         headers={"Authorization": "Bearer " + tok})
@@ -137,18 +164,10 @@ else:
             break
         except Exception as e:
             err = e
-    def why(e):
-        # Cloudflare's quota refusal is a 429 whose *body* carries code 10048;
-        # str(HTTPError) is only "HTTP Error 429: Too Many Requests", so a text
-        # match on str(e) alone reads a spent quota as an unexplained failure and
-        # holds up the whole release for a page nobody is waiting on. (Learned by
-        # being wrong: CI died exactly this way on run #22.)
-        parts = [str(e), repr(getattr(e, "reason", ""))]
-        read = getattr(e, "read", None)
-        if callable(read):
-            try: parts.append(read().decode("utf-8", "replace")[:400])
-            except Exception: pass
-        return " ".join(parts)
+            t = why(e)
+            # a spent budget will not unspend itself; a 5xx from the upstream might
+            if quota(t): break
+            if try_no < 3: time.sleep(3 * try_no if transient(t) else 1)
     if err is None:
         print("  ^ %-14s %d -> %d bytes" % (name, len(cur or b""), len(body)))
     elif read() == body:
@@ -161,7 +180,9 @@ else:
         # Any other failure mode is still fatal: a stale page from a real bug is
         # exactly what this function exists to refuse.
         txt = why(err)
-        if getattr(err, "code", None) == 429 or "10048" in txt or "free usage limit" in txt or "limit exceeded" in txt:
+        if transient(txt):
+            print("  ! %-14s NOT PUBLISHED — the KV upstream refused us (5xx) three times over 15 seconds, and git and KV still differ (%d bytes vs %d). This is Cloudflare, not this build: the next deploy repeats the put, and CI's 00:20 UTC job is that retry. The Worker is deployed regardless." % (name, len(body), len(cur or b"")))
+        elif quota(txt):
             print("  ! %-14s NOT PUBLISHED — this account\'s KV write budget is spent (HTTP 429/10048). "
                   "The old copy stays live (%d bytes in git, %d in KV); this goes out on the next deploy "
                   "after 00:00 UTC, and the Worker is deployed regardless." % (name, len(body), len(cur or b"")))
