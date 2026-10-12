@@ -695,6 +695,16 @@ SHIP_S=$(cat pages/store.html)
 ck "the page we ship asks once, then lets the order through" 'id="fProof"' "$SHIP_S"
 ck "  · shown because the server said so, not from a list of rail names" "R\.proof !== 'none'" "$SHIP_S"
 ck "  · and the code is read back on the receipt" 'pay\.proof' "$SHIP_S"
+# 0.7.9: the door is on the receipt, and a refusal says what it ends
+ck "  · the receipt holds the field itself, as a form, at the door's own route" '<form id="pff" method="post" action="/api/proof">' "$SHIP_S"
+ck "  · its box and its link are one condition, so they cannot disagree" '\(needDoor \? pfBox : addProof\)' "$SHIP_S"
+ck "  · and it asks the Worker whether a refusal closes the door" 'if \(j\.final\)' "$SHIP_S"
+# the two fields a receipt page acts on cannot be read off the live Worker today: a capped
+# day fails the rate-limit counter closed, so every POST to the door is answered 503 before
+# a cap is even looked at. That is on purpose (the same limiter guards the PIN, and a budget
+# is not a reason to answer a brute force generously), and it is asserted below instead.
+ckw  "  · the answer a browser can act on names its reason in a field" '"why":"cap"' "$BOGUS"
+nkw  "  · and does not pretend a bad link is news about the order" '"final":true' "$BOGUS"
 ck "the dashboard ships the picker and a name for the field" 'data-rd="proof"' "$SHIP_A"
 ck "  · the ledger row prints who sent it and which code they gave" 'o\.buyer\.proof' "$SHIP_A"
 ck "  · and the CSV has a header name for every column it writes" 'payer,proof_of_payment,flags' "$SHIP_A"

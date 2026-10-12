@@ -1,5 +1,47 @@
 # Tapstall — status
 
+## The field is on the receipt, not one tap away (2026-10-12, v0.7.9)
+
+**The instruction, read for the fifth time, says *from the receipt page*.** Four releases had
+built a door and walked the buyer to it. What the words actually describe is smaller and closer:
+the code their app just printed is on the screen in front of them, at the moment they still
+trust the page, so the box goes there. `pages/store.html` now renders `pfBox` inside the paybox
+whenever `needDoor` — the same cap the order response just handed this browser (`o.proof_url`,
+sliced to the token and escaped into a hidden field), the shop's own `proof_label` and
+`proof_hint`, and the sender-number box only where `pay.ask_payer` said this rail searches by
+it. It is a real `<form method=post action="/api/proof">` with `form=1` in it, so the no-JS
+answer is still the door's page; the script only replaces the navigation with one `fetch` to
+the route that already exists. No new endpoint, no new capability, nothing the token can do
+that it could not do before the box moved.
+
+**Success folds the box into the receipt.** On `{ok:true}` the form is replaced by the `.kv`
+line the page would have printed anyway — `Code from the app · MLINE 4471, from +263 77 999
+0001` — and `pfDone(code)` takes the kept entry down with it, so a buyer who fills it here
+never sees the line under the notice bar. A failure keeps the box and shows the sentence, with
+one exception the Worker now decides: refusals carry `why` and `final` (`empty`/`throttled`/
+`cap`/`shop` keep it; `settled`/`spent`/`revoked`/`gone` fold it away). That split exists
+because a browser classifying an answer by reading English stops working the day the sentence
+is reworded, and it is the same classification `pfForgetScript` already obeys on the page path
+— one rule, two shapes of caller.
+
+**A capped day fails closed at the door, and that is the right way round.** Writing the
+assertions showed that `rateLimited`'s own counter is a KV write, so when the account has no
+writes left every POST to `/api/proof` is answered with the buyer-worded 503 from 0.7.8 before
+a cap is even looked at. The alternative — letting the limiter skip when its put throws — would
+mean a spent budget switches off the throttle that stands between a stranger and a merchant's
+PIN. So the ceiling stays, and the behaviour is now pinned by a test (`a capped account fails
+closed at the door, politely, and never answers 500`): 503 as a page, `who: buyer` as JSON, no
+prune, no 500, and reads unaffected.
+
+**Checked.** `npm test` **210/210** (core 77 · live 88 · pages 35 · limits 10).
+`prod_check.sh` **198 passed / 78 blocked / 0 failed**: three of the new lines read git's copy of
+the page, so they are true today even though the page cannot be served yet; two read the live
+`why`/`final` fields and are blocked, because on a capped day the door cannot reach them at all.
+Worker **0.7.9 on both hostnames**, `pin_kdf true`. The gap worth saying out loud:
+`pages/store.html` is **38,237 bytes in git against 31,381 in KV**, so the 00:20 UTC publish ships
+0.7.5's keeping *and* this box together, and until it runs a buyer is served the page that has
+neither.
+
 ## Every answer at the door closes it (2026-10-12, v0.7.7 → v0.7.8)
 
 **Fourth time the same instruction came back, and what was left was the door's own manners.**

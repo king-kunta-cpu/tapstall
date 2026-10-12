@@ -517,6 +517,34 @@ test('the ledger gives the shop the same one box, on its own side', () => {
   assert.match(admin, /an empty box is not a filing/, 'and the box refuses to post itself empty, which is what the 422 exists for');
 });
 
+test('the receipt page holds the door open itself, one box, no navigation', () => {
+  // the fifth pass at the same instruction: the buyer has the code on their screen at the
+  // moment they place the order, so the field moves to where their eyes already are
+  assert.match(storeHtml, /\(needDoor \? pfBox : addProof\)/,
+    'the box and the link are one decision, not two copies of the same condition');
+  assert.match(storeHtml, /var pfBox = '<div style="background:#fff;color:#101418[^>]*border-radius:12px/,
+    'and the box is drawn inside the dark paybox as a light card, so it is legible without a new stylesheet');
+  assert.match(storeHtml, /<form id="pff" method="post" action="\/api\/proof">/,
+    'it is a form first: with JS switched off it posts to the same route the link opens');
+  assert.match(storeHtml, /name="cap" value="' \+ esc\(o\.proof_url\.slice\(3\)\)/,
+    'the token inside it is the one this very response handed this browser, escaped, and nothing else');
+  assert.match(storeHtml, /name="proof" maxlength="40" autocapitalize=characters|name="proof" maxlength="40" autocapitalize="characters"/,
+    'the same field the door has, same length, same no-autocorrect rule');
+  assert.match(storeHtml, /pay\.ask_payer\s*\?\s*'<label for="fPfPayer">Number you will pay from/,
+    'the sender number joins it only where this rail searches by it, in the cart\u2019s words');
+  assert.match(storeHtml, /if \(j\.final\)/,
+    'and the page asks the Worker whether a refusal ends the door, rather than reading the sentence');
+  const eps = [...storeHtml.matchAll(/fetch\(\s*['"]([^'"]+)['"]/g)].map((m) => m[1]);
+  assert.ok(eps.length >= 2, 'the receipt page does fetch, so the list is real: ' + JSON.stringify(eps));
+  assert.ok(eps.every((e) => /^\/(api\/(order|order\/proof|proof|lookup)|s\/)/.test(e)),
+    'and none of it is a new door: ' + JSON.stringify(eps));
+  // the box must not accuse anybody, same rule as the line under the notice bar
+  const box = storeHtml.slice(storeHtml.indexOf('var pfBox ='), storeHtml.indexOf('var addProof'));
+  assert.ok(!/you have not paid|still owed|you owe|unpaid/.test(box),
+    'the words inside it offer, and claim nothing it cannot know: ' + box.slice(0, 80));
+  assert.match(box, /esc\(pay\.proof_label \|\| 'Code from the app'\)/, 'the shop names the field here too');
+});
+
 test('a returning buyer finds the door again, on the device it was left on', () => {
   assert.match(storeHtml, /var PFK = 'tp_pf_' \+ CFG\.handle/, 'one key per shop, so a shared phone does not mix two stores’ doors');
   assert.match(storeHtml, /var addProof = \(pay\.proof \|\| !pay\.proof_mode \|\| pay\.proof_mode === 'none'\) \? '' : '<p class="hint">'/, 'the sentence the receipt shows is still gated on the same one condition');

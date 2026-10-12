@@ -470,6 +470,30 @@ var TERM = /*__TAPSTALL_TERM__*/null;
        open: one field, this order only, no chat needed. An order that already has
        the code says nothing, and a rail that never asked says nothing either. */
     var needDoor = !pay.proof && pay.proof_mode && pay.proof_mode !== 'none' && !!o.proof_url;
+    /* v0.7.9: the field itself, here, rather than a link to it. The code the buyer's app
+       printed is on the screen in front of them and fades from memory at the rate of one
+       distraction per order, so the box is put where the confirmation already is. It is the
+       same door the link opens — the cap this response just handed this browser, the same
+       one field, the same endpoint — and nothing about what that token may do changed
+       because the box moved closer. Without JS the <form> still posts to the door's page
+       path, so the box is an enhancement, never a requirement. */
+    var pfBox = '<div style="background:#fff;color:#101418;border-radius:12px;padding:.7rem;margin:.6rem 0 0">'
+      + '<form id="pff" method="post" action="/api/proof">'
+      + '<input type="hidden" name="cap" value="' + esc(o.proof_url.slice(3)) + '">'
+      + '<input type="hidden" name="form" value="1">'
+      + '<label for="fPfCode">' + esc(pay.proof_label || 'Code from the app') + '</label>'
+      + '<input id="fPfCode" name="proof" maxlength="40" autocapitalize="characters" spellcheck="false" autocomplete="off"'
+      + ' placeholder="e.g. 88123456" style="border-color:#cfd8e3">'
+      + (pay.ask_payer
+          ? '<label for="fPfPayer">Number you will pay from <span style="font-weight:400;color:#65788b;font-size:.82em">'
+            + '(optional — helps us find your payment)</span></label>'
+            + '<input id="fPfPayer" name="payer" maxlength="30" inputmode="tel" autocomplete="off" spellcheck="false"'
+            + ' placeholder="0712345678" style="border-color:#cfd8e3">'
+          : '')
+      + '<button class="cta" id="pfBtn" type="submit" style="margin-top:.6rem">Put it on my order</button>'
+      + '<p class="hint" id="pfMsg" style="color:#65788b">' + esc(pay.proof_hint
+          || 'The code your app shows after it sends — one field, and it goes straight on the order.') + '</p>'
+      + '</form></div>';
     var addProof = (pay.proof || !pay.proof_mode || pay.proof_mode === 'none') ? '' : '<p class="hint">'
       + (o.proof_url
           ? (pay.proof_mode === 'require'
@@ -491,7 +515,7 @@ var TERM = /*__TAPSTALL_TERM__*/null;
       (pay.payer_from ? '<div class="kv"><span>From</span><span>' + esc(pay.payer_from) + '</span></div>' : '') +
       '<div class="kv"><span>Reference</span><span>' + esc(pay.reference || o.order.code) + '</span></div>' +
       (pay.proof ? '<div class="kv"><span>' + esc(pay.proof_label || 'Code from the app') + '</span><span>' + esc(pay.proof) + '</span></div>' : '') +
-      addProof +
+      (needDoor ? pfBox : addProof) +
       '<div class="copy" id="cp">Copy payment reference + amount</div>' +
       '<ol class="steps">' + (pay.steps || []).map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('') + '</ol>' +
       '<p class="hint">' + esc(pay.note || '') + '</p>' +
@@ -514,6 +538,38 @@ var TERM = /*__TAPSTALL_TERM__*/null;
     $('shBody').innerHTML = h;
     $('sheet').classList.add('on');
     if (o.wa_link) $('waBtn').onclick = function () { window.location.href = o.wa_link; };
+    if (needDoor) $('pff').onsubmit = function (ev) {
+      ev.preventDefault();
+      var btn = $('pfBtn'), msg = $('pfMsg'), code = ($('fPfCode').value || '').trim();
+      var body = { cap: o.proof_url.slice(3), proof: code };
+      if (pay.ask_payer) body.payer = ($('fPfPayer').value || '').trim();
+      btn.disabled = true; btn.textContent = 'Sending…';
+      fetch('/api/proof', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (res) {
+          var j = res.j || {};
+          if (res.ok && j.ok) {
+            // used up, so the kept entry goes with it: one line under the notice bar and
+            // this box are the same door, and it is closed now either way
+            pfDone(o.order.code);
+            $('pff').outerHTML = '<div class="kv"><span>' + esc(pay.proof_label || 'Code from the app')
+              + '</span><span><b>' + esc(j.proof || code) + '</b>'
+              + (j.payer ? ', from ' + esc(j.payer) : '') + '</span></div>';
+            return;
+          }
+          btn.disabled = false; btn.textContent = 'Put it on my order';
+          var m = j.error || 'Could not send that — check your connection and try again.';
+          msg.textContent = m;
+          // only the Worker knows whether a refusal ends the door, so only it says so:
+          // `final` is a fact about the order, and a browser that guessed it from the
+          // sentence would stop working the day the sentence was reworded
+          if (j.final) { pfDone(o.order.code); $('pff').outerHTML = '<p class="hint">' + esc(m) + '</p>'; }
+        })
+        .catch(function () {
+          btn.disabled = false; btn.textContent = 'Put it on my order';
+          msg.textContent = 'Network problem — nothing was sent, and your code is still on this screen.';
+        });
+    };
     $('cp').onclick = function () {
       var t = 'Order ' + o.order.code + ' — pay ' + (pay.amount || pr.pay_now) + ' ' + CUR + ' to ' + (pay.account || '') + ' (' + (pay.rail || '') + (pay.dial ? ' ' + pay.dial : '') + ') ref ' + (pay.reference || o.order.code);
       if (navigator.clipboard) navigator.clipboard.writeText(t).then(function () { $('cp').textContent = 'Copied ✓'; });

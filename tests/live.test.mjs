@@ -2702,3 +2702,87 @@ test('a spent write budget answers the door in the buyer’s words, and keeps th
   assert.equal(JSON.parse(env.ORDERS._map.get('order:' + h + ':' + ord.json.order.id).value).buyer.proof, 'AFTER BUDGET',
     'the door was never closed by the outage, so nothing had to be re-issued');
 });
+
+test('the receipt page is told, not told-in-English: refusals carry why and final', async () => {
+  const h = 'zzfinal' + String(Date.now()).slice(-5);
+  const reg = await call('/api/register', { method: 'POST', body: {
+    handle: h, shop_name: 'Final Field', whatsapp: '263771234567', rail: 'custom', currency: 'USD',
+    rail_def: { label: 'Momo', dial: '*151#', pct: 0.03, type: 'manual', spec: 'phone', proof: 'ask', proof_label: 'Momo code' },
+    pay_account: '0771234567',
+  } });
+  assert.equal(reg.status, 201, reg.text);
+  const ord = await call('/api/order', { method: 'POST', ip: '196.37.0.1', body: { handle: h, service: 'pickup',
+    buyer: { name: 'Anesu M', phone: '0780006611' }, items: [{ name: 'Box', price: 18 }] } });
+  assert.equal(ord.status, 201, ord.text);
+  const cap = ord.json.proof_url.slice(3);
+  const key = 'order:' + h + ':' + ord.json.order.id;
+  const put = (body, ip) => call('/api/proof', { method: 'POST', ip, body });
+
+  // a blank box is a question the buyer has not answered yet, so the page keeps it
+  const blank = await put({ cap, proof: '' }, '196.37.0.2');
+  assert.equal(blank.status, 422, blank.text.slice(0, 140));
+  assert.equal(blank.json.why, 'empty', 'named, so the caller does not read the sentence to learn what kind of no this is');
+  assert.equal(blank.json.final, false, 'and it is not final: the box stays on the receipt');
+
+  // three writes and the door is out of corrections — that one is final
+  await put({ cap, proof: 'ONE' }, '196.37.0.3');
+  await put({ cap, proof: 'TWO' }, '196.37.0.4');
+  await put({ cap, proof: 'THREE' }, '196.37.0.5');
+  const spent = await put({ cap, proof: 'FOUR' }, '196.37.0.6');
+  assert.equal(spent.status, 429, spent.text.slice(0, 140));
+  assert.deepEqual({ why: spent.json.why, final: spent.json.final }, { why: 'spent', final: true },
+    'spent is the end of the road for this field, and says so in the one word the page acts on');
+
+  // settled: also final, and the order keeps what it had
+  await call('/api/mark', { method: 'POST', ip: '196.37.0.7', body: { cap: ord.json.mark_url.slice(3) } });
+  const settled = await put({ cap, proof: 'LATE' }, '196.37.0.8');
+  assert.deepEqual({ why: settled.json.why, final: settled.json.final }, { why: 'settled', final: true }, settled.text.slice(0, 140));
+  assert.equal(JSON.parse(env.ORDERS._map.get(key).value).buyer.proof, 'THREE', 'nothing moved');
+
+  // a minute of flooding is the same status code as being spent and the opposite meaning,
+  // which is exactly why the page may not sort them by number
+  let last = null;
+  for (let i = 0; i < 8; i++) last = await put({ cap: 'v1.9999999999.eyJhIjoicHJvb2YifQ.deadbeef', proof: 'F' + i }, '196.37.0.9');
+  assert.equal(last.status, 429, last.text.slice(0, 120));
+  assert.deepEqual({ why: last.json.why, final: last.json.final }, { why: 'throttled', final: false },
+    'throttled: keep the box, keep the link, come back in a minute');
+
+  // and the two answers the receipt page has to distinguish from a closed door
+  const forged = await put({ cap: cap.slice(0, -6) + 'AAAAAA', proof: 'X' }, '196.37.0.10');
+  assert.deepEqual({ why: forged.json.why, final: forged.json.final }, { why: 'cap', final: false },
+    'a link that will not verify is not news about the order, so the entry in the phone stays');
+  const rev = await call('/api/revoke', { method: 'POST', headers: { 'x-tapstall-admin': JSON.parse(env.STORES._map.get('store:' + h).value).admin_token }, body: { handle: h } });
+  assert.equal(rev.status, 200, rev.text);
+  const closed = await put({ cap, proof: 'X' }, '196.37.0.11');
+  assert.deepEqual({ why: closed.json.why, final: closed.json.final }, { why: 'revoked', final: true }, closed.text.slice(0, 140));
+});
+
+test('a capped account fails closed at the door, politely, and never answers 500', async () => {
+  // the rate-limit counter is itself a KV write, so on a day with none left every POST to
+  // the buyer's door is answered before a cap is looked at. Failing *open* there would
+  // mean the same helper that throttles a wrong PIN stops throttling it because a budget
+  // ran out, so the ceiling stays and the answer is the buyer-worded page instead of a
+  // stack trace. What must not happen is a 500, or a lost entry, or a half-write.
+  const h = 'zzclosed' + String(Date.now()).slice(-5);
+  const reg = await call('/api/register', { method: 'POST', body: {
+    handle: h, shop_name: 'Closed Day', whatsapp: '263771234567', rail: 'zipit', pay_account: '1234567890', currency: 'USD',
+  } });
+  assert.equal(reg.status, 201, reg.text);
+  const sp = env.STORES.put, op = env.ORDERS.put;
+  env.STORES.put = async () => { throw new Error('put() limit exceeded for the day'); };
+  env.ORDERS.put = async () => { throw new Error('put() limit exceeded for the day'); };
+  try {
+    const page = await call('/api/proof', { method: 'POST', ip: '196.38.0.1',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: form({ cap: 'v1.9999999999.eyJhIjoicHJvb2YifQ.deadbeef', form: '1', proof: 'X' }) });
+    assert.equal(page.status, 503, 'a garbage cap and a spent budget say 503 rather than 401, and that is the honest order: ' + page.text.slice(0, 120));
+    assert.match(page.text, /<h2/, 'still a page, because a browser posted it');
+    assert.ok(!/tp_pf_/.test(page.text), 'and still no prune: today\u2019s budget is not tomorrow\u2019s answer');
+    const api = await call('/api/proof', { method: 'POST', ip: '196.38.0.2', body: { cap: 'nope', proof: 'X' } });
+    assert.equal(api.status, 503, api.text.slice(0, 120));
+    assert.equal(api.json.who, 'buyer', 'the JSON reader is told whose problem this is');
+    const read = await call('/api/lookup', { method: 'POST', ip: '196.38.0.3', body: { handle: h, code: 'NOPE' } });
+    assert.notEqual(read.status, 500, 'a read that needs no write answers normally, so the shop can still look things up: ' + read.text.slice(0, 120));
+  } finally {
+    env.STORES.put = sp; env.ORDERS.put = op;
+  }
+});

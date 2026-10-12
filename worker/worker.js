@@ -30,7 +30,7 @@ import {
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '0.7.8';
+const VERSION = '0.7.9';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 const MAX_ORDERS_KEPT = 200;
@@ -810,12 +810,16 @@ async function proofAdd(req, url, env) {
   // nothing — a busy minute is not an answer about the order, and a buyer who is told to
   // wait should still find the link where they left it.
   const isForm = String(req.headers.get("content-type") || "").includes("application/x-www-form-urlencoded");
+  // the rate limit answers before the body is read, so it builds its own envelope — with
+  // the two fields the refusal helper carries, because a caller deciding "do I keep this
+  // box open?" must not have to tell a throttled minute from a closed door by prose
+  const throttle = (m) => json({ ok: false, error: m, why: "throttled", final: false }, 429);
   if (await rateLimited(env, ip, "proof:", PRL)) {
     const msg = "too many attempts from you — wait a minute and send it again";
     return isForm
       ? html(shell("Not added", `<h2 style="margin:.1rem 0 .5rem">Not added</h2><p class=t>${esc(msg)}</p>`
           + `<p class=t>Nothing you have already sent was lost, and one more minute is all it needs.</p>`), 429, NOINDEX)
-      : json({ ok: false, error: msg }, 429);
+      : throttle(msg);
   }
   const b = await readBody(req);
   const asPage = b.form === "1";
@@ -824,25 +828,31 @@ async function proofAdd(req, url, env) {
   // field are not answers, so they are never final; a settled order, a shop that closed
   // its links, and an order that is gone are, and each one leaves the buyer's notice bar
   // offering a link that could only ever say "not added" a second time.
+  //
+  // The same two facts ride the JSON answer as `final` and `why`, because the receipt page
+  // carries this door inline now and has to decide whether to keep it or fold it away. A
+  // browser reading English to work that out is a browser that stops working the day the
+  // sentence is reworded, so the Worker keeps the classification and says it in a field.
   // `shell` takes a title and a body and nothing else: the status and the noindex header
   // belong to `html`. They were passed one level in on this page path, which made every
   // refusal a buyer could see answer HTTP 200 and drop the robots header — invisible in the
   // body, and invisible to a test that only reads the words.
-  const no = (msg, code, handle, final) => asPage
+  const no = (msg, code, handle, final, why) => asPage
     ? html(shell("Not added", `<h2 style="margin:.1rem 0 .5rem">Not added</h2><p class=t>${esc(msg)}</p>`
         + (handle ? `<p class=t><a href="/s/${esc(handle)}">Back to the shop</a></p>` : "")
         + (handle && final ? pfForgetScript(handle, "", String(b.cap || "")) : "")), code, NOINDEX)
-    : json({ ok: false, error: msg }, code);
+    : json({ ok: false, error: msg, why: why || "refused", final: !!final }, code);
   const p = b.cap ? await verifyCap(env.ADMIN_SECRET || "dev-secret", String(b.cap)) : null;
-  if (!p || p.a !== "proof") return no("that link does not open this field any more", 401);
+  if (!p || p.a !== "proof") return no("that link does not open this field any more", 401, "", false, "cap");
   const st = await getStore(env, p.h);
-  if (!st) return no("no such shop", 404);
-  if (String(p.g) !== String(st.auth_gen || "0")) return no("this shop has closed its code links", 410, st.handle, true);
+  if (!st) return no("no such shop", 404, "", false, "shop");
+  if (String(p.g) !== String(st.auth_gen || "0")) return no("this shop has closed its code links", 410, st.handle, true, "revoked");
   const key = `order:${st.handle}:${p.id}`;
   const o = await env.ORDERS.get(key, "json");
-  if (!o) return no("no such order", 404, st.handle, true);
+  if (!o) return no("no such order", 404, st.handle, true, "gone");
   const r = proofAccept(o, { proof: b.proof == null ? null : String(b.proof), payer: b.payer == null ? null : String(b.payer) }, 'buyer');
-  if (!r.ok) return no(r.msg, r.why === "settled" ? 409 : r.why === "spent" ? 429 : 422, st.handle, r.why === "settled" || r.why === "spent");
+  if (!r.ok) return no(r.msg, r.why === "settled" ? 409 : r.why === "spent" ? 429 : 422, st.handle,
+    r.why === "settled" || r.why === "spent", r.why);
   if (r.changed) {
     const when = new Date().toISOString();
     o.buyer = Object.assign({}, o.buyer || {}, { proof: r.proof, payer: r.payer });

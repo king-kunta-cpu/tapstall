@@ -255,6 +255,16 @@ verified ZW/SA tariffs) but it is now a **default, not the whole answer**:
   pruning — instead of the JSON blob about the merchant's settings that the shared catch used to
   hand to a phone mid-payment (v0.7.8).
 
+- **The field is on the receipt, not one tap away.** `showDone` draws `pfBox` in the paybox
+  whenever `needDoor`: a real `<form method=post action="/api/proof">` carrying the cap this
+  response handed this browser, the shop's own label and hint, and the sender-number box only
+  where the rail searches by it. JS replaces the navigation with one `fetch` and folds the box
+  into a line of the receipt; without JS it is still the door's page. Refusals answer with
+  `why` and `final` so the client never classifies an answer by reading English — `empty` and
+  `throttled` keep the box, `settled`, `spent`, `revoked` and `gone` fold it away — and the
+  same counter that throttles a wrong PIN is why a capped day answers the door with 503 before
+  it looks at a cap (v0.7.9).
+
 An invalid description at sign-up becomes `cash` rather than a rejected
 registration: a merchant who never opens the shop is worse than one whose slip
 says "pay on collection" until they fix it.
