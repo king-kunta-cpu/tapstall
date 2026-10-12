@@ -1,1 +1,46 @@
-worker job started 2026-10-12T13:10:50Z run=38253169963 sha=d06e464
+  CI workflow YAML validates
+[36m*[0m KV namespaces
+[36m*[0m stores=b5c1c89d95114092ae91bbafc5a2d76c  orders=4f4ac94a66db4b859b61668a3c160819
+ui kit: 5 page(s) in sync with pages/kit.css
+[36m*[0m templates → KV (hot-swappable: HTML edits need no redeploy)
+  ! store          NOT PUBLISHED — this account's KV write budget is spent (HTTP 429/10048). The old copy stays live (34305 bytes in git, 31382 in KV); this goes out on the next deploy after 00:00 UTC, and the Worker is deployed regardless.
+  = onboard        already current in KV (40282 bytes), no write spent
+  = admin          already current in KV (92846 bytes), no write spent
+  = fees           already current in KV (11119 bytes), no write spent
+  = index          already current in KV (3236 bytes), no write spent
+  = confirm        already current in KV (17119 bytes), no write spent
+  = renew          already current in KV (17626 bytes), no write spent
+  = ops            already current in KV (44675 bytes), no write spent
+  = guide-payment-reference-matching already current in KV (9369 bytes), no write spent
+  = guide-whatsapp-shop-payments already current in KV (10619 bytes), no write spent
+  = sample-menu.csv already current in KV (372 bytes), no write spent
+  ! store          git has 34305 bytes, KV has 31382 — customers are served the older page
+  + onboard        40282 bytes in git, same bytes in KV
+  + admin          92846 bytes in git, same bytes in KV
+  + fees           11119 bytes in git, same bytes in KV
+  + index          3236 bytes in git, same bytes in KV
+  + confirm        17119 bytes in git, same bytes in KV
+  + renew          17626 bytes in git, same bytes in KV
+  + ops            44675 bytes in git, same bytes in KV
+  + guide-payment-reference-matching 9369 bytes in git, same bytes in KV
+  + guide-whatsapp-shop-payments 10619 bytes in git, same bytes in KV
+  + sample-menu.csv 372 bytes in git, same bytes in KV
+  ! not current: store
+    the fix is one command once the account can write again: ./scripts/deploy.sh --templates
+[33m![0m a page above is not what customers are being served — the Worker is current, the page is not
+[33m![0m it publishes itself at 00:20 UTC (the scheduled run), or now: ./scripts/deploy.sh --templates
+[36m*[0m building bundle
+bundle: worker.js + core.js inlined (4554 lines, 264540 bytes)
+assets: _headers admin.html confirm.html data onboard.html ops.html renew.html store.html 
+bundle size: 496K
+wrangler.toml regenerated for tapstall
+[36m*[0m publishing worker to Cloudflare
+[33m![0m wrangler deploy failed, attempt 1 of 3:   <!--[if I... (length = 6504)
+[33m![0m wrangler deploy failed, attempt 2 of 3:   <!--[if I... (length = 6504)
+[33m![0m wrangler deploy failed, attempt 3 of 3:   <!--[if I... (length = 6504)
+[31mx[0m the Worker was not published in three attempts — nothing new is live, and this run is the proof
+==== exit=1 2026-10-12T13:15:29Z ====
+==== tools ====
+node=/opt/hostedtoolcache/node/20.20.2/x64/bin/node npm=/opt/hostedtoolcache/node/20.20.2/x64/bin/npm jq=/usr/bin/jq curl=/usr/bin/curl openssl=/usr/bin/openssl python3=/usr/bin/python3 
+==== inputs visible to this step ====
+CF_TOKEN=set(len 53) CF_ACCOUNT=set(len 32) ADMIN_SECRET=set(len 48) WORKER_NAME=set(len 8) 
