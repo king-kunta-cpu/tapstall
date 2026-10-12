@@ -226,6 +226,20 @@ verified ZW/SA tariffs) but it is now a **default, not the whole answer**:
   voice (`Nothing to file — type the code they sent you.` vs the buyer's *"type what your
   app printed"*), which is why `proofAccept`'s refusals take `by` as well.
 
+- **A buyer who closed the page is not locked out, and the door takes the whole
+  record.** `pages/store.html` keeps the receipt's `/p/<cap>` in `localStorage` under
+  `tp_pf_<handle>` — five entries, each dropped at the token's own 72 hours — and shows
+  one line above the shelf: *"Order MAM-1234 — add your payment code"*, dismissible. The
+  code page removes the entry when the value lands (`pfForgetScript`, which emits nothing
+  unless the handle and code match their declared shapes). It never states that anything
+  is owed, because the page cannot know. The field itself is the pair the cart had:
+  `payer` joins `proof` whenever `order.pay.ask_payer` was true on the frozen slip and
+  the number is missing, so the buyer can complete the record the shop searches by, in the
+  cart's own words and the cart's own cleaning rule. And `notifyText(st, order)` in
+  `core.js` — the merchant's order notice, now testable as a function — appends one
+  sentence when a code is owed on an open order, pointing at the door in their ledger
+  rather than pasting a live write into an inbox that gets forwarded.
+
 An invalid description at sign-up becomes `cash` rather than a rejected
 registration: a merchant who never opens the shop is worse than one whose slip
 says "pay on collection" until they fix it.

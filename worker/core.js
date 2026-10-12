@@ -787,6 +787,27 @@ export function waSummary(st = {}, o = {}) {
 }
 
 /**
+ * The merchant's own notice about a new order: who, what, the flag line, and — when
+ * the rail asked for a code and the order is still open — one sentence telling them a
+ * buyer can file it themselves.
+ *
+ * The sentence is a pointer, not the link. A merchant who was handed the buyer's
+ * single-field URL could type into it themselves, and the ledger's `proof_by: 'buyer'`
+ * would become a claim about a hand that did not hold the phone. The row in their
+ * dashboard already carries the minted door, so nothing is gained by copying one into
+ * an inbox that gets forwarded.
+ */
+export function notifyText(st, order = {}) {
+  const o = order && typeof order === 'object' ? order : {};
+  const flags = (o.risk_flags || []).join(', ') || 'none';
+  const ask = proofAsk(o);
+  const line = ask && proofOpen(o)
+    ? '\nNo ' + proofNoun((o.pricing || {}).rail).label.toLowerCase() + ' yet — the row in your ledger has a link they can paste it into, one field, nothing else it can change.'
+    : '';
+  return `Buyer: ${(o.buyer || {}).name || ''} (${(o.buyer || {}).phone || ''})\n${waSummary(st, o)}\nFlags: ${flags}${line}\n`;
+}
+
+/**
  * What a stranger may learn about a store. An allowlist, on purpose: a denylist
  * leaks the day someone adds a field and forgets to list it here — which is
  * exactly what happened when `pending` (a queued payout account) started riding

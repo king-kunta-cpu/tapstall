@@ -973,3 +973,17 @@ test('the shop’s own door has no budget and no closing hour, and the same fiel
     'and a submit with no boxes that would change nothing says so, rather than clearing the payer it was never given');
   assert.equal(C.proofAccept(paid, { proof: 'x'.repeat(80) }, 'merchant').proof.length, 40, 'the same 40 characters, because it is one field');
 });
+
+test('the merchant’s notice tells them a door exists, and does not hand them the key', () => {
+  const rail = { key: 'zipit', label: 'Zimswitch', type: 'manual', spec: 'bank', proof: 'require' };
+  const st = { handle: 'shop', currency: 'USD', pay_account: '0771234567', rail: 'zipit' };
+  const owe = { code: 'SH-1', buyer: { name: 'R', phone: '078' }, pricing: { rail, pay_now: 12 }, status: 'awaiting_payment', items: [] };
+  const t = C.notifyText(st, owe);
+  assert.match(t, /No reference from your bank yet — the row in your ledger has a link they can paste it into/, 'the sentence names the field in the shop’s own words: ' + t);
+  assert.match(t, /nothing else it can change/, 'and says what the link cannot do, because that is the merchant’s first question');
+  assert.ok(!/\/p\//.test(t), 'the URL itself never travels in an inbox — a forwarded email would carry a live write');
+  assert.match(C.notifyText(st, { ...owe, buyer: { ...owe.buyer, proof: 'RBZ-9' } }), /proof RBZ-9/, 'an answered order reads as it always did');
+  assert.ok(!/yet —/.test(C.notifyText(st, { ...owe, buyer: { ...owe.buyer, proof: 'RBZ-9' } })), 'and nothing is nagged about it');
+  assert.ok(!/yet —/.test(C.notifyText(st, { ...owe, status: 'paid' })), 'a settled order is not sent chasing, the door is shut anyway');
+  assert.ok(!/yet —/.test(C.notifyText(st, { ...owe, pricing: { rail: { ...rail, proof: 'none' }, pay_now: 12 } })), 'a rail that never asked says nothing');
+});

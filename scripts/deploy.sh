@@ -98,6 +98,19 @@ fi
 say "templates → KV (hot-swappable: HTML edits need no redeploy)"
 kv_put_tpl "$STORES_ID" $TPL_NAMES sample-menu.csv
 
+# Read the served bytes back, on the main path too and not only in --templates mode.
+# This is the failure that looks like success: the Worker version goes up, one page does
+# not, and every log that does not compare git with KV says the deploy was fine — which
+# is what happened to a storefront change on a day the free KV writes were spent. It
+# warns rather than dies, because the Worker really did deploy and the nightly
+# `pages-are-current` run at 00:20 UTC is the retry: after the reset it puts any page
+# whose bytes differ and fails if the difference survives.
+if verify_templates "$STORES_ID" $TPL_NAMES sample-menu.csv; then :
+else
+  warn "a page above is not what customers are being served — the Worker is current, the page is not"
+  warn "it publishes itself at 00:20 UTC (the scheduled run), or now: ./scripts/deploy.sh --templates"
+fi
+
 say "building bundle"
 bash scripts/build_bundle.sh .build
 

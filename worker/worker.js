@@ -20,7 +20,7 @@ import {
   applyMenu, sanitizeMenu, menuPrice, openNow, cleanWeek, cleanRailAccts, hoursText,
   cleanImg, sniffImage, imgKeyOf, imgRefOf, newImgId, referencedImages, IMG_MAX_BYTES,
   IMG_TARGET_BYTES,
-  cleanProof, cleanPayer, proofNoun, proofAsk, PROOF_MODES,
+  cleanProof, cleanPayer, proofNoun, proofAsk, PROOF_MODES, notifyText,
   proofAccept, proofOpen, PROOF_WINDOW_SEC, PROOF_WRITES_MAX,
   issueCap, verifyCap, randomKey, validateSettings, stageSettings, applyPending, maskField,
   newTxRef, TX_WINDOW_SEC, payfastSignedOk, txMatches,
@@ -30,7 +30,7 @@ import {
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '0.7.4';
+const VERSION = '0.7.6';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 const MAX_ORDERS_KEPT = 200;
@@ -589,7 +589,7 @@ async function notify(env, st, order) {
       await env.EMAIL.send(new EmailMessage(
         `${st.handle}@notify.tapstall`, st.notify_email,
         `New order ${order.code} — ${order.pricing.pay_now} ${st.currency || 'USD'}`,
-        `Buyer: ${order.buyer.name} (${order.buyer.phone})\n${waSummary(st, order)}\nFlags: ${(order.risk_flags || []).join(', ') || 'none'}\n`
+        notifyText(st, order)
         + `Open this to confirm (it needs your browser, nothing else): ${order.confirm_url || ''}\n`
         + `Dashboard: ${env.PUBLIC_ORIGIN || ''}/a with your store name and PIN`
       ));
@@ -718,6 +718,14 @@ async function proofPage(env, cap) {
   const pay = o.pay || {};
   const ask = proofAsk(o);
   const wa = String(st.whatsapp || "").replace(/[^0-9]/g, "");
+  // The same second field the order form had, and no more than that: it appears only
+  // where this shop's rail reconciles by sender number (`ask_payer`, frozen on the slip
+  // at order time, so a shop that changes its rail cannot retroactively demand it of a
+  // buyer who already answered or declined) and only while the order has none. A buyer
+  // who typed a code but skipped the number can finish their own record; a buyer with
+  // both sees no second box and no extra sentence.
+  const wantPayer = !!(o.pay && o.pay.ask_payer) && !cleanPayer((o.buyer || {}).payer, 'loose');
+  const onFilePayer = cleanPayer((o.buyer || {}).payer, 'loose');
   const state = !open
     ? `<p>This order is ${esc(o.status)}, so its record is closed from here. ${esc(left > 0 ? "If the code needs correcting, message the shop — they can fix it on their side." : "Message the shop and they will fix it on their side.")}</p>`
     : left <= 0
@@ -727,19 +735,48 @@ async function proofPage(env, cap) {
         + `<label class=t for=proof>${esc(onFile ? "Correct the reference" : noun.label)}</label>`
         + `<input id=proof name=proof value="${esc(onFile)}" maxlength=40 autocapitalize=characters spellcheck=false autocomplete=off`
         + ` style="font:inherit;width:100%;box-sizing:border-box;padding:.65rem .7rem;margin:.35rem 0 .6rem;border:1px solid #cfd8e3;border-radius:10px">`
-        + `<button type=submit>Send it to the shop</button>`
+        + (wantPayer
+            ? `<label class=t for=payer style="display:block;margin-top:.6rem">Number you will pay from`
+              + ` <span style="font-weight:400;font-size:.82em">(optional — helps us find your payment)</span></label>`
+              + `<input id=payer name=payer maxlength=30 inputmode=tel autocomplete=off spellcheck=false placeholder="0712345678"`
+              + ` style="font:inherit;width:100%;box-sizing:border-box;padding:.65rem .7rem;margin:.35rem 0 0;border:1px solid #cfd8e3;border-radius:10px">`
+            : '')
+        + `<button type=submit style="margin-top:.6rem">Send it to the shop</button>`
         + `<p class=t style="margin-top:.5rem">${esc(noun.hint)}</p>`
         + `<p class=t style="margin-top:.7rem">One link, this order only. It adds a reference — it cannot mark anything paid, and the shop still decides when the money has arrived.</p>`
         + (left < PROOF_WRITES_MAX ? `<p class=t>${left} more ${left === 1 ? "correction" : "corrections"} allowed on this order.</p>` : "")
         + (wa ? `<p class=t style="text-align:center"><a href="https://wa.me/${wa}?text=${encodeURIComponent(`Order ${o.code || ""} — my payment is ${amount}`)}">or send it in the chat</a></p>` : "")
         + `</form>`;
+  const pfClear = pfForgetScript(st.handle, o.code);
   const body = `<p class=t>${esc(st.name || st.handle)}</p>`
     + `<h2 style="margin:.15rem 0 .5rem">Order <b>${esc(o.code || "")}</b></h2>`
     + `<p class=t><b>${amount}</b> · ${esc(o.status || "open")}${rail && rail.label ? " · " + esc(rail.label) : ""}</p>`
     + (pay.account ? `<p class=t>Paid to <b>${esc(pay.account)}</b></p>` : "")
-    + (onFile ? `<p>The shop has <b>${esc(onFile)}</b> on this order.</p>` : (ask ? `<p class=t>${esc(ask)}</p>` : ""))
-    + state + back;
+    + (onFile || onFilePayer
+        ? `<p>The shop has ${onFile ? 'the reference <b>' + esc(onFile) + '</b>' : 'a sender number'} on this order${onFilePayer ? (onFile ? ', sent from <b>' + esc(onFilePayer) + '</b>' : '<b>' + esc(onFilePayer) + '</b>, and no reference yet') : ''}.</p>`
+        : (ask ? `<p class=t>${esc(ask)}</p>` : ""))
+    + state + back + pfClear;
   return html(shell("Add your payment code", body), 200, NOINDEX);
+}
+
+/**
+ * Put the door down where it was picked up. The storefront keeps the receipt's link
+ * on the buyer's own device until it is used; this is the "used" signal. It is
+ * decoration, not state — if the write fails, if the key is blocked, if the browser is
+ * a WhatsApp webview with storage switched off, all that happens is a line that offers
+ * a link one more time, and the link's own page tells the truth about the order.
+ *
+ * The values go in as a regex-checked literal, not as HTML-escaped text, because this
+ * is a script: anything that is not a shop handle or an order code is refused outright
+ * and the script is simply not emitted.
+ */
+function pfForgetScript(handle, code) {
+  const h = String(handle || '');
+  const c = String(code || '');
+  if (!/^[a-z0-9-]{2,30}$/.test(h) || !/^[A-Za-z0-9_-]{1,16}$/.test(c)) return '';
+  return '<script>try{var k="tp_pf_' + h + '",a=JSON.parse(localStorage.getItem(k)||"[]");'
+    + 'if(Object.prototype.toString.call(a)==="[object Array]"){var n=a.filter(function(x){return !(x&&String(x.c)==="' + c + '")});'
+    + 'if(n.length!==a.length)localStorage.setItem(k,JSON.stringify(n))}}catch(e){}</script>';
 }
 
 /**
@@ -780,13 +817,14 @@ async function proofAdd(req, url, env) {
       row.payer = o.buyer.payer; row.proof = o.buyer.proof; row.proof_by = "buyer"; row.proof_at = when;
       await env.ORDERS.put(listKey, JSON.stringify(list));
     }
-    await pushAudit(env, st, { act: "proof", via: "buyer", fields: [`${o.code || o.id} ← ${o.buyer.proof || o.buyer.payer}`], ip });
+    await pushAudit(env, st, { act: "proof", via: "buyer",
+      fields: [`${o.code || o.id} ← ${[o.buyer.proof, o.buyer.payer].filter(Boolean).join(' · ')}`], ip });
   }
   const note = `Payment reference ${r.proof || r.payer} is on order ${o.code || ""}.`
     + (r.changed ? "" : " That is what the shop already had, so nothing was rewritten.")
     + (r.left > 0 ? ` You can correct it ${r.left} more time${r.left === 1 ? "" : "s"} while the order is open.` : "");
   if (asPage) {
-    return html(shell("Sent", `<h2 style="margin:.1rem 0 .5rem">Sent to the shop</h2><p>${esc(note)}</p>`
+    return html(shell("Sent", `<h2 style="margin:.1rem 0 .5rem">Sent to the shop</h2><p>${esc(note)}</p>` + pfForgetScript(st.handle, o.code)
       + `<p class=t>You can close this now — settling the order is the shop's to do.</p>`
       + `<p class=t><a href="/s/${esc(st.handle)}">Back to ${esc(st.name || st.handle)}</a></p>`), 200, NOINDEX);
   }
@@ -2715,7 +2753,8 @@ async function proofFile(req, url, env) {
   }
   // the response says whether the log held, in the same words a mark uses: a gap in
   // the paper trail is not a failed tap, and the merchant must not retype to be sure
-  const logged = await pushAudit(env, st, { act: 'proof', via: 'merchant', fields: [`${o.code || o.id} ← ${o.buyer.proof || o.buyer.payer}`], ip: ipOf(req) });
+  const logged = await pushAudit(env, st, { act: 'proof', via: 'merchant',
+    fields: [`${o.code || o.id} ← ${[o.buyer.proof, o.buyer.payer].filter(Boolean).join(' · ')}`], ip: ipOf(req) });
   return json({ ok: true, changed: true, code: o.code, proof: o.buyer.proof, status: o.status, logged,
     note: 'Filed on ' + (o.code || 'the order') + (o.status === 'paid' ? ' — the money was already counted, so nothing else moved.' : '.') });
 }

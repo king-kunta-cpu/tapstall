@@ -2152,6 +2152,105 @@ test('the shop can file the code the buyer sent in chat, and it is called what i
   assert.equal(got.status, 405, 'and it is POST-only like every other write');
 });
 
+test('the code page puts the door down on the device it was handed to', async () => {
+  const h = 'zzkeep' + String(Date.now()).slice(-5);
+  const reg = await call('/api/register', { method: 'POST', body: {
+    handle: h, shop_name: 'Keep Test', whatsapp: '263771234567', rail: 'zipit', pay_account: '1234567890', currency: 'USD',
+  } });
+  assert.equal(reg.status, 201, reg.text);
+  const ord = await call('/api/order', { method: 'POST', ip: '196.33.0.1', body: { handle: h, service: 'pickup',
+    buyer: { name: 'Kuda T', phone: '0780002200' }, items: [{ name: 'Box', price: 9 }] } });
+  assert.equal(ord.status, 201, ord.text);
+  const cap = ord.json.proof_url.slice(3);
+  const page = await call('/p/' + cap);
+  assert.equal(page.status, 200, page.text.slice(0, 120));
+  assert.ok(page.text.includes(`"tp_pf_${h}"`), 'the script names this shop’s key, not a global one: ' + page.text.slice(-400));
+  assert.ok(page.text.includes(`"${ord.json.order.code}"`), 'and the order whose entry it clears');
+  assert.equal((page.text.match(/<script>/g) || []).length, 1, 'exactly one script block, so nothing is spliced into another');
+  assert.match(page.text, /if\(n\.length!==a\.length\)localStorage\.setItem\(k,JSON\.stringify\(n\)\)/,
+    'and it writes only to drop something it had already stored — an entry that is not there is left alone, so a first visit costs nothing');
+  // the Sent page carries the same line, so the door closes behind them
+  const sent = await call('/api/proof', { method: 'POST', ip: '196.33.0.2',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: form({ cap, form: '1', proof: 'KEEP-1' }) });
+  assert.equal(sent.status, 200, sent.text.slice(0, 160));
+  assert.match(sent.text, /Sent to the shop/, 'the confirmation page is still a page, not a blob');
+  assert.ok(sent.text.includes(`"tp_pf_${h}"`), 'and it is the page that removes the entry, at the moment the code lands');
+  assert.equal(JSON.parse(env.ORDERS._map.get(`order:${h}:${ord.json.order.id}`).value).buyer.proof, 'KEEP-1');
+  // a link that cannot be used gets no script: nothing to forget, and no reason to run anything
+  const dead = await call('/p/' + 'v1.9999999999.eyJhIjoicHJvb2YifQ.deadbeef');
+  assert.ok(!/<script>/.test(dead.text), 'a refused link executes nothing in the buyer’s browser: ' + dead.text.slice(0, 160));
+});
+
+test('the buyer’s door asks for the sender number on the rails that search by it', async () => {
+  const hp = 'zzpayer' + String(Date.now()).slice(-5);
+  const reg = await call('/api/register', { method: 'POST', body: {
+    handle: hp, shop_name: 'Payer Door', whatsapp: '263771234567', rail: 'custom', currency: 'USD',
+    rail_def: { label: 'Momo', dial: '*151#', pct: 0.03, type: 'manual', spec: 'phone', proof: 'ask', proof_label: 'Momo code' },
+    pay_account: '0771234567',
+  } });
+  assert.equal(reg.status, 201, reg.text);
+  const ord = await call('/api/order', { method: 'POST', ip: '196.34.0.1', body: { handle: hp, service: 'pickup',
+    buyer: { name: 'Kudzai R', phone: '0780003311' }, items: [{ name: 'Box', price: 8 }] } });
+  assert.equal(ord.status, 201, ord.text);
+  assert.equal(ord.json.pay.ask_payer, true, 'this rail reconciles by sender, and the slip said so');
+  const cap = ord.json.proof_url.slice(3);
+  const page = await call('/p/' + cap);
+  assert.equal(page.status, 200, page.text.slice(0, 140));
+  assert.match(page.text, /name=payer/, 'so the door carries the second field the cart had');
+  assert.match(page.text, /Number you will pay from/, 'in the cart’s own words, not new vocabulary');
+  assert.match(page.text, /optional — helps us find your payment/, 'with the same claim about it, which is the honest one');
+  // and the rail that does not search by number does not ask for one
+  const hn = 'zznopay' + String(Date.now()).slice(-5);
+  const reg2 = await call('/api/register', { method: 'POST', body: {
+    handle: hn, shop_name: 'No Payer', whatsapp: '263771234567', rail: 'custom', currency: 'USD',
+    rail_def: { label: 'Voucher', type: 'manual', spec: 'none', proof: 'require', proof_label: 'Voucher code' },
+    pay_account: '0771234567',
+  } });
+  assert.equal(reg2.status, 201, reg2.text);
+  const ord2 = await call('/api/order', { method: 'POST', ip: '196.34.0.2', body: { handle: hn, service: 'pickup',
+    buyer: { name: 'Tapiwa G', phone: '0780003322' }, items: [{ name: 'Box', price: 8 }] } });
+  assert.equal(ord2.json.pay.ask_payer, false, 'a voucher rail has no sender number to search');
+  const page2 = await call('/p/' + ord2.json.proof_url.slice(3));
+  assert.equal(page2.status, 200, page2.text.slice(0, 140));
+  assert.ok(!/name=payer/.test(page2.text), 'and its door asks for one thing, because that is all it needs');
+  assert.match(page2.text, /Voucher code/, 'the one field it does show is named by the shop, not by us');
+});
+
+test('both halves of the buyer’s record land in one write, and both are logged', async () => {
+  const hp = 'zzboth' + String(Date.now()).slice(-5);
+  const reg = await call('/api/register', { method: 'POST', body: {
+    handle: hp, shop_name: 'Both Fields', whatsapp: '263771234567', rail: 'custom', currency: 'USD',
+    rail_def: { label: 'Momo', dial: '*151#', pct: 0.03, type: 'manual', spec: 'phone', proof: 'require', proof_label: 'Momo code' },
+    pay_account: '0771234567',
+  } });
+  assert.equal(reg.status, 201, reg.text);
+  const ord = await call('/api/order', { method: 'POST', ip: '196.34.0.3', body: { handle: hp, service: 'pickup',
+    buyer: { name: 'Nomsa D', phone: '0780003333' }, items: [{ name: 'Box', price: 21 }] } });
+  const cap = ord.json.proof_url.slice(3);
+  const key = 'order:' + hp + ':' + ord.json.order.id;
+  const before = env.ORDERS._writesTo(key);
+  const r = await call('/api/proof', { method: 'POST', ip: '196.34.0.4', body: { cap, proof: 'MLINE 4471', payer: '+263 77 999 0001' } });
+  assert.equal(r.status, 200, r.text);
+  const doc = JSON.parse(env.ORDERS._map.get(key).value);
+  assert.equal(doc.buyer.proof, 'MLINE 4471');
+  assert.equal(doc.buyer.payer, '+263 77 999 0001',
+    'kept as typed with runs of space collapsed, the same rule as a code: the number the buyer read in their app is the number on the order, and the slip narrows it for dialing at print time');
+  assert.equal(doc.pay.payer_from, '', 'and the frozen slip keeps what was true when it was issued: a receipt does not acquire a line afterwards, which is why the ledger and the handoff read the buyer object, not the snapshot');
+  const dashRow = (await call('/api/admin?handle=' + hp, { headers: { 'x-tapstall-admin': JSON.parse(env.STORES._map.get('store:' + hp).value).admin_token } })).json.orders.find((x) => x.id === ord.json.order.id);
+  assert.equal(dashRow.buyer.payer, '+263 77 999 0001', 'so it is the live surfaces that carry what arrived late, as they must');
+  assert.equal(doc.proof_writes, 1, 'two fields, one write counted — the budget is per visit to the door, not per box');
+  assert.equal(env.ORDERS._writesTo(key), before + 1, 'and one put, not two');
+  const row = JSON.parse(env.ORDERS._map.get('list:' + hp).value).find((x) => x.id === ord.json.order.id);
+  assert.equal(row.proof, 'MLINE 4471', 'both land on the ledger row the merchant reads');
+  assert.equal(row.payer, '+263 77 999 0001', 'the ledger row agrees with the document, spaced as typed');
+  const dash = await call('/api/admin?handle=' + hp, { headers: { 'x-tapstall-admin': JSON.parse(env.STORES._map.get('store:' + hp).value).admin_token } });
+  const audit = dash.json.audit.filter((x) => x.act === 'proof')[0];
+  assert.match(audit.fields.join(' '), /MLINE 4471 · \+263 77 999 0001/, 'the paper trail lists both, not whichever came first: ' + JSON.stringify(audit));
+  const again = await call('/p/' + cap);
+  assert.match(again.text, /sent from <b>\+263 77 999 0001<\/b>/, 'and the door shows the pair back before it is used again');
+  assert.ok(!/name=payer/.test(again.text), 'once the number is in, the second box is gone — it asked because it was missing');
+});
+
 test('a save frees the picture it dropped even when the index cannot see it yet', async () => {
   // Production fact this exists for: KV's list() is only eventually consistent, and
   // the file a merchant just took off is usually the newest key in the namespace, so

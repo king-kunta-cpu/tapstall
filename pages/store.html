@@ -19,6 +19,10 @@ h1{font-size:1.05rem;margin:0;line-height:1.2}
 .chip{background:#1a2530;border-radius:999px;padding:.15rem .5rem}
 a.chip{color:#dbe6f0;text-decoration:none;border:1px solid #2b3a48}
 a.chip:active,a.chip:hover{background:#243342}
+.pfbar{margin:.6rem 1rem 0;background:#eef4fb;border:1px solid #cfdfeb;color:#18324c;font-size:.82rem;padding:.5rem .65rem;border-radius:10px;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+.pfbar a{color:#0b4a86;font-weight:600}
+.pfbar .x{margin-left:auto;background:none;border:0;color:#65788b;font:inherit;padding:0 .15rem;cursor:pointer}
+.pfbar[hidden]{display:none}
 .notice{margin:.7rem 1rem 0;background:#fff7e6;border:1px solid #f0d9a8;color:#6b4d09;font-size:.8rem;padding:.55rem .7rem;border-radius:10px}
 .cats{display:flex;gap:.4rem;overflow-x:auto;padding:.75rem 1rem .3rem;scrollbar-width:none}
 .cats::-webkit-scrollbar{display:none}
@@ -102,6 +106,9 @@ ol.steps li{margin:.25rem 0}
   </header>
 
   <div class="notice" id="notice" hidden></div>
+  <!-- The buyer's own door, kept on their device for as long as one is valid. It
+       offers a link; it never claims the order is still owed anything. -->
+  <div class="pfbar" id="pfbar" hidden></div>
   <div class="cats" id="cats" hidden></div>
   <div class="grid" id="grid"></div>
   <div class="empty" id="empty" hidden></div>
@@ -144,6 +151,48 @@ var TERM = /*__TAPSTALL_TERM__*/null;
     cart = JSON.parse(rawCart || '[]') || [];
   } catch (e) { cart = []; }
 
+  /* A door is only worth handing out if the person it was handed to can find it
+     again: people pay, then they close the page. So the receipt's link is kept on
+     this device for exactly as long as the platform says one is valid — 72 hours,
+     the same number as PROOF_WINDOW_SEC in core.js, pinned in a test — and the code
+     page removes the entry when the code is in. Nothing here reads the order back or
+     claims anything about it: the line offers, it does not accuse. A spent link still
+     tells the truth on the far side ("This link is finished", and the shop can file
+     what they send in chat), so nothing has to be certain for this to be safe. */
+  var PFK = 'tp_pf_' + CFG.handle, PF_TTL = 72 * 3600 * 1000, PF_MAX = 5;
+  function pfLoad() {
+    var a = [];
+    try { a = JSON.parse(localStorage.getItem(PFK) || '[]'); } catch (e) { a = []; }
+    if (!Array.isArray(a)) a = [];
+    var cut = Date.now() - PF_TTL;
+    a = a.filter(function (x) {
+      return x && (Number(x.t) || 0) > cut && typeof x.u === 'string' && /^\/p\/[A-Za-z0-9._-]{20,400}$/.test(x.u);
+    });
+    return a.slice(-PF_MAX);
+  }
+  function pfSave(a) { try { localStorage.setItem(PFK, JSON.stringify(a)); } catch (e) {} }
+  function pfAdd(code, url) {
+    if (!url) return;
+    var a = pfLoad().filter(function (x) { return x.c !== String(code || ''); });
+    a.push({ c: String(code || '').slice(0, 16), u: url, t: Date.now() });
+    pfSave(a.slice(-PF_MAX)); pfRender();
+  }
+  function pfDone(code) {
+    var a = pfLoad(), n = a.filter(function (x) { return x.c !== String(code || ''); });
+    if (n.length !== a.length) pfSave(n);
+  }
+  function pfRender() {
+    var bar = $('pfbar'); if (!bar) return;
+    var a = pfLoad();
+    if (!a.length) { bar.hidden = true; bar.innerHTML = ''; return; }
+    var x = a[a.length - 1];
+    bar.hidden = false;
+    bar.innerHTML = (a.length > 1 ? '<span>' + a.length + ' orders</span>' : '')
+      + 'Order <b>' + esc(x.c) + '</b> — <a href="' + esc(x.u) + '">add your payment code</a>'
+      + '<button class="x" id="pfx" aria-label="Dismiss">\u2715</button>';
+    $('pfx').onclick = function () { pfDone(x.c); pfRender(); };
+  }
+
   document.title = CFG.shop_name + ' — order on WhatsApp';
   $('sname').textContent = CFG.shop_name;
   if (CFG.tagline) $('stag').textContent = CFG.tagline;
@@ -163,6 +212,7 @@ var TERM = /*__TAPSTALL_TERM__*/null;
   if (CFG.closed) note('Shop closed right now — you can still order and we will confirm when we open.');
   if (TERM && TERM.state === 'expired') note('This store is paused until the owner renews. Existing orders still reach us on WhatsApp.');
   if (CFG.rail === 'cash' && !CFG.pay_account) note('Cash / pickup payments: pay the runner or pay when you collect.');
+  pfRender();
 
   function note(t) { var n = $('notice'); n.hidden = false; n.textContent = t; }
   function money(n) { return (Number(n) || 0).toFixed(2) + ' ' + CUR; }
@@ -419,6 +469,7 @@ var TERM = /*__TAPSTALL_TERM__*/null;
        they are looking at the confirmation right now. So the receipt holds the door
        open: one field, this order only, no chat needed. An order that already has
        the code says nothing, and a rail that never asked says nothing either. */
+    var needDoor = !pay.proof && pay.proof_mode && pay.proof_mode !== 'none' && !!o.proof_url;
     var addProof = (pay.proof || !pay.proof_mode || pay.proof_mode === 'none') ? '' : '<p class="hint">'
       + (o.proof_url
           ? (pay.proof_mode === 'require'
@@ -458,6 +509,7 @@ var TERM = /*__TAPSTALL_TERM__*/null;
       (o.risk_flags && o.risk_flags.length ? '<div class="warn">The shop will double-check this order before sending: ' + esc(o.risk_flags.join(', ')) + '</div>' : '') +
       (o.trust && o.trust.orders_before > 1 ? '<div class="badge">Welcome back — ' + o.trust.orders_before + ' orders from this number</div>' : '') +
       '</div>';
+    if (needDoor) pfAdd(o.order.code, o.proof_url);
     $('shTitle').textContent = 'Almost done';
     $('shBody').innerHTML = h;
     $('sheet').classList.add('on');

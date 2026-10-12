@@ -1,5 +1,71 @@
 # Tapstall — status
 
+## The door is kept, and it takes the whole record (2026-10-12, v0.7.5 → v0.7.6)
+
+**Third time the same instruction came back, so the same loop got its last two edges.**
+0.7.3 gave a buyer a field, 0.7.4 put that field at the end of the chase. What was left
+was everything *around* the write: whether a buyer who closed the page could ever get back
+to it, whether the shop knew the door existed, and whether "their own record" meant half
+of it.
+
+**v0.7.5 — the door is kept where it was handed out.** `pages/store.html` stores the
+receipt's `/p/<cap>` against this shop's handle (`tp_pf_<handle>`, max five entries, each
+pruned at 72 hours — `PF_TTL = 72 * 3600 * 1000`, pinned in a test to `PROOF_WINDOW_SEC`
+so the client cannot outlive the token) and shows one quiet line under the notice bar:
+"Order MAM-1234 — add your payment code", with a dismiss. The `/p/` page removes the entry
+when the code lands, from `proofPage` and from the Sent page, and the storefront's keep
+gate and the receipt's sentence come from one `needDoor` condition rather than two copies
+of it. The wording offers instead of accusing: nothing on that page can read the order
+back, so nothing on it may claim the buyer still owes anything, and a spent link still
+tells the truth on the far side. `pfForgetScript` refuses to emit anything unless the
+handle and code match their own shapes — it is a `<script>`, where HTML escaping is the
+wrong tool.
+
+**v0.7.5 — the merchant is told a door exists, and is not given the key.** The order
+notice body moved to `notifyText(st, order)` in `core.js`, so the sentence is testable
+without a Worker, and when a code is owed on an open order it appends: *"No reference from
+your bank yet — the row in your ledger has a link they can paste it into, one field,
+nothing else it can change."* A pointer, not the URL: a link in an inbox is a live write
+that gets forwarded, and `proof_by: 'buyer'` would stop meaning the hand that held the
+phone. The merchant's own dashboard row already carries the minted door.
+
+**v0.7.6 — the buyer's door takes the sender number too.** `proofAccept` has always
+accepted `payer` next to `proof`; the page never asked for it, which left the loop half
+shut on the rails where the number *is* the reconciliation. The field now appears when
+`order.pay.ask_payer` is true — read from the slip frozen at order time, so a shop that
+changes its rail cannot retroactively demand it of a buyer who already declined — and only
+while the order has none, so a buyer with both sees one box and no extra sentence. Same
+words as the cart's ("Number you will pay from (optional — helps us find your payment)"),
+same `cleanPayer(…, 'loose')` rule, so it is stored spaced exactly as typed while the
+printed slip keeps the dialable form it was issued with: a receipt does not acquire a line
+afterwards, which is why the ledger row, the dashboard and the handoff read the buyer
+object instead. Two fields, one `proof_writes`, one put per key, and the audit line lists
+both (`MAM-9 ← MLINE 4471 · +263 77 999 0001`) rather than whichever came first.
+
+**A deploy that could not write, and the check that now catches it.** The storefront
+change is in git and in the Worker; the KV copy of `tpl:store` could not be updated,
+because the account had spent its 1,000 free writes today (`__selftest: kv_write_blocked`,
+retry in ~11 h). `deploy.sh --templates` says it exactly: *"git has 34305 bytes, KV has
+31382 — customers are served the older page"*, and the scheduled `pages-are-current` run
+at 00:20 UTC — twenty minutes after the reset — publishes it and goes red if the difference
+survives. The gap that mattered was in the *ordinary* deploy path, which published pages
+and never read them back, so "deployed" could mean "one page is stale" behind a green log.
+It runs the same verification now and warns with the reason and both fixes.
+
+**Reporting, not noise.** A spent budget used to turn thirteen buyer-door lines red,
+because their inputs (an order, a page publish) could not exist. They are `ckw`/`nkw` now —
+`nkw` is new, because a must-not-contain check on an empty input passes for the wrong
+reason and prints green. Today's live run: **192 passed / 70 blocked / 0 failed**.
+
+**Checked.** `npm test` **205/205** (core 77 · live 84 · pages 34 · limits 10): the payer
+box appears on a phone rail and not on a rail with no sender number to search; both halves
+land in one write and one put; the pair is echoed back and the second box then disappears;
+document, ledger row, dashboard row and audit line agree; the frozen slip stays honest. The
+storefront's keeping is asserted statically, including that its line cannot accuse.
+
+**Untouched, still.** `/c/` does not check `p.g`, so *Revoke* closes code links and
+sessions and leaves confirm links alone — raised in 0.7.3, unanswered, unfixed.
+
 ## The last mile of the same field (2026-10-12, v0.7.4)
 
 **The instruction came back, so the feature went deeper.** 0.7.3 let a buyer add their

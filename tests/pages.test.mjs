@@ -516,3 +516,25 @@ test('the ledger gives the shop the same one box, on its own side', () => {
   assert.match(admin, /value="' \+ esc\(\(o\.buyer && o\.buyer\.proof\) \|\| ''\)/, 'prefilled with what the buyer sent, so a correction is the same gesture');
   assert.match(admin, /an empty box is not a filing/, 'and the box refuses to post itself empty, which is what the 422 exists for');
 });
+
+test('a returning buyer finds the door again, on the device it was left on', () => {
+  assert.match(storeHtml, /var PFK = 'tp_pf_' \+ CFG\.handle/, 'one key per shop, so a shared phone does not mix two stores’ doors');
+  assert.match(storeHtml, /var addProof = \(pay\.proof \|\| !pay\.proof_mode \|\| pay\.proof_mode === 'none'\) \? '' : '<p class="hint">'/, 'the sentence the receipt shows is still gated on the same one condition');
+  assert.match(storeHtml, /var needDoor = !pay\.proof && pay\.proof_mode && pay\.proof_mode !== 'none' && !!o\.proof_url;/, 'and keeping the link is gated on that same condition, not a second copy of it');
+  assert.match(storeHtml, /if \(needDoor\) pfAdd\(o\.order\.code, o\.proof_url\);/, 'the entry is written from showDone, where the link actually was');
+  // the client must not outlive the token: same 72 hours, held in one number each side
+  assert.match(storeHtml, /PF_TTL = 72 \* 3600 \* 1000/, 'the client prunes at the lifetime the server mints with');
+  assert.equal(CORE.PROOF_WINDOW_SEC * 1000, 72 * 3600 * 1000, 'and that lifetime is still the one in core.js, so the two cannot drift');
+  assert.match(storeHtml, /PF_MAX = 5/, 'a handful of entries, no unbounded growth in someone’s storage');
+  assert.match(storeHtml, /typeof x\.u === 'string' &&/, 'a stored value is checked before it is rendered as a link');
+  assert.match(storeHtml, /\{20,400\}\$\//, 'against the shape a capability actually has, so a junk entry cannot become an <a href>');
+  assert.match(storeHtml, /try \{ a = JSON.parse\(localStorage\.getItem\(PFK\) \|\| '\[\]'\); \} catch \(e\) \{ a = \[\]; \}/, 'parse failure reads as empty, never as a crash on the shop’s front page');
+  assert.match(storeHtml, /if \(!Array\.isArray\(a\)\) a = \[\];/, 'and a stored object is refused rather than walked');
+  // scoped to the renderer, because the rest of the file legitimately talks about
+  // unpaid orders elsewhere — this one line must not, since it cannot know
+  const pf = storeHtml.slice(storeHtml.indexOf('function pfRender()'));
+  assert.match(pf.slice(0, 700), /add your payment code/, 'the line offers, in the buyer’s words');
+  assert.ok(!/you have not paid|still owed|you owe|unpaid/.test(pf.slice(0, 700)),
+    'and it accuses nobody: nothing on this page can read the order back, so nothing here may claim to know');
+  assert.match(storeHtml, /aria-label="Dismiss"/, 'a line like this must be puttable down by hand too');
+});

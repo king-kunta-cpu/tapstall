@@ -8,8 +8,14 @@
 #   4. the public surfaces still answer exactly as they did before
 #   5. both consoles (merchant pages, /ops) are live, gated, and say nothing
 #
-# It creates one throwaway order on $HANDLE and cancels it at the end. Nothing
-# else about that store is left changed.
+# It creates two throwaway orders on $HANDLE and cancels them both at the end.
+# Nothing else about that store is left changed.
+#
+# Which lines are `ckw` is a claim about cost, not about importance: everything on the
+# buyer's door needs a write (an order to hold the code, or the nightly publish that
+# moves a page), so on a day the 1,000 free KV writes are gone they are reported as
+# blocked rather than red — thirteen red lines about a spent budget is how a real
+# failure hides.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 ORIGIN="${ORIGIN:-https://tapstall.simalidudu.workers.dev}"
@@ -48,6 +54,16 @@ ckw() {  # like ck, for a line that cannot be verified without a KV write today
     blocked=$((blocked + 1)); return
   fi
   ck "$@"
+}
+nkw() {  # like nk, for a must-not-contain line whose input cannot exist without a write
+  # A must-not-contain check on an empty input passes for the wrong reason: no order
+  # was created, so nothing was found, so the line is green. On a spent day that is a
+  # false green repeated, so say what is true instead — not verifiable today.
+  if [[ "$NOWRITE" == 1 ]]; then
+    printf '  \033[33m!\033[0m %s \033[2m— needs a KV write, and there are none left today\033[0m\n' "$1"
+    blocked=$((blocked + 1)); return
+  fi
+  nk "$@"
 }
 nk() {   # nk <name> <must-NOT-contain-regex> <actual>
   printf '%s\n' "$3" > "$ckf"
@@ -248,11 +264,11 @@ PURL=$(printf '%s' "$ORD" | python3 -c "import sys,json;print(json.load(sys.stdi
 PCAP=${PURL#/p/}
 MPCAP=${MARK#/c/}
 ckw "the receipt is handed a code link of its own" '^/p/v1\.' "$PURL"
-ck  "  · a different capability from the shop's, not the same one on a new path" '^diff$' "$(if [[ -z "$PCAP" || -z "$MPCAP" || "$PCAP" == "$MPCAP" ]]; then echo same; else echo diff; fi)"
+ckw  "  · a different capability from the shop's, not the same one on a new path" '^diff$' "$(if [[ -z "$PCAP" || -z "$MPCAP" || "$PCAP" == "$MPCAP" ]]; then echo same; else echo diff; fi)"
 BFORM=$(curl -s -m 30 -A 'Mozilla/5.0 (compatible; Slackbot/1.0; +https://slack.com/faq)' "$ORIGIN/p/$PCAP")
 ckw "  · a crawler that fetches it gets a form it cannot fire" 'method=post action="/api/proof"' "$BFORM"
-ck  "  · the page says out loud what the link cannot do" 'cannot mark anything paid' "$BFORM"
-ck  "  · and quotes the shop's own ask rather than inventing one" 'Reference from your bank|Code from the app|app shows' "$BFORM"
+ckw  "  · the page says out loud what the link cannot do" 'cannot mark anything paid' "$BFORM"
+ckw  "  · and quotes the shop's own ask rather than inventing one" 'Reference from your bank|Code from the app|app shows' "$BFORM"
 BPROBE="ZCPROBE$(date +%s | tail -c 6)"
 BPOST=$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"$PCAP"'","proof":"'"$BPROBE"'"}' "$ORIGIN/api/proof")
 ckw "the buyer's POST lands, and is called a change" '"changed":true' "$BPOST"
@@ -261,12 +277,24 @@ ck  "  · and the answer counts what is left, so nobody guesses" '"left":2' "$BP
 KVBUY=$(curl -s -m 30 -H "Authorization: Bearer $TOK" "https://api.cloudflare.com/client/v4/accounts/$ACCT/storage/kv/namespaces/$ORD_KV/values/order:$HANDLE:$ID")
 ckw "  · on the order document, named as the buyer's" '"proof_by":"buyer"' "$KVBUY"
 ckw "  · the money state untouched by a public write" '"status":"awaiting_payment"' "$KVBUY"
-nk  "  · and no link is stored on the order for a reader to reuse" '/p/v1' "$KVBUY"
+nkw "  · and no link is stored on the order for a reader to reuse" '/p/v1' "$KVBUY"
+ckw "  · the door asks for the sender number on a rail that searches by it" 'name=payer' "$BFORM"
+ckw "  · in the same words the order form used, not a third vocabulary" 'Number you will pay from' "$BFORM"
 DASHB=$(curl -s -m 30 -H "x-tapstall-admin: $ADMIN_KEY" "$ORIGIN/api/admin?handle=$HANDLE")
 ckw "  · the ledger row carries it, so the chase sentence leaves on its own" "$BPROBE" "$DASHB"
 BOGUS=$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"v1.9999999999.eyJhIjoicHJvb2YifQ.deadbeef","proof":"XX"}' "$ORIGIN/api/proof")
 ckw "a cap nobody minted is refused in the same words as an expired one" 'does not open this field' "$BOGUS"
 ck  "  · and the write endpoint is POST-only, so a prefetch cannot use it" '^405$' "$(code "$ORIGIN/api/proof")"
+# 0.7.5: the door is kept where it was handed out, and put down when it is used
+SF=$(curl -s -m 30 -A 'Mozilla/5.0' "$ORIGIN/s/$HANDLE")
+ckw  "  · a returning buyer is offered the door on the shop's own page" 'id="pfbar"' "$SF"
+ckw  "  · the offer is a link, in the buyer's words, with a way to put it down" 'add your payment code' "$SF"
+ckw  "  · and the stored entry is pruned at the lifetime the token actually has" 'PF_TTL = 72 . 3600 . 1000' "$SF"
+ckw  "  · the code page hands the buyer's device the entry to forget" "tp_pf_$HANDLE" "$BFORM"
+FSEND=$(curl -s -m 30 -X POST -H 'content-type: application/x-www-form-urlencoded' \
+  -d 'form=1&cap='"$PCAP"'&proof='"$BPROBE" "$ORIGIN/api/proof")
+ck  "  · the page a no-JS buyer gets after sending carries the same line" "tp_pf_$HANDLE" "$FSEND"
+ckw "  · and a resend of the same value rewrites nothing, which is why a retry is free" 'nothing was rewritten' "$FSEND"
 
 # ---- 0.7.4: the chase carries the door, and the shop can file what it was sent
 # The buyer's door closes when the order is settled, and the refusal text sends people
@@ -275,7 +303,7 @@ ck  "  · and the write endpoint is POST-only, so a prefetch cannot use it" '^40
 # arrives in the chat has to have somewhere to land.
 DASHC=$(curl -s -m 30 -H "x-tapstall-admin: $ADMIN_KEY" "$ORIGIN/api/admin?handle=$HANDLE")
 ROWC=$(printf '%s' "$DASHC" | python3 -c "import sys,json;print(json.dumps(next((o for o in json.load(sys.stdin).get('orders',[]) if o.get('id')=='$ID'), {})))" 2>/dev/null)
-ck  "a row whose code has arrived asks for nothing" '^none$' "$(printf '%s' "$ROWC" | python3 -c "import sys,json;d=json.load(sys.stdin);print('none' if 'ask' not in d else 'still asking')" 2>/dev/null)"
+ckw "a row whose code has arrived asks for nothing" '^none$' "$(printf '%s' "$ROWC" | python3 -c "import sys,json;d=json.load(sys.stdin);print('none' if 'ask' not in d else 'still asking')" 2>/dev/null)"
 ORD2=$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{
   "handle":"'"$HANDLE"'","service":"pickup",
   "buyer":{"name":"prod check two","phone":"0700000002","optin":true},
@@ -286,7 +314,7 @@ DASH2=$(curl -s -m 30 -H "x-tapstall-admin: $ADMIN_KEY" "$ORIGIN/api/admin?handl
 ROW2=$(printf '%s' "$DASH2" | python3 -c "import sys,json;print(json.dumps(next((o for o in json.load(sys.stdin).get('orders',[]) if o.get('id')=='$ID2'), {})))" 2>/dev/null)
 ckw "a row that still owes a code carries a door for the buyer" '/p/v1\.' "$ROW2"
 ckw "  · inside the shop's own sentence, which is what gets copied or tapped" '[Aa]dd it here and (it goes straight on the order|I can confirm your order today)' "$ROW2"
-ck  "  · and the sentence ends at exactly that URL, so a copied slip cannot offer a different door" '^same$' "$(printf '%s' "$ROW2" | python3 -c "import sys,json;d=json.load(sys.stdin);print('same' if d.get('proof_url') and d.get('ask','').endswith(d['proof_url']) else 'different')" 2>/dev/null)"
+ckw  "  · and the sentence ends at exactly that URL, so a copied slip cannot offer a different door" '^same$' "$(printf '%s' "$ROW2" | python3 -c "import sys,json;d=json.load(sys.stdin);print('same' if d.get('proof_url') and d.get('ask','').endswith(d['proof_url']) else 'different')" 2>/dev/null)"
 PURL2=$(printf '%s' "$ROW2" | python3 -c "import sys,json;print(json.load(sys.stdin).get('proof_url',''))" 2>/dev/null)
 CAP2=${PURL2##*/p/}
 B2="ZC2-$(date +%s | tail -c 6)"
@@ -300,7 +328,7 @@ ckw "  · on the order document, in the shop's hand" '"proof_by":"merchant"' "$K
 ckw "  · the buyer's correction budget untouched by a shop write" '"proof_writes":1' "$KV2"
 ck  "  · no public door reaches this write at all" '^401$' "$(code -X POST -H 'content-type: application/json' -d '{"handle":"'"$HANDLE"'","id":"'"$ID2"'","proof":"X"}' "$ORIGIN/api/order/proof")"
 ck  "  · a GET is refused, so a link prefetch files nothing" '^405$' "$(code "$ORIGIN/api/order/proof")"
-ck  "  · and a blank box is answered in the shop's own voice" 'Nothing to file' "$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" -d '{"handle":"'"$HANDLE"'","id":"'"$ID2"'","proof":"   "}' "$ORIGIN/api/order/proof")"
+ckw "  · and a blank box is answered in the shop's own voice" 'Nothing to file' "$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" -d '{"handle":"'"$HANDLE"'","id":"'"$ID2"'","proof":"   "}' "$ORIGIN/api/order/proof")"
 
 echo "[5] settings: cosmetic instant, money held 15 minutes, cancellable"
 HOURS=$(printf '%s' "$STORE" | python3 -c "import sys,json;print(json.load(sys.stdin).get('hours','') or 'open')" 2>/dev/null)
