@@ -136,7 +136,18 @@ if [[ -x node_modules/.bin/wrangler ]]; then
       if [[ $try -gt 1 ]]; then ok "wrangler deploy, on attempt $try (Cloudflare 504'd before that)"; else ok "wrangler deploy"; fi
       pub=1; break
     fi
-    warn "wrangler deploy failed, attempt $try of 3: $(grep -iE '504|Gateway Timeout|error code' "$publog" | head -1)"
+    # the shape of the failure decides what to do with it: a 504 is Cloudflare timing out,
+    # an HTML body is the edge answering the runner with a page instead of the API (an
+    # outage, or a challenge aimed at this IP range), and neither is a deploy error that a
+    # change in this repo could fix. Say which one, rather than leave a fragment to guess at.
+    # `|| true` is not decoration: `fail=$(grep …)` inherits grep's status, and under
+    # `set -euo pipefail` a deploy that failed for a reason this line does not recognise
+    # would abort the script before it ever said what happened — which is the one job left.
+    fail=$(grep -iE '504|Gateway Timeout|error code' "$publog" | head -1 || true)
+    if [[ -z "$fail" ]] && head -c 400 "$publog" | grep -qiE '<!doctype|<html|<!--\[if'; then
+      fail="Cloudflare answered HTML, not the API ($(wc -c < "$publog") bytes back) — an edge outage or a challenge, not something this deploy can fix"
+    fi
+    warn "wrangler deploy failed, attempt $try of 3: ${fail:-$(tail -1 "$publog")}"
     if [[ $try -lt 3 ]]; then sleep $((try * 8)); fi
   done
   rm -f "$publog"

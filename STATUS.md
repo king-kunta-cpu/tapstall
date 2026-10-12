@@ -52,10 +52,29 @@ survives. The gap that mattered was in the *ordinary* deploy path, which publish
 and never read them back, so "deployed" could mean "one page is stale" behind a green log.
 It runs the same verification now and warns with the reason and both fixes.
 
+**Then the same flakiness wore a different hat.** Runs #65 to #67 on `main` went red with
+the tests green: #65 on a `504` at the post-publish subdomain read, #66 on three `504s` at
+three different endpoints of the Workers API (`PATCH /script-settings`, `POST /deployments`,
+`PUT /schedules`), and #67's rerun on an HTML page — `<!--[if I…`, 6,504 bytes — where the
+API should have answered. The Worker merchants use was 0.7.6 and already live from this
+machine, so the red meant "Cloudflare would not talk to the runner", and reading the log is
+now enough to know that: each attempt names its matched line, and a non-JSON body is labelled
+as edge trouble instead of left as a fragment. The scheduled run retries on its own.
+
+`node_modules` is not installed on this machine, so local deploys have always gone through
+`scripts/cf_publish.py`, and the retry is proven by CI's own transcript: run #66 printed
+`wrangler deploy failed, attempt 1 of 3: PATCH /…/script-settings -> 504 Gateway Timeout`,
+`…attempt 2 of 3: POST /…/deployments -> 504`, `…3 of 3: PUT /…/schedules -> 504`, then
+`the Worker was not published in three attempts — nothing new is live`. To see the second
+shape here, `node_modules/.bin/wrangler` was created as a stub that prints a Cloudflare HTML
+page and exits 1, and the line read `Cloudflare answered HTML, not the API (6271 bytes back)
+— an edge outage or a challenge, not something this deploy can fix`, three times, then died.
+The stub is deleted; `node_modules` is not a tracked directory, so nothing else was touched.
+
 **Reporting, not noise.** A spent budget used to turn thirteen buyer-door lines red,
 because their inputs (an order, a page publish) could not exist. They are `ckw`/`nkw` now —
 `nkw` is new, because a must-not-contain check on an empty input passes for the wrong
-reason and prints green. Today's live run: **192 passed / 70 blocked / 0 failed**.
+reason and prints green. Today's live run: **192 passed / 72 blocked / 0 failed**.
 
 **Checked.** `npm test` **205/205** (core 77 · live 84 · pages 34 · limits 10): the payer
 box appears on a phone rail and not on a rail with no sender number to search; both halves
