@@ -394,7 +394,32 @@ and the merchant's own sharing supplies the link; `/a`, `/ops` and the API are
 robots.txt. IndexNow and Search Console verification are one config line each and are
 deliberately not switched on: they are the same enumeration with extra steps.
 
+Two more surfaces came out of the same reading. **A shop can post itself**:
+`GET /s/<handle>/share.txt` returns plain text assembled from the store document —
+a WhatsApp status block, an X post that fits 280 characters so its link survives, a
+Facebook bullet block with no hollow bullets, and an Instagram line that carries no URL
+because captions there are not clickable. The storefront links it from its own header
+(`share.txt`, relative, so it needs no script and no absolute URL), and a buyer
+forwarding a shop uses the same file. **There are written pages**: `/guide/<slug>`,
+one pillar and one cluster, listed in `core.js: GUIDES` so the route, the sitemap and
+the footer all read the same array — and `deploy.sh` derives its publish list from
+`pages/guide-*.html`, which is how the bot's whole orphan problem is made impossible
+instead of monitored. `@ORIGIN@` in those files is stamped with the host that answered,
+so the canonical is right on any domain and a move to a real one fixes every page at once.
+
+The last piece is operational: every exit of both money doors is counted, once per hour
+per outcome (`hooks:<YYYYMMDDHH>:<status>`, a conditional write so the bound holds across
+isolates), and `/ops/api/health` reports it. Their engine posts each guard refusal to
+Discord, which is right about visibility and silent about cost; a refusal is the one
+event a stranger can generate at will, so what you get is "was anything tried this hour,
+and did anything get through" rather than a ledger an attacker can spend our budget with.
+
 ### What came from the COREMERCH bots, and what did not
+
+Every numbered feature in their changelog, plus the mailer's and the payment engine's,
+is dispositioned in [`docs/POINTERS.md`](docs/POINTERS.md) — taken, already had, or
+refused with a reason. The short version: take the checklist and the discipline, leave
+the density counters, the ping that Google ignores, and the credential in the source.
 
 `uploads/COREMERCH CONTENT BOT V6.0.txt` is a 387 KB Google Apps Script that publishes
 to GitHub Pages. Its discoverability half is good engineering and is now ours in

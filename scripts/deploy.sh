@@ -75,19 +75,28 @@ python3 scripts/ui_kit.py check || die "pages/*.html are out of date with pages/
 # the HTML waits, and the only way to finish is to run something again after midnight.
 # This is that something. It spends a write only where KV differs from git, so a
 # nightly run on a quiet day costs nothing and proves the same fact every time.
+# Everything in pages/ named guide-* is published and verified, without a human
+# remembering to add it to a list. A written page that is never published is the
+# orphan failure the COREMERCH bot spends a whole subsystem hunting: here it is
+# impossible by construction, because the list is the directory.
+TPL_NAMES="store onboard admin fees index confirm renew ops"
+for f in pages/guide-*.html; do          # the script has already cd'd to the repo root
+  [[ -e "$f" ]] && TPL_NAMES="$TPL_NAMES $(basename "$f" .html)"
+done
+
 if [[ "$MODE" == "--templates" ]]; then
   say "templates → KV only (no bundle, no worker publish)"
-  kv_put_tpl "$STORES_ID" store onboard admin fees index confirm renew ops sample-menu.csv
+  kv_put_tpl "$STORES_ID" $TPL_NAMES sample-menu.csv
   # Read back, and fail on the difference. A step that prints a warning and exits 0
   # is how a stale page stayed stale: the log said the truth and the pipeline said
   # success, and the only reader of a green run is the person who was not there.
-  verify_templates "$STORES_ID" store onboard admin fees index confirm renew ops sample-menu.csv \
+  verify_templates "$STORES_ID" $TPL_NAMES sample-menu.csv \
     || die "the pages above are not what customers are being served — the account could not write them today"
   exit 0
 fi
 
 say "templates → KV (hot-swappable: HTML edits need no redeploy)"
-kv_put_tpl "$STORES_ID" store onboard admin fees index confirm renew ops sample-menu.csv
+kv_put_tpl "$STORES_ID" $TPL_NAMES sample-menu.csv
 
 say "building bundle"
 bash scripts/build_bundle.sh .build
@@ -120,8 +129,13 @@ ok ".deploy/state.json"
 # renewal tokens already in merchants' inboxes). In CI, set it as a repo secret.
 if [[ -n "${ADMIN_SECRET:-}" ]]; then
   ok "ADMIN_SECRET from environment"
+elif [[ -s .secrets/admin_secret ]]; then
+  # Reading the file is not the same as inventing one, and the log used to say it
+  # was: a stable secret reported as "generated" is a false alarm about rotating
+  # the fingerprint salt, which is the one thing this variable must not do.
+  ADMIN_SECRET="$(admin_secret)"; ok "ADMIN_SECRET read from .secrets/admin_secret (stable across deploys)"
 else
-  ADMIN_SECRET="$(admin_secret)"; warn "ADMIN_SECRET generated locally — in CI set the ADMIN_SECRET repo secret or every deploy rotates it"
+  ADMIN_SECRET="$(admin_secret)"; warn "ADMIN_SECRET generated into .secrets/admin_secret — in CI, set that same value as the repo secret, or a CI deploy rotates the salt and signs merchants out"
 fi
 put_secret ADMIN_SECRET "$ADMIN_SECRET"
 [[ -n "${FLUTTERWAVE_SECRET:-}" ]] && put_secret FW_SECRET "$FLUTTERWAVE_SECRET"

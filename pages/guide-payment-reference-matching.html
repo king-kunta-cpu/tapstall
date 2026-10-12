@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>“I paid you” is not a payment: TxIDs, ShapIDs and references — Tapstall</title>
+<meta name="description" content="Every payment method prints its proof under a different name and needs it to a different degree. How a WhatsApp seller tells a real payment from an assertion in five seconds, without a spreadsheet.">
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
+<link rel="canonical" href="@ORIGIN@/guide/payment-reference-matching">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Tapstall">
+<meta property="og:title" content="“I paid you” is not a payment: TxIDs, ShapIDs and references">
+<meta property="og:description" content="Some rails print a code, some print nothing you can find later. What to ask for, when, and what to do when it does not arrive.">
+<meta property="og:url" content="@ORIGIN@/guide/payment-reference-matching">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="“I paid you” is not a payment: TxIDs, ShapIDs and references">
+<meta name="twitter:description" content="What to ask for on each rail, when, and what to do when it does not arrive.">
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Article","headline":"“I paid you” is not a payment: TxIDs, ShapIDs and references","description":"How a WhatsApp seller tells a real payment from an assertion, per rail, without a spreadsheet.","datePublished":"2026-10-12","dateModified":"2026-10-12","author":{"@type":"Organization","name":"Tapstall","url":"@ORIGIN@/onboard"},"publisher":{"@type":"Organization","name":"Tapstall"},"isPartOf":{"@type":"Article","url":"@ORIGIN@/guide/whatsapp-shop-payments"},"mainEntityOfPage":{"@type":"WebPage","@id":"@ORIGIN@/guide/payment-reference-matching"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Tapstall","item":"@ORIGIN@/onboard"},{"@type":"ListItem","position":2,"name":"Guides","item":"@ORIGIN@/guide/whatsapp-shop-payments"}]}]}</script>
+<style>
+*{box-sizing:border-box}body{margin:0;font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f4f6f8;color:#101418}
+.hero{background:#0b0f14;color:#fff;padding:2.2rem 1.1rem 1.5rem}
+.hero .in{max-width:38rem;margin:0 auto}
+.hero h1{font-size:1.5rem;line-height:1.18;margin:0 0 .5rem;letter-spacing:-.02em}
+.hero p{color:#aebbc7;font-size:.95rem;margin:.4rem 0}
+main{max-width:38rem;margin:0 auto;padding:1.1rem 1.1rem 4rem}
+h2{font-size:1.12rem;margin:2rem 0 .5rem;line-height:1.25}
+p{margin:.55rem 0}
+table{width:100%;border-collapse:collapse;margin:.8rem 0;font-size:.9rem}
+th,td{text-align:left;padding:.4rem .45rem;border-bottom:1px solid #dde3e9;vertical-align:top}
+th{font-size:.78rem;text-transform:uppercase;letter-spacing:.03em;color:#5b6c7c}
+.box{background:#fff;border:1px solid #dde3e9;border-radius:12px;padding:.8rem .9rem;margin:1rem 0;font-size:.93rem}
+.box.k{background:#0b0f14;color:#e8eff5;border-color:#0b0f14}
+.box.k b{color:#fff}
+pre{background:#0b0f14;color:#e8eff5;border-radius:12px;padding:.75rem .85rem;overflow:auto;font-size:.85rem;line-height:1.5}
+code{background:#eef2f6;border-radius:5px;padding:.05rem .3rem;font-size:.88em}
+a{color:#0b5cad}
+ul{padding-left:1.15rem;margin:.5rem 0}
+li{margin:.3rem 0}
+.tag{display:inline-block;font-size:.75rem;background:#1a2530;color:#cfdbe6;border-radius:999px;padding:.15rem .55rem;margin-bottom:.6rem}
+footer{border-top:1px solid #dde3e9;margin-top:2.5rem;padding-top:1rem;font-size:.85rem;color:#5b6c7c}
+</style>
+</head>
+<body>
+<div class="hero"><div class="in">
+<span class="tag">Guide · updated 12 October 2026</span>
+<h1>“I paid you” is not a payment</h1>
+<p>A TxID, a ShapID, an Ozow confirmation and a screenshot are four different things. This one is about what each payment method actually gives you, what to ask a buyer for before you lose the sale, and the message to send when it does not arrive.</p>
+</div></div>
+<main>
+
+<h2>Four kinds of proof, and they are not interchangeable</h2>
+<ul>
+<li><b>A code the buyer's app prints.</b> EcoCash sends an SMS with a TxID. InnBucks and OnePay print a reference. It is copyable, searchable, and it exists whether or not the buyer is honest.</li>
+<li><b>An identifier that <i>is</i> the account.</b> PayShap works off a ShapID; the transfer carries it, so the number you search is short and yours.</li>
+<li><b>Nothing at all, but a bank statement.</b> A ZIPIT or RTGS transfer arrives as an amount on a line. Without the reference the bank printed, it is unfindable in a busy day.</li>
+<li><b>A gateway that tells you itself.</b> Ozow and PayFast confirm the payment to your systems. The buyer's claim is irrelevant, which is why those methods need nothing from anybody.</li>
+</ul>
+<p>A screenshot of any of the four is a picture. Pictures are not records, and a "paid" tick that depends on trust is a liability you are carrying for free.</p>
+
+<h2>What to ask, per method</h2>
+<table>
+<tr><th>Method</th><th>Ask for?</th><th>Why</th></tr>
+<tr><td>EcoCash USD / ZiG</td><td>Yes — the TxID from the SMS</td><td>Searchable in your own app; the amount usually matches too</td></tr>
+<tr><td>InnBucks, OnePay</td><td>Yes — the reference</td><td>Same reason; shorter, so buyers actually send it</td></tr>
+<tr><td>PayShap</td><td>Yes — the ShapID reference, if their app shows one</td><td>0.5% and fast, but the statement line is thin</td></tr>
+<tr><td>Bank ZIPIT / RTGS</td><td><b>Require it</b></td><td>40 transfers, one amount, no code: without the reference you are guessing</td></tr>
+<tr><td>Ozow, PayFast</td><td>No</td><td>The gateway confirms; asking is theatre</td></tr>
+<tr><td>Cash on pickup</td><td>No</td><td>Money is in your hand at the door</td></tr>
+</table>
+<div class="box"><b>The wording matters more than the field.</b> Ask for a “<i>code from the app</i>” and half of Zimbabwe sends you their phone number. Ask for the thing their bank actually calls it and it arrives in the first message. Whatever you call it, that is the name the buyer sees — on the payment page, on the order slip and in the ledger.</div>
+
+<h2>Ask, never block</h2>
+<p>There is a version of this where the code is mandatory and the order cannot be placed without it. It is tidy, and it costs sales: a buyer standing at a till with a bad signal and a five-minute-old order will not go looking for an SMS, they will buy from the next shop.</p>
+<p>So the rule that works is: <b>ask before they pay, flag after, never refuse.</b> An order without the code is still money on its way. What you need is for the missing thing to be impossible to overlook — a row in the ledger that says what is missing, the same note on the WhatsApp handoff and in the exported CSV, and a follow-up message already written so asking costs one tap instead of a paragraph.</p>
+<pre>Hi — thanks for your order! Just need the payment
+reference to confirm it: the code your app shows after
+you send (EcoCash calls it a TxID). Send a screenshot
+if that is easier. Amount was R120.43 — that exact
+amount is how we find it.</pre>
+<p>The last line is doing real work. A payment matched by its amount needs no code at all, which is why the odd cents on the total are not a rounding accident. The mechanics of that are in the main guide: <a href="/guide/whatsapp-shop-payments">taking payment for a WhatsApp shop</a>.</p>
+
+<h2>The five-second routine</h2>
+<ol style="padding-left:1.2rem">
+<li>Open today's list. Anything flagged “no reference” sits at the top, not buried at the bottom of a chat.</li>
+<li>Search the amount in your bank or wallet app. Found, and it matches the order's name → mark it paid.</li>
+<li>Not found → send the message above. Do not chase the buyer twice in one day; they are not yet a customer.</li>
+<li>At close, export the day. Every row should carry: order code, buyer, amount, method, reference, and whether a reference was still missing. A CSV you cannot audit next week is not a record.</li>
+</ol>
+<div class="box k"><b>If you change only one thing today:</b> stop reading the amount and start searching it. A total with odd cents attached turns “who paid R120?” into one keystroke, on every rail, with no code required and no app to open.</div>
+
+<h2>Setting this up in a shop</h2>
+<p>On Tapstall each method carries its own account or number — an EcoCash number is not a PayShap ShapID and not a bank account — and each one states how much proof it needs: nothing, “ask”, or “require”. The label is editable in the seller's own words, and a required code still never blocks an order. The <a href="/onboard">shop is created from a phone in about a minute</a>: a name, a menu, a PIN.</p>
+
+<footer>
+<p>Related: <a href="/guide/whatsapp-shop-payments">Taking payment for a WhatsApp shop in Zimbabwe and South Africa</a> · <a href="/fees">What a payment method costs you</a> · <a href="/onboard">Create a shop</a></p>
+<p>Tariffs and app behaviour in both countries change; the method table above was checked on 12 October 2026 against the published pricing we model in the product. Your own banking app remains the authority on your fees.</p>
+</footer>
+</main>
+</body>
+</html>

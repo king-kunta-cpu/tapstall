@@ -1,5 +1,62 @@
 # Tapstall — status
 
+## The shop can introduce itself, and there is something to find (2026-10-12, v0.7.2)
+
+**Same instruction, taken further.** *"Take pointers from my google bots"* was asked
+twice, and the second time it was read properly rather than skimmed: the content bot's
+30 numbered changelog lines, the digest mailer's rate-limiting and resume markers, and
+the OpenRail engine's five money guards. `docs/POINTERS.md` now holds every one of them,
+dispositioned — taken, already had, or refused with the reason, so a refusal can be
+argued with instead of rediscovered.
+
+**Three things shipped.** (1) `GET /s/<handle>/share.txt`: the cross-post generator idea
+applied to a shop. `shareCopy` in `core.js` builds four blocks — WhatsApp status, X,
+Facebook, Instagram — each obeying *its own* platform's limit, because a post that
+truncates loses the link, which is the only part that mattered. X is measured to 280
+characters in a test, not in a comment; the Instagram block deliberately carries no URL,
+because a caption is not clickable, and a test says so; a missing fact leaves no hollow
+bullet. (2) Two written pages, `/guide/whatsapp-shop-payments` and
+`/guide/payment-reference-matching` — a pillar and a cluster, in their bot's own model,
+with the tariff table and the matching trick that only our code can describe accurately.
+`GUIDES` in `core.js` is the single source: the route, the sitemap entry and the footer
+link all read it, and `deploy.sh` now derives its publish list from
+`pages/guide-*.html`, so a written page that never got published — the exact orphan
+failure their bot spends a whole subsystem detecting each week — cannot happen here
+without a test going red. `@ORIGIN@` is stamped at serve time, so canonicals stay right
+if the platform ever moves to its own domain. (3) Every exit of both money doors is
+counted per hour per outcome (`hooks:<YYYYMMDDHH>:<status>`, `onlyIf: {match:'none'}` so
+the one-write-per-hour bound holds across isolates rather than per warm worker) and
+surfaced in `/ops/api/health`. Their engine posts every guard refusal to Discord; that is
+right about visibility and silent about cost — a refusal is the one event a stranger can
+generate at will, and the account has 1,000 writes a day in total.
+
+**Refused, in brief, and why it is worth refusing loudly:** keyword-density and
+uniqueness ratios (padding is how a small site earns a thin-content tag), FAQ JSON-LD
+(Google demoted it for sites like ours in 2023), IndexNow and tenant sitemaps (the same
+enumeration, mailed to a search engine), the sentence-hash LRU (a bounded memory forgets,
+and a thing that forgets double-credits), `google.com/ping?sitemap=` (documented as
+ignored — their bot should delete it), and the mailer's in-progress resume marker
+(our unit of work is one atomic KV write, so the next cron run *is* the retry, and
+adding state would only add a way to be wrong).
+
+**Two bugs the new checks caught in the checks themselves**, which is what they are for:
+a `grep -E` pattern with an escaped pipe (BRE habit, no alternation in ERE), and a
+canonical pattern that allowed one character where the HTML has two (`="`). Both were
+proved against production bytes before being declared fixed — the pages were always
+right; the assertions were wrong, and a red line that is wrong is worse than no line.
+Suite **185/185** (core 71, live 74, pages 30, limits 10); `prod_check.sh` **230
+assertions, 0 failed** against live production, including "the merchant's private
+columns are not in the bytes", "no unstamped token reached a reader" and "a guide nobody
+wrote is a 404, not an indexable page".
+
+**One production note.** `deploy.sh` used to print "ADMIN_SECRET generated locally" even
+when it had merely read the existing `.secrets/admin_secret` — a stable secret reporting
+itself as rotating, which is the one thing that variable must not appear to do. It now
+says which case it is in. A local deploy whose value differs from CI's does sign
+merchants out (sessions and CSRF caps are signed with it) and resets buyer order-history
+fingerprints; no money state is affected, and renewal links keep working because their
+tokens are stored keys, not derived values.
+
 ## A store link now looks like a shop when it is pasted into a group (2026-10-12, v0.7.1)
 
 **Prompted by the user's own bots.** Three files were handed over to take pointers

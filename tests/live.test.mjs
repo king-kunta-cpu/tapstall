@@ -14,7 +14,7 @@
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, mkdtempSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -142,7 +142,11 @@ let store = {};
 // Serve the real templates through the stub, exactly as KV does in production,
 // so the storefront test exercises injection rather than the fallback page.
 before(async () => {
-  for (const name of ['store', 'onboard', 'admin', 'fees', 'index', 'confirm', 'renew', 'ops']) {
+  // derived from the directory, exactly as deploy.sh does: a page in git that nobody
+  // added to a list is a page that ships broken, in the test and in production alike
+  const TPL = ['store', 'onboard', 'admin', 'fees', 'index', 'confirm', 'renew', 'ops']
+    .concat(readdirSync(join(root, 'pages')).filter((f) => /^guide-.*\.html$/.test(f)).map((f) => f.slice(0, -5)));
+  for (const name of TPL) {
     const html = readFileSync(join(root, 'pages', name + '.html'), 'utf8');
     await env.STORES.put('tpl:' + name, html);
   }
@@ -2127,4 +2131,110 @@ test('the two files a crawler asks for first, and what one of them refuses to co
   const gone = await call('/s/zznosuchstore');
   assert.equal(gone.status, 404);
   assert.match(gone.headers.get('x-robots-tag') || '', /noindex/, 'a page for a shop that does not exist must not be indexed as one');
+});
+
+/* -------------------------------------------- what the shop says about itself, unsolicited */
+test('a shop can hand itself to a group chat without the merchant writing a word', async () => {
+  const { h, key } = await seoStore('Zz Share Kitchen');
+  let r = await call('/api/settings', { method: 'POST', confirm: true, ip: '196.31.8.1', headers: { 'x-tapstall-admin': key() },
+    body: { handle: h, tagline: 'Kota, atchar and a cold St Christopher', location: 'MBle, Harare' } });
+  assert.equal(r.status, 200, r.text);
+  r = await call('/api/menu', { method: 'POST', confirm: true, ip: '196.31.8.2', headers: { 'x-tapstall-admin': key() },
+    body: { handle: h, menu: { extra: [{ name: 'Chicken kota', price: 20 }, { name: 'Mopane worms', price: 15, out: true }] } } });
+  assert.equal(r.status, 200, r.text);
+
+  const t = await call('/s/' + h + '/share.txt');
+  assert.equal(t.status, 200, t.text);
+  assert.match(t.headers.get('content-type'), /^text\/plain/, 'plain text, so a long press selects it on any phone');
+  assert.match(t.text, /WhatsApp status or a group/);
+  assert.match(t.text, /Zz Share Kitchen, MBe, Harare|Zz Share Kitchen, MBle, Harare/);
+  assert.match(t.text, /Chicken kota 20 USD/, 'the price the merchant typed, not a number we invented');
+  assert.match(t.text, /Link in bio\./, 'and the one platform whose caption cannot hold a link is told so');
+  const xBlock = t.text.split('— X / Twitter (fits the limit) —')[1].split('\n\n')[0].trim();
+  assert.ok(xBlock.length <= 280, 'X truncates a long post and drops the link with it: ' + xBlock.length);
+  assert.ok(xBlock.endsWith('https://tapstall.test/s/' + h), 'so the link is what survives');
+  assert.equal((t.text.match(new RegExp('tapstall\\.test/s/' + h, 'g')) || []).length, 4, 'once per block, four blocks, no more');
+  const fbBlock = t.text.split('— Facebook page or group —')[1].split('\n\n')[0];
+  assert.ok(!/•\s*\n\n/.test(fbBlock) && !/\n{3}/.test(fbBlock), 'no hollow bullet where a fact is missing');
+
+  // and the shop itself carries the door, without a script having to run first
+  const page = await call('/s/' + h);
+  assert.match(page.text, /<a class="chip" href="share\.txt">Share this shop<\/a>/, 'a relative link, so it is this store’s file');
+  assert.ok(page.text.indexOf('share.txt') < page.text.indexOf('</head>') || page.text.includes('share.txt'), 'and it is in the bytes');
+  const gone = await call('/s/zznoshare/share.txt');
+  assert.equal(gone.status, 404);
+});
+
+test('what the money doors were asked for is counted, and a probe storm costs one write', async () => {
+  const settled = () => new Promise((res) => setImmediate(res));
+  const hour = new Date().toISOString().slice(0, 13).replace(/[-:T]/g, '');
+  const refusedKey = 'hooks:' + hour + ':refused';
+
+  // the exact old exploit shape again, twice from different addresses
+  const one = await call('/api/hook/payfast', { method: 'POST', ip: '196.31.7.1', headers: FORM,
+    body: 'payment_status=COMPLETE&custom_str1=mamatoe|36500' });
+  assert.equal(one.status, 503, 'unarmed, so refused: ' + one.text);
+  await settled();
+  assert.ok(env.STORES._map.has(refusedKey), 'and the refusal is on the record for the operator to find');
+  assert.equal(JSON.parse(env.STORES._map.get(refusedKey).value).note, 'the renewal webhook is not armed — set PAYFAST_PASSPHRASE on this Worker (the same passphrase as the payment button), then this notice will be accepted'.slice(0, 160),
+    'the note says what was missing, in the words we used');
+
+  for (let i = 0; i < 8; i++) {
+    await call('/api/hook/payfast', { method: 'POST', ip: '196.31.7.' + (20 + i), headers: FORM,
+      body: 'payment_status=COMPLETE&custom_str1=mamatoe|36500' });
+    await call('/api/hook/flutterwave', { method: 'POST', ip: '196.31.7.' + (40 + i), body: { data: { tx_ref: 'nope-1234567890ab', status: 'successful' } } });
+  }
+  await settled();
+  assert.equal(env.STORES._writesTo(refusedKey), 1,
+    'one write for the whole hour, whoever else was refused in it: a stranger must not be able to spend the day’s write budget');
+  for (const outcome of ['ignored', 'already', 'activated']) {
+    assert.ok(env.STORES._map.has('hooks:' + hour + ':' + outcome), outcome + ' was exercised earlier in this file and should be on the record too');
+  }
+
+  const h = await call('/ops/api/health', { cookie: 'tp_ops=' + opsCookie });
+  assert.equal(h.status, 200, h.text);
+  assert.ok(h.json.hooks, 'the console reports it');
+  assert.ok(h.json.hooks.refused >= 1, 'refused notices in the last 24 hours: ' + JSON.stringify(h.json.hooks));
+  assert.equal(h.json.hooks.activated, 1, 'the one real payment this file made is counted once as well');
+  assert.ok(h.json.hooks.hours.every((k) => /^hooks:\d{10}:(refused|ignored|already|activated)$/.test(k)), 'and the keys are shaped, so the count cannot drift');
+  const blob = JSON.stringify(h.json.hooks);
+  assert.ok(!/passphrase|SECRET|verif-hash/.test(blob), 'the ledger records that a door was refused, not what was behind it');
+});
+
+/* ---------------------------------------------------------------- the written pages */
+test('the guides are served, dated, and stamped with the host that answered', async () => {
+  const idx = await call('/guide');
+  assert.ok(idx.status >= 300 && idx.status < 400, 'the plural index points at the pillar: ' + idx.status);
+  assert.match(idx.headers.get('location') || '', /\/guide\/[a-z-]+$/);
+
+  for (const slug of ['whatsapp-shop-payments', 'payment-reference-matching']) {
+    const g = await call('/guide/' + slug);
+    assert.equal(g.status, 200, slug + ' should be served from a template in git');
+    assert.ok(!g.text.includes('@ORIGIN@'), slug + ' left an unstamped token in the page');
+    assert.match(g.text, new RegExp('<link rel="canonical" href="https://tapstall\\.test/guide/' + slug + '">'), slug + ' canonical is absolute and this host');
+    assert.match(g.text, /name="description" content="[^"]{60,}"/, slug + ' has a real description');
+    assert.match(g.text, /property="og:title"/);
+    assert.equal((g.text.match(/<h1>/g) || []).length, 1, slug + ' has exactly one h1');
+    assert.ok((g.text.match(/<h2>/g) || []).length >= 3, slug + ' has sections a snippet can quote');
+    assert.match(g.text, /\/onboard/, slug + ' has somewhere to go next');
+    assert.match(g.text, /2026/, slug + ' dates its claims, because tariffs and app behaviour move');
+    const ld = g.text.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/);
+    assert.ok(ld, slug + ' carries structured data in the bytes');
+    const data = JSON.parse(ld[1]);
+    const art = data['@graph'].find((x) => x['@type'] === 'Article');
+    assert.ok(art && art.headline.length > 10, slug + ' announces itself as an Article');
+    assert.equal(art.mainEntityOfPage['@id'], 'https://tapstall.test/guide/' + slug);
+    const words = g.text.replace(/<script[\s\S]*?<\/script>/g, '').replace(/<style>[\s\S]*?<\/style>/g, '').replace(/<[^>]+>/g, ' ').split(/\s+/).filter(Boolean).length;
+    assert.ok(words > 400, slug + ' is ' + words + ' words; a page thinner than that is decoration for the crawler');
+  }
+
+  const nope = await call('/guide/something-never-written');
+  assert.equal(nope.status, 404);
+  assert.match(nope.headers.get('x-robots-tag') || '', /noindex/, 'a page that does not exist must not be indexed as one');
+  assert.match(nope.text, /\/guide\/whatsapp-shop-payments/, 'and it hands over what does exist, rather than a dead end');
+
+  const sm = await call('/sitemap.xml');
+  for (const slug of ['whatsapp-shop-payments', 'payment-reference-matching']) {
+    assert.match(sm.text, new RegExp('<loc>https://tapstall\\.test/guide/' + slug + '</loc>'), slug + ' is in the sitemap, so it is not an orphan');
+  }
 });

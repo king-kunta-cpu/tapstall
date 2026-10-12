@@ -1,0 +1,41 @@
+<!doctype html>
+<!--
+  A handoff, not a copy of the guide.
+
+  The Pages mirror carries static files only, and this page is written content that
+  the Worker serves from KV so its canonical URL, its OG block and its tariff numbers
+  all come from one source. So the mirror holds a link rather than a second copy of
+  the article: two copies is two canonicals, and two canonicals is how a small site
+  teaches a crawler to distrust it. Same reasoning as ../onboard.html and ../a.html.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="1; url=https://tapstall.simalidudu.workers.dev/guide/payment-reference-matching">
+<title>“I paid you” is not a payment: TxIDs, ShapIDs and references</title>
+<style>
+  body { font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+         margin: 0; padding: 3rem 1.25rem; background: #0d1117; color: #e6edf3; }
+  main { max-width: 34rem; margin: 0 auto; }
+  a { color: #4cc9a6; }
+  p.note { color: #9198a1; font-size: .9rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Tapstall guide</h1>
+  <p>“I paid you” is not a payment: TxIDs, ShapIDs and references</p>
+  <p>The guide is read from the app, where the page that carries it lives.
+     <a href="https://tapstall.simalidudu.workers.dev/guide/payment-reference-matching">Read it</a>.</p>
+  <p class="note">If you got here from a link on this mirror, that link is meant to move
+     you to <code>tapstall.simalidudu.workers.dev/guide/payment-reference-matching</code>. Nothing here is stored
+     or read — this page is static.</p>
+</main>
+<script>
+  // The meta refresh works without JS; this makes the same move for a browser that
+  // ignores it, and keeps the query string, as every other handoff here does.
+  try { location.replace('https://tapstall.simalidudu.workers.dev/guide/payment-reference-matching' + (location.search || '')); } catch (e) {}
+</script>
+</body>
+</html>

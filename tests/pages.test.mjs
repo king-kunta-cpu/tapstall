@@ -14,7 +14,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as CORE from '../worker/core.js';
@@ -145,6 +145,37 @@ test('merchant-facing pages share the kit and the private ones hide from crawler
   assert.match(page('confirm'), /document\.hidden/, 'link-preview bots must not be able to confirm an order');
 });
 
+test('every guide that is written is published, listed and linked from somewhere', () => {
+  // The COREMERCH bot keeps a LinkGraph sheet and spends a whole subsystem on orphan
+  // posts — pages published but never linked. Here the three lists have to agree with
+  // each other and with the directory, so the failure it detects cannot exist:
+  // GUIDES (what is routed and sitemapped) == pages/guide-*.html (what is published).
+  // template name = `guide-<slug>`, slug = what GUIDES routes on; both spellings are
+  // derived here from the same directory listing, so neither can drift quietly
+  const names = readdirSync(join(root, 'pages')).filter((f) => /^guide-.*\.html$/.test(f)).map((f) => f.slice(0, -5));
+  const files = names.map((n) => n.replace(/^guide-/, ''));
+  const routes = worker.match(/'guide-' \+ g\.slug/) ? true : false;
+  assert.ok(routes, 'the Worker resolves a guide slug to a template name');
+  const core = readFileSync(join(root, 'worker', 'core.js'), 'utf8');
+  const block = core.slice(core.indexOf('export const GUIDES'), core.indexOf('export const guideOf'));
+  const slugs = [...block.matchAll(/slug: '([a-z0-9-]+)'/g)].map((m) => m[1]);
+  assert.ok(slugs.length >= 2, 'there are guides in the list at all: ' + slugs.join(','));
+  assert.deepEqual(slugs.slice().sort(), files.sort(), 'a guide in git that is not in GUIDES is unrouteable, and one in GUIDES with no file is a 404 in a sitemap');
+  for (const slug of slugs) {
+    const html = page('guide-' + slug);
+    assert.ok(html.includes('<title>'), slug + ' has a title');
+    assert.ok(html.includes('rel="canonical" href="@ORIGIN@/guide/' + slug), slug + ' canonical is stamped at serve time, not hard-coded to a host');
+    assert.ok(html.includes('@ORIGIN@'), slug + ' uses the token the Worker replaces');
+    const others = slugs.filter((x) => x !== slug);
+    assert.ok(others.some((o) => html.includes('/guide/' + o)), slug + ' links to a sibling — a page nothing points at is the thing the crawl never reaches');
+  }
+  // and the publish list is derived, not remembered
+  const deploy = readFileSync(join(root, 'scripts', 'deploy.sh'), 'utf8');
+  assert.match(deploy, /pages\/guide-\*\.html/, 'deploy.sh discovers guide pages from the directory instead of a hand-kept list');
+  const opsList = worker.slice(worker.indexOf('const OPS_TPL_NAMES'), worker.indexOf('];', worker.indexOf('const OPS_TPL_NAMES')));
+  for (const slug of slugs) assert.ok(opsList.includes('guide-' + slug), 'the operator cannot hot-edit ' + slug + ': not in OPS_TPL_NAMES');
+});
+
 test('the storefront head is filled by the Worker, and the pair agree', () => {
   // The crawler-facing head is not in the page: it is generated per store and dropped
   // in at a marker. That is two files making one page, so the contract between them is
@@ -161,7 +192,8 @@ test('the storefront head is filled by the Worker, and the pair agree', () => {
   }
   // robots.txt says these are private; the header is the version a bot cannot ignore
   assert.match(worker, /const NOINDEX = \{ 'x-robots-tag'|const NOINDEX = \{ 'X-Robots-Tag': 'noindex, nofollow' \};/, 'the Worker holds one noindex constant');
-  assert.equal((worker.match(/200, NOINDEX\)|404, NOINDEX\)/g) || []).length, 3, 'admin, ops and the missing-store page all carry it');
+  assert.ok((worker.match(/200, NOINDEX\)|404, NOINDEX\)/g) || []).length >= 3, 'admin, ops and the missing-store page all carry it');
+  assert.match(worker, /html\(NO_GUIDE, 404, NOINDEX\)/, 'and so does a guide that was never written');
   assert.match(worker, /p === '\/robots\.txt'/, 'and robots.txt is served by the Worker, not by a file that can drift from it');
   assert.match(worker, /p === '\/sitemap\.xml'/, 'same for the sitemap');
 });
@@ -219,7 +251,14 @@ test('the mirror never links to a page it does not have', () => {
   }
   assert.equal(pub('_redirects'), false,
     'a _redirects rule is a promise Pages does not keep; keeping the file invites trusting it');
-  for (const shape of ['onboard.html', 'onboard/index.html', 'a.html', 'a/index.html']) {
+  const shapes = ['onboard.html', 'onboard/index.html', 'a.html', 'a/index.html'];
+  // and the same for every guide the landing page links to: a written page the mirror
+  // points at must have something to point with
+  for (const f of readdirSync(join(root, 'pages')).filter((x) => /^guide-.*\.html$/.test(x))) {
+    const slug = f.slice('guide-'.length, -5);
+    shapes.push(`guide/${slug}.html`, `guide/${slug}/index.html`);
+  }
+  for (const shape of shapes) {
     assert.ok(pub(shape), `${shape} is the handoff that makes the mirror's app link work`);
   }
   for (const [name, path] of [['public/onboard', 'onboard'], ['public/a', 'a']]) {

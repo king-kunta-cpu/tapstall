@@ -603,6 +603,10 @@ done
 ck "the payfast door names the setting it needs instead of shrugging" 'PAYFAST_PASSPHRASE|signature' "$(curl -s -m 30 -X POST -H 'content-type: application/x-www-form-urlencoded' -d 'payment_status=COMPLETE&custom_str1=mamatoe-1234567890abcdef' "$ORIGIN/api/hook/payfast")"
 PAID1=$(curl -s -m 30 -H "Authorization: Bearer $TOK" "https://api.cloudflare.com/client/v4/accounts/$ACCT/storage/kv/namespaces/$KV/values/store:$HANDLE" | python3 -c "import sys,json;print(json.load(sys.stdin).get('paid_until') or 0)" 2>/dev/null)
 ck "  · and the plan on file did not move, so a probe is free" '^'"$PAID0"'$' "$PAID1"
+HOUR=$(date -u +%Y%m%d%H)
+LED=$(curl -s -m 30 -H "Authorization: Bearer $TOK" "https://api.cloudflare.com/client/v4/accounts/$ACCT/storage/kv/namespaces/$KV/values/hooks:$HOUR:refused")
+ck "  · and the refusal was counted, once, for the whole hour" "^{.*"version"" "$LED"
+ck "  · with the reason in the operator's words, not the attacker's" 'not armed|signature|verif-hash|tx_ref|reference' "$LED"
 
 echo "[12] being found: what a crawler and a WhatsApp preview actually receive"
 # The page cache is max-age=60/s-maxage=300, so these fetch a busted URL: a green line
@@ -637,7 +641,32 @@ ck "the sitemap lists our pages, never a register of merchants" '^0$' "$(printf 
 ck "  · with the front door in it" '/onboard</loc>' "$SM"
 ck "a dashboard says noindex in a header too, for bots that skip robots.txt" 'noindex' "$(curl -s -m 30 -o /dev/null -D - "$ORIGIN/a" | tr -d '\r')"
 
-echo "[13] tidy up"
+echo "[13] the shop speaks for itself: share copy, and the pages that get strangers here"
+SHARE=$(curl -s -m 30 "$ORIGIN/s/$HANDLE/share.txt")
+ck "a shop can hand itself to a group chat in plain text" 'text/plain|Copy the block' "$(curl -s -m 30 -o /dev/null -D - "$ORIGIN/s/$HANDLE/share.txt" | tr -d '\r' | head -3; printf '%s' "$SHARE" | head -1)"
+ck "  · the merchant's own words are in it" "$NAME" "$SHARE"
+ck "  · and the link is in every block that can carry one" '^4$' "$(printf '%s' "$SHARE" | grep -c "$ORIGIN/s/$HANDLE")"
+ck "  · the X block is short enough to keep its link" '^0$' "$(printf '%s' "$SHARE" | python3 -c "
+import sys
+t = sys.stdin.read()
+try:
+    x = t.split('— X / Twitter (fits the limit) —')[1].split('\n\n')[0].strip()
+except Exception:
+    print('split-failed'); raise SystemExit
+print(0 if (len(x) <= 280 and x.endswith('/s/$HANDLE')) else 1)")"
+ck "  · the shop's own page links the file" 'href="share.txt"' "$PAGE"
+for g in whatsapp-shop-payments payment-reference-matching; do
+  GP=$(curl -s -m 30 "$ORIGIN/guide/$g?probe=$(date +%s)")
+  ck "guide: /guide/$g is served, dated, and stamped with this host" "canonical. href..$ORIGIN/guide/$g" "$GP"
+  ck "  · no unstamped token reached a reader" '^0$' "$(printf '%s' "$GP" | grep -c '@ORIGIN@')"
+  ck "  · one h1, and the article describes itself" '^1$' "$(printf '%s' "$GP" | grep -c '<h1>')"
+done
+ck "the plural index points at the pillar" '^30[12]$' "$(curl -s -m 30 -o /dev/null -w '%{http_code}' "$ORIGIN/guide")"
+GH=$(curl -s -m 30 -o /dev/null -D - "$ORIGIN/guide/there-is-no-such-guide" | tr -d '\r')
+ck "a guide nobody wrote is a 404, not an indexable page" 'x-robots-tag: noindex' "$GH"
+ck "  · and the landing page links the guides, so they are not orphans" '/guide/whatsapp-shop-payments' "$(curl -s -m 30 "$ORIGIN/?probe=$(date +%s)")"
+
+echo "[14] tidy up"
 CK2=$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" \
   -d '{"handle":"'"$HANDLE"'","id":"'"$ID"'","status":"cancelled"}' "$ORIGIN/api/mark")
 ckw "probe order cancelled" '"status":"cancelled"' "$CK2"

@@ -17,6 +17,8 @@ h1{font-size:1.05rem;margin:0;line-height:1.2}
 .tag{margin:.15rem 0 0;font-size:.8rem;color:#aebbc7}
 .meta{font-size:.75rem;color:#8fa0af;margin-top:.45rem;display:flex;gap:.5rem;flex-wrap:wrap}
 .chip{background:#1a2530;border-radius:999px;padding:.15rem .5rem}
+a.chip{color:#dbe6f0;text-decoration:none;border:1px solid #2b3a48}
+a.chip:active,a.chip:hover{background:#243342}
 .notice{margin:.7rem 1rem 0;background:#fff7e6;border:1px solid #f0d9a8;color:#6b4d09;font-size:.8rem;padding:.55rem .7rem;border-radius:10px}
 .cats{display:flex;gap:.4rem;overflow-x:auto;padding:.75rem 1rem .3rem;scrollbar-width:none}
 .cats::-webkit-scrollbar{display:none}
@@ -91,6 +93,9 @@ ol.steps li{margin:.25rem 0}
           <span class="chip" id="curnow"></span>
           <span class="chip" id="chours" hidden></span>
           <span class="chip" id="cloc" hidden></span>
+          <!-- relative on purpose: this page is /s/<handle>, so this is /s/<handle>/share.txt,
+               and a link the merchant can forward from the shop itself needs no script -->
+          <a class="chip" href="share.txt">Share this shop</a>
         </div>
       </div>
     </div>

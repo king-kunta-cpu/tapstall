@@ -23,12 +23,13 @@ import {
   cleanProof, cleanPayer, proofNoun, proofAsk, PROOF_MODES,
   issueCap, verifyCap, randomKey, validateSettings, stageSettings, applyPending, maskField,
   newTxRef, TX_WINDOW_SEC, payfastSignedOk, txMatches,
-  seoFacts, seoHead, seoJsonLdTag, ROBOTS_TXT, sitemapXml,
+  seoFacts, seoHead, seoJsonLdTag, ROBOTS_TXT, sitemapXml, GUIDES, guideOf,
+  shareCopy, hookAuditKey, hookHourStamp,
   EDITABLE_FIELDS, SOFT_FIELDS, sign, adminStore, normaliseRail, resolveRail,
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '0.7.1';
+const VERSION = '0.7.2';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 const MAX_ORDERS_KEPT = 200;
@@ -194,6 +195,32 @@ async function route(req, url, env, ctx) {
     const st = await getStore(env, m[1]);
     return st ? json({ ok: true, store: publicStore(st, await railsCatalog(env)) }) : json({ ok: false, error: 'no_store' }, 404);
   }
+  // The written pages. `@ORIGIN@` is stamped here rather than at build time so the
+  // canonical URL is the host that answered, forever, and so a move to a real domain
+  // fixes every guide with no edit to any of them.
+  if (p === '/guide' || p === '/guides' || p === '/guides.html') return redirect('/guide/' + GUIDES[0].slug);
+  if ((m = p.match(/^\/guide\/([a-z0-9][a-z0-9-]{3,46})\/?$/))) {
+    const g = guideOf(m[1]);
+    if (!g) return html(NO_GUIDE, 404, NOINDEX);
+    const page = await tpl(env, 'guide-' + g.slug);
+    if (!page.includes('<title>')) return html(NO_GUIDE, 404, NOINDEX);   // written but never published
+    return html(page.split('@ORIGIN@').join(url.origin), 200, { 'Cache-Control': 'public, max-age=3600' });
+  }
+  if ((m = p.match(/^\/s\/([a-z0-9][a-z0-9-]{1,30})\/share\.txt$/))) {
+    // The post a merchant would otherwise have to write at 21:00 with one hand. Plain
+    // text on purpose: on any phone a text page is select-all then share, and it works
+    // with JavaScript off, which the storefront itself cannot claim.
+    const st = await getStore(env, m[1]);
+    if (!st) return text('No store at this address.', 404);
+    const c = shareCopy(st, seoFacts(st, url.origin), url.origin);
+    return text('Copy the block for the place you are posting it.\n\n'
+      + '— WhatsApp status or a group —\n' + c.wa + '\n\n'
+      + '— X / Twitter (fits the limit) —\n' + c.x + '\n\n'
+      + '— Facebook page or group —\n' + c.fb + '\n\n'
+      + '— Instagram (link in bio) —\n' + c.ig + '\n\n'
+      + 'The link on its own, if you would rather write the rest yourself:\n' + c.url + '\n',
+      200, 'text/plain; charset=utf-8');
+  }
   if ((m = p.match(/^\/s\/([a-z0-9][a-z0-9-]{1,30})\/feed\.json$/))) {
     const st = await getStore(env, m[1]);
     if (!st) return json({ ok: false, error: 'no_store' }, 404);
@@ -284,8 +311,8 @@ async function route(req, url, env, ctx) {
 
   if (p === '/api/checkout' && req.method === 'POST') return checkout(req, url, env);
   if (p === '/api/renew-ref' && req.method === 'POST') return renewRef(req, env);
-  if (p === '/api/hook/flutterwave' && req.method === 'POST') return hookFlutterwave(req, url, env);
-  if (p === '/api/hook/payfast' && req.method === 'POST') return hookPayfast(req, url, env);
+  if (p === '/api/hook/flutterwave' && req.method === 'POST') return hookFlutterwave(req, url, env, ctx);
+  if (p === '/api/hook/payfast' && req.method === 'POST') return hookPayfast(req, url, env, ctx);
 
   return null;
 }
@@ -848,7 +875,15 @@ async function renewRef(req, env) {
   });
 }
 
-async function hookFlutterwave(req, url, env) {
+async function hookFlutterwave(req, url, env, ctx) {
+  // every exit is audited, so a refusal cannot be forgotten by the code that
+  // refuses: one place to answer "what was this door asked to do, and did it
+  // do it". `say` is the only way out of this function.
+  const say = (obj, code = 200) => {   // a defaulted code is how an exit that omitted the status lands in the wrong column
+    const kind = code === 200 ? (obj.already ? 'already' : obj.activated ? 'activated' : 'ignored') : 'refused';
+    auditHook(env, ctx, kind, obj.error || obj.ignored || obj.note || '');
+    return json(obj, code);
+  };
   if (url.searchParams.get('done')) {
     return html(`<!doctype html><meta charset=utf-8><title>Payment received</title>
       <body style="font:16px system-ui;max-width:30rem;margin:16vh auto;padding:0 1rem">
@@ -858,14 +893,14 @@ async function hookFlutterwave(req, url, env) {
   const body = await req.json().catch(() => null) || {};
   const data = body.data || {};
   const txRef = data.tx_ref || body.tx_ref;
-  if (!txRef) return json({ ok: false, error: 'no tx_ref' }, 400);
+  if (!txRef) return say({ ok: false, error: 'no tx_ref' }, 400);
   // Fail closed. A check that only applies "if configured" is a check that is off
   // until somebody notices it was never turned on, and this one moves a paid plan.
-  if (!env.FW_SECRET) return json({ ok: false, error: 'the renewal webhook is not armed — set FW_SECRET on this Worker (the verify hash in the Flutterwave dashboard), then this notice will be accepted' }, 503);
-  if (req.headers.get('verif-hash') !== env.FW_SECRET) return json({ ok: false, error: 'bad verif-hash' }, 401);
-  if (data.status && data.status !== 'successful') return json({ ok: true, ignored: data.status });
+  if (!env.FW_SECRET) return say({ ok: false, error: 'the renewal webhook is not armed — set FW_SECRET on this Worker (the verify hash in the Flutterwave dashboard), then this notice will be accepted' }, 503);
+  if (req.headers.get('verif-hash') !== env.FW_SECRET) return say({ ok: false, error: 'bad verif-hash' }, 401);
+  if (data.status && data.status !== 'successful') return say({ ok: true, ignored: data.status });
   const tx = await env.STORES.get('tx:' + txRef, 'json');
-  if (!tx) return json({ ok: true, ignored: 'no payment intent on file for that reference — it was spent, or its window closed' });
+  if (!tx) return say({ ok: true, ignored: 'no payment intent on file for that reference — it was spent, or its window closed' });
   // Never take a payment's word for its own success: when an API key exists, the
   // transaction is fetched back and the status and the amount are read from that.
   if (env.FLW_API_KEY) {
@@ -878,22 +913,22 @@ async function hookFlutterwave(req, url, env) {
     if (!v || !v.data || v.data.status !== 'successful') {
       // the intent is left unspent on purpose: a provider that is briefly unreachable
       // must not cost a merchant a payment they really made
-      return json({ ok: false, error: 'the payment could not be confirmed with Flutterwave just now — nothing was changed, it will be checked again on the next notice' }, 502);
+      return say({ ok: false, error: 'the payment could not be confirmed with Flutterwave just now — nothing was changed, it will be checked again on the next notice' }, 502);
     }
-    if (Number(v.data.amount) !== round2(Number(tx.amount))) return json({ ok: false, error: 'the amount on the transaction is not the amount this plan costs' }, 400);
+    if (Number(v.data.amount) !== round2(Number(tx.amount))) return say({ ok: false, error: 'the amount on the transaction is not the amount this plan costs' }, 400);
     if (String(v.data.currency || tx.currency || 'USD').toUpperCase() !== String(tx.currency || 'USD').toUpperCase()) {
-      return json({ ok: false, error: 'paid in a currency this plan is not priced in' }, 400);
+      return say({ ok: false, error: 'paid in a currency this plan is not priced in' }, 400);
     }
   }
   const st = await getStore(env, tx.handle);
-  if (!st) return json({ ok: false, error: 'store gone' }, 410);
+  if (!st) return say({ ok: false, error: 'store gone' }, 410);
   st.paid_until = Math.max(Date.now(), st.paid_until || 0) + tx.days * 864e5;
   st.plan = tx.days >= 300 ? 'annual' : 'term';
   st.suspended = false; st.warned_at = null;
   await writeStore(env, st);
   await env.STORES.delete('tx:' + txRef);
   await env.STORES.delete('term:' + st.handle);
-  return json({ ok: true, activated: st.handle, paid_until: new Date(st.paid_until).toISOString() });
+  return say({ ok: true, activated: st.handle, paid_until: new Date(st.paid_until).toISOString() });
 }
 
 /**
@@ -902,18 +937,26 @@ async function hookFlutterwave(req, url, env) {
  * when the merchant asked to renew. The request itself is trusted for nothing — not
  * the handle, not the number of days, not the amount.
  */
-async function hookPayfast(req, url, env) {
+async function hookPayfast(req, url, env, ctx) {
+  // every exit is audited, so a refusal cannot be forgotten by the code that
+  // refuses: one place to answer "what was this door asked to do, and did it
+  // do it". `say` is the only way out of this function.
+  const say = (obj, code = 200) => {   // a defaulted code is how an exit that omitted the status lands in the wrong column
+    const kind = code === 200 ? (obj.already ? 'already' : obj.activated ? 'activated' : 'ignored') : 'refused';
+    auditHook(env, ctx, kind, obj.error || obj.ignored || obj.note || '');
+    return json(obj, code);
+  };
   const ip = ipOf(req);
-  if (await rateLimited(env, ip)) return json({ ok: false, error: 'too many notices from you, wait a minute' }, 429);
+  if (await rateLimited(env, ip)) return say({ ok: false, error: 'too many notices from you, wait a minute' }, 429);
   const body = await req.text().catch(() => '');
   // the body is the notice; the query string is accepted too because PayFast echoes it
   const fields = Object.fromEntries(new URLSearchParams(body || url.search));
   const status = String(fields.payment_status || '');
-  if (status !== 'COMPLETE') return json({ ok: true, ignored: status || 'no status' });
+  if (status !== 'COMPLETE') return say({ ok: true, ignored: status || 'no status' });
   const pp = String(env.PAYFAST_PASSPHRASE || '');
-  if (!pp) return json({ ok: false, error: 'the renewal webhook is not armed — set PAYFAST_PASSPHRASE on this Worker (the same passphrase as the payment button), then this notice will be accepted' }, 503);
+  if (!pp) return say({ ok: false, error: 'the renewal webhook is not armed — set PAYFAST_PASSPHRASE on this Worker (the same passphrase as the payment button), then this notice will be accepted' }, 503);
   if (!payfastSignedOk(fields, pp)) {
-    return json({ ok: false, error: 'signature does not verify' }, 400);
+    return say({ ok: false, error: 'signature does not verify' }, 400);
   }
   // One payment, one credit — asked before anything else, because the answer to a
   // retry of a payment that already landed is "already applied", not "unknown
@@ -921,14 +964,14 @@ async function hookPayfast(req, url, env) {
   // the signed string, so it is the provider's own number, not the sender's.
   const pid = String(fields.pf_payment_id || '');
   const seenKey = 'paid:' + (pid || String(fields.custom_str1 || ''));
-  if (await env.STORES.get(seenKey)) return json({ ok: true, already: true, note: 'that payment was already applied' });
+  if (await env.STORES.get(seenKey)) return say({ ok: true, already: true, note: 'that payment was already applied' });
   const ref = String(fields.custom_str1 || '');
-  if (ref.length < 6) return json({ ok: true, ignored: 'no reference this Worker minted' });
+  if (ref.length < 6) return say({ ok: true, ignored: 'no reference this Worker minted' });
   const tx = await env.STORES.get('tx:' + ref, 'json');
   const check = txMatches(tx, fields);
-  if (!check.ok) return json({ ok: true, ignored: check.why });        // nothing to retry, nothing written
+  if (!check.ok) return say({ ok: true, ignored: check.why });        // nothing to retry, nothing written
   const st = await getStore(env, tx.handle);
-  if (!st) return json({ ok: false, error: 'store gone' }, 410);
+  if (!st) return say({ ok: false, error: 'store gone' }, 410);
   st.paid_until = Math.max(Date.now(), st.paid_until || 0) + (Number(tx.days) || 365) * 864e5;
   st.plan = (Number(tx.days) || 0) >= 300 ? 'annual' : 'term';
   st.suspended = false; st.warned_at = null;
@@ -939,7 +982,7 @@ async function hookPayfast(req, url, env) {
   await env.STORES.delete('tx:' + ref);
   await writeStore(env, st);
   await env.STORES.delete('term:' + st.handle);
-  return json({ ok: true, activated: st.handle, paid_until: new Date(st.paid_until).toISOString(), days: tx.days });
+  return say({ ok: true, activated: st.handle, paid_until: new Date(st.paid_until).toISOString(), days: tx.days });
 }
 
 /* ------------------------------------------------------------------ cron */
@@ -1264,6 +1307,12 @@ function sessCookie(value) {
  *  orders should not be indexed even by a crawler that ignores robots.txt, and a
  *  header costs no crawl budget to enforce. */
 const NOINDEX = { 'X-Robots-Tag': 'noindex, nofollow' };
+const NO_GUIDE = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>No such guide | Tapstall</title><meta name="robots" content="noindex"></head>
+<body style="font:16px/1.6 system-ui;max-width:34rem;margin:14vh auto;padding:0 1.2rem">
+<h1 style="font-size:1.3rem">No guide at that address</h1>
+<p>The guides we have: <a href="/guide/whatsapp-shop-payments">taking payment for a WhatsApp shop</a>
+and <a href="/guide/payment-reference-matching">matching a payment to an order</a>.</p>
+<p><a href="/onboard">Create a shop</a> — a name, a menu and a PIN.</p></body></html>`;
 function text(s, status = 200, type = 'text/plain; charset=utf-8') {
   return new Response(s, { status, headers: { 'content-type': type, 'cache-control': 'public, max-age=3600' } });
 }
@@ -1989,7 +2038,8 @@ function secsToMidnightUTC() {
 }
 
 const OPS_COOKIE = 'tp_ops';
-const OPS_TPL_NAMES = ['store', 'onboard', 'admin', 'fees', 'index', 'confirm', 'renew', 'ops', 'sample-menu'];
+const OPS_TPL_NAMES = ['store', 'onboard', 'admin', 'fees', 'index', 'confirm', 'renew', 'ops', 'sample-menu',
+  'guide-whatsapp-shop-payments', 'guide-payment-reference-matching'];
 const PAGES_URL = 'https://king-kunta-cpu.github.io/tapstall/';
 
 function opsKillCookies() { return killCookies([OPS_COOKIE]); }
@@ -2183,6 +2233,36 @@ async function opsState(env) {
   }, 200, { 'Cache-Control': 'no-store' });
 }
 
+/**
+ * Every refusal at a money door is counted, once per hour per outcome, and only if that
+ * hour has not already logged one. The bound matters more than the detail: a stranger
+ * can generate refusals at will, and this account has 1,000 KV writes a day in total,
+ * so an unbounded audit trail is a denial-of-wallet waiting to happen. (The COREMERCH
+ * engine this is taken from posts every guard refusal to Discord, which is right about
+ * visibility and silent about cost.)
+ */
+const hookSeen = new Set();
+function auditHook(env, ctx, status, note) {
+  const key = hookAuditKey(hookHourStamp(), status);
+  if (hookSeen.has(key)) return null;
+  if (hookSeen.size > 400) hookSeen.clear();     // an isolate lives for hours, not forever, but say it anyway
+  hookSeen.add(key);
+  const rec = { at: new Date().toISOString(), note: String(note || '').slice(0, 160), version: VERSION };
+  // `onlyIf: {match:'none'}` is the guard that actually holds. The set above is a
+  // courtesy — it is per isolate, and a burst spreads across isolates, so without the
+  // conditional write the "once an hour" bound is only as true as the warmest worker.
+  // If a namespace cannot do conditional writes, the `catch` loses the line rather
+  // than opening the budget: the audit is worth a read, not a denial of service.
+  const job = env.STORES.put(key, JSON.stringify(rec), { expirationTtl: 7 * 86400, onlyIf: { match: 'none' } })
+    .catch(() => {});
+  if (ctx && ctx.waitUntil) ctx.waitUntil(job);
+  return job;
+}
+
+/** One line for the operator: what the money doors were asked for, and what they did
+ *  about it, per hour. A count per hour is not a census of attempts and never claimed
+ *  to be — a census is exactly what an attacker would pay us in writes to obtain. */
+
 async function opsHealth(env) {
   const t = await selftest(env);
   let pages = 'unreachable';
@@ -2195,7 +2275,23 @@ async function opsHealth(env) {
     const r = await fetch(REPO_RAW + 'ci-deploy.log', { headers: { 'user-agent': 'tapstall/1 (operator health check)' } });
     if (r.ok) { const txt = await r.text(); ci = txt.split('\n').filter(l => /==== exit|tests |pass |fail /.test(l)).slice(-6); }
   } catch (e) { ci = null; }
-  return json({ ok: true, selftest: t, pages, ci, cron: t.cron_heartbeat || null, version: VERSION, templates: OPS_TPL_NAMES }, 200, { 'Cache-Control': 'no-store' });
+  // what the two money doors were asked for in the last 24 hours, by outcome
+  const hooks = { refused: 0, ignored: 0, already: 0, activated: 0, hours: [] };
+  try {
+    const list = await env.STORES.list({ prefix: 'hooks:', limit: 200 });
+    const since = hookHourStamp(Date.now() - 24 * 3600 * 1000);
+    for (const k of list.keys || []) {
+      const name = String(k.name || '');
+      const hour = name.slice(6, 16);
+      if (hour < since) continue;
+      hooks.hours.push(name);
+      const status = name.split(':')[2];
+      if (hooks[status] !== undefined) hooks[status]++;
+    }
+    hooks.hours.sort();
+  } catch (e) { hooks.error = String((e && e.message) || e).slice(0, 120); }
+  return json({ ok: true, selftest: t, pages, ci, cron: t.cron_heartbeat || null, version: VERSION, templates: OPS_TPL_NAMES, hooks },
+    200, { 'Cache-Control': 'no-store' });
 }
 
 async function opsAudit(req, url, env) {

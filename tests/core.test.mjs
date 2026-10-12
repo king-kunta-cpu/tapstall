@@ -865,3 +865,33 @@ test('what may not be in a public head, and what may not be in a sitemap', () =>
   assert.ok(!sm.includes('/s/'), 'we do not publish a list of every merchant: those pages carry their payment numbers');
   assert.match(robots, /Sitemap: https:\/\/tapstall\.test\/sitemap\.xml$/m, 'and the file we do publish is announced');
 });
+
+test('the post a merchant would otherwise have to write at 21:00', () => {
+  const f = C.seoFacts(SEO_STORE, ORIGIN, MON_10);
+  const c = C.shareCopy(SEO_STORE, f, ORIGIN);
+  assert.ok(c.x.length <= 280, 'X counts characters, and truncates the link if you do not: ' + c.x.length);
+  assert.ok(c.wa.length <= 650, 'a WhatsApp status is not a newsletter');
+  assert.ok(c.x.endsWith(ORIGIN + '/s/kotaking'), 'the link survives to the end of every block or the post is decoration');
+  for (const k of ['wa', 'x', 'fb']) {
+    assert.equal(c[k].split(ORIGIN + '/s/kotaking').length - 1, 1, k + ' repeats the link');
+    assert.ok(!/undefined|null/.test(c[k]), k + ' leaks an unset field as a word');
+  }
+  // Instagram captions are not clickable, so the one format that must not carry a URL
+  // is the one a generator would otherwise paste one into.
+  assert.ok(!c.ig.includes(ORIGIN), 'ig says link in bio and means it');
+  assert.match(c.ig, /Link in bio\./);
+  assert.match(c.wa, /Chicken kota 22\.50 ZAR/, 'what is on offer, priced, in the shop’s own currency');
+  assert.match(c.wa, /Open until 21:00/, 'whether they can come now');
+  assert.match(c.fb, /^Kota King, Harare CBD — Halal fried chicken and kota\n(?:• [^\n]+\n)+\n→ /, 'a line for the shop, bullets, a gap, then the link');
+  assert.ok(!/\n\n\n/.test(c.fb) && !/•\s*\n/.test(c.fb), 'and a missing line is missing, not a bullet with nothing after it');
+  const bare = C.shareCopy({ handle: 'x9' }, C.seoFacts({ handle: 'x9' }, ORIGIN, MON_10), ORIGIN);
+  assert.match(bare.wa, /^x9\b/, 'a shop with nothing typed still gets something sendable');
+  assert.ok(bare.x.length <= 280 && bare.fb.includes(ORIGIN), 'in every format');
+});
+
+test('what the money doors were asked for is counted, once an hour', () => {
+  const stamp = C.hookHourStamp(Date.UTC(2026, 9, 12, 10, 30));
+  assert.equal(stamp, '2026101210', 'UTC, to the hour, because the day boundary is somebody else’s');
+  assert.equal(C.hookAuditKey(stamp, 'refused'), 'hooks:2026101210:refused');
+  for (const s of C.HOOK_AUDIT_STATUSES) assert.match(C.hookAuditKey(stamp, s), /^hooks:\d{10}:/);
+});

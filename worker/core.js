@@ -1551,16 +1551,96 @@ export const ROBOTS_TXT = (origin) => [
   '',
 ].join('\n');
 
+/**
+ * The written pages, in code rather than in a directory listing, for one reason: the
+ * route, the sitemap and the footer link all have to agree about what exists, and a
+ * file that is published but not listed is an orphan — the exact failure the
+ * COREMERCH bot calls out in its own link graph and fixes by prioritising orphans for
+ * internal links. `updated` is the date the *page* changed, which is the only
+ * `lastmod` a crawler can be trusted with.
+ */
+export const GUIDES = [
+  { slug: 'whatsapp-shop-payments', kind: 'pillar',
+    title: 'Taking payment for a WhatsApp shop in Zimbabwe and South Africa',
+    desc: 'What EcoCash, InnBucks, ZIPIT, PayShap, Ozow and PayFast actually cost a small seller, and how a payment gets matched to an order when the only record is a chat.',
+    updated: '2026-10-12' },
+  { slug: 'payment-reference-matching', kind: 'cluster',
+    title: '“I paid you” is not a payment: TxIDs, ShapIDs and references',
+    desc: 'Every rail prints its proof under a different name and needs it to a different degree. How a seller tells a real payment from an assertion, in five seconds, without a spreadsheet.',
+    updated: '2026-10-12' },
+];
+export const guideOf = (slug) => GUIDES.find((g) => g.slug === slug) || null;
+
 /** Deliberately not a list of every store. `/s/<handle>` shows that shop's payment
  *  numbers; a public file naming every handle is a harvest list of our whole
  *  customer base, and a merchant's page needs a link to be found, not our index.
  *  Store pages are crawlable and canonical — that is enough for the crawler, and
  *  it is the merchant's own sharing that supplies the link. */
-export const sitemapXml = (origin) => {
+export function sitemapXml(origin, extra = []) {
   const base = String(origin || '').replace(/\/+$/, '');
-  const url = (loc, freq, pri) => '  <url><loc>' + escHtml(base + loc) + '</loc>'
+  const url = (loc, freq, pri, mod) => '  <url><loc>' + escHtml(base + loc) + '</loc>'
+    + (mod ? '<lastmod>' + escHtml(mod) + '</lastmod>' : '')
     + '<changefreq>' + freq + '</changefreq><priority>' + pri + '</priority></url>';
+  const rows = [url('/onboard', 'weekly', '1.0'), url('/', 'weekly', '0.9'), url('/fees', 'monthly', '0.5')];
+  for (const g of GUIDES) rows.push(url('/guide/' + g.slug, 'monthly', '0.8', g.updated));
+  for (const x of extra) rows.push(url(x.loc, x.freq || 'monthly', x.pri || '0.5', x.mod));
   return '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
-    + url('/onboard', 'weekly', '1.0') + '\n' + url('/', 'weekly', '0.9') + '\n'
-    + url('/fees', 'monthly', '0.5') + '\n</urlset>\n';
-};
+    + rows.join('\n') + '\n</urlset>\n';
+}
+
+/**
+ * Copy a merchant can paste, generated from the store — the shape borrowed from the
+ * COREMERCH bot's cross-post generator (one block per destination, a length rule per
+ * destination, a CTA and the link at the end), applied to a shop instead of an article.
+ *
+ * It is server-side for the same reason the head is: a merchant on a prepaid handset
+ * should not have to write marketing copy at 21:00 when the kitchen is quiet. And each
+ * format is only as long as that platform allows, because a post truncated by the host
+ * is a post with no link in it.
+ */
+export function shareCopy(st, f, origin) {
+  const s = st || {};
+  const facts = f || {};
+  const base = String(origin || '').replace(/\/+$/, '');
+  const url = base + '/s/' + (s.handle || '');
+  const rows = shelfRows(s).filter((p) => p && p.name && Number(p.price) > 0);
+  const name = clip(s.shop_name || s.handle || 'Our shop', 40);
+  const where = s.location ? clip(s.location, 28) : '';
+  const top = rows.slice(0, 3).map((p) => clip(p.name, 28) + ' ' + money(p.price, p.cur || facts.currency));
+  const open = facts.open_label || (facts.hours ? clip(facts.hours, 48) : '');
+  const rail = s.rail_info && s.rail_info.label ? s.rail_info.label : '';
+  const link = url;   // each format frames it its own way; a brand word twice in a 280-char post is a word wasted
+
+  const lead = name + (where ? ', ' + where : '');
+  const wa = [lead, top.length ? 'On the menu: ' + top.join(' · ') : '', open, 'Full menu: ' + link]
+    .filter(Boolean).join('\n');
+  const xLine = clip(top.length ? name + ': ' + top[0] + (top[1] ? ', ' + top[1] : '') : lead, 240 - url.length - 1);
+  // bullets first, then a gap, then the link: an empty line where a missing fact was
+  // is how generated copy looks generated
+  const fbLines = [lead + (taglineIsReal(s) ? ' — ' + clip(s.tagline, 90) : ''),
+    ...top.map((t) => '• ' + t), open ? '• ' + open : '', rail ? '• We take ' + rail : ''].filter(Boolean);
+  const fb = fbLines.join('\n') + '\n\n→ ' + link;
+  return {
+    url,
+    wa: wa.slice(0, 650),
+    x: (xLine + ' ' + url).slice(0, 280),
+    fb: fb.slice(0, 1400),
+    ig: clip(lead + (top.length ? ' — ' + top[0] + ' and more' : ''), 140) + '. Link in bio.',
+    hook: clip(lead + (top.length ? ': ' + top[0] : ''), 47),
+  };
+}
+const taglineIsReal = (s) => String((s && s.tagline) || '').trim().length > 6;
+
+/**
+ * A refused payment notice, counted per hour rather than per request.
+ *
+ * OpenRail posts every guard refusal to Discord, which is the right instinct and the
+ * wrong cost here: this account can make 1,000 KV writes a day, and a refusal is the
+ * one event a stranger can generate at will. So the ledger is one key per (hour,
+ * outcome), created only if it does not exist — an attacker's busiest hour and a
+ * merchant's quiet one both cost the platform at most a handful of writes, and the
+ * Ops console can still answer "was anything tried, and did anything get through".
+ */
+export const HOOK_AUDIT_STATUSES = ['refused', 'ignored', 'already', 'activated'];
+export const hookAuditKey = (hourStamp, status) => 'hooks:' + hourStamp + ':' + status;
+export const hookHourStamp = (ms) => new Date(ms || Date.now()).toISOString().slice(0, 13).replace(/[-:T]/g, '');
