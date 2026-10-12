@@ -119,10 +119,28 @@ NAME="$WORKER_NAME" STORES_ID="$STORES_ID" ORDERS_ID="$ORDERS_ID" WITH_CRON=1 RE
 
 say "publishing worker to Cloudflare"
 if [[ -x node_modules/.bin/wrangler ]]; then
-  # wrangler owns the multipart format, the workers_dev route and the schedule
-  CLOUDFLARE_API_TOKEN="$CF_TOKEN" CLOUDFLARE_ACCOUNT_ID="$CF_ACCOUNT" \
-    node_modules/.bin/wrangler deploy --config wrangler.toml 2>&1 | grep -Ev "^$" | tail -6
-  ok "wrangler deploy"
+  # wrangler owns the multipart format, the workers_dev route and the schedule.
+  #
+  # Three attempts, because Cloudflare answers `504 Gateway Timeout` at the subdomain
+  # step for no reason this repo can affect — it cost run #65 on a day the tests were
+  # green and the Worker was in fact fine, and a red run that means nothing is how a
+  # real alarm gets ignored. No pipe into tail on the way: a pipeline's status is
+  # tail's, so the retry loop checks wrangler's own exit, prints the tail afterwards,
+  # and only dies when every attempt failed.
+  publog=$(mktemp)
+  pub=0
+  for try in 1 2 3; do
+    if CLOUDFLARE_API_TOKEN="$CF_TOKEN" CLOUDFLARE_ACCOUNT_ID="$CF_ACCOUNT" \
+         node_modules/.bin/wrangler deploy --config wrangler.toml >"$publog" 2>&1; then
+      grep -Ev "^$" "$publog" | tail -6
+      if [[ $try -gt 1 ]]; then ok "wrangler deploy, on attempt $try (Cloudflare 504'd before that)"; else ok "wrangler deploy"; fi
+      pub=1; break
+    fi
+    warn "wrangler deploy failed, attempt $try of 3: $(grep -iE '504|Gateway Timeout|error code' "$publog" | head -1)"
+    if [[ $try -lt 3 ]]; then sleep $((try * 8)); fi
+  done
+  rm -f "$publog"
+  [[ $pub == 1 ]] || die "the Worker was not published in three attempts — nothing new is live, and this run is the proof"
 else
   warn "wrangler not installed (npm i) — using the dependency-free publisher"
   CF_TOKEN="$CF_TOKEN" CF_ACCOUNT="$CF_ACCOUNT" WORKER_NAME="$WORKER_NAME" \
