@@ -1,5 +1,70 @@
 # Tapstall — status
 
+## A store link now looks like a shop when it is pasted into a group (2026-10-12, v0.7.1)
+
+**Prompted by the user's own bots.** Three files were handed over to take pointers
+from: the COREMERCH content bot (387 KB of Apps Script that publishes posts to GitHub
+Pages), its weekly digest mailer, and the OpenRail payment engine. The content bot's
+discoverability half is a checklist worth copying, and this release copies it for
+storefronts: a canonical URL, OG tags **with alt text**, a Twitter large-image card,
+JSON-LD per page, `robots.txt`, a sitemap, and the rule that an image is never
+promised unless its bytes are real. The mailer and the payment engine mostly confirmed
+things already built here (quota-aware batching, budget forecasting, the five-guard
+money ladder) — OpenRail's header literally lists *IPN token + API re-verification +
+idempotency + re-deposit guard + amount verification*, which is 0.7.0 in other words.
+
+**What was broken before:** every store page shipped `<title>Tapstall Store</title>`
+and nothing else in the head — no description, no canonical, no `og:*`, no structured
+data, and no `robots.txt` at all. So a pasted link previewed as a grey box labelled
+"Tapstall Store", and Google saw a hundred near-identical empty pages. That is not a
+cosmetic miss in this product: the storefront is the whole distribution story
+(no chasing — the merchant's own audience finds them), and the preview *is* the ad.
+
+**The shape of the fix.** The head cannot be built in the page, because the crawler
+that reads it runs no JavaScript, so `storePage` injects it server-side. The rules live
+in `core.js` (`seoFacts`, `seoHead`, `seoJsonLdTag`, `weekSpec`, `ROBOTS_TXT`,
+`sitemapXml`) — 5 new unit tests — with one deliberate raw-string path
+(`fillSeo`), because `fillPage` JSON.stringifies its values and a `<meta>` tag is not
+a JS literal. Every fact is derived from the store document: title from
+`shop_name` + `location`, description from `tagline` plus the top three priced items
+plus the live open/closed line, `LocalBusiness` with `telephone` (the number the buyer
+already sees), `priceRange`, `openingHoursSpecification` from the same week table the
+page shows, and a `Menu` of the merchant's own rows with `OutOfStock` on the sold-out
+ones. Nothing is invented: no hours when none were typed, no cuisine nobody claimed,
+no `og:image` when no picture exists.
+
+**The one deliberate refusal.** `/sitemap.xml` lists three of our own pages and does
+**not** enumerate `/s/<handle>`. It is an unauthenticated URL, and every store page
+carries that shop's payment numbers — a tenant sitemap is a downloadable register of
+the whole customer base and their tills. Store pages stay crawlable and canonical; the
+link that gets them found is the one the merchant posts. `robots.txt` disallows
+`/a`, `/ops`, `/api/` and the diagnostic routes, and those pages also answer with
+`X-Robots-Tag: noindex, nofollow` for the crawler that ignores robots.txt. IndexNow and
+Search Console are one line each and are left off for the same enumeration reason.
+
+**Caught on the way, and worth repeating.** The old live assertion "no menu is baked
+into the served HTML" (the reason a menu edit is instant) is now drawn where it
+actually matters — at `</head>`: the list a buyer orders from stays live-fetched, the
+head may quote the last-known shelf for a crawler, and a stale snippet is normal while
+a stale order is not. Two bugs came out of writing this: `og:image:alt` surviving with
+no image (a preview that promises a photo and shows none is worse than silence), and
+`….` — a stacked ending, because a truncated part was joined as a sentence and got a
+full stop after its own ellipsis; `clip` is now idempotent and `sentences` respects a
+part that already ends on a mark. `prod_check`'s own new JSON-LD line was red against
+production first, and it was the check that was wrong: a greedy `[^
+]*>` swallowed the
+whole `<script>` line including its closing tag.
+
+**Proven live, from a clean state and back to one:** uploaded a real PNG to
+`mamatoe`, set it as the logo, and the served head gained `og:image` +
+`og:image:alt` (`Mama Too Catering, 4 items on the menu`) + `twitter:card
+summary_large_image`, the JSON-LD gained the same absolute image, and the URL a
+preview bot fetches answered `200 image/png`. Taking the logo off removed the tags and
+the file `404`ed with `img:mamatoe:*` empty in the namespace — 0.6.9's reclaim,
+confirmed by a test that was about something else. Suite **179/179**;
+`prod_check.sh` **214 assertions** including "the merchant's private columns are not in
+the bytes" and "we do not hand out a register of merchants".
+
 ## A public POST can no longer hand anybody a paid plan (2026-10-12, v0.7.0)
 
 **Found while auditing my own money model, not reported by anyone.** The proof-of-payment

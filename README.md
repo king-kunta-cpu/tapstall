@@ -365,6 +365,61 @@ until then); email delivery needs the `EMAIL` binding to be created in the
 dashboard once; buyers' phone numbers are stored per order (POPIA/Zim GDPR
 posture is "minimise + 180-day TTL on the fingerprint hash", not zero-knowledge).
 
+## Being found
+
+A store link is pasted into a WhatsApp group, a Facebook page, a X post. The things
+that build those previews run no JavaScript, and neither does a crawler — so since
+0.7.1 the storefront's `<head>` is written by the Worker, per store, from what the
+store document already holds. `core.js` owns the rules (`seoFacts`, `seoHead`,
+`seoJsonLdTag`, `ROBOTS_TXT`, `sitemapXml`) so they are testable; `fillSeo` in
+`worker.js` is the one deliberate raw-string injection (the marker
+`<!--@SEO@-->` sits *above* a fallback title, so a template published before this
+still works, and the fallback is removed only when a real title replaces it).
+
+| Emitted | From | Never from |
+|---|---|---|
+| `<title>` = shop, place, brand | `shop_name`, `location` | a hard-coded brand line |
+| `description` | `tagline` + the top three priced items + "Open until 21:00" | a template sentence when the merchant wrote one |
+| `og:image`, `twitter:image` | `logo`, else the first item picture, served by `/i/…` | a promise with no file behind it: no picture, no tag |
+| `canonical` | the host that answered | the alias, which 301s before this runs |
+| `LocalBusiness` + `Menu` JSON-LD | `whatsapp`, `week`, `menu`/cached shelf, `currency` | hours nobody typed, a cuisine nobody claimed |
+| `robots.txt`, `sitemap.xml` | the app paths to shut, three pages to open | **a list of every store** |
+
+The sitemap is the one place we say no. `/sitemap.xml` is unauthenticated, and every
+`/s/<handle>` displays that shop's payment numbers, so enumerating tenants is a
+downloadable register of our customer base and their tills. Store pages stay
+crawlable (`robots.txt` opens `/s/` and `/i/`, `robots: index, max-image-preview:large`)
+and the merchant's own sharing supplies the link; `/a`, `/ops` and the API are
+`Disallow`ed *and* carry `X-Robots-Tag: noindex` for the crawler that ignores
+robots.txt. IndexNow and Search Console verification are one config line each and are
+deliberately not switched on: they are the same enumeration with extra steps.
+
+### What came from the COREMERCH bots, and what did not
+
+`uploads/COREMERCH CONTENT BOT V6.0.txt` is a 387 KB Google Apps Script that publishes
+to GitHub Pages. Its discoverability half is good engineering and is now ours in
+substance: canonical URLs, OG **with alt text**, Twitter `summary_large_image`,
+JSON-LD per page, a sitemap with a priority map and `lastmod`, ping-on-publish,
+"real PNG byte enforcement on all images" (ours are sniffed and re-sniffed at serve
+time), heading discipline, and a dead-image detector (0.6.9's reclaim is the same
+instinct, applied to KV instead of a repo).
+
+Not copied, with reasons: **keyword density and section-uniqueness ratios** (they
+optimise a blog for a crawler; a menu is data, and a page that pads to hit 0.8–1.8%
+is how a small site earns a thin-content tag); **FAQ JSON-LD** (Google demoted FAQ
+rich results for non-authoritative sites in 2023, so it is now ceremony);
+**a sentence-hash LRU of 500 for dedupe** (a bounded memory means an old post can be
+republished once it falls out — a TTL, which is what `paid:` and `tx:` use, cannot be
+evicted into a double); **`google.com/ping?sitemap=`** (Google never committed to it
+and says it is ignored — one HTTP call per publish for a documented no-op, worth
+deleting from the bot). Its `OPENRAIL` engine's five guards (re-deposit, idempotency,
+API re-verification, amount, asset) are the same ladder 0.7.0 now walks, which is
+worth knowing: the discipline is not new to this household, it had simply not been
+applied to *our* webhook. If a crypto rail is ever added, the piece to take from
+`OPENRAIL` is its tolerance policy — 1% on stablecoins, 2% volatile, under-payment
+flagged not refused, and a nightly underpayment report — because an exact-cent match
+is the right rule for a fixed plan price and the wrong one for a chain.
+
 ## How a payment is believed
 
 Renewal money arrives by provider webhook, and a webhook is a public POST that

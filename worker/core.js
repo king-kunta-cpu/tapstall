@@ -1347,3 +1347,220 @@ export function txMatches(tx, fields) {
   }
   return { ok: true };
 }
+
+/* ------------------------------------------------------------------ being found
+ *
+ * The storefront is the only page in this product that a stranger might arrive at,
+ * and the arrival is almost never a search box: it is a link into a WhatsApp group,
+ * a Facebook status, a X post. Those hosts do not run JavaScript to build a preview
+ * — they read the bytes we send. So everything below is rendered on the server, from
+ * what the store document already holds, and nothing in it is invented.
+ *
+ * Borrowed, deliberately, from the COREMERCH content bot's checklist (canonical,
+ * OG + Twitter card with alt text, JSON-LD, a title of "what it is | who", a
+ * description trimmed on a word): a page that is worth a crawl is worth a click.
+ * Not borrowed: keyword density and FAQ padding — a menu is not a blog post, and a
+ * fabricated Q&A is how a small site gets tagged as thin content.
+ */
+
+export const SEO_TITLE_MAX = 62;          // Google truncates near 60 characters
+export const SEO_DESC_MAX = 158;          // and near 158
+
+/** The strict set: correct in an attribute and in text, so there is one function to
+ *  trust rather than two that must never be swapped. */
+export const escHtml = (s) => String(s == null ? '' : s).replace(/[&<>"']/g,
+  (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+/** Trim on a word, or the snippet ends mid-"orde…". Idempotent on purpose: parts are
+ *  clipped before they are joined, and a mark must never stack up (“….” is what that
+ *  looks like when it is not). */
+function clip(s, max) {
+  const t = String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max);
+  const at = cut.lastIndexOf(' ');
+  const head = (at > max * 0.5 ? cut.slice(0, at) : cut.slice(0, max - 1));
+  const cut2 = head.replace(/[,;:.\-\s]+$/, '');
+  return cut2 + (/[…?!]$/.test(cut2) ? '' : '…');    // one mark, and never a loose space before it
+}
+const joinBits = (parts, sep) => parts.filter((p) => p && String(p).trim()).join(sep);
+
+/** Prices as a buyer reads them: the store's currency, no cents when there are none.
+ *  The ISO code and not a symbol is the point — this page serves Harare and Johannesburg
+ *  from one line of code, and "R45" would be a guess about somebody's country. */
+function money(n, cur) {
+  const v = round2(Number(n) || 0);
+  const txt = v % 1 ? v.toFixed(2) : String(v);
+  return txt + (cur ? ' ' + cur : '');
+}
+/** Parts joined as sentences, because a description is read aloud by a voice
+ *  assistant in a car and by a snippet in search, and neither wants "field field field". */
+const sentences = (parts) => {
+  const keep = parts.map((p) => String(p == null ? '' : p).replace(/[.\s]+$/, '')).filter(Boolean);
+  let out = '';
+  for (const p of keep) out = out ? out + (/[\u2026?!]$/.test(out) ? ' ' : '. ') + p : p;
+  // a part that already ends on a mark is a finished ending; a second one is a typo
+  return out && !/[\u2026?!]$/.test(out) ? out + '.' : out;
+};
+
+/** Rows for the head and the structured data — the cached shelf if there is one,
+ *  otherwise the dashboard's own items. `loadProducts` is never called here: a
+ *  Google sheet that is slow must not be able to slow down a page's first byte. */
+function shelfRows(st) {
+  const cached = st && st.feed_cache && Array.isArray(st.feed_cache.products) ? st.feed_cache.products : [];
+  return applyMenu(cached, st && st.menu);
+}
+
+export function seoFacts(st, origin, nowMs) {
+  const s = st || {};
+  const name = clip(s.shop_name || s.handle || 'A shop', 48);
+  const rows = shelfRows(s);
+  const open = openNow(s, nowMs);
+  const cur = String(s.currency || (rows[0] && rows[0].cur) || '').toUpperCase();
+  const tagline = clip(s.tagline || '', 90);
+  const priced = rows.filter((p) => p && p.name && Number(p.price) > 0).slice(0, 3);
+  // "three items and what they cost" is the description for a shop, not a slogan:
+  // it answers the question the link was sent to answer.
+  const items = priced.map((p) => clip(p.name, 26) + ' ' + money(p.price, cur)).join(', ');
+  const desc = clip(sentences([
+    tagline && tagline !== name ? tagline : 'Order from ' + name + ' on Tapstall — menu, prices and payment in one link',
+    items ? 'From the menu: ' + items : '',
+    open.known && open.label ? open.label : ''],), SEO_DESC_MAX);
+  const title = (() => {
+    const brand = ' | Tapstall';
+    const head = clip(joinBits([name, s.location ? clip(s.location, 22) : ''], ' — '), SEO_TITLE_MAX - brand.length);
+    return head + (head.length + brand.length <= SEO_TITLE_MAX ? brand : '');
+  })();
+  const pic = (s.logo || (rows.find((p) => p && p.img) || {}).img || '').trim();
+  const base = String(origin || '').replace(/\/+$/, '');
+  const url = base + '/s/' + (s.handle || '');
+  const prices = rows.map((p) => Number(p && p.price)).filter((n) => n > 0);
+  return {
+    handle: s.handle || '', title, desc, url,
+    image: pic ? base + pic : '',
+    // alt text belongs to a picture: with no image on file the answer is no alt and
+    // no tag, because a preview that promises a photo and shows none is worse than
+    // a preview that says nothing
+    imageAlt: pic ? clip(joinBits([name, s.location ? 'in ' + clip(s.location, 22) : '', rows.length ? rows.length + ' items on the menu' : ''], ', '), 150) : '',
+    tagline, currency: cur,
+    phone: s.whatsapp ? '+' + digits(s.whatsapp).replace(/\D/g, '') : '',
+    location: clip(s.location || '', 80),
+    hours: hoursText(s.week), open_label: open.known ? open.label : '', is_open: !!(open.known && open.open),
+    price_range: prices.length > 1 ? (cur ? cur + ' ' : '') + round2(Math.min(...prices)) + '–' + round2(Math.max(...prices)) : '',
+    item_count: rows.length,
+  };
+}
+
+/** schema.org's day windows, from the same week table the page shows. */
+export function weekSpec(week) {
+  const rows = Array.isArray(week) ? week : [];
+  const out = [];
+  for (let i = 0; i < 7 && i < rows.length; i++) {
+    const row = rows[i];
+    if (!row || !Array.isArray(row.slots)) continue;
+    for (const sl of row.slots) {
+      if (!sl || !isFinite(Number(sl.o)) || !sl.c && !isFinite(Number(sl.c))) continue;
+      out.push({ '@type': 'OpeningHoursSpecification', dayOfWeek: DAY_NAMES[i], opens: fromMin(Number(sl.o)), closes: fromMin(Number(sl.c)) });
+    }
+  }
+  return out;
+}
+
+/** A @graph, because a page that describes one business with a menu describes them
+ *  together; `itemListElement` counts on the merchant's own shelf, never on ours. */
+export function seoJsonLd(st, f) {
+  const facts = f || {};
+  const biz = {
+    '@type': 'LocalBusiness', '@id': facts.url + '#business',
+    name: (st && st.shop_name) || facts.handle, url: facts.url, description: facts.tagline || undefined,
+    telephone: facts.phone || undefined, priceRange: facts.price_range || undefined,
+    image: facts.image || undefined,
+  };
+  if (st && st.week) biz.openingHoursSpecification = weekSpec(st.week);
+  if (!biz.openingHoursSpecification || !biz.openingHoursSpecification.length) delete biz.openingHoursSpecification;
+  if (facts.location) biz.areaServed = [{ '@type': 'Place', name: facts.location }];
+  const rows = shelfRows(st).filter((p) => p && p.name).slice(0, 40);
+  if (rows.length) {
+    biz.hasMenu = {
+      '@type': 'Menu', name: clip(((st && st.shop_name) || '') + ' menu', 80), url: facts.url + '#menu',
+      hasMenuItem: rows.map((p) => ({
+        '@type': 'MenuItem', name: clip(p.name, 80),
+        description: p.desc ? clip(p.desc, 200) : undefined,
+        image: p.img ? String(facts.url || '').replace(/\/s\/.*$/, '') + p.img : undefined,
+        offers: {
+          '@type': 'Offer', price: round2(Number(p.price) || 0).toFixed(2),
+          priceCurrency: p.cur || facts.currency || 'USD',
+          availability: p.available === false ? 'https://schema.org/OutOfStock' : 'https://schema.org/InStock',
+          url: facts.url,
+        },
+      })),
+    };
+  }
+  const crumb = {
+    '@type': 'BreadcrumbList', itemListElement: [
+      { '@type': 'ListItem', position: 1, name: 'Tapstall', item: String(facts.url || '').replace(/\/s\/.*$/, '') + '/onboard' },
+      { '@type': 'ListItem', position: 2, name: biz.name, item: facts.url },
+    ],
+  };
+  return { '@context': 'https://schema.org', '@graph': [biz, crumb] };
+}
+
+/** The data as an embeddable tag. `<` becomes \u003c — a shop called
+ *  `<script>alert(1)</script>` must not be able to close the block it is quoted in —
+ *  and the rule lives here rather than in the Worker so that it can be tested at all. */
+export function seoJsonLdTag(st, f) {
+  return '<script type="application/ld+json">'
+    + JSON.stringify(seoJsonLd(st, f)).replace(/</g, '\\u003c') + '</script>';
+}
+
+/** The head block, as bytes: what a crawler and a chat preview actually read. */
+export function seoHead(f) {
+  const t = escHtml(f.title || 'Tapstall store'), d = escHtml(f.desc || ''), u = escHtml(f.url || '');
+  const one = (k, v) => (v ? '<meta name="' + k + '" content="' + escHtml(v) + '">' : '');
+  const prop = (k, v) => (v ? '<meta property="' + k + '" content="' + escHtml(v) + '">' : '');
+  return [
+    '<title>' + t + '</title>',
+    one('description', d),
+    // max-image-preview:large is what lets search show the food at full width
+    '<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">',
+    u ? '<link rel="canonical" href="' + u + '">' : '',
+    prop('og:type', 'website'), prop('og:site_name', 'Tapstall'), prop('og:title', f.title),
+    prop('og:description', f.desc), prop('og:url', f.url),
+    prop('og:image', f.image), one('og:image:alt', f.imageAlt),
+    one('twitter:card', f.image ? 'summary_large_image' : 'summary'), one('twitter:title', f.title),
+    one('twitter:description', f.desc), one('twitter:image', f.image), one('twitter:image:alt', f.imageAlt),
+  ].filter(Boolean).join('\n');
+}
+
+/** robots.txt is a *permission*, and the two things here are the app pages (a
+ *  dashboard with someone's orders in it is not content) and the images, which must
+ *  stay crawlable or every og:image on this platform is a broken preview. */
+export const ROBOTS_TXT = (origin) => [
+  'User-agent: *',
+  'Allow: /s/',
+  'Allow: /i/',
+  'Allow: /onboard',
+  'Allow: /fees',
+  'Disallow: /a',
+  'Disallow: /api/',
+  'Disallow: /ops',
+  'Disallow: /__selftest',
+  'Disallow: /__ping',
+  'Disallow: /fees.ics',
+  'Sitemap: ' + String(origin || '').replace(/\/+$/, '') + '/sitemap.xml',
+  '',
+].join('\n');
+
+/** Deliberately not a list of every store. `/s/<handle>` shows that shop's payment
+ *  numbers; a public file naming every handle is a harvest list of our whole
+ *  customer base, and a merchant's page needs a link to be found, not our index.
+ *  Store pages are crawlable and canonical — that is enough for the crawler, and
+ *  it is the merchant's own sharing that supplies the link. */
+export const sitemapXml = (origin) => {
+  const base = String(origin || '').replace(/\/+$/, '');
+  const url = (loc, freq, pri) => '  <url><loc>' + escHtml(base + loc) + '</loc>'
+    + '<changefreq>' + freq + '</changefreq><priority>' + pri + '</priority></url>';
+  return '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+    + url('/onboard', 'weekly', '1.0') + '\n' + url('/', 'weekly', '0.9') + '\n'
+    + url('/fees', 'monthly', '0.5') + '\n</urlset>\n';
+};

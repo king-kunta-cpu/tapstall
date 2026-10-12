@@ -145,6 +145,27 @@ test('merchant-facing pages share the kit and the private ones hide from crawler
   assert.match(page('confirm'), /document\.hidden/, 'link-preview bots must not be able to confirm an order');
 });
 
+test('the storefront head is filled by the Worker, and the pair agree', () => {
+  // The crawler-facing head is not in the page: it is generated per store and dropped
+  // in at a marker. That is two files making one page, so the contract between them is
+  // asserted here — a renamed marker would otherwise degrade silently to a page that
+  // tells Google nothing, and nothing would ever notice.
+  const at = page('store').indexOf('<!--@SEO@-->');
+  assert.ok(at > 0, 'the store page carries the marker the Worker looks for');
+  assert.ok(at < page('store').indexOf('<title>'), 'and above the fallback title, so an unsubstituted page still has one');
+  assert.match(worker, /replace\('<!--@SEO@-->'/, 'the Worker replaces that exact marker');
+  assert.match(worker, /if \(!out\.includes\('<!--@SEO@-->'\)\) return out;/, 'and leaves a page without one exactly as it found it');
+  assert.match(worker, /<title>Tapstall Store<\/title>', ''\)/, 'it removes the fallback, so there is one title and not two');
+  for (const name of ['store', 'index', 'fees']) {
+    assert.ok(!/<meta property="og:/.test(page(name)), name + ' hard-codes an og: tag that every store would share');
+  }
+  // robots.txt says these are private; the header is the version a bot cannot ignore
+  assert.match(worker, /const NOINDEX = \{ 'x-robots-tag'|const NOINDEX = \{ 'X-Robots-Tag': 'noindex, nofollow' \};/, 'the Worker holds one noindex constant');
+  assert.equal((worker.match(/200, NOINDEX\)|404, NOINDEX\)/g) || []).length, 3, 'admin, ops and the missing-store page all carry it');
+  assert.match(worker, /p === '\/robots\.txt'/, 'and robots.txt is served by the Worker, not by a file that can drift from it');
+  assert.match(worker, /p === '\/sitemap\.xml'/, 'same for the sitemap');
+});
+
 test('no page prints a credential, and none can be framed', () => {
   for (const name of PAGES) {
     // store/index/fees are authored directly, so there is no src/ twin for them

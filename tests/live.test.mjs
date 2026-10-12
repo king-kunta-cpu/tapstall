@@ -1407,10 +1407,18 @@ test('a dashboard edit changes the shelf, the feed and the money — in one save
   const page = await call('/s/mamatoe');
   assert.equal(page.status, 200);
   assert.ok(/var CFG = \{/.test(page.text), 'the storefront page still renders');
-  // The page ships no item names at all — the buyer's browser asks feed.json for
-  // them. Proved here rather than assumed, because it is what makes a menu edit
-  // instant: no HTML to rebuild, no edge cache to bust, nothing to wait for.
-  assert.ok(!/Whole goat|2 litre Coke/.test(page.text), 'no menu is baked into the served HTML, so the shelf is live the moment it is saved');
+  // What the buyer can order from is not baked into this HTML at all — the browser
+  // asks feed.json for it. Proved here rather than assumed, because that is what makes
+  // a menu edit instant: no HTML to rebuild, no edge cache to bust, nothing to wait for.
+  // (Since 0.7.1 the <head> does quote the last-known shelf, for crawlers and chat
+  // previews that run no JavaScript: a stale snippet is a normal thing, a stale order
+  // is not. So the line is drawn at </head>, and this is where it is held.)
+  const below = page.text.slice(page.text.indexOf('</head>'));
+  assert.ok(!/Whole goat|2 litre Coke/.test(below), 'no menu is baked into the part a buyer reads, so the shelf is live the moment it is saved');
+  const seoHeadBlock = page.text.slice(0, page.text.indexOf('</head>'));
+  assert.match(seoHeadBlock, /"hasMenuItem":\[/, 'and the part a crawler reads does carry the shelf');
+  assert.ok(seoHeadBlock.includes('Fridge Coke'), 'including the row the merchant renamed here, not only what the sheet said');
+  assert.ok(!/Whole goat/.test(seoHeadBlock.slice(seoHeadBlock.indexOf('<title>')).slice(0, 400)) || /Chicken/.test(seoHeadBlock), 'the description quotes the top of the shelf, never the whole of it');
 
   const audit = (await call('/api/admin?handle=mamatoe', { cookie: store.cookie })).json.audit;
   const hit = audit.find((a) => a.act === 'menu');
@@ -2019,4 +2027,104 @@ test('the flutterwave notice is refused until it is armed, and then asked again 
   } finally {
     globalThis.fetch = savedFetch; delete env.FW_SECRET; delete env.FLW_API_KEY;
   }
+});
+
+/* --------------------------------------------------- being found: the served bytes */
+/* A storefront's first job is to survive being pasted into a group chat: the hosts
+ * that build that preview run no JavaScript, and neither does a search crawler. So
+ * every assertion here is about the response body, not about what the page draws. */
+const seoStore = async (name, extra) => {
+  const h = 'zzseo' + String(Date.now()).slice(-5);
+  const reg = await call('/api/register', { method: 'POST', body: { handle: h, shop_name: name, whatsapp: '263771234567', currency: 'USD' } });
+  assert.equal(reg.status, 201, reg.text);
+  const key = () => JSON.parse(env.STORES._map.get('store:' + h).value).admin_token;
+  return { h, key, ...extra };
+};
+
+test('a shop tells a crawler what it sells, in the bytes the Worker sends', async () => {
+  const { h, key } = await seoStore('Zz Test Kitchen');
+  let r = await call('/api/settings', { method: 'POST', confirm: true, ip: '196.31.9.1', headers: { 'x-tapstall-admin': key() },
+    body: { handle: h, tagline: 'Halal fried chicken, cooked to order', location: 'Harare CBD' } });
+  assert.equal(r.status, 200, r.text);
+  r = await call('/api/menu', { method: 'POST', confirm: true, ip: '196.31.9.2', headers: { 'x-tapstall-admin': key() },
+    body: { handle: h, menu: { extra: [
+      { name: 'Chicken kota', price: 22.5, desc: 'with egg and atchar' },
+      { name: 'Full polish', price: 45, out: true },
+    ] } } });
+  assert.equal(r.status, 200, r.text);
+
+  const page = await call('/s/' + h);
+  assert.equal(page.status, 200);
+  const body = page.text;
+  const titles = body.match(/<title>[^<]*<\/title>/g) || [];
+  assert.equal(titles.length, 1, 'one title, not a real one plus a leftover fallback: ' + titles.join(' / '));
+  assert.match(body, /<title>Zz Test Kitchen \u2014 Harare CBD \| Tapstall<\/title>/);
+  assert.match(body, new RegExp('<link rel="canonical" href="https://tapstall\\.test/s/' + h + '">'), 'the page has one canonical spelling');
+  assert.match(body, /name="description" content="[^"]{40,}"/, 'a description with something in it');
+  assert.match(body, /Chicken kota 22\.50 USD/, 'priced from the menu, in the currency the store shows');
+  assert.match(body, /Full polish 45 USD/, 'both items, because the merchant typed both');
+  assert.match(body, /property="og:description" content="Halal fried chicken, cooked to order\./, 'and the preview says the shop\u2019s own line');
+  assert.ok(!/og:image/.test(body), 'no photo on file, so no photo is promised: a blank preview box is worse than none');
+  assert.match(body, /name="robots" content="index, follow, max-image-preview:large/, 'it asks to be shown, at full width');
+  assert.match(body, /var CFG = \{/, 'and the storefront still gets the data it needs');
+
+  const ld = body.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/);
+  assert.ok(ld, 'the structured data block is in the bytes, not drawn later');
+  const data = JSON.parse(ld[1]);
+  assert.equal(data['@context'], 'https://schema.org');
+  const biz = data['@graph'].find((x) => x['@type'] === 'LocalBusiness');
+  assert.equal(biz.name, 'Zz Test Kitchen');
+  assert.equal(biz.url, 'https://tapstall.test/s/' + h);
+  assert.equal(biz.telephone, '+263771234567', 'the number the buyer already sees, in the form a dialler wants');
+  assert.ok(!biz.openingHoursSpecification, 'no hours typed, none claimed');
+  assert.equal(biz.hasMenu.hasMenuItem.length, 2);
+  assert.equal(biz.hasMenu.hasMenuItem[0].offers.price, '22.50', 'a string with two decimals, per schema.org');
+  assert.equal(biz.hasMenu.hasMenuItem[1].offers.availability, 'https://schema.org/OutOfStock', 'sold out is told to search as loudly as to the buyer');
+
+  const head = body.slice(0, body.indexOf('</head>'));
+  for (const k of ['admin_token', 'paid_until', 'renew_url', 'secret_hash', 'rail_accts', 'pending', 'fw_secret']) {
+    assert.ok(!head.includes('"' + k + '"'), 'the head leaks the field name ' + k);
+    assert.ok(!body.includes(k + '":'), k + ' must not appear anywhere in a public page');
+  }
+});
+
+test('a shop with nothing typed in still says something true', async () => {
+  const { h } = await seoStore('Bare Shop');
+  const p = await call('/s/' + h);
+  assert.equal(p.status, 200);
+  assert.match(p.text, /<title>Bare Shop \| Tapstall<\/title>/);
+  assert.match(p.text, /name="description" content="Order from Bare Shop on Tapstall \u2014 menu, prices and payment in one link\."/);
+  assert.ok(!/og:image/.test(p.text), 'nothing promised, nothing broken');
+  assert.match(p.text, /name="twitter:card" content="summary"/, 'a plain card, since there is no picture to make large');
+  const ld = p.text.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/);
+  const biz = JSON.parse(ld[1])['@graph'].find((x) => x['@type'] === 'LocalBusiness');
+  assert.equal(biz.hasMenu, undefined, 'an empty menu in the data would be a lie about the shop');
+  assert.equal(biz.priceRange, undefined, 'and so would a price range with no prices');
+});
+
+test('the two files a crawler asks for first, and what one of them refuses to contain', async () => {
+  const robots = await call('/robots.txt');
+  assert.equal(robots.status, 200);
+  assert.match(robots.headers.get('content-type'), /^text\/plain/);
+  assert.match(robots.text, /^Allow: \/s\/$/m, 'the storefront is the content');
+  assert.match(robots.text, /^Allow: \/i\/$/m, 'and the pictures must be fetchable or every preview is blank');
+  for (const d of ['/a', '/api/', '/ops', '/__selftest']) {
+    assert.match(robots.text, new RegExp('^Disallow: ' + d.replace(/\//g, '\\/') + '$', 'm'), d + ' is not for a crawler');
+  }
+  assert.match(robots.text, /^Sitemap: https:\/\/tapstall\.test\/sitemap\.xml$/m);
+
+  const sm = await call('/sitemap.xml');
+  assert.equal(sm.status, 200);
+  assert.match(sm.headers.get('content-type'), /application\/xml/);
+  assert.match(sm.text, /<loc>https:\/\/tapstall\.test\/onboard<\/loc>/);
+  assert.ok(!sm.text.includes('/s/'), 'we do not hand out a list of every merchant: those pages carry their payment numbers');
+
+  // the app pages say it in a header too, for the crawler that ignores robots.txt
+  for (const p of ['/a', '/ops']) {
+    const res = await call(p);
+    assert.match(res.headers.get('x-robots-tag') || '', /noindex/, p + ' would be indexed by a bot that skips robots.txt');
+  }
+  const gone = await call('/s/zznosuchstore');
+  assert.equal(gone.status, 404);
+  assert.match(gone.headers.get('x-robots-tag') || '', /noindex/, 'a page for a shop that does not exist must not be indexed as one');
 });

@@ -604,7 +604,40 @@ ck "the payfast door names the setting it needs instead of shrugging" 'PAYFAST_P
 PAID1=$(curl -s -m 30 -H "Authorization: Bearer $TOK" "https://api.cloudflare.com/client/v4/accounts/$ACCT/storage/kv/namespaces/$KV/values/store:$HANDLE" | python3 -c "import sys,json;print(json.load(sys.stdin).get('paid_until') or 0)" 2>/dev/null)
 ck "  · and the plan on file did not move, so a probe is free" '^'"$PAID0"'$' "$PAID1"
 
-echo "[12] tidy up"
+echo "[12] being found: what a crawler and a WhatsApp preview actually receive"
+# The page cache is max-age=60/s-maxage=300, so these fetch a busted URL: a green line
+# here has to mean "a stranger arriving now gets this", not "somebody did once".
+PAGE=$(curl -s -m 30 "$ORIGIN/s/$HANDLE?probe=$(date +%s)")
+NAME=$(printf '%s' "$STORE" | python3 -c "import sys,json;print(json.load(sys.stdin).get('shop_name',''))" 2>/dev/null)
+ck "the title is the shop, not the product" "<title>$NAME" "$PAGE"
+ck "  · one title, not a real one plus a fallback" '^1$' "$(printf '%s' "$PAGE" | grep -c '<title>')"
+ck "  · canonical points here, absolute" "<link rel=\"canonical\" href=\"$ORIGIN/s/$HANDLE\">" "$PAGE"
+ck "  · a description a preview can use" 'name="description" content="[^"]{40,}"' "$PAGE"
+ck "  · and it is offered to be shown big" 'max-image-preview:large' "$PAGE"
+ck "  · no og:image when the shop has no picture" '^0$' "$(printf '%s' "$PAGE" | grep -c 'property="og:image"')"
+ck "  · the merchant's private columns are not in the bytes" '^0$' "$(printf '%s' "$PAGE" | grep -cE '\"(admin_token|paid_until|secret_hash|rail_accts|pending)\"')"
+ck "the structured data parses, and says the same shop" '^jsonld-ok$' "$(printf '%s' "$PAGE" | WANT="$NAME" python3 -c '
+import os,re,json,sys
+h = sys.stdin.read()
+m = re.search(r"<script type=[^\n]*ld\+json[^\n]*?>([\s\S]*?)</script>", h)   # the *? before > matters: greedy would run to the </script> on the same line
+if not m:
+    print("missing"); raise SystemExit
+d = json.loads(m.group(1))
+g = d.get("@graph") or []
+biz = [x for x in g if x.get("@type") == "LocalBusiness"]
+menu = (biz[0].get("hasMenu") or {}) if biz else {}
+ok = bool(biz) and biz[0].get("name") == os.environ.get("WANT") and bool(menu.get("hasMenuItem"))
+print("jsonld-ok" if ok else "bad:" + str(len(g)) + ":" + str(len(menu.get("hasMenuItem") or [])))' 2>/dev/null)"
+ROB=$(curl -s -m 30 "$ORIGIN/robots.txt")
+ck "robots.txt opens the shopfronts and the pictures" '^Allow: /s/$' "$ROB"
+ck "  · and shuts the app" '^Disallow: /api/$' "$ROB"
+ck "  · announced sitemap is ours" "^Sitemap: $ORIGIN/sitemap.xml$" "$ROB"
+SM=$(curl -s -m 30 "$ORIGIN/sitemap.xml")
+ck "the sitemap lists our pages, never a register of merchants" '^0$' "$(printf '%s' "$SM" | grep -c '/s/')"
+ck "  · with the front door in it" '/onboard</loc>' "$SM"
+ck "a dashboard says noindex in a header too, for bots that skip robots.txt" 'noindex' "$(curl -s -m 30 -o /dev/null -D - "$ORIGIN/a" | tr -d '\r')"
+
+echo "[13] tidy up"
 CK2=$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" \
   -d '{"handle":"'"$HANDLE"'","id":"'"$ID"'","status":"cancelled"}' "$ORIGIN/api/mark")
 ckw "probe order cancelled" '"status":"cancelled"' "$CK2"

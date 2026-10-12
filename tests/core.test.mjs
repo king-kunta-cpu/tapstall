@@ -760,3 +760,108 @@ test('a payment reference cannot be walked, and a payment window closes', () => 
   assert.ok(C.newTxRef('x'.repeat(60)).length <= 30 + 1 + 16, 'a long handle is cut, not concatenated past the key’s dignity');
   assert.equal(C.TX_WINDOW_SEC, 1800, 'thirty minutes: long enough to pay, short enough that the price is still the price');
 });
+
+/* ------------------------------------------------------------- being found */
+/* The storefront is read by things that do not run JavaScript: a WhatsApp preview
+ * bot, Google, and a phone on a bad connection. All three get the bytes we send, so
+ * the bytes are the product — which is why the rules are here rather than in the
+ * page, where a test cannot reach them. */
+const SEO_STORE = {
+  handle: 'kotaking', shop_name: 'Kota King', tagline: 'Halal fried chicken and kota',
+  location: 'Harare CBD', currency: 'ZAR', whatsapp: '263771234567', rail: 'cash',
+  week: [{ slots: [{ o: 540, c: 1260 }] }, null, null, null, null, null, { slots: [{ o: 600, c: 1020 }] }],
+  logo: '/i/kotaking/logo-1',
+  feed_cache: { products: [
+    { id: 'a', name: 'Chicken kota', price: 22.5, cur: 'ZAR', desc: 'with egg and atchar', img: '/i/kotaking/pic-a' },
+    { id: 'b', name: 'Full polish', price: 45, cur: 'ZAR', available: false },
+  ] },
+};
+const MON_10 = Date.UTC(2026, 9, 12, 10, 0);   // a Monday, so "open until" is a fact and not a weekday lottery
+const ORIGIN = 'https://tapstall.test';
+
+test('what a crawler is told about a shop, and only what the shop said', () => {
+  const f = C.seoFacts(SEO_STORE, ORIGIN, MON_10);
+  assert.equal(f.title, 'Kota King — Harare CBD | Tapstall', 'what it is, where, then who hosts it');
+  assert.equal(f.url, ORIGIN + '/s/kotaking', 'and the page has one canonical spelling');
+  assert.match(f.desc, /^Halal fried chicken and kota\./, 'the merchant’s own line first, as a sentence');
+  assert.match(f.desc, /Chicken kota 22\.50 ZAR/, 'prices from the shelf, in the shop’s currency');
+  assert.equal(f.image, ORIGIN + '/i/kotaking/logo-1', 'an absolute URL, because a preview bot cannot resolve ours');
+  assert.match(f.imageAlt, /Kota King.*Harare CBD/, 'alt text, which their bot taught me to never leave out');
+  assert.equal(f.price_range, 'ZAR 22.5–45', 'and a range only if two prices exist');
+  assert.equal(f.open_label, 'Open until 21:00', 'the answer to the only question a street food page has');
+  assert.ok(f.desc.length <= C.SEO_DESC_MAX && f.title.length <= C.SEO_TITLE_MAX, 'truncated where search truncates');
+});
+
+test('a page is never left describing nothing, and never invents', () => {
+  const bare = C.seoFacts({ handle: 'x9', shop_name: '' }, ORIGIN, MON_10);
+  assert.equal(bare.title, 'x9 | Tapstall', 'no name is the handle’s job');
+  assert.match(bare.desc, /menu, prices and payment in one link/, 'the fallback line, which is true of every store');
+  assert.equal(bare.image, '', 'no picture on file, so no picture is promised');
+  const head = C.seoHead(bare);
+  assert.ok(!/og:image|twitter:image/.test(head), 'and no og:image tag either — a broken preview image is worse than none');
+  assert.match(head, /name="twitter:card" content="summary"/, 'summary, not summary_large_image, when there is nothing to show');
+  assert.ok(!/undefined|null/.test(head), 'nothing that leaked through as the word undefined');
+  const huge = C.seoFacts({ handle: 'h', shop_name: 'A'.repeat(80), tagline: 'word '.repeat(120) }, ORIGIN, MON_10);
+  assert.ok(huge.title.length <= C.SEO_TITLE_MAX, 'a shouty name still fits');
+  assert.match(huge.desc, /\u2026$/, 'it is long enough to need a mark');
+  assert.ok(!/[\.\s]\u2026/.test(huge.desc), 'one mark, and never a loose dot or space in front of it');
+  assert.ok(huge.desc.length <= C.SEO_DESC_MAX, 'the limit is a limit, not an aim');
+});
+
+test('merchant text is data, not markup', () => {
+  const evil = { handle: 'zz', shop_name: 'G\'s "Shop" <script>alert(1)</script>', tagline: 'a & b < c', currency: 'USD' };
+  const head = C.seoHead(C.seoFacts(evil, ORIGIN, MON_10));
+  assert.ok(!head.includes('<script>alert'), 'a shop name cannot open a tag');
+  assert.match(head, /&lt;script&gt;alert/, 'it is there, escaped, as the merchant typed it');
+  assert.match(head, /G&#39;s &quot;Shop&quot;/, 'quotes inside an attribute cannot escape it either');
+  const tag = C.seoJsonLdTag(evil, C.seoFacts(evil, ORIGIN, MON_10));
+  const body = tag.replace(/^<script[^>]*>/, '').replace(/<\/script>$/, '');
+  assert.ok(!/</.test(body), 'inside the JSON-LD, not one < survives unescaped');
+  assert.match(body, /alert\(1\)/, 'the shop name is still in there, as data');
+  assert.ok(tag.startsWith('<script type="application/ld+json">') && tag.endsWith('</script>'), 'and the block itself is one tag');
+});
+
+test('the structured data is the shop: hours, menu, sold-out, and the price of each', () => {
+  const f = C.seoFacts(SEO_STORE, ORIGIN, MON_10);
+  const g = C.seoJsonLd(SEO_STORE, f);
+  assert.equal(g['@context'], 'https://schema.org');
+  const [biz] = g['@graph'];
+  assert.equal(biz['@type'], 'LocalBusiness', 'not Restaurant, not Takeaway: nobody asked us to claim that');
+  assert.deepEqual(biz.openingHoursSpecification, [
+    { '@type': 'OpeningHoursSpecification', dayOfWeek: 'Mon', opens: '09:00', closes: '21:00' },
+    { '@type': 'OpeningHoursSpecification', dayOfWeek: 'Sun', opens: '10:00', closes: '17:00' },
+  ], 'minutes on the sheet, HH:MM here, closed days simply absent');
+  assert.equal(biz.telephone, '+263771234567', 'the number the buyer already sees, in the form a dialler wants');
+  assert.equal(biz.hasMenu.hasMenuItem.length, 2);
+  assert.equal(biz.hasMenu.hasMenuItem[0].offers.price, '22.50', 'a string with two decimals, per schema.org');
+  assert.equal(biz.hasMenu.hasMenuItem[0].offers.priceCurrency, 'ZAR');
+  assert.equal(biz.hasMenu.hasMenuItem[1].offers.availability, 'https://schema.org/OutOfStock', 'sold out is said, not hidden');
+  assert.equal(biz.hasMenu.hasMenuItem[1].offers.price, '45.00');
+  const [crumb] = g['@graph'].slice(1);
+  assert.equal(crumb['@type'], 'BreadcrumbList');
+  assert.equal(crumb.itemListElement[1].item, ORIGIN + '/s/kotaking');
+  const empty = C.seoJsonLd({ handle: 'x' }, C.seoFacts({ handle: 'x', shop_name: 'X' }, ORIGIN, MON_10));
+  assert.equal(empty['@graph'][0].hasMenu, undefined, 'no shelf, no menu — not an empty one');
+  assert.equal(empty['@graph'][0].openingHoursSpecification, undefined, 'and no hours either');
+});
+
+test('what may not be in a public head, and what may not be in a sitemap', () => {
+  const leaky = { ...SEO_STORE, admin_token: 'tok-SECRET', pin: { hash: 'HASH' }, secret_hash: 'SH',
+    paid_until: 1893456000000, plan: 'annual', suspended: false, rail_accts: { bank: '1234567890' },
+    pending: { fields: { pay_account: 'SECRET-ACCT' } }, notify_email: 'me@secret.example' };
+  const blob = JSON.stringify(C.seoFacts(leaky, ORIGIN, MON_10)) + JSON.stringify(C.seoJsonLd(leaky, C.seoFacts(leaky, ORIGIN, MON_10))) + C.seoHead(C.seoFacts(leaky, ORIGIN, MON_10));
+  for (const w of ['tok-SECRET', 'HASH', 'SH', 'SECRET-ACCT', 'me@secret.example', '1234567890']) {
+    assert.ok(!blob.includes(w), 'the head carries ' + w);
+  }
+  for (const k of ['admin_token', 'paid_until', 'rail_accts', 'pending', 'secret_hash', 'plan', 'suspended']) {
+    assert.ok(!blob.includes('"' + k + '"'), 'and not even the field name ' + k);
+  }
+  const robots = C.ROBOTS_TXT(ORIGIN);
+  assert.match(robots, /^Allow: \/s\/$/m, 'the storefront is the content');
+  assert.match(robots, /^Allow: \/i\/$/m, 'and the pictures must be fetchable or every preview is blank');
+  for (const d of ['/a', '/api/', '/ops', '/__selftest']) assert.match(robots, new RegExp('^Disallow: ' + d.replace(/[/]/g, '\\/') + '$', 'm'), d + ' is not for a crawler');
+  const sm = C.sitemapXml(ORIGIN);
+  assert.match(sm, /<loc>https:\/\/tapstall\.test\/onboard<\/loc>/);
+  assert.ok(!sm.includes('/s/'), 'we do not publish a list of every merchant: those pages carry their payment numbers');
+  assert.match(robots, /Sitemap: https:\/\/tapstall\.test\/sitemap\.xml$/m, 'and the file we do publish is announced');
+});

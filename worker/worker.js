@@ -23,11 +23,12 @@ import {
   cleanProof, cleanPayer, proofNoun, proofAsk, PROOF_MODES,
   issueCap, verifyCap, randomKey, validateSettings, stageSettings, applyPending, maskField,
   newTxRef, TX_WINDOW_SEC, payfastSignedOk, txMatches,
+  seoFacts, seoHead, seoJsonLdTag, ROBOTS_TXT, sitemapXml,
   EDITABLE_FIELDS, SOFT_FIELDS, sign, adminStore, normaliseRail, resolveRail,
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '0.7.0';
+const VERSION = '0.7.1';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 const MAX_ORDERS_KEPT = 200;
@@ -163,6 +164,11 @@ async function route(req, url, env, ctx) {
       200, { 'Cache-Control': 'public, max-age=60' });
   }
   if (p === '/fees.ics') return feesIcs();
+  // robots.txt and sitemap.xml are answered by the Worker rather than by a file in
+  // Pages, because the origin a crawler sees is the host that answered it, and because
+  // the second file is a list of what we will *not* enumerate (see core.js).
+  if (p === '/robots.txt') return text(ROBOTS_TXT(url.origin));
+  if (p === '/sitemap.xml') return text(sitemapXml(url.origin), 200, 'application/xml; charset=utf-8');   // text(body, status, type): passing the type second is a 500
   if (p === '/fees' || p === '/fees.html') {
     const page = await tpl(env, 'fees');
     return page.startsWith('<!doctype') ? html(page, 200, { 'Cache-Control': 'public, max-age=3600' }) : redirect('/onboard');
@@ -183,7 +189,7 @@ async function route(req, url, env, ctx) {
   // A merchant's own picture, out of the store's KV. Public on purpose: it is a
   // photo of the food, and the storefront is what has to load it fast on a handset.
   if ((m = p.match(/^\/i\/([a-z0-9][a-z0-9-]{1,30})\/([A-Za-z0-9_-]{4,40})$/))) return imageGet(req, env, m[1], m[2]);
-  if ((m = p.match(/^\/s\/([a-z0-9][a-z0-9-]{1,30})$/))) return storePage(env, m[1]);
+  if ((m = p.match(/^\/s\/([a-z0-9][a-z0-9-]{1,30})$/))) return storePage(url, env, m[1]);
   if ((m = p.match(/^\/s\/([a-z0-9][a-z0-9-]{1,30})\/config\.json$/))) {
     const st = await getStore(env, m[1]);
     return st ? json({ ok: true, store: publicStore(st, await railsCatalog(env)) }) : json({ ok: false, error: 'no_store' }, 404);
@@ -284,13 +290,33 @@ async function route(req, url, env, ctx) {
   return null;
 }
 /* ------------------------------------------------------------- store page */
-async function storePage(env, handle) {
+async function storePage(url, env, handle) {
   const st = await getStore(env, handle);
-  if (!st) return html(notFoundPage(handle), 404);
+  if (!st) return html(notFoundPage(handle), 404, NOINDEX);
   const term = await env.STORES.get('term:' + handle, 'json');
   const page = fillPage(await tpl(env, 'store'),
     [['TAPSTALL_CONFIG', publicStore(st, await railsCatalog(env))], ['TAPSTALL_TERM', term || null]]);
-  return html(page, 200, { 'Cache-Control': 'public, max-age=60, s-maxage=300', ...FRAMEABLE });
+  return html(fillSeo(page, url.origin, st), 200, { 'Cache-Control': 'public, max-age=60, s-maxage=300', ...FRAMEABLE });
+}
+
+/** The head a crawler reads, written as raw bytes. `fillPage` cannot carry this: its
+ *  values go through `JSON.stringify`, because they land inside a script, and a
+ *  `<meta>` tag is not a JS literal. So this is a deliberate second path, and it
+ *  degrades: the marker in `pages/store.html` sits *above* a static title, so an old
+ *  copy of the page that never saw a substitution still has a title and still works.
+ *  The origin is the host that answered, which is always the real one: the alias
+ *  redirects a store link to this Worker before any of this runs. */
+function fillSeo(page, origin, st) {
+  const out = String(page);
+  if (!out.includes('<!--@SEO@-->')) return out;        // a page published before this existed: leave it alone
+  let facts;
+  try { facts = seoFacts(st, origin); } catch (e) { return out; }      // a broken store doc must not blank a storefront
+  const ld = seoJsonLdTag(st, facts);   // the escaping is core's, so a test can reach it
+  // the fallback title is only a fallback: two <title> elements are invalid, and a
+  // crawler is free to show either, so a real one has to replace it rather than
+  // out-rank it. Deleting it here (and only here) is what keeps the old copy whole.
+  return out.replace('<!--@SEO@-->', seoHead(facts) + '\n' + ld + '\n')
+            .replace('<title>Tapstall Store</title>', '');
 }
 
 /**
@@ -1234,6 +1260,13 @@ function sessCookie(value) {
 
 /** Merge per-route headers over the defaults, lower-cased, so callers that
  *  write `Cache-Control` cannot end up with `no-store, no-store`. */
+/** The pages that are an application, not content: a dashboard holding somebody's
+ *  orders should not be indexed even by a crawler that ignores robots.txt, and a
+ *  header costs no crawl budget to enforce. */
+const NOINDEX = { 'X-Robots-Tag': 'noindex, nofollow' };
+function text(s, status = 200, type = 'text/plain; charset=utf-8') {
+  return new Response(s, { status, headers: { 'content-type': type, 'cache-control': 'public, max-age=3600' } });
+}
 function hdr(extra) {
   // both spellings for one release: a cached page or a script an operator wrote
   // against the old header should keep working while it is still in use
@@ -1723,7 +1756,7 @@ function urlHandle(req) {
    leak. `?code=`/`?token=` links from before 0.6.0 are dead ends by design and the
    page says so. */
 async function adminEntry(req, url, env) {
-  return html(await tpl(env, 'admin'));
+  return html(await tpl(env, 'admin'), 200, NOINDEX);
 }
 
 /* ------------------------------------------------------- self-service settings */
@@ -2077,7 +2110,7 @@ async function opsPage(req, env) {
   const who = await opsAuthed(req, env);
   const page = await tpl(env, 'ops');
   const signed = who.ok ? 'true' : 'false';
-  return html(fillPage(page, [['TAPSTALL_OPS', { signed_in: who.ok === true, version: VERSION }]]));
+  return html(fillPage(page, [['TAPSTALL_OPS', { signed_in: who.ok === true, version: VERSION }]]), 200, NOINDEX);
 }
 
 function opsSummarise(st, rows) {
