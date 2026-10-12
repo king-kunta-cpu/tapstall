@@ -1,11 +1,1 @@
-  CI workflow YAML validates
-[36m*[0m KV namespaces
-[36m*[0m stores=b5c1c89d95114092ae91bbafc5a2d76c  orders=4f4ac94a66db4b859b61668a3c160819
-ui kit: 5 page(s) in sync with pages/kit.css
-[36m*[0m templates → KV (hot-swappable: HTML edits need no redeploy)
-  ! store          could not be published and KV differs from git: HTTP Error 504: Gateway Timeout 'Gateway Timeout' {"result":null,"success":false,"errors":[{"code":7009,"message":"Upstream service unavailable"}],"messages":[]
-==== exit=1 2026-10-12T16:01:02Z ====
-==== tools ====
-node=/opt/hostedtoolcache/node/20.20.2/x64/bin/node npm=/opt/hostedtoolcache/node/20.20.2/x64/bin/npm jq=/usr/bin/jq curl=/usr/bin/curl openssl=/usr/bin/openssl python3=/usr/bin/python3 
-==== inputs visible to this step ====
-CF_TOKEN=set(len 53) CF_ACCOUNT=set(len 32) ADMIN_SECRET=set(len 48) WORKER_NAME=set(len 8) 
+worker job started 2026-10-12T16:07:59Z run=38275241963 sha=ec6f49c
