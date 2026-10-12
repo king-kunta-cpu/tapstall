@@ -281,6 +281,12 @@ verified ZW/SA tariffs) but it is now a **default, not the whole answer**:
   is the shop's route only: the buyer's door reads two fields and no verb, a blank box is still
   refused on both sides, and an already-empty field is answered as a state rather than a failure
   (v0.8.1).
+- **The door says who closed it.** A link can die two ways now — the buyer spent it, or the shop
+  handed the field back and turned the nonce over — and only one of those is something the buyer
+  did. Same 410, same `used: true`, same pruning of the dead entry from the phone that kept it;
+  different sentence, chosen by `proofSuperseded` reading the void stamp and the empty field. No
+  retired link gains a write or a mint: an old link is a pointer to nowhere, and the fresh box
+  comes from the receipt that already mints (v0.8.2).
 
 An invalid description at sign-up becomes `cash` rather than a rejected
 registration: a merchant who never opens the shop is worse than one whose slip

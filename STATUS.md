@@ -1,5 +1,48 @@
 # Tapstall — status
 
+## Who closed the door (2026-10-12, v0.8.2)
+
+**Yesterday's card lied by omission.** "That link is used — this order's field accepts one code
+per link, and this one has already filed something" was written when there was exactly one way for
+a link to die. The hand-back added a second: the shop clears the field, `pcap` turns over, and
+every link written for the old code goes dead — including the one sitting in the buyer's
+notification bar. Those buyers were being told they had spent something. They had not done
+anything.
+
+- **`proofSuperseded(order, nonce)`** (core, pure, seven-line truth table): the link is not
+  current, `proof_void_at` exists, and the field is empty. That last condition is the same test
+  `proofAsk` uses to decide whether to start asking again, which is what makes the box and the
+  sentence unable to disagree about whether there is anywhere to put a code.
+- **One status, two sentences.** 410, `final: false`, `used: true`, `pfForgetScript` by url — all
+  shared, so a retired link is folded away exactly like a spent one and cannot drift. `no()` holds
+  the whole rule in one line (`const dead = why === "used" || why === "superseded"`) and the new
+  pages test pins that line, so the shared signal stays shared. The words differ:
+  *"That link is retired — the shop cleared the code on this order, so every link written for it
+  is retired; nothing you did caused that. Your receipt has a fresh box for the same field."*
+- **No power moved with the softer tone.** The retired card mints nothing (`issueCap` appears zero
+  times in `proofPage`, asserted), the buyer's door still has no clearing verb, and a retired link
+  cannot write even the value it filed before — the field is empty, so a fresh door is the answer,
+  and only the surfaces that already mint (the receipt read, the chase) hand one out. An old link
+  stays a pointer to nowhere.
+- **The control is in the test, not in the reasoning**: the *same* URL is fetched before the void
+  (field full, link spent by the buyer → "That link is used", no occurrence of "retired") and
+  after it (field empty, void stamped → "That link is retired"). If either case ever falls through
+  to the other's copy, that pair fails.
+
+**Also fixed, in the deploy harness:** the self-check waited for *a* live Worker and then printed
+whatever version the edge happened to hold, so a green deploy could report yesterday's build —
+which is exactly what happened here, twice today (once in `prod_check`, once in run #77's log). It
+now waits for the version it uploaded, up to 24 seconds, and if the edge is still behind it says
+`still propagating; the upload itself succeeded` instead of letting a number read as a verdict.
+Verified against the real edge: `worker live: https://tapstall.simalidudu.workers.dev (0.8.2)`.
+
+**Checked.** `npm test` **218/218** (core 80 · live 90 · pages 38 · limits 10). `prod_check.sh`
+gains one probe and three reads of it (retired-not-used, `final` absent, `used` present) — written
+as one POST because every probe on a capped day costs a rate-limit write; the three new lines sit in
+the blocked column today — `prod_check.sh` measured **205 passed / 94 blocked / 0 failed**, up from
+92 blocked because one status-only probe became one POST and three reads of it. `deploy.sh --check` green, and
+0.8.2 is live on both hostnames.
+
 ## The field can be handed back (2026-10-12, v0.8.1)
 
 **The seventh reading of the same instruction found the seam the sixth left open.** A filed code

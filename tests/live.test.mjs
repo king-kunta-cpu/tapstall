@@ -2891,6 +2891,7 @@ test('a code the shop cannot read is handed back, not argued about', async () =>
   assert.equal(ord.status, 201, ord.text);
   const id = ord.json.order.id, key = 'order:' + h + ':' + id;
   const doc = () => JSON.parse(env.ORDERS._map.get(key).value);
+  const CAP_BEFORE_VOID = ord.json.proof_url.slice(3);   // the link the buyer came in on, kept for the page half of this test
   const row = () => JSON.parse(env.ORDERS._map.get('list:' + h).value).find((x) => x.id === id);
 
   const w1 = await call('/api/proof', { method: 'POST', ip: '196.44.0.2', body: { cap: ord.json.proof_url.slice(3), proof: 'blurry photo' } });
@@ -2901,6 +2902,14 @@ test('a code the shop cannot read is handed back, not argued about', async () =>
   const quiet = (await admin()).json.orders.find((x) => x.id === id);
   assert.equal(quiet.proof_url, undefined, 'while a code is on file the order offers no door to anybody');
   assert.ok(!quiet.ask, 'and it stops chasing: nothing to ask for');
+
+  /* The same URL, one release of wording apart, before the shop does anything: the buyer spent
+     this link themselves, so the card says so. It is the control that keeps the new sentence
+     honest — if the used case ever fell through to the retired copy, this is what notices. */
+  const pageSpent = await call('/p/' + CAP_BEFORE_VOID);
+  assert.equal(pageSpent.status, 410, pageSpent.text.slice(0, 120));
+  assert.match(pageSpent.text, /That link is used/, 'a link the buyer wrote with is named for what it did: ' + pageSpent.text.slice(0, 160));
+  assert.ok(!/retired/.test(pageSpent.text), 'and nothing is implied about the shop');
 
   const back = await call('/api/order/proof', { method: 'POST', ip: '196.44.0.3',
     headers: { 'x-tapstall-admin': skey }, body: { handle: h, id, void: true } });
@@ -2937,9 +2946,24 @@ test('a code the shop cannot read is handed back, not argued about', async () =>
      shop has just declared it wants again, from a browser tab that has no idea. */
   for (const [label, cap] of [['held live link', held.slice(3)], ['the original', ord.json.proof_url.slice(3)]]) {
     const dead = await call('/api/proof', { method: 'POST', ip: '196.44.0.4', body: { cap, proof: 'SOME OTHER CODE' } });
-    assert.deepEqual({ status: dead.status, why: dead.json.why, used: dead.json.used },
-      { status: 410, why: 'used', used: true }, label + ' is superseded by rotation, not by the field: ' + dead.text.slice(0, 120));
+    // the classification this release exists for: same status, same folding, and a sentence
+    // that does not blame the buyer for a decision the shop made
+    assert.deepEqual({ status: dead.status, why: dead.json.why, used: dead.json.used, superseded: dead.json.superseded, final: dead.json.final },
+      { status: 410, why: 'superseded', used: true, superseded: true, final: false },
+      label + ' is retired by the hand-back, not spent by the buyer: ' + dead.text.slice(0, 140));
+    assert.match(dead.text, /the shop cleared that code, so this link is retired/, 'and the buyer is told who cleared it: ' + dead.text.slice(0, 200));
   }
+
+  /* A *page* at the retired link says the same thing in the buyer's words and puts the entry down.
+     This is checked while the order is still open, which is the only moment the used card is the
+     live question: on a settled order the order explains itself first (0.7.7's precedence), and a
+     dead link is not news about a paid order. */
+  const pageRetired = await call('/p/' + CAP_BEFORE_VOID);
+  assert.equal(pageRetired.status, 410, pageRetired.text.slice(0, 120));
+  assert.match(pageRetired.text, /That link is retired/, 'the card is titled for what happened: ' + pageRetired.text.slice(0, 160));
+  assert.match(pageRetired.text, /nothing you did caused that/, 'and says so out loud');
+  assert.ok(pageRetired.text.includes('String(x.u)==="/p/' + CAP_BEFORE_VOID + '"'), 'and puts the dead entry down on the phone that kept it');
+  assert.ok(!/That link is used/.test(pageRetired.text), 'a retired link is not called used, not once on this page');
 
   const again = (await admin()).json.orders.find((x) => x.id === id);
   assert.ok(again.ask, 'the chase is back on the row, in the order’s own words');
@@ -2976,8 +3000,7 @@ test('a code the shop cannot read is handed back, not argued about', async () =>
   const doorOnPaid = await call('/api/proof', { method: 'POST', ip: '196.44.0.10',
     body: { cap: freshUrl.slice(freshUrl.indexOf('/p/') + 3), proof: 'TOO LATE' } });
   assert.deepEqual({ status: doorOnPaid.status, why: doorOnPaid.json.why }, { status: 409, why: 'settled' },
-    'the order is closed, and that is the true answer even though the link is also dead: ' + doorOnPaid.text.slice(0, 120));
-  const shopRefiles = await call('/api/order/proof', { method: 'POST', ip: '196.44.0.11',
+    'the order is closed, and that is the true answer even though the link is also dead: ' + doorOnPaid.text.slice(0, 120));  const shopRefiles = await call('/api/order/proof', { method: 'POST', ip: '196.44.0.11',
     headers: { 'x-tapstall-admin': skey }, body: { handle: h, id, proof: 'FROM THE CHAT' } });
   assert.equal(shopRefiles.status, 200, 'the shop can file what arrives in the chat afterwards, as it always could: ' + shopRefiles.text.slice(0, 120));
 });

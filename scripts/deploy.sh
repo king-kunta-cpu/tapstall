@@ -192,11 +192,23 @@ CF_TOKEN="$CF_TOKEN" CF_ACCOUNT="$CF_ACCOUNT" python3 scripts/set_triggers.py "$
 
 # ---------------------------------------------------------------- self-check
 BASE="https://$WORKER_NAME.$(workers_subdomain | tail -1).workers.dev"
-for i in 1 2 3 4 5; do
-  curl -sf -A "Mozilla/5.0" --max-time 15 "$BASE/__ping" >/dev/null 2>&1 && break; sleep 2
+# The wait is for *this build*, not merely for a live Worker. The edge keeps serving the previous
+# version for a few seconds after an upload, and a selftest printed inside that window shows
+# yesterday's number under a green deploy: that false alarm has now cost two investigations
+# (prod_check's "ping reports the version", and a 0.8.2 upload reporting 0.8.1 in the log). The
+# loop asks /__ping which version it is holding and stops when the answer matches. A mismatch
+# after the wait is a warning, not a failure — the upload is what it is, and propagation is not
+# a defect in the build.
+WANT="$(worker_version)"
+GOT=""
+for i in 1 2 3 4 5 6 7 8; do
+  GOT=$(curl -sf -A "Mozilla/5.0" --max-time 15 "$BASE/__ping" 2>/dev/null | jq -r '.version // ""' 2>/dev/null || true)
+  [[ "$GOT" == "$WANT" ]] && break
+  sleep 3
 done
 curl -sf -A "Mozilla/5.0" --max-time 15 "$BASE/__ping" >/dev/null || die "worker did not answer /__ping"
-ok "worker live: $BASE"
+ok "worker live: $BASE (${GOT:-version not readable yet})"
+[[ "$GOT" == "$WANT" ]] || warn "edge still answers ${GOT:-nothing} while this deploy uploaded $WANT — still propagating; the upload itself succeeded"
 echo "--- /__selftest ---"
 # This print is a status line, not the deploy's verdict: the /__ping loop above is what
 # proves the Worker serves. Cloudflare's edge answered one of today's hiccups with an

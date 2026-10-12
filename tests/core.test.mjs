@@ -1027,3 +1027,19 @@ test('proofVoid: what it takes for a shop to hand the field back', () => {
   assert.equal(C.proofVoid({}).ok, true, 'no throw, no drama: {} is just an empty field');
   assert.ok(!('status' in C.proofVoid(open)), 'the answer never claims to have touched status, because it cannot');
 });
+
+test('proofSuperseded: the link died, but not by the buyer\u2019s hand', () => {
+  const used = { pcap: 'new', proof_void_at: '2026-10-12T16:40:11.000Z', buyer: {}, status: 'awaiting_payment' };
+  assert.equal(C.proofSuperseded(used, 'old'), true, 'a stale nonce, a hand-back stamp, an empty field');
+  assert.equal(C.proofSuperseded({ ...used, buyer: { proof: 'AGAIN' } }, 'old'), false,
+    'once something is on file again the true sentence is the ordinary one: this link filed, then the order moved on');
+  assert.equal(C.proofSuperseded({ ...used, buyer: { payer: '0771234567' } }, 'old'), false,
+    'and a lone sender number counts, because the field is only empty when both halves are');
+  assert.equal(C.proofSuperseded({ pcap: 'new', buyer: {}, status: 'awaiting_payment' }, 'old'), false,
+    'no hand-back ever happened, so nothing was retired: this is the spent-link case');
+  assert.equal(C.proofSuperseded({ ...used, pcap: 'old' }, 'old'), false,
+    'a current link is never described as retired, stamp or no stamp');
+  assert.equal(C.proofSuperseded({ ...used, buyer: { proof: '  ' } }, 'old'), true,
+    'whitespace is not a code: the same cleaning the field itself uses decides it');
+  assert.equal(C.proofSuperseded(null, 'x'), false, 'and an order that is not there is answered, not thrown');
+});

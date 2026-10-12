@@ -21,7 +21,7 @@ import {
   cleanImg, sniffImage, imgKeyOf, imgRefOf, newImgId, referencedImages, IMG_MAX_BYTES,
   IMG_TARGET_BYTES,
   cleanProof, cleanPayer, proofNoun, proofAsk, PROOF_MODES, notifyText,
-  proofAccept, proofOpen, proofUsed, proofVoid, PROOF_WINDOW_SEC, PROOF_WRITES_MAX,
+  proofAccept, proofOpen, proofUsed, proofSuperseded, proofVoid, PROOF_WINDOW_SEC, PROOF_WRITES_MAX,
   issueCap, verifyCap, randomKey, validateSettings, stageSettings, applyPending, maskField,
   newTxRef, TX_WINDOW_SEC, payfastSignedOk, txMatches,
   seoFacts, seoHead, seoJsonLdTag, ROBOTS_TXT, sitemapXml, GUIDES, guideOf,
@@ -30,7 +30,7 @@ import {
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '0.8.1';
+const VERSION = '0.8.2';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 const MAX_ORDERS_KEPT = 200;
@@ -726,8 +726,13 @@ async function proofPage(env, cap) {
     // on to a new token, so the URL in the buyer's phone is worth putting down — while the
     // field itself is still open on their receipt, which is where the sentence sends them.
     // Nothing is minted here: a spent link that could ask for a fresh one is not spent.
-    return card("That link is used", [
-      `This order's field accepts one code per link, and this one has already filed something. Your receipt has the box, and it is still open — if the code needs correcting, type it there, or ask the shop and they can change it on their side.`],
+    // The one case that must not borrow this sentence is the hand-back: a link the shop retired
+    // while the buyer was carrying it is not a link the buyer used, and saying so would be a
+    // accusation with nothing behind it. Same status, same pruning, different words.
+    const sup = proofSuperseded(o, p.n);
+    return card(sup ? "That link is retired" : "That link is used", [sup
+      ? `The shop cleared the code on this order, so every link written for it is retired — nothing you did caused that. Your receipt has a fresh box for the same field: open it, type the code, and it goes on the order again.`
+      : `This order's field accepts one code per link, and this one has already filed something. Your receipt has the box, and it is still open — if the code needs correcting, type it there, or ask the shop and they can change it on their side.`],
       410, pfForgetScript(st.handle, "", cap));
   }
   const back = `<p class=t><a href="/s/${esc(st.handle)}">Back to ${esc(st.name || st.handle)}</a></p>`;
@@ -864,15 +869,21 @@ async function proofAdd(req, url, env) {
   // belong to `html`. They were passed one level in on this page path, which made every
   // refusal a buyer could see answer HTTP 200 and drop the robots header — invisible in the
   // body, and invisible to a test that only reads the words.
-  const no = (msg, code, handle, final, why) => asPage
-    ? html(shell("Not added", `<h2 style="margin:.1rem 0 .5rem">Not added</h2><p class=t>${esc(msg)}</p>`
-        + (handle ? `<p class=t><a href="/s/${esc(handle)}">Back to the shop</a></p>` : "")
-        // a used token is pruned for a different reason than a closed field: the link is
-        // dead, the field is not, so the sentence has to send them to the receipt instead of
-        // the chat — and `used` rides the JSON so the inline box knows to fold itself away
-        + (handle && (final || why === "used") ? pfForgetScript(handle, "", String(b.cap || "")) : "")), code, NOINDEX)
-    : json({ ok: false, error: msg, why: why || "refused", final: !!final,
-      used: why === "used", ...(why === "used" ? {} : {}) }, code);
+  const no = (msg, code, handle, final, why) => {
+    // `used` and `superseded` are one fact about the link (it is finished, put it down) and two
+    // facts about the buyer (you used it / the shop retired it), so they share the pruning and
+    // the folding and never share the sentence. `dead` is the single place that knows this.
+    const dead = why === "used" || why === "superseded";
+    return asPage
+      ? html(shell("Not added", `<h2 style="margin:.1rem 0 .5rem">Not added</h2><p class=t>${esc(msg)}</p>`
+          + (handle ? `<p class=t><a href="/s/${esc(handle)}">Back to the shop</a></p>` : "")
+          // a used token is pruned for a different reason than a closed field: the link is
+          // dead, the field is not, so the sentence has to send them to the receipt instead of
+          // the chat — and `used` rides the JSON so the inline box knows to fold itself away
+          + (handle && (final || dead) ? pfForgetScript(handle, "", String(b.cap || "")) : "")), code, NOINDEX)
+      : json({ ok: false, error: msg, why: why || "refused", final: !!final,
+        used: dead, ...(dead ? { superseded: why === "superseded" } : {}) }, code);
+  };
   const p = b.cap ? await verifyCap(env.ADMIN_SECRET || "dev-secret", String(b.cap)) : null;
   if (!p || p.a !== "proof") return no("that link does not open this field any more", 401, "", false, "cap");
   const st = await getStore(env, p.h);
@@ -897,7 +908,11 @@ async function proofAdd(req, url, env) {
       return json({ ok: true, changed: false, code: o.code, proof: o.buyer.proof, payer: o.buyer.payer,
         left: r.left, note: again, proof_url: null, retry: true });
     }
-    return no("this link has already filed a code — the box on your receipt is still open", 410, st.handle, false, "used");
+    const sup = proofSuperseded(o, p.n);
+    return no(sup
+      ? "the shop cleared that code, so this link is retired — your receipt has a fresh box for it"
+      : "this link has already filed a code — the box on your receipt is still open",
+      410, st.handle, false, sup ? "superseded" : "used");
   }
   if (!r.ok) return no(r.msg, r.why === "settled" ? 409 : r.why === "spent" ? 429 : 422, st.handle,
     r.why === "settled" || r.why === "spent", r.why);

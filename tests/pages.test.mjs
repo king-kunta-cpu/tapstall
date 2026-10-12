@@ -623,3 +623,24 @@ test('a buyer’s door has no verb that clears, and no way to borrow one', () =>
     'and it is written down as an act, in the trail the merchant can read back');
 });
 
+/* One status, two sentences: the difference between a link the buyer used and a link the shop
+   retired is only a difference in words — the folding, the pruning and the refusal to write are
+   shared, and neither card mints. So the test pins both halves: the shared signal in one place,
+   and no new power behind the softer sentence. */
+test('the door says who closed it, and folds the same way either way', () => {
+  assert.match(worker, /const dead = why === "used" \|\| why === "superseded";/,
+    'one place in the Worker knows what a finished link is, so pruning and folding cannot drift apart');
+  assert.match(worker, /used: dead, \.\.\.\(dead \? \{ superseded: why === "superseded" \} : \{\}\)/,
+    'the json carries the fold signal the client already reads, plus the reason for it');
+  assert.match(worker, /\(handle && \(final \|\| dead\) \? pfForgetScript/,
+    'a retired link is put down like a used one, by url, with no order needed');
+  assert.match(worker, /card\(sup \? "That link is retired" : "That link is used"/,
+    'the page titles differ, because the sentences must');
+  assert.match(worker, /nothing you did caused that/, 'and the softer card says who did cause it');
+  const proofPage = worker.slice(worker.indexOf('async function proofPage'), worker.indexOf('async function proofAdd'));
+  assert.equal((proofPage.match(/issueCap\(/g) || []).length, 0,
+    'and no mint happens at the door page: a retired link stays a pointer to nowhere');
+  const proofAdd = worker.slice(worker.indexOf('async function proofAdd'), worker.indexOf('/* ------', worker.indexOf('async function proofAdd')));
+  assert.ok(!/proofVoid\(/.test(proofAdd), 'and the softer words do not come with a new verb');
+});
+

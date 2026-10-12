@@ -375,8 +375,13 @@ ROW3=$(printf '%s' "$DASH3" | python3 -c "import sys,json;print(json.dumps(next(
 ckw "an empty field asks again, so a door is minted for it a third time" '"proof_url":"[^"]*/p/v1' "$ROW3"
 PURL3=$(printf '%s' "$ROW3" | python3 -c "import sys,json;print(json.load(sys.stdin).get('proof_url',''))" 2>/dev/null)
 CAP3=${PURL3##*/p/}
-ckw "  · a link minted before the hand-back cannot file over it" '^(409|410)$' \
-  "$(code -X POST -H 'content-type: application/json' -d '{"cap":"'"$CAP2"'","proof":"STALE AFTER VOID"}' "$ORIGIN/api/proof")"
+STALE=$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"$CAP2"'","proof":"STALE AFTER VOID"}' "$ORIGIN/api/proof")
+# one probe, both halves read off its body: `why` is only ever `superseded` behind a 410, and
+# `final` is the field's fate — a retired link must leave the field open, or the hand-back has
+# closed an order the shop just asked to be paid for again
+ckw "  · a link minted before the hand-back cannot file over it, and is named as retired" '"why":"superseded"' "$STALE"
+nkw "  · while the field itself is left open" '"final":true' "$STALE"
+ckw "  · and the folding signal is still there, so the box goes away either way" '"used":true' "$STALE"
 ckw "  · while the new one writes, on the buyer's side of the counter" '"changed":true' \
   "$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"$CAP3"'","proof":"AGAIN-$(date +%s | tail -c 6)"}' "$ORIGIN/api/proof")"
 ckw "  · and void is not the buyer's word, whatever they put in the json" 'Type the code your app printed' \

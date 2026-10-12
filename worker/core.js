@@ -216,6 +216,29 @@ export function proofVoid(order) {
   };
 }
 
+/**
+ * Who closed the door — because the sentence a buyer deserves depends on it, and nothing else.
+ *
+ * `used` means this link filed something and the order moved on. `superseded` means the shop
+ * handed the field back (0.8.1) while this link was in somebody's pocket: the buyer did nothing,
+ * the value they sent is gone by the shop's choice, and a fresh door is being minted for the
+ * empty field on their next read. The two facts are told apart by the field itself: a hand-back
+ * leaves `proof_void_at` and an empty `proof`, which is exactly the condition `proofAsk` uses to
+ * start asking again — so the box and the sentence cannot disagree about whether there is
+ * somewhere to put the code.
+ *
+ * It changes no capability. A superseded link writes nothing and mints nothing here, any more
+ * than a spent one does: the fresh door comes from the surfaces that already mint (the receipt
+ * read, the chase), never from the retired one. An old link must stay a pointer to nowhere.
+ */
+export function proofSuperseded(order, nonce) {
+  const o = order && typeof order === 'object' ? order : {};
+  if (!proofUsed(o, nonce)) return false;
+  if (!o.proof_void_at) return false;
+  const b = o.buyer && typeof o.buyer === 'object' ? o.buyer : {};
+  return !cleanProof(b.proof) && !cleanPayer(b.payer, 'loose');
+}
+
 export function proofOpen(order) {
   const s = (order && typeof order === 'object' ? order : {}).status;
   return !s || PROOF_OPEN.indexOf(s) >= 0;
