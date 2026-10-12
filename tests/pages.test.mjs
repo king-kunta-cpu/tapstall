@@ -644,3 +644,30 @@ test('the door says who closed it, and folds the same way either way', () => {
   assert.ok(!/proofVoid\(/.test(proofAdd), 'and the softer words do not come with a new verb');
 });
 
+/* A refusal is a claim about what the buyer can still do, and the hand-back changed that fact
+   for every link at once. So the sentence is pinned where it is written, not only where it is
+   read: the retired card may not send a buyer to a box, because after a void there is no box on
+   any device — and the spent card may only promise one conditionally, since the newer door lives
+   on the phone that filed and nowhere else. */
+test('a refusal promises only what the device can still deliver', () => {
+  const page = worker.slice(worker.indexOf('async function proofPage'), worker.indexOf('const back ='));
+  const retired = page.slice(page.indexOf('sup ? "That link is retired"'));
+  const spent = retired.slice(retired.indexOf(': `This order'));
+  assert.match(retired, /their ledger has the same field, one box, and they can put it on the order for you/,
+    'the retired card names the route that exists on every phone, including one a link was forwarded into');
+  assert.ok(!/receipt/i.test(retired), 'and sends nobody to a receipt a hand-back has already emptied');
+  assert.match(retired, /nothing you did caused that/, 'the blame question is answered in the first breath');
+  assert.match(spent, /If this phone has a newer link for the order/, 'the spent card is conditional, because the fresh door is a fact about one device');
+  assert.match(spent, /nothing else it can change/, 'and it says what the shop\u2019s box cannot touch, in the words the merchant notice already uses');
+  // the inline half, which folds the box and shows nothing else
+  const add = worker.slice(worker.indexOf('async function proofAdd'), worker.indexOf('/* ------', worker.indexOf('async function proofAdd')));
+  const refusal = add.slice(add.indexOf('const sup = proofSuperseded(o, p.n);'), add.indexOf('const sup = proofSuperseded(o, p.n);') + 900);
+  assert.match(refusal, /every link for this order is retired/, 'same fact, in the shorter voice a fold needs');
+  // the sentences, not the prose around them: a comment may say "receipt", a buyer-facing
+  // string may not, and a guard that cannot tell them apart is a guard that gets weakened
+  const msgs = (refusal.match(/"[^"]{20,}"/g) || []).filter((s) => /retired|filed a code/.test(s));
+  assert.equal(msgs.length, 2, 'both refusals are found by this test, not one: ' + JSON.stringify(msgs));
+  assert.ok(msgs.every((s) => !/receipt/i.test(s)), 'and neither promises a box a hand-back has closed: ' + msgs.join(' | '));
+  assert.match(refusal, /a newer link from this order still works/, 'the spent answer points at what may exist without naming a screen');
+});
+

@@ -2951,7 +2951,12 @@ test('a code the shop cannot read is handed back, not argued about', async () =>
     assert.deepEqual({ status: dead.status, why: dead.json.why, used: dead.json.used, superseded: dead.json.superseded, final: dead.json.final },
       { status: 410, why: 'superseded', used: true, superseded: true, final: false },
       label + ' is retired by the hand-back, not spent by the buyer: ' + dead.text.slice(0, 140));
-    assert.match(dead.text, /the shop cleared that code, so this link is retired/, 'and the buyer is told who cleared it: ' + dead.text.slice(0, 200));
+    assert.match(dead.text, /every link for this order is retired/, 'and the buyer is told who cleared it: ' + dead.text.slice(0, 200));
+    // the invariant the last release missed: a refusal that a hand-back has made true for
+    // nobody must not send a buyer to a box. The receipt keeps its wording only where a
+    // newer door can actually exist on this device
+    assert.ok(!/receipt/.test(dead.json.error), 'no retired answer points at a receipt: ' + dead.json.error);
+    assert.match(dead.json.error, /send it in the chat/, 'it names the route that always works: ' + dead.json.error);
   }
 
   /* A *page* at the retired link says the same thing in the buyer's words and puts the entry down.
@@ -2962,6 +2967,9 @@ test('a code the shop cannot read is handed back, not argued about', async () =>
   assert.equal(pageRetired.status, 410, pageRetired.text.slice(0, 120));
   assert.match(pageRetired.text, /That link is retired/, 'the card is titled for what happened: ' + pageRetired.text.slice(0, 160));
   assert.match(pageRetired.text, /nothing you did caused that/, 'and says so out loud');
+  assert.match(pageRetired.text, /their ledger has the same field, one box, and they can put it on the order for you/,
+    'the retired card sends them somewhere that exists on any phone: ' + pageRetired.text.slice(0, 400));
+  assert.ok(!/Your receipt has a fresh box/.test(pageRetired.text), 'and promises nothing a hand-back has closed');
   assert.ok(pageRetired.text.includes('String(x.u)==="/p/' + CAP_BEFORE_VOID + '"'), 'and puts the dead entry down on the phone that kept it');
   assert.ok(!/That link is used/.test(pageRetired.text), 'a retired link is not called used, not once on this page');
 

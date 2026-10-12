@@ -288,6 +288,13 @@ verified ZW/SA tariffs) but it is now a **default, not the whole answer**:
   retired link gains a write or a mint: an old link is a pointer to nowhere, and the fresh box
   comes from the receipt that already mints (v0.8.2).
 
+- **A refusal may only promise what the device can still deliver.** "Open your receipt" was true of
+  the phone that filed and false of the one a forwarded link arrived on; after a hand-back it is
+  true of nobody, because the void retires every link the order had at once. So the retired card
+  sends the buyer to the chat, where the shop's own one-field box can put the code on the order,
+  and the spent card says *if this phone has a newer link*, which is the only form of that
+  sentence that is ever false-free (v0.8.3).
+
 An invalid description at sign-up becomes `cash` rather than a rejected
 registration: a merchant who never opens the shop is worse than one whose slip
 says "pay on collection" until they fix it.

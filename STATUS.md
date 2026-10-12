@@ -1,5 +1,38 @@
 # Tapstall — status
 
+## A refusal is a claim about the device (2026-10-12, v0.8.3)
+
+0.8.2 gave the retired link the right *blame* and left the wrong *direction*. Its card said:
+"Your receipt has a fresh box for the same field: open it, type the code." That is true of the
+phone that filed a code — because `pfKeepScript` left a newer door in that phone's list — and it
+was written without asking what happens on the phone a forwarded link arrives on. After a
+hand-back it is true of **nobody**: the void retires every link the order had, at once, and the
+storefront's only persistent order affordance is that list of doors (`pages/store.html` keeps
+`tp_pf_<handle>` and nothing else — there is no saved-order view to go back to).
+
+- **The retired card now sends the buyer somewhere that exists on every phone:** "Send the code in
+  your chat with the shop: their ledger has the same field, one box, and they can put it on the
+  order for you." The shop's half of that sentence is not a promise invented here — it is
+  `/api/order/proof` from 0.7.4, and it ends with the same clause the merchant notice has used all
+  along: *nothing else it can change*.
+- **The spent card became conditional** — "If this phone has a newer link for the order, that box
+  is still open" — because the fresh door is a fact about one device, not about the order.
+- **The guard is on the source, not on the fixture:** a new `pages` test reads the two shipped
+  strings out of `proofPage` and the two out of the `no()` call in `proofAdd` and fails if any of
+  them says "receipt". It also asserts it found *two* strings, so a reword that renames one of
+  them fails the count rather than silently checking one sentence. And it matches the strings
+  rather than the lines around them — my first version of that assertion tripped on a comment of
+  mine that said "receipt" while every shipped sentence was clean, which is precisely how a copy
+  guard gets weakened and then stops being one.
+- **prod_check reads the live copy**: one probe, four reads of its body (`why`, `used`, the chat
+  clause, and an `nkw` that the error names no receipt box). Still blocked on a capped day.
+
+**Checked.** `npm test` **219/219** (core 80 · live 90 · pages 39 · limits 10). The three new
+`prod_check` patterns were replayed with `grep -qE` against the exact body `/api/proof` returns for
+a retired link, and against a deliberately regressed body containing "your receipt has a fresh
+box" — which the `nkw` catches. Deployed and confirmed through the loop 0.8.2 added:
+`worker live: https://tapstall.simalidudu.workers.dev (0.8.3)`.
+
 ## Who closed the door (2026-10-12, v0.8.2)
 
 **Yesterday's card lied by omission.** "That link is used — this order's field accepts one code

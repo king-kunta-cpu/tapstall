@@ -30,7 +30,7 @@ import {
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '0.8.2';
+const VERSION = '0.8.3';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 const MAX_ORDERS_KEPT = 200;
@@ -729,10 +729,15 @@ async function proofPage(env, cap) {
     // The one case that must not borrow this sentence is the hand-back: a link the shop retired
     // while the buyer was carrying it is not a link the buyer used, and saying so would be a
     // accusation with nothing behind it. Same status, same pruning, different words.
+    // and the sentence has to survive the device it is read on. "Open your receipt" was true of
+    // the phone that filed the code, because the answer left a newer door in that phone's list;
+    // it was never true of the phone a forwarded link arrived on, and after a hand-back it is
+    // true of nobody — every link for the order is retired at once. The route that always exists
+    // is the chat, where the shop has the same field on its own side (0.7.4).
     const sup = proofSuperseded(o, p.n);
     return card(sup ? "That link is retired" : "That link is used", [sup
-      ? `The shop cleared the code on this order, so every link written for it is retired — nothing you did caused that. Your receipt has a fresh box for the same field: open it, type the code, and it goes on the order again.`
-      : `This order's field accepts one code per link, and this one has already filed something. Your receipt has the box, and it is still open — if the code needs correcting, type it there, or ask the shop and they can change it on their side.`],
+      ? `The shop cleared the code on this order, so every link written for it is retired — nothing you did caused that. Send the code in your chat with the shop: their ledger has the same field, one box, and they can put it on the order for you.`
+      : `This order's field accepts one code per link, and this one has already filed something. If this phone has a newer link for the order, that box is still open — otherwise send the code in your chat and the shop can put it on the order for you, because their ledger has the same field and nothing else it can change.`],
       410, pfForgetScript(st.handle, "", cap));
   }
   const back = `<p class=t><a href="/s/${esc(st.handle)}">Back to ${esc(st.name || st.handle)}</a></p>`;
@@ -909,9 +914,12 @@ async function proofAdd(req, url, env) {
         left: r.left, note: again, proof_url: null, retry: true });
     }
     const sup = proofSuperseded(o, p.n);
+    // the inline box folds itself away on `used`, so this string is the whole answer the buyer
+    // sees on the receipt: it may name what just happened to the field, and it may not send them
+    // looking for a box that a hand-back has already closed for everybody
     return no(sup
-      ? "the shop cleared that code, so this link is retired — your receipt has a fresh box for it"
-      : "this link has already filed a code — the box on your receipt is still open",
+      ? "the shop cleared that code, so every link for this order is retired — send it in the chat and they can put it on the order for you"
+      : "this link has already filed a code — a newer link from this order still works, or the shop can put it on the order for you",
       410, st.handle, false, sup ? "superseded" : "used");
   }
   if (!r.ok) return no(r.msg, r.why === "settled" ? 409 : r.why === "spent" ? 429 : 422, st.handle,

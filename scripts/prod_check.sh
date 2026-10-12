@@ -382,6 +382,8 @@ STALE=$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"
 ckw "  · a link minted before the hand-back cannot file over it, and is named as retired" '"why":"superseded"' "$STALE"
 nkw "  · while the field itself is left open" '"final":true' "$STALE"
 ckw "  · and the folding signal is still there, so the box goes away either way" '"used":true' "$STALE"
+ckw "  · the retired answer names the chat, not a screen the hand-back emptied" 'send it in the chat' "$STALE"
+nkw "  · and promises no receipt box, because after a void there is none" '"error":"[^"]*receipt' "$STALE"
 ckw "  · while the new one writes, on the buyer's side of the counter" '"changed":true' \
   "$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"$CAP3"'","proof":"AGAIN-$(date +%s | tail -c 6)"}' "$ORIGIN/api/proof")"
 ckw "  · and void is not the buyer's word, whatever they put in the json" 'Type the code your app printed' \
