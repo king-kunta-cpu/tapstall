@@ -987,3 +987,13 @@ test('the merchant’s notice tells them a door exists, and does not hand them t
   assert.ok(!/yet —/.test(C.notifyText(st, { ...owe, status: 'paid' })), 'a settled order is not sent chasing, the door is shut anyway');
   assert.ok(!/yet —/.test(C.notifyText(st, { ...owe, pricing: { rail: { ...rail, proof: 'none' }, pay_now: 12 } })), 'a rail that never asked says nothing');
 });
+
+test('proofUsed: a link is worth one change, and only once the order says so', () => {
+  // the whole single-use rule is this one pure function, so it is worth its own truth table
+  assert.equal(C.proofUsed({ pcap: 'abc' }, 'abc'), false, 'the live nonce matches, so the link is current');
+  assert.equal(C.proofUsed({ pcap: 'abc' }, 'zzz'), true, 'a different one means this link already filed something');
+  assert.equal(C.proofUsed({}, 'abc'), false, 'an order from before the rule is not retroactively spent');
+  assert.equal(C.proofUsed({ pcap: 'abc' }, undefined), false, 'a cap minted before the rule is honoured, not punished');
+  assert.equal(C.proofUsed({ pcap: '' }, ''), false, 'and two empties are the same case, said twice because they arrive separately');
+  assert.equal(C.proofUsed({ pcap: 7 }, '7'), false, 'KV round-trips numbers as strings, and a nonce is not a type');
+});

@@ -21,7 +21,7 @@ import {
   cleanImg, sniffImage, imgKeyOf, imgRefOf, newImgId, referencedImages, IMG_MAX_BYTES,
   IMG_TARGET_BYTES,
   cleanProof, cleanPayer, proofNoun, proofAsk, PROOF_MODES, notifyText,
-  proofAccept, proofOpen, PROOF_WINDOW_SEC, PROOF_WRITES_MAX,
+  proofAccept, proofOpen, proofUsed, PROOF_WINDOW_SEC, PROOF_WRITES_MAX,
   issueCap, verifyCap, randomKey, validateSettings, stageSettings, applyPending, maskField,
   newTxRef, TX_WINDOW_SEC, payfastSignedOk, txMatches,
   seoFacts, seoHead, seoJsonLdTag, ROBOTS_TXT, sitemapXml, GUIDES, guideOf,
@@ -30,7 +30,7 @@ import {
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '0.7.9';
+const VERSION = '0.8.0';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 const MAX_ORDERS_KEPT = 200;
@@ -510,7 +510,12 @@ async function placeOrder(req, url, env, ctx) {
    * writes into a field labelled as coming from the buyer, and `via: 'buyer'` in the
    * audit log would stop being true. The capability exists in the response, for the
    * person who needs it, and nowhere else. */
-  const proofCap = await issueCap(secret, { a: 'proof', h: st.handle, id, g: String(st.auth_gen || '0') }, PROOF_WINDOW_SEC);
+  // The nonce is what makes the link worth one write: it is stored on the order, folded
+  // into the signature, and rotated by every accepted write. Storing it here is not the
+  // thing the comment above refuses — a nonce is not a URL and cannot become one without
+  // the signing key, so a merchant reading the document learns only that a link exists.
+  order.pcap = randomKey(8);
+  const proofCap = await issueCap(secret, { a: 'proof', h: st.handle, id, g: String(st.auth_gen || '0'), n: order.pcap }, PROOF_WINDOW_SEC);
 
   /* The order document is written BEFORE the buyer is answered. It used to sit
    * in ctx.waitUntil, which meant a failed write — a spent KV write budget, a
@@ -556,6 +561,9 @@ async function persistOrder(env, st, order) {
     // on the row list so the ledger does not need the order document to answer
     payer: order.buyer.payer || '', proof: order.buyer.proof || '',
     prior_unpaid: order.prior_unpaid,
+    // the row is what the dashboard mints from, so the row has to know the current nonce
+    // or a shop's link to the buyer's field would be an unbound one
+    pcap: order.pcap || '',
   });
   await env.ORDERS.put(key, JSON.stringify(cur.slice(0, MAX_ORDERS_KEPT)));
 }
@@ -713,6 +721,15 @@ async function proofPage(env, cap) {
   }
   const o = await env.ORDERS.get(`order:${st.handle}:${p.id}`, "json");
   if (!o) return card("Order not found", ["It is not on this shop's list any more."], 404, pfForgetScript(st.handle, "", cap));
+  if (proofUsed(o, p.n) && proofOpen(o)) {
+    // Spent link, open order: the one refusal that closes the link and not the field. the order has moved
+    // on to a new token, so the URL in the buyer's phone is worth putting down — while the
+    // field itself is still open on their receipt, which is where the sentence sends them.
+    // Nothing is minted here: a spent link that could ask for a fresh one is not spent.
+    return card("That link is used", [
+      `This order's field accepts one code per link, and this one has already filed something. Your receipt has the box, and it is still open — if the code needs correcting, type it there, or ask the shop and they can change it on their side.`],
+      410, pfForgetScript(st.handle, "", cap));
+  }
   const back = `<p class=t><a href="/s/${esc(st.handle)}">Back to ${esc(st.name || st.handle)}</a></p>`;
   const rail = (o.pricing || {}).rail;
   const noun = proofNoun(rail);
@@ -840,8 +857,12 @@ async function proofAdd(req, url, env) {
   const no = (msg, code, handle, final, why) => asPage
     ? html(shell("Not added", `<h2 style="margin:.1rem 0 .5rem">Not added</h2><p class=t>${esc(msg)}</p>`
         + (handle ? `<p class=t><a href="/s/${esc(handle)}">Back to the shop</a></p>` : "")
-        + (handle && final ? pfForgetScript(handle, "", String(b.cap || "")) : "")), code, NOINDEX)
-    : json({ ok: false, error: msg, why: why || "refused", final: !!final }, code);
+        // a used token is pruned for a different reason than a closed field: the link is
+        // dead, the field is not, so the sentence has to send them to the receipt instead of
+        // the chat — and `used` rides the JSON so the inline box knows to fold itself away
+        + (handle && (final || why === "used") ? pfForgetScript(handle, "", String(b.cap || "")) : "")), code, NOINDEX)
+    : json({ ok: false, error: msg, why: why || "refused", final: !!final,
+      used: why === "used", ...(why === "used" ? {} : {}) }, code);
   const p = b.cap ? await verifyCap(env.ADMIN_SECRET || "dev-secret", String(b.cap)) : null;
   if (!p || p.a !== "proof") return no("that link does not open this field any more", 401, "", false, "cap");
   const st = await getStore(env, p.h);
@@ -851,12 +872,34 @@ async function proofAdd(req, url, env) {
   const o = await env.ORDERS.get(key, "json");
   if (!o) return no("no such order", 404, st.handle, true, "gone");
   const r = proofAccept(o, { proof: b.proof == null ? null : String(b.proof), payer: b.payer == null ? null : String(b.payer) }, 'buyer');
+  /* One link, one *change*. A spent link may still submit the value the order already holds,
+     because that is not a second edit — it is the retry of a first one whose answer was lost,
+     and a buyer told "already used" in that case is a buyer who pays again or phones the shop.
+     A spent link offering anything NEW is the thing that is refused. */
+  if (proofUsed(o, p.n) && proofOpen(o)) {
+    if (r.ok && !r.changed) {
+      const again = `Payment reference ${r.proof || r.payer} is on order ${o.code || ""}. That is what the shop already has, so nothing was rewritten.`;
+      if (asPage) {
+        return html(shell("Sent", `<h2 style="margin:.1rem 0 .5rem">Sent to the shop</h2><p>${esc(again)}</p>`
+            + pfForgetScript(st.handle, o.code, String(b.cap || ""))
+            + `<p class=t>You can close this now — settling the order is the shop's to do.</p>`), 200, NOINDEX);
+      }
+      return json({ ok: true, changed: false, code: o.code, proof: o.buyer.proof, payer: o.buyer.payer,
+        left: r.left, note: again, proof_url: null, retry: true });
+    }
+    return no("this link has already filed a code — the box on your receipt is still open", 410, st.handle, false, "used");
+  }
   if (!r.ok) return no(r.msg, r.why === "settled" ? 409 : r.why === "spent" ? 429 : 422, st.handle,
     r.why === "settled" || r.why === "spent", r.why);
   if (r.changed) {
     const when = new Date().toISOString();
     o.buyer = Object.assign({}, o.buyer || {}, { proof: r.proof, payer: r.payer });
     o.proof_writes = r.writes; o.proof_at = when; o.proof_by = "buyer";
+    // the token is spent the moment the value lands, so the order moves to a new nonce and
+    // this response — and only this response, in the hand that just wrote — carries the one
+    // link worth using next
+    const nextNonce = randomKey(8);
+    o.pcap = nextNonce;
     await env.ORDERS.put(key, JSON.stringify(o));
     // and onto the row the merchant reads, so the chase sentence disappears from the
     // place it was written: the same two writes a mark spends, no more
@@ -865,20 +908,33 @@ async function proofAdd(req, url, env) {
     const row = list.find((x) => x && x.id === o.id);
     if (row) {
       row.payer = o.buyer.payer; row.proof = o.buyer.proof; row.proof_by = "buyer"; row.proof_at = when;
+      row.pcap = nextNonce;
       await env.ORDERS.put(listKey, JSON.stringify(list));
     }
     await pushAudit(env, st, { act: "proof", via: "buyer",
       fields: [`${o.code || o.id} ← ${[o.buyer.proof, o.buyer.payer].filter(Boolean).join(' · ')}`], ip });
+  }
+  // the fresh token, minted only for the caller whose write was just accepted: whoever can
+  // file once can correct twice more, and does not need a second link to anybody else
+  let freshUrl = "";
+  if (r.changed) {
+    const fresh = await issueCap(env.ADMIN_SECRET || "dev-secret",
+      { a: "proof", h: st.handle, id: o.id, g: String(st.auth_gen || "0"), n: o.pcap }, PROOF_WINDOW_SEC);
+    freshUrl = "/p/" + fresh;
   }
   const note = `Payment reference ${r.proof || r.payer} is on order ${o.code || ""}.`
     + (r.changed ? "" : " That is what the shop already had, so nothing was rewritten.")
     + (r.left > 0 ? ` You can correct it ${r.left} more time${r.left === 1 ? "" : "s"} while the order is open.` : "");
   if (asPage) {
     return html(shell("Sent", `<h2 style="margin:.1rem 0 .5rem">Sent to the shop</h2><p>${esc(note)}</p>` + pfForgetScript(st.handle, o.code, String(b.cap || ""))
+      + (r.changed && r.left > 0
+          ? `<p class=t><a href="${esc(freshUrl)}">Correct it</a> — this field takes ${r.left} more ${r.left === 1 ? "change" : "changes"} on this order.</p>`
+          : "")
       + `<p class=t>You can close this now — settling the order is the shop's to do.</p>`
       + `<p class=t><a href="/s/${esc(st.handle)}">Back to ${esc(st.name || st.handle)}</a></p>`), 200, NOINDEX);
   }
-  return json({ ok: true, changed: r.changed, code: o.code, proof: o.buyer.proof, payer: o.buyer.payer, left: r.left, note });
+  return json({ ok: true, changed: r.changed, code: o.code, proof: o.buyer.proof, payer: o.buyer.payer,
+    left: r.left, note, proof_url: freshUrl || null });
 }
 
 /* -------------------------------------------------------------- register */
@@ -2773,8 +2829,11 @@ async function withAsk(o, st, origin, env) {
     const bare = proofAsk(o);
     return bare ? { ...o, ask: bare } : o;
   }
+  // `n` only when the reader has a nonce to offer: an unbound cap is honoured (it is how
+  // orders placed before this release keep working), but a bound one is worth one write
   const cap = await issueCap(env.ADMIN_SECRET || 'dev-secret',
-    { a: 'proof', h: st.handle, id: o.id, g: String(st.auth_gen || '0') }, PROOF_WINDOW_SEC);
+    { a: 'proof', h: st.handle, id: o.id, g: String(st.auth_gen || '0'), ...(o.pcap ? { n: o.pcap } : {}) },
+    PROOF_WINDOW_SEC);
   const here = origin + '/p/' + cap;
   const a = proofAsk(o, { here });
   return a ? { ...o, ask: a, proof_url: here } : o;
@@ -2809,12 +2868,17 @@ async function proofFile(req, url, env) {
   const when = new Date().toISOString();
   o.buyer = Object.assign({}, o.buyer || {}, { proof: r.proof, payer: r.payer });
   o.proof_at = when; o.proof_by = 'merchant';
+  // and the buyer's link is spent by this write as much as by theirs: one link, one write,
+  // whichever hand held it. A code that arrived in the chat should not leave a live field
+  // open on the order for the next 72 hours.
+  o.pcap = randomKey(8);
   await env.ORDERS.put(key, JSON.stringify(o));
   const listKey = `list:${st.handle}`;
   const list = (await env.ORDERS.get(listKey, 'json')) || [];
   const row = list.find((x) => x && x.id === o.id);
   if (row) {
     row.payer = o.buyer.payer; row.proof = o.buyer.proof; row.proof_by = 'merchant'; row.proof_at = when;
+    row.pcap = o.pcap;
     await env.ORDERS.put(listKey, JSON.stringify(list));
   }
   // the response says whether the log held, in the same words a mark uses: a gap in

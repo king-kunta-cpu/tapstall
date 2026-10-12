@@ -698,12 +698,21 @@ ck "  · and the code is read back on the receipt" 'pay\.proof' "$SHIP_S"
 # 0.7.9: the door is on the receipt, and a refusal says what it ends
 ck "  · the receipt holds the field itself, as a form, at the door's own route" '<form id="pff" method="post" action="/api/proof">' "$SHIP_S"
 ck "  · its box and its link are one condition, so they cannot disagree" '\(needDoor \? pfBox : addProof\)' "$SHIP_S"
-ck "  · and it asks the Worker whether a refusal closes the door" 'if \(j\.final\)' "$SHIP_S"
+ck "  · and it asks the Worker whether a refusal closes the door" 'if \(j\.final \|\| j\.used\)' "$SHIP_S"
+ck "  · a spent link sends the box to the link the answer just handed it" 'if \(j.proof_url\) o.proof_url = j.proof_url' "$SHIP_S"
 # the two fields a receipt page acts on cannot be read off the live Worker today: a capped
 # day fails the rate-limit counter closed, so every POST to the door is answered 503 before
 # a cap is even looked at. That is on purpose (the same limiter guards the PIN, and a budget
 # is not a reason to answer a brute force generously), and it is asserted below instead.
 ckw  "  · the answer a browser can act on names its reason in a field" '"why":"cap"' "$BOGUS"
+# 0.8.0: one link, one change. Both halves need a write to reach (a capped day answers the
+# door at its rate-limit counter first), so they are blocked today and green on a real one.
+# Both halves of the rule are one POST apart, on the cap that just filed $BPROBE: the same
+# value is a retry and is answered as one, a new value is a second edit and is refused by name.
+ckw "  · a spent link still honours the value it filed, because that is a retry" '"retry":true' \
+  "$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"$PCAP"'","proof":"'"$BPROBE"'"}' "$ORIGIN/api/proof")"
+ckw "  · and refuses a new one by name, which is the whole point of single use" '"why":"used"' \
+  "$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"$PCAP"'","proof":"ZCPROBE2"}' "$ORIGIN/api/proof")"
 nkw  "  · and does not pretend a bad link is news about the order" '"final":true' "$BOGUS"
 ck "the dashboard ships the picker and a name for the field" 'data-rd="proof"' "$SHIP_A"
 ck "  · the ledger row prints who sent it and which code they gave" 'o\.buyer\.proof' "$SHIP_A"

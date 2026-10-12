@@ -549,12 +549,19 @@ var TERM = /*__TAPSTALL_TERM__*/null;
         .then(function (res) {
           var j = res.j || {};
           if (res.ok && j.ok) {
+            // the link this box posted is spent, so the box takes the one this answer was
+            // kind enough to hand back: same field, one more write, no new trip anywhere
             // used up, so the kept entry goes with it: one line under the notice bar and
             // this box are the same door, and it is closed now either way
+            if (j.proof_url) o.proof_url = j.proof_url;
             pfDone(o.order.code);
             $('pff').outerHTML = '<div class="kv"><span>' + esc(pay.proof_label || 'Code from the app')
               + '</span><span><b>' + esc(j.proof || code) + '</b>'
-              + (j.payer ? ', from ' + esc(j.payer) : '') + '</span></div>';
+              + (j.payer ? ', from ' + esc(j.payer) : '') + '</span></div>'
+              // the link this box just used is spent, and the answer carried the next one, so
+              // the receipt keeps a way to correct a typo rather than stranding it in a response
+              + (j.proof_url && j.left > 0 ? '<p class="hint"><a href="' + esc(j.proof_url)
+                  + '">Correct it</a> — this field takes ' + j.left + ' more on this order.</p>' : '');
             return;
           }
           btn.disabled = false; btn.textContent = 'Put it on my order';
@@ -563,7 +570,7 @@ var TERM = /*__TAPSTALL_TERM__*/null;
           // only the Worker knows whether a refusal ends the door, so only it says so:
           // `final` is a fact about the order, and a browser that guessed it from the
           // sentence would stop working the day the sentence was reworded
-          if (j.final) { pfDone(o.order.code); $('pff').outerHTML = '<p class="hint">' + esc(m) + '</p>'; }
+          if (j.final || j.used) { pfDone(o.order.code); $('pff').outerHTML = '<p class="hint">' + esc(m) + '</p>'; }
         })
         .catch(function () {
           btn.disabled = false; btn.textContent = 'Put it on my order';

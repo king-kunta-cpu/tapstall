@@ -1989,9 +1989,15 @@ test('three corrections, then the door shuts — and a settled order shut it alr
   // an order that came with a code from the cart still gets its three corrections:
   // the budget counts writes through this door, and nothing else
   const ord = late = Object.assign(late, await lateOrder('196.31.0.4', { proof: 'FROM CART' }));
-  const cap = proofCapOf(ord);
+  let cap = proofCapOf(ord);
   const key = 'order:' + late.handle + ':' + ord.json.order.id;
-  const put = (proof, ip) => call('/api/proof', { method: 'POST', ip, body: { cap, proof } });
+  // one link, one change: a write that changed something hands back the next link, which is
+  // what the buyer's own page does with it, so the test follows the same chain a phone would
+  const put = async (proof, ip) => {
+    const res = await call('/api/proof', { method: 'POST', ip, body: { cap, proof } });
+    if (res.json && res.json.proof_url) cap = res.json.proof_url.slice(3);
+    return res;
+  };
   assert.equal(JSON.parse(env.ORDERS._map.get(key).value).buyer.proof, 'FROM CART', 'the cart value is on the order, untouched');
   assert.equal((await put('SECOND', '196.31.0.5')).json.left, 2, 'first through this door, so two left');
   assert.equal((await put('THIRD', '196.31.0.6')).json.left, 1, 'and one');
@@ -2246,9 +2252,16 @@ test('both halves of the buyer’s record land in one write, and both are logged
   const dash = await call('/api/admin?handle=' + hp, { headers: { 'x-tapstall-admin': JSON.parse(env.STORES._map.get('store:' + hp).value).admin_token } });
   const audit = dash.json.audit.filter((x) => x.act === 'proof')[0];
   assert.match(audit.fields.join(' '), /MLINE 4471 · \+263 77 999 0001/, 'the paper trail lists both, not whichever came first: ' + JSON.stringify(audit));
-  const again = await call('/p/' + cap);
-  assert.match(again.text, /sent from <b>\+263 77 999 0001<\/b>/, 'and the door shows the pair back before it is used again');
+  const fresh = r.json.proof_url;
+  assert.ok(fresh && fresh !== '/p/' + cap, 'the answer hands the next link to the hand that just wrote, and only to it');
+  const again = await call('/p/' + fresh.slice(3));
+  assert.match(again.text, /sent from <b>\+263 77 999 0001<\/b>/, 'the door shows the pair back on the link that is live now');
   assert.ok(!/name=payer/.test(again.text), 'once the number is in, the second box is gone — it asked because it was missing');
+  const spent = await call('/p/' + cap);
+  assert.equal(spent.status, 410, 'the link that filed it is worth nothing further: ' + spent.text.slice(0, 120));
+  assert.match(spent.text, /accepts one code per link/, 'and it says what happened, in those words');
+  assert.ok(spent.text.includes('String(x.u)==="/p/' + cap + '"'),
+    'while it is at it, it puts the dead link down on the device that was holding it');
 });
 
 test('a save frees the picture it dropped even when the index cannot see it yet', async () => {
@@ -2714,28 +2727,45 @@ test('the receipt page is told, not told-in-English: refusals carry why and fina
   const ord = await call('/api/order', { method: 'POST', ip: '196.37.0.1', body: { handle: h, service: 'pickup',
     buyer: { name: 'Anesu M', phone: '0780006611' }, items: [{ name: 'Box', price: 18 }] } });
   assert.equal(ord.status, 201, ord.text);
-  const cap = ord.json.proof_url.slice(3);
+  let cap = ord.json.proof_url.slice(3);
   const key = 'order:' + h + ':' + ord.json.order.id;
-  const put = (body, ip) => call('/api/proof', { method: 'POST', ip, body });
+  const put = async (body, ip) => {
+    // a caller that names its own cap is testing a bad one, and must keep it
+    const res = await call('/api/proof', { method: 'POST', ip,
+      body: body.cap === undefined ? Object.assign({ cap }, body) : body });
+    if (res.json && res.json.proof_url) cap = res.json.proof_url.slice(3);
+    return res;
+  };
 
   // a blank box is a question the buyer has not answered yet, so the page keeps it
-  const blank = await put({ cap, proof: '' }, '196.37.0.2');
+  const blank = await put({ proof: '' }, '196.37.0.2');
   assert.equal(blank.status, 422, blank.text.slice(0, 140));
   assert.equal(blank.json.why, 'empty', 'named, so the caller does not read the sentence to learn what kind of no this is');
   assert.equal(blank.json.final, false, 'and it is not final: the box stays on the receipt');
 
   // three writes and the door is out of corrections — that one is final
-  await put({ cap, proof: 'ONE' }, '196.37.0.3');
-  await put({ cap, proof: 'TWO' }, '196.37.0.4');
-  await put({ cap, proof: 'THREE' }, '196.37.0.5');
-  const spent = await put({ cap, proof: 'FOUR' }, '196.37.0.6');
+  const firstCap = cap;
+  const w1 = await put({ proof: 'ONE' }, '196.37.0.3');
+  assert.ok(w1.json.proof_url && w1.json.proof_url.slice(3) !== firstCap,
+    'and a link that changed something is already spent: the answer carries the next one');
+  const reused = await call('/api/proof', { method: 'POST', ip: '196.37.0.30', body: { cap: firstCap, proof: 'AGAIN' } });
+  assert.deepEqual({ status: reused.status, why: reused.json.why, final: reused.json.final, used: reused.json.used },
+    { status: 410, why: 'used', final: false, used: true },
+    'the spent one refuses a NEW value but is not treated as news about the order: ' + reused.text.slice(0, 140));
+  const retry = await call('/api/proof', { method: 'POST', ip: '196.37.0.31', body: { cap: firstCap, proof: 'ONE' } });
+  assert.equal(retry.json.changed, false, 'while the same value again is a retry, not a second edit: ' + retry.text.slice(0, 140));
+  assert.equal(retry.json.retry, true, 'and it is named as one, so a lost answer costs the buyer nothing');
+  assert.equal(JSON.parse(env.ORDERS._map.get(key).value).proof_writes, 1, 'and it cost the order no write at all');
+  await put({ proof: 'TWO' }, '196.37.0.4');
+  await put({ proof: 'THREE' }, '196.37.0.5');
+  const spent = await put({ proof: 'FOUR' }, '196.37.0.6');
   assert.equal(spent.status, 429, spent.text.slice(0, 140));
   assert.deepEqual({ why: spent.json.why, final: spent.json.final }, { why: 'spent', final: true },
     'spent is the end of the road for this field, and says so in the one word the page acts on');
 
   // settled: also final, and the order keeps what it had
   await call('/api/mark', { method: 'POST', ip: '196.37.0.7', body: { cap: ord.json.mark_url.slice(3) } });
-  const settled = await put({ cap, proof: 'LATE' }, '196.37.0.8');
+  const settled = await put({ proof: 'LATE' }, '196.37.0.8');
   assert.deepEqual({ why: settled.json.why, final: settled.json.final }, { why: 'settled', final: true }, settled.text.slice(0, 140));
   assert.equal(JSON.parse(env.ORDERS._map.get(key).value).buyer.proof, 'THREE', 'nothing moved');
 
@@ -2753,7 +2783,7 @@ test('the receipt page is told, not told-in-English: refusals carry why and fina
     'a link that will not verify is not news about the order, so the entry in the phone stays');
   const rev = await call('/api/revoke', { method: 'POST', headers: { 'x-tapstall-admin': JSON.parse(env.STORES._map.get('store:' + h).value).admin_token }, body: { handle: h } });
   assert.equal(rev.status, 200, rev.text);
-  const closed = await put({ cap, proof: 'X' }, '196.37.0.11');
+  const closed = await put({ proof: 'X' }, '196.37.0.11');
   assert.deepEqual({ why: closed.json.why, final: closed.json.final }, { why: 'revoked', final: true }, closed.text.slice(0, 140));
 });
 
@@ -2785,4 +2815,60 @@ test('a capped account fails closed at the door, politely, and never answers 500
   } finally {
     env.STORES.put = sp; env.ORDERS.put = op;
   }
+});
+
+test('one link, one change: the row mints fresh, the shop spends the buyer’s link, and an old order binds itself', async () => {
+  const h = 'zzonce' + String(Date.now()).slice(-5);
+  const reg = await call('/api/register', { method: 'POST', body: {
+    handle: h, shop_name: 'One Change', whatsapp: '263771234567', rail: 'zipit', pay_account: '1234567890', currency: 'USD',
+  } });
+  assert.equal(reg.status, 201, reg.text);
+  const ord = await call('/api/order', { method: 'POST', ip: '196.39.0.1', body: { handle: h, service: 'pickup',
+    buyer: { name: 'Tendai K', phone: '0780007711' }, items: [{ name: 'Box', price: 24 }] } });
+  assert.equal(ord.status, 201, ord.text);
+  const buyerCap = ord.json.proof_url.slice(3);
+  const key = 'order:' + h + ':' + ord.json.order.id;
+  const skey = JSON.parse(env.STORES._map.get('store:' + h).value).admin_token;
+  const admin = () => call('/api/admin?handle=' + h, { headers: { 'x-tapstall-admin': skey } });
+
+  /* The ledger's door is minted per read, from the order's current nonce, which is the only
+     reason a shop reloading its list can never be handed a stale link. And the moment a code
+     is on file the row stops carrying one at all: the shop has a box of its own, and an old
+     URL that still worked would undo the whole rule. */
+  const rowLink = (await admin()).json.orders.find((x) => x.id === ord.json.order.id).proof_url;
+  assert.ok(rowLink && rowLink !== ord.json.proof_url, 'a row that still owes a code carries a door: ' + rowLink);
+  // the row's copy is absolute (it is meant to be pasted into a chat), the receipt's is not
+  const rowCap = rowLink.slice(rowLink.indexOf('/p/') + 3);
+  const viaRow = await call('/api/proof', { method: 'POST', ip: '196.39.0.2', body: { cap: rowCap, proof: 'MLINE 1' } });
+  assert.equal(viaRow.status, 200, 'and it files on it, because the link is the current one: ' + viaRow.text.slice(0, 140));
+  const staleBuyer = await call('/api/proof', { method: 'POST', ip: '196.39.0.3', body: { cap: buyerCap, proof: 'MY OWN INSTEAD' } });
+  assert.deepEqual({ status: staleBuyer.status, why: staleBuyer.json.why, used: staleBuyer.json.used },
+    { status: 410, why: 'used', used: true }, 'the buyer’s link, minted before that write, is spent: ' + staleBuyer.text.slice(0, 120));
+  const rowAfter = (await admin()).json.orders.find((x) => x.id === ord.json.order.id);
+  assert.equal(rowAfter.proof_url, undefined, 'and the row carries no link now, because a stale door is worse than none');
+
+  // the shop filing from the chat spends the link the buyer is holding, and takes nothing back
+  const held = viaRow.json.proof_url;
+  assert.ok(held, 'the write that landed handed the next link to the hand that wrote');
+  const filed = await call('/api/order/proof', { method: 'POST', ip: '196.39.0.4',
+    headers: { 'x-tapstall-admin': skey }, body: { handle: h, id: ord.json.order.id, proof: 'FROM CHAT' } });
+  assert.equal(filed.status, 200, filed.text);
+  const docNow = JSON.parse(env.ORDERS._map.get(key).value);
+  const rowNow = JSON.parse(env.ORDERS._map.get('list:' + h).value).find((x) => x.id === ord.json.order.id);
+  assert.equal(rowNow.pcap, docNow.pcap, 'the row’s nonce moved with the document’s, so the next read mints a live one');
+  const spent = await call('/api/proof', { method: 'POST', ip: '196.39.0.5', body: { cap: held.slice(3), proof: 'MINE INSTEAD' } });
+  assert.equal(spent.status, 410, 'and the buyer’s link is spent by the shop’s entry, not merely outranked: ' + spent.text.slice(0, 120));
+  assert.equal(JSON.parse(env.ORDERS._map.get(key).value).buyer.proof, 'FROM CHAT', 'nothing was written over');
+  const sameAgain = await call('/api/proof', { method: 'POST', ip: '196.39.0.6', body: { cap: held.slice(3), proof: 'FROM CHAT' } });
+  assert.equal(sameAgain.json.retry, true, 'the value that is already there is still honoured, because a retry is not an edit: ' + sameAgain.text.slice(0, 140));
+
+  /* An order placed before this release has no nonce to be bound by. Refusing it would sign a
+     buyer out of a field mid-session for a rule that did not exist when they were handed the
+     link, so the first write that lands is the thing that binds it — no migration, no flag. */
+  env.ORDERS._map.set(key, { value: JSON.stringify(Object.assign({}, docNow, { pcap: undefined })) });
+  const legacy = await call('/api/proof', { method: 'POST', ip: '196.39.0.7', body: { cap: buyerCap, proof: 'LEGACY OK' } });
+  assert.equal(legacy.status, 200, 'no cliff for a buyer mid-session: ' + legacy.text.slice(0, 140));
+  const bound = JSON.parse(env.ORDERS._map.get(key).value);
+  assert.equal(bound.buyer.proof, 'LEGACY OK');
+  assert.ok(bound.pcap, 'and the order is bound from that write on');
 });

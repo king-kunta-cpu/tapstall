@@ -532,8 +532,10 @@ test('the receipt page holds the door open itself, one box, no navigation', () =
     'the same field the door has, same length, same no-autocorrect rule');
   assert.match(storeHtml, /pay\.ask_payer\s*\?\s*'<label for="fPfPayer">Number you will pay from/,
     'the sender number joins it only where this rail searches by it, in the cart\u2019s words');
-  assert.match(storeHtml, /if \(j\.final\)/,
-    'and the page asks the Worker whether a refusal ends the door, rather than reading the sentence');
+  assert.match(storeHtml, /if \(j\.final \|\| j\.used\)/,
+    'and the page asks the Worker whether a refusal ends the door or only spent its link, rather than reading the sentence');
+  assert.match(storeHtml, /if \(j\.proof_url\) o\.proof_url = j\.proof_url;/,
+    'a successful write hands the box its next link, so the buyer is never told to go and find one');
   const eps = [...storeHtml.matchAll(/fetch\(\s*['"]([^'"]+)['"]/g)].map((m) => m[1]);
   assert.ok(eps.length >= 2, 'the receipt page does fetch, so the list is real: ' + JSON.stringify(eps));
   assert.ok(eps.every((e) => /^\/(api\/(order|order\/proof|proof|lookup)|s\/)/.test(e)),

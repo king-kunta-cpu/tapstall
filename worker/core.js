@@ -154,6 +154,23 @@ const PROOF_OPEN = ['awaiting_payment', 'cod'];
 /** Whether a buyer may still write into this order. One definition, because the page
  *  that offers the form and the machine that accepts the write must never disagree
  *  about whether a door is open. */
+/**
+ * Is this cap still the one the order would honour? `pcap` is the order's current
+ * *nonce*: minting a link folds it in, and an accepted write rotates it, so the URL a
+ * buyer was handed is worth exactly one write — which is what "single-use" has to mean
+ * before it means anything. Two shapes stay honoured, and both are the upgrade path, not
+ * a hole: a cap with no nonce (issued by the release before this one, still inside its
+ * 72 hours) and an order with no nonce (placed before it, and bound by its first write).
+ * The nonce is not a secret and is safe to store on the order — it cannot be turned into
+ * a link without the Worker's signing key, which is why this does not undo the rule that
+ * the buyer's URL is never written to the order document.
+ */
+export function proofUsed(order = {}, nonce) {
+  const bound = String(order.pcap || '');
+  const got = String(nonce || '');
+  return !!(bound && got && bound !== got);
+}
+
 export function proofOpen(order) {
   const s = (order && typeof order === 'object' ? order : {}).status;
   return !s || PROOF_OPEN.indexOf(s) >= 0;

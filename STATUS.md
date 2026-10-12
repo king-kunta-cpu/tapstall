@@ -1,5 +1,53 @@
 # Tapstall — status
 
+## One link, one change (2026-10-12, v0.8.0)
+
+**The instruction has always said *single-use token*, and until today it did not mean that.**
+`a:'proof'` caps were purpose-bound (this field only) and order-bound, and they expired — but
+the same URL could file up to `PROOF_WRITES_MAX` values for its full 72 hours. A link that had
+done its job stayed worth doing it again: forwarded into a group chat, screenshotted, left in
+a notification, it kept one live write for three days. So the token is now spent by the write.
+
+- **Order creation binds a nonce**: `order.pcap = randomKey(8)`, folded into the signed
+  payload as `n`, mirrored onto the ledger row so a dashboard read mints from the same value.
+  Storing the *nonce* on the document does not breach the rule that the buyer's URL is never
+  stored there: a nonce is not a link, and cannot become one without the signing key.
+- **An accepted, changed write rotates it** — same document put, no extra write — and mints
+  the next link for one recipient: the response. `Sent` gets `Correct it`, the JSON gets
+  `proof_url`, and the receipt box re-points `o.proof_url` at it, so a buyer who mistyped once
+  corrects twice more exactly as before, at zero extra taps and with nothing in an inbox.
+- **A spent link may still re-file the value it filed.** `proofUsed` + `changed:false` is a
+  retry, not a second edit, and a buyer whose answer was lost in a bad signal must not be told
+  their code never arrived. It answers `retry: true` and costs the order no write.
+- **A spent link may not file anything new**: 410, `why: "used"`, `used: true`, `final: false`
+  — the link is dead, the field is not — and the page carries `pfForgetScript` by url, so the
+  dead entry leaves the phone that was holding it. Nothing is minted in refusal: a spent link
+  that could ask for a fresh one is not spent.
+- **The shop's own file spends the buyer's link too** (`/api/order/proof` rotates the nonce as
+  well): a code that arrived in the chat does not leave a live write on the order for three
+  days. The merchant never needs `/p/`; they have a box.
+- **No cliff, no migration**: a cap with no `n`, or an order with no `pcap`, is honoured as it
+  was, and the first write that lands binds it. `proofUsed(order, nonce)` is the whole rule and
+  it has its own truth table in `core.test.mjs`, including `pcap: 7` against `'7'`, because KV
+  round-trips numbers as strings and a nonce is not a type.
+
+Two shipped sentences had to change on the way in, and one existing behaviour had to be
+defended rather than tightened: `no()` now prunes on `why === "used"` as well as on `final`,
+because "the link is finished" and "the field is finished" need the same tidying and different
+words; the settled-order answer takes precedence over the spent-link one, since an order that
+has been paid is the more useful thing to say; and the ledger row stops carrying a door once a
+code is on file — mint-per-read means it can never be stale, and a stale door would undo the
+rule this release exists for.
+
+**Checked.** `npm test` **212/212** (core 78 · live 89 · pages 35 · limits 10). `npm test` also
+caught five of its own regressions first: every test that reused one cap for several writes now
+follows the chain a phone follows, which is the only way this change is provably *usable* and
+not merely correct. `prod_check.sh` gains four lines (two about the box, two about the rule);
+the two that need a write are `ckw` today because a capped day answers the door at its rate
+limiter before a cap is looked at. Worker 0.8.0 on both hostnames. `pages/store.html` still
+waits on the 00:20 UTC publish, which now carries 0.7.5's keeping, 0.7.9's box and this
+re-pointing in one put.
+
 ## The field is on the receipt, not one tap away (2026-10-12, v0.7.9)
 
 **The instruction, read for the fifth time, says *from the receipt page*.** Four releases had

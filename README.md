@@ -265,6 +265,16 @@ verified ZW/SA tariffs) but it is now a **default, not the whole answer**:
   same counter that throttles a wrong PIN is why a capped day answers the door with 503 before
   it looks at a cap (v0.7.9).
 
+- **One link, one change.** The buyer's cap is bound to a nonce stored on the order, and an
+  accepted write rotates it and hands the next link back in its own answer — `Correct it` on
+  the `Sent` page, `proof_url` in the JSON, and the receipt box re-pointed at it. So the
+  affordance is exactly what it was (three writes, one field, no merchant in the loop) and a
+  link that has filed something is worth one thing more: the same value again, which is a
+  retry, answered `retry: true` at no cost. A new value on a spent link is 410 `why: "used"`,
+  it prunes that link from the phone that kept it, and it mints nothing in the refusal. The
+  shop filing a code from the chat spends the buyer's link the same way; a cap or an order
+  from before the rule is honoured and binds itself on its first write (v0.8.0).
+
 An invalid description at sign-up becomes `cash` rather than a rejected
 registration: a merchant who never opens the shop is worse than one whose slip
 says "pay on collection" until they fix it.
