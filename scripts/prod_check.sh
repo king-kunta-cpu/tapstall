@@ -293,7 +293,7 @@ ckw  "  · and the stored entry is pruned at the lifetime the token actually has
 ckw  "  · the code page hands the buyer's device the entry to forget" "tp_pf_$HANDLE" "$BFORM"
 FSEND=$(curl -s -m 30 -X POST -H 'content-type: application/x-www-form-urlencoded' \
   -d 'form=1&cap='"$PCAP"'&proof='"$BPROBE" "$ORIGIN/api/proof")
-ck  "  · the page a no-JS buyer gets after sending carries the same line" "tp_pf_$HANDLE" "$FSEND"
+ckw "  · the page a no-JS buyer gets after sending carries the same line" "tp_pf_$HANDLE" "$FSEND"
 ckw "  · and a resend of the same value rewrites nothing, which is why a retry is free" 'nothing was rewritten' "$FSEND"
 # 0.7.7: every answer the door can give puts it down, and a busy minute does not
 ckw  "  · the door is forgettable by the link alone, which is all a refusal knows" 'String(x\.u)==="/p/' "$BFORM"
@@ -302,6 +302,21 @@ nk   "  · a link nobody minted runs nothing in a browser, not even a tidy-up" '
 FBLANK=$(curl -s -m 30 -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/x-www-form-urlencoded' \
   -d 'form=1&cap='"$PCAP"'&proof=' "$ORIGIN/api/proof")
 ckw  "  · a refusal page is refused by its status too, and not only by its words" '^422$' "$FBLANK"
+# 0.7.8: a spent write budget is answered to the buyer, in words about their order, as a
+# page, with Retry-After and no pruning. Today's shape needs no order to reach: the rate-limit
+# counter is itself a KV write, so any form POST finds the ceiling first. On a day with writes
+# left the same POST gets the ordinary refusal, which is why only the "is a page" assertion is
+# unconditional and the buyer-worded ones are gated on the cap.
+QFORGE='v1.9999999999.eyJhIjoicHJvb2YifQ.deadbeef'
+QPOST=$(curl -s -m 30 -X POST -H 'content-type: application/x-www-form-urlencoded' \
+  -d 'form=1&cap='"$QFORGE"'&proof=ZCPROBE' "$ORIGIN/api/proof")
+ck "  · a browser posting to the buyer's door always gets a page" '<h2' "$QPOST"
+if [[ "$NOWRITE" == 1 ]]; then
+  ck "  · a spent budget is spoken to the buyer, about their order" 'the order stands exactly as it was' "$QPOST"
+  ck "  · and it prunes nothing, because a full budget is not an answer" '^0$' "$(printf '%s' "$QPOST" | grep -c '<script>')"
+  ck "  · with the time to come back in a header, not in prose" '^[0-9]{4,}$' \
+    "$(curl -s -o /dev/null -m 30 -w '%header{retry-after}' -X POST -H 'content-type: application/x-www-form-urlencoded' -d 'form=1&cap='"$QFORGE"'&proof=ZCPROBE' "$ORIGIN/api/proof")"
+fi
 
 # ---- 0.7.4: the chase carries the door, and the shop can file what it was sent
 # The buyer's door closes when the order is settled, and the refusal text sends people

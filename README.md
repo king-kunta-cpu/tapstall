@@ -250,6 +250,10 @@ verified ZW/SA tariffs) but it is now a **default, not the whole answer**:
   `shell(title, body)`, which takes two arguments, so every "Not added" answered HTTP 200 with
   no robots tag; and a rate-limited form post handed the browser a JSON blob, which is now a
   page that says nothing was lost and keeps the entry where it is.
+  On a day when the account's 1,000 KV writes are spent, the door also answers the buyer in
+  the buyer's own words — a page that says the order stands as it was, with `Retry-After`, and no
+  pruning — instead of the JSON blob about the merchant's settings that the shared catch used to
+  hand to a phone mid-payment (v0.7.8).
 
 An invalid description at sign-up becomes `cash` rather than a rejected
 registration: a merchant who never opens the shop is worse than one whose slip

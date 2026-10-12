@@ -2666,3 +2666,39 @@ test('an answer that ends the door puts it down; a busy minute and a blank box d
   assert.equal(dead.status, 401, dead.text.slice(0, 120));
   assert.ok(!/<script>/.test(dead.text), 'and that stays true: an unverified link executes nothing in a buyer\u2019s browser, even to tidy up');
 });
+
+test('a spent write budget answers the door in the buyer’s words, and keeps the link', async () => {
+  const h = 'zzquota' + String(Date.now()).slice(-5);
+  const reg = await call('/api/register', { method: 'POST', body: {
+    handle: h, shop_name: 'Quota Door', whatsapp: '263771234567', rail: 'zipit', pay_account: '1234567890', currency: 'USD',
+  } });
+  assert.equal(reg.status, 201, reg.text);
+  const ord = await call('/api/order', { method: 'POST', ip: '196.36.0.1', body: { handle: h, service: 'pickup',
+    buyer: { name: ' Rutendo', phone: '0780005511' }, items: [{ name: 'Box', price: 15 }] } });
+  assert.equal(ord.status, 201, ord.text);
+  const cap = ord.json.proof_url.slice(3);
+  const put = env.ORDERS.put;
+  env.ORDERS.put = async () => { throw new Error('put() limit exceeded for the day'); };
+  try {
+    const page = await call('/api/proof', { method: 'POST', ip: '196.36.0.2',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: form({ cap, form: '1', proof: 'QUOTA-1' }) });
+    assert.equal(page.status, 503, 'the write genuinely failed, and says so with its real code: ' + page.text.slice(0, 140));
+    assert.match(page.text, /<h2/, 'to a person who posted a form it is a page, not a blob');
+    assert.match(page.text, /the order stands exactly as it was/, 'and it speaks about the order, not about the shop’s settings');
+    assert.ok(!/your settings/i.test(page.text), 'the merchant’s sentence is not this reader’s sentence');
+    assert.ok(!/tp_pf_/.test(page.text), 'and it puts the door down nowhere: a full budget is not an answer about the order');
+    assert.ok(Number(page.headers.get('retry-after')) > 0, 'Retry-After rides the page too, so a reload is not guesswork');
+    assert.equal(page.headers.get('x-robots-tag'), 'noindex, nofollow');
+    const api = await call('/api/proof', { method: 'POST', ip: '196.36.0.3', body: { cap, proof: 'QUOTA-2' } });
+    assert.equal(api.status, 503, api.text.slice(0, 140));
+    assert.equal(api.json.who, 'buyer', 'a JSON caller is still told who is affected, and it is not the merchant');
+    const doc = JSON.parse(env.ORDERS._map.get('order:' + h + ':' + ord.json.order.id).value);
+    assert.ok(!doc.buyer || !doc.buyer.proof, 'nothing half-landed: ' + JSON.stringify(doc.buyer));
+  } finally {
+    env.ORDERS.put = put;
+  }
+  const ok = await call('/api/proof', { method: 'POST', ip: '196.36.0.4', body: { cap, proof: 'AFTER BUDGET' } });
+  assert.equal(ok.status, 200, 'and the same link works the moment the shop can write again: ' + ok.text.slice(0, 140));
+  assert.equal(JSON.parse(env.ORDERS._map.get('order:' + h + ':' + ord.json.order.id).value).buyer.proof, 'AFTER BUDGET',
+    'the door was never closed by the outage, so nothing had to be re-issued');
+});

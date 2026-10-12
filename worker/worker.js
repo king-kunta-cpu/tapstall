@@ -30,7 +30,7 @@ import {
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '0.7.7';
+const VERSION = '0.7.8';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 const MAX_ORDERS_KEPT = 200;
@@ -109,7 +109,7 @@ export default {
       return open ? openCors(res) : res;
     } catch (e) {
       const msg = String((e && e.message) || e);
-      const spent = quotaAnswer(msg, url.pathname);
+      const spent = quotaAnswer(msg, url.pathname, req);
       if (spent) return open ? openCors(spent) : spent;
       return json({ ok: false, error: msg, stage: 'worker' }, 500);
     }
@@ -2299,10 +2299,20 @@ async function opsAuthed(req, env) {
    Anything that catches and reshapes an error (opsGate below) has to consult
    this too, or the whole point is lost one layer down. */
 const QUOTA_RE = /put\(\) limit|write.*limit|CPU time exceeded|Memory limit/i;
-function quotaAnswer(msg, pathname) {
+function quotaAnswer(msg, pathname, req) {
   if (!QUOTA_RE.test(msg)) return null;
   const secs = secsToMidnightUTC();
-  const buyerish = pathname === '/api/order' || pathname === '/api/lookup';
+  // The buyer's door is a public write like the cart, and a browser reaches it with a
+  // <form>. Two things follow on a day the account has spent its 1,000 writes: the answer
+  // is addressed to the buyer, not to the merchant whose settings are nothing to do with
+  // this, and it is a page, not a JSON blob in the middle of someone's payment. It is also
+  // not an answer about the order — a full budget is a fact about the shop's plan — so the
+  // page prunes nothing: the link the buyer is holding still works the moment the shop can
+  // write again, and the storefront line stays up to bring them back to it.
+  const doorForm = pathname === '/api/proof'
+    && String((req && req.headers && req.headers.get('content-type')) || '')
+         .includes('application/x-www-form-urlencoded');
+  const buyerish = pathname === '/api/order' || pathname === '/api/lookup' || pathname === '/api/proof';
   const merchantish = pathname.indexOf('/api/') === 0 || /^\/(a|c\/|renew\/)/.test(pathname);
   const who = buyerish ? 'buyer' : merchantish ? 'merchant' : 'operator';
   const line = who === 'buyer'
@@ -2310,6 +2320,12 @@ function quotaAnswer(msg, pathname) {
     : who === 'merchant'
       ? 'Nothing was saved, and nothing was half-saved: your settings are exactly as they were. The account\u2019s storage writes are spent for today — try again in a few hours.'
       : 'Nothing was written. The account has spent its free storage writes for today (1,000/day on the free Workers plan), so this lever will work again in a few hours. Upgrade to the $5 plan and the ceiling goes away.';
+  if (doorForm) {
+    return html(shell("Not saved", `<h2 style="margin:.1rem 0 .5rem">Not saved</h2>`
+        + `<p class=t>The shop cannot take a code at this moment — its storage allowance for the day is spent. Nothing you sent was lost, and the order stands exactly as it was.</p>`
+        + `<p class=t>Try again in a few hours, or paste it into the chat with the shop: it is the same field either way.</p>`),
+      503, Object.assign({ 'Retry-After': String(secs) }, NOINDEX));
+  }
   return json({ ok: false, retry_in_sec: secs, detail: msg, who, error: line },
     503, { 'Retry-After': String(secs), 'Cache-Control': 'no-store' });
 }

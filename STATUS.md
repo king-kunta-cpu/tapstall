@@ -1,6 +1,6 @@
 # Tapstall — status
 
-## Every answer at the door closes it (2026-10-12, v0.7.7)
+## Every answer at the door closes it (2026-10-12, v0.7.7 → v0.7.8)
 
 **Fourth time the same instruction came back, and what was left was the door's own manners.**
 The field, the chase that ends at it, the device that remembers it and the sender number that
@@ -32,14 +32,27 @@ blob in the browser, because the rate limit answers before the body is read. It 
 now — "Nothing you have already sent was lost, and one more minute is all it needs" — decided from
 the request's own content type, which is the only thing visible that early.
 
-**Checked.** `npm test` **206/206** (core 77 · live 85 · pages 34 · limits 10). The new live test
+**A spent budget is not an answer about the order.** Today is the kind of day that proves
+it: the account has no KV writes left, so a buyer posting a code reaches `ORDERS.put`, the put
+throws, and the global catch used to answer **a JSON blob addressed to the merchant** — "your
+settings are exactly as they were" — in the middle of someone's payment. `/api/proof` is now a
+buyer path in `quotaAnswer`, and a form post to it gets a page: *Not saved — the shop cannot
+take a code at this moment … Nothing you sent was lost, and the order stands exactly as it was*,
+with `Retry-After` and `noindex`, and **no prune**: the link works the hour the shop can write
+again, and the storefront line stays up to bring them back to it. v0.7.8.
+
+**Checked.** `npm test` **207/207** (core 77 · live 86 · pages 34 · limits 10). The new live test
 walks one order through all seven states and asserts the entry survives exactly where it should:
 blank → 422, keeps it; flood → 429 page, keeps it; settled page and settled post → prune; deleted
 order → prune; revocation, on the page *and* on the write path → prune; forged cap → no script at
-all. `prod_check.sh` gains three lines, one of which (`nk`, an unverified link running nothing)
-verifies today with no KV write at all, and the two that need an order are `ckw` as usual on a
-capped day. The Worker moved to 0.7.7 on both hostnames; `pages/store.html` did not change, so the
-storefront page is still the one waiting for the 00:20 UTC publish.
+all. `prod_check.sh` gains seven lines: three for the closing — one of them an `nk` that needs
+no write and went green today — and four for the budget page, three of which are only true on a
+capped day, which today is, so all four ran against the live Worker: **195 passed / 76 blocked /
+0 failed**. Two older lines moved from red to blocked for the same reason as the rest of them: they
+read something the Worker itself writes (`hooks:<hour>:refused`, and the Sent page), and on a day
+with no writes left nothing can create them. The Worker is 0.7.8 on both hostnames;
+`pages/store.html` did not change, so the storefront page is still the one waiting for the 00:20
+UTC publish.
 
 ## The door is kept, and it takes the whole record (2026-10-12, v0.7.5 → v0.7.6)
 
