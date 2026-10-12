@@ -32,10 +32,17 @@ code but could never **send the field back**.
   for an empty field. `pfTok` cuts the token at the `/p/` marker rather than at character three,
   because the receipt’s URL is relative and a ledger read’s is absolute.
 
-`prod_check.sh` gains 15 write-gated lines (blocked on a capped day, as the rule says) and 6
-static ones. Every new pattern was replayed against the shipped page bytes and against the exact
-JSON the routes emit, and six of them against values they must *not* match — two needed their
-parentheses escaped before they matched anything at all, which is what that replay is for.
+**Checked.** `npm test` **216/216** (core 79 · live 90 · pages 37 · limits 10), `deploy.sh --check`
+green including the ui-kit sync that proves `pages/admin.html` is the generated form of
+`pages/src/admin.html`, and `prod_check.sh` **205 passed / 92 blocked / 0 failed** on a capped day:
+12 new write-gated checks sitting in the blocked column exactly as the rule says they should, and
+6 new static ones passing against the shipped page. Every new pattern was replayed with `grep -qE`
+against those page bytes and against the exact JSON these routes emit, plus six fixtures they must
+*not* match — two of my own patterns needed their parentheses escaped before they matched anything
+at all, which is what that replay is for. Live: `__ping` answers `{"ok":true,"version":"0.8.1"}`,
+CI run #76 `exit=0`, and the two pages still owed (`store` 39,588 B, `admin` 94,163 B) were
+reported by the *other* fix from today — `NOT PUBLISHED — this account's KV write budget is spent
+(429/10048) … the Worker is deployed regardless` — one attempt each, not three.
 
 **Also fixed:** `load_secrets` now looks in `$HOME/.secrets` as well as the repo’s, and tolerates a
 secret file with no trailing newline — `read` returns 1 at EOF, and under `set -e` that was a
