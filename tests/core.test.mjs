@@ -943,3 +943,33 @@ test('an absent field is left alone, not erased', () => {
   assert.equal(C.proofOpen({ status: 'paid' }), false);
   assert.equal(C.proofOpen({}), true, 'an order with no status yet is open — refusing would strand it');
 });
+
+test('the ask can name a door, and says nothing about one that does not exist', () => {
+  const rail = { key: 'zipit', label: 'Zimswitch', type: 'manual', spec: 'bank', proof: 'require' };
+  const owe = { status: 'awaiting_payment', buyer: { proof: '' }, pricing: { rail } };
+  assert.equal(C.proofAsk(owe), 'Need: Reference from your bank — your app shows it right after it sends. Send it here and I can confirm your order today.',
+    'unchanged words when the caller has no door: the old sentence, byte for byte');
+  const withDoor = C.proofAsk(owe, { here: 'https://tapstall.test/p/v1.abc' });
+  assert.match(withDoor, /Add it here and I can confirm your order today: https:\/\/tapstall\.test\/p\/v1\.abc$/, 'and one clause swapped when it has');
+  assert.match(C.proofAsk({ ...owe, pricing: { rail: { ...rail, proof: 'ask' } } }, { here: 'https://x/p/1' }),
+    /add it here and it goes straight on the order: https:\/\/x\/p\/1/, 'the optional mode offers the door without demanding it');
+  assert.ok(!/http/.test(C.proofAsk({ ...owe, buyer: { proof: 'HAS' } }, { here: 'https://x/p/1' })), 'answered is silent, door or no door');
+});
+test('the shop’s own door has no budget and no closing hour, and the same field rules', () => {
+  const paid = { status: 'paid', buyer: { proof: '', payer: '+263770001111' } };
+  const r = C.proofAccept(paid, { proof: 'IN CHAT' }, 'merchant');
+  assert.equal(r.ok, true, 'a code that arrived after the money was counted is the most legitimate write in the file');
+  assert.equal(r.by, 'merchant', 'and the answer says whose hand did it, so the record can too');
+  assert.equal(r.status, undefined, 'no status in, no status out — not from either door');
+  assert.equal(r.payer, '+263770001111', 'the untouched half of the buyer object carries forward');
+  assert.equal(r.writes, 0, 'a shop write does not spend the buyer’s three corrections');
+  const spent = { status: 'awaiting_payment', buyer: {}, proof_writes: C.PROOF_WRITES_MAX };
+  assert.equal(C.proofAccept(spent, { proof: 'A' }, 'merchant').ok, true, 'nor does it spend the buyer’s allowance when the shop files');
+  assert.equal(C.proofAccept(spent, { proof: 'A' }, 'buyer').why, 'spent', 'the stranger’s door is still shut at three');
+  assert.equal(C.proofAccept(paid, { proof: 'A' }, 'buyer').why, 'settled', 'and shut at settle');
+  assert.equal(C.proofAccept({ status: 'paid', buyer: {} }, {}, 'merchant').msg, 'Nothing to file — type the code they sent you.',
+    'the blank refusal is written for the hand holding the phone: a buyer is told where to look, a shop is told what it failed to do');
+  assert.equal(C.proofAccept(paid, {}, 'merchant').changed, false,
+    'and a submit with no boxes that would change nothing says so, rather than clearing the payer it was never given');
+  assert.equal(C.proofAccept(paid, { proof: 'x'.repeat(80) }, 'merchant').proof.length, 40, 'the same 40 characters, because it is one field');
+});

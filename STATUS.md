@@ -1,5 +1,60 @@
 # Tapstall — status
 
+## The last mile of the same field (2026-10-12, v0.7.4)
+
+**The instruction came back, so the feature went deeper.** 0.7.3 let a buyer add their
+own code from the receipt. Two things were still false at the edges of that, and this
+release is only those two.
+
+**(1) The chase now ends at a door.** `proofAsk`'s sentence used to say *"Send it here"*
+while "here" was a chat window. So `withAsk` mints a `proof` capability while it writes
+the row's `ask` — `proofAsk(order, { here })` swaps one clause — and because the
+merchant's two taps already append `ask`, *WhatsApp buyer* and *Copy slip* now both carry
+an absolute `/p/<cap>` link. That is the whole change, and it also answers the failure 0.7.3
+left open: a buyer who closed the receipt lost the door for 72 hours. Minted per read,
+one HMAC, **no KV write**, nothing stored — a buyer needs the next message, not the old
+link. A settled order's row keeps its sentence and gets no link: `proofOpen` decides
+both halves, so the page and the machine still cannot disagree.
+
+**(2) The shop can file what a buyer sent in chat.** A code that arrives after the money
+was counted had nowhere to go — the buyer's door was closed by design and the merchant had
+no field at all, which made the honest answer "your record is wrong forever". So
+`POST /api/order/proof` exists: `identify` only, no capability read anywhere in the
+handler, no rate bucket (it is the owner's ledger), **no** open-state gate and **no**
+three-write budget, because both of those exist to bound a stranger. Same `proofAccept`,
+`by: 'merchant'` — same cleaning, same "an absent field is left alone", and the one rule
+that does not bend: it cannot write `status`. `proof_by` records which hand filed it, the
+audit row says `via: 'merchant'`, and the buyer's allowance is untouched by a shop write
+(`proof_writes` stays where it was, asserted). The dashboard row grows one input and one
+button when a code is owed or the order is open, prefilled with what the buyer sent, so
+"correct it" is the same gesture as "file it".
+
+**One voice per door.** The blank-field refusal is written for whoever is standing at the
+field: the buyer is told where to look, the shop is told what it failed to do
+(`Nothing to file — type the code they sent you.`). A shared sentence read from the wrong
+side is a support message, and a test pins both strings.
+
+**Generated pages, caught as designed.** The dashboard is built from `pages/src/admin.html`
+by `scripts/ui_kit.py`, and the first edit went to the shipped copy; the drift test failed
+it inside the same minute. The edit went to the source and `python3 scripts/ui_kit.py`
+regenerated. `store.html` has no source counterpart — it is hand-authored — which is why
+0.7.3's receipt edit was fine where it was.
+
+**Checked.** `npm test` **200/200** (core 76 · live 81 · pages 33 · limits 10): the minted
+row link is driven end to end and accepted; a paid row keeps its words and gains no door;
+the shop files over a buyer's value on a settled order with `status` unmoved and the
+buyer's budget intact; `proof_url` is absolute where a chat needs it and relative in the
+order response; anonymous 401 with `need_login`, a `proof` cap offered to the merchant
+door is not even read, GET 405, blank 422, replay `changed:false`, ghost id 404, and the
+sentence byte-for-byte unchanged when no door was minted. `prod_check.sh` grew nine lines
+on the live Worker — including reading the stored order out of KV for `"proof_by":
+"merchant"` beside `"proof_writes":1` — and cancels both probe orders at the end.
+
+**Not done, on purpose.** The merchant's `markPaid` session path still does not check
+`p.g` against `auth_gen` for `/c/` links (raised, unanswered, untouched — no line of it
+changed in either release), and `pages/admin.html`'s filed value has no "clear" gesture:
+an empty box refuses, which is the same rule the buyer's door runs.
+
 ## The buyer closes the loop themselves (2026-10-12, v0.7.3)
 
 **The ask, kept exactly.** *"letting a buyer add their code after the order from the

@@ -506,3 +506,13 @@ test('the buyer’s link is not stitched into anything the shop reads', () => {
   assert.match(worker, /a: 'proof', h: st\.handle, id, g:/, 'and the mint binds the link to one handle, one order and the shop’s current generation');
   assert.ok(!/order\.proof_url/.test(worker), 'the link is never stored on the order document, so the merchant cannot hold it');
 });
+
+test('the ledger gives the shop the same one box, on its own side', () => {
+  const admin = page('admin');
+  assert.match(admin, /data-pf="/, 'a field per row that needs one, keyed to the order');
+  assert.match(admin, /data-pfs="/, 'and one button beside it');
+  assert.match(admin, /api\('\/api\/order\/proof'/, 'posted to the shop’s own endpoint, never to /api/mark and never with a capability');
+  assert.match(admin, /o\.ask \|\| open\(o\)/, 'shown when a code is owed or the order is still open, so a settled row that answered shows nothing');
+  assert.match(admin, /value="' \+ esc\(\(o\.buyer && o\.buyer\.proof\) \|\| ''\)/, 'prefilled with what the buyer sent, so a correction is the same gesture');
+  assert.match(admin, /an empty box is not a filing/, 'and the box refuses to post itself empty, which is what the 422 exists for');
+});

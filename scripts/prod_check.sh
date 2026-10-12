@@ -268,6 +268,40 @@ BOGUS=$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"v1
 ckw "a cap nobody minted is refused in the same words as an expired one" 'does not open this field' "$BOGUS"
 ck  "  · and the write endpoint is POST-only, so a prefetch cannot use it" '^405$' "$(code "$ORIGIN/api/proof")"
 
+# ---- 0.7.4: the chase carries the door, and the shop can file what it was sent
+# The buyer's door closes when the order is settled, and the refusal text sends people
+# to the chat. Two things follow, and both are checked here rather than in a comment:
+# the ask a merchant copies has to end at a link that still works, and a code that
+# arrives in the chat has to have somewhere to land.
+DASHC=$(curl -s -m 30 -H "x-tapstall-admin: $ADMIN_KEY" "$ORIGIN/api/admin?handle=$HANDLE")
+ROWC=$(printf '%s' "$DASHC" | python3 -c "import sys,json;print(json.dumps(next((o for o in json.load(sys.stdin).get('orders',[]) if o.get('id')=='$ID'), {})))" 2>/dev/null)
+ck  "a row whose code has arrived asks for nothing" '^none$' "$(printf '%s' "$ROWC" | python3 -c "import sys,json;d=json.load(sys.stdin);print('none' if 'ask' not in d else 'still asking')" 2>/dev/null)"
+ORD2=$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{
+  "handle":"'"$HANDLE"'","service":"pickup",
+  "buyer":{"name":"prod check two","phone":"0700000002","optin":true},
+  "items":['"$PROBE"']}' "$ORIGIN/api/order")
+ID2=$(printf '%s' "$ORD2" | python3 -c "import sys,json;print(json.load(sys.stdin)['order']['id'])" 2>/dev/null)
+MARK2=$(printf '%s' "$ORD2" | python3 -c "import sys,json;print(json.load(sys.stdin).get('mark_url',''))" 2>/dev/null)
+DASH2=$(curl -s -m 30 -H "x-tapstall-admin: $ADMIN_KEY" "$ORIGIN/api/admin?handle=$HANDLE")
+ROW2=$(printf '%s' "$DASH2" | python3 -c "import sys,json;print(json.dumps(next((o for o in json.load(sys.stdin).get('orders',[]) if o.get('id')=='$ID2'), {})))" 2>/dev/null)
+ckw "a row that still owes a code carries a door for the buyer" '/p/v1\.' "$ROW2"
+ckw "  · inside the shop's own sentence, which is what gets copied or tapped" '[Aa]dd it here and (it goes straight on the order|I can confirm your order today)' "$ROW2"
+ck  "  · and the sentence ends at exactly that URL, so a copied slip cannot offer a different door" '^same$' "$(printf '%s' "$ROW2" | python3 -c "import sys,json;d=json.load(sys.stdin);print('same' if d.get('proof_url') and d.get('ask','').endswith(d['proof_url']) else 'different')" 2>/dev/null)"
+PURL2=$(printf '%s' "$ROW2" | python3 -c "import sys,json;print(json.load(sys.stdin).get('proof_url',''))" 2>/dev/null)
+CAP2=${PURL2##*/p/}
+B2="ZC2-$(date +%s | tail -c 6)"
+FROMDOOR=$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"$CAP2"'","proof":"'"$B2"'"}' "$ORIGIN/api/proof")
+ckw "  · and the minted link is live, not decorative" '"changed":true' "$FROMDOOR"
+FILED=$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" \
+  -d '{"handle":"'"$HANDLE"'","id":"'"$ID2"'","proof":"CHAT-'"$B2"'"}' "$ORIGIN/api/order/proof")
+ckw "the shop files a code that arrived in the chat over the buyer's own" '"changed":true' "$FILED"
+KV2=$(curl -s -m 30 -H "Authorization: Bearer $TOK" "https://api.cloudflare.com/client/v4/accounts/$ACCT/storage/kv/namespaces/$ORD_KV/values/order:$HANDLE:$ID2")
+ckw "  · on the order document, in the shop's hand" '"proof_by":"merchant"' "$KV2"
+ckw "  · the buyer's correction budget untouched by a shop write" '"proof_writes":1' "$KV2"
+ck  "  · no public door reaches this write at all" '^401$' "$(code -X POST -H 'content-type: application/json' -d '{"handle":"'"$HANDLE"'","id":"'"$ID2"'","proof":"X"}' "$ORIGIN/api/order/proof")"
+ck  "  · a GET is refused, so a link prefetch files nothing" '^405$' "$(code "$ORIGIN/api/order/proof")"
+ck  "  · and a blank box is answered in the shop's own voice" 'Nothing to file' "$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" -d '{"handle":"'"$HANDLE"'","id":"'"$ID2"'","proof":"   "}' "$ORIGIN/api/order/proof")"
+
 echo "[5] settings: cosmetic instant, money held 15 minutes, cancellable"
 HOURS=$(printf '%s' "$STORE" | python3 -c "import sys,json;print(json.load(sys.stdin).get('hours','') or 'open')" 2>/dev/null)
 PROBE="ZZ-PROBE-$(date +%s | tail -c 6)"
@@ -699,6 +733,9 @@ echo "[14] tidy up"
 CK2=$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" \
   -d '{"handle":"'"$HANDLE"'","id":"'"$ID"'","status":"cancelled"}' "$ORIGIN/api/mark")
 ckw "probe order cancelled" '"status":"cancelled"' "$CK2"
+CK3=$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" \
+  -d '{"handle":"'"$HANDLE"'","id":"'"$ID2"'","status":"cancelled"}' "$ORIGIN/api/mark")
+ckw "the second probe order cancelled too, so nothing is left to act on" '"status":"cancelled"' "$CK3"
 rm -f "$H" "$JAR"
 echo
 printf '%s\n' "passed: $pass   blocked by the day's KV budget: $blocked   failed: $fail"

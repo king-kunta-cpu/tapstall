@@ -2069,6 +2069,89 @@ test('the buyer’s door is throttled on its own, and stays off the shop’s all
   assert.equal(other.status, 201, 'ordering from the same address is untouched by a flooding neighbour: ' + other.text);
 });
 
+test('the chase the merchant sends now ends at a door the buyer can open', async () => {
+  const h = 'zzchase' + String(Date.now()).slice(-5);
+  const reg = await call('/api/register', { method: 'POST', body: {
+    handle: h, shop_name: 'Chase Test', whatsapp: '263771234567', rail: 'zipit', pay_account: '1234567890', currency: 'USD',
+  } });
+  assert.equal(reg.status, 201, reg.text);
+  const key = JSON.parse(env.STORES._map.get('store:' + h).value).admin_token;
+  const ord = await call('/api/order', { method: 'POST', ip: '196.32.0.1', body: { handle: h, service: 'pickup',
+    buyer: { name: 'Simba N', phone: '0780007788' }, items: [{ name: 'Box', price: 60 }] } });
+  assert.equal(ord.status, 201, ord.text);
+  const dash = await call('/api/admin?handle=' + h, { headers: { 'x-tapstall-admin': key } });
+  const row = dash.json.orders.find((o) => o.id === ord.json.order.id);
+  assert.match(row.ask, /Add it here and I can confirm your order today: https:\/\/tapstall\.test\/p\/v1\./,
+    'the sentence the shop copies ends at a real field: ' + row.ask);
+  assert.ok(row.ask.endsWith(row.proof_url), 'and the sentence ends at exactly the URL the row carries, so a copied slip and a tapped message cannot offer two different doors');
+  // the point of minting it at read time is that the link the merchant sends works
+  // absolute on this surface, because the row’s text is copied into a chat where a
+  // relative path is a broken link — so the test has to cut the path off properly
+  assert.ok(/^https:\/\/tapstall\.test\/p\/v1\./.test(row.proof_url), 'and it is absolute, which is what a chat message needs: ' + row.proof_url);
+  const added = await call('/api/proof', { method: 'POST', ip: '196.32.0.2', body: { cap: row.proof_url.replace(/^.*\/p\//, ''), proof: 'SENT-IN-CHAT' } });
+  assert.equal(added.status, 200, 'a buyer who lost the receipt gets a working door from the next message: ' + added.text);
+  assert.equal(JSON.parse(env.ORDERS._map.get('order:' + h + ':' + ord.json.order.id).value).buyer.proof, 'SENT-IN-CHAT');
+  const after = await call('/api/admin?handle=' + h, { headers: { 'x-tapstall-admin': key } });
+  assert.equal(after.json.orders.find((o) => o.id === ord.json.order.id).ask, undefined,
+    'and the row stops asking the moment the code is in, minted or not');
+  // a settled order keeps its sentence and gains no door: no live write for a closed record
+  const paid = await call('/api/order', { method: 'POST', ip: '196.32.0.3', body: { handle: h, service: 'pickup',
+    buyer: { name: 'Paid One', phone: '0780007799' }, items: [{ name: 'Box', price: 60 }] } });
+  await call('/api/mark', { method: 'POST', ip: '196.32.0.4', body: { cap: paid.json.mark_url.slice(3) } });
+  const settled = (await call('/api/admin?handle=' + h, { headers: { 'x-tapstall-admin': key } })).json.orders.find((o) => o.id === paid.json.order.id);
+  assert.match(settled.ask, /Need: Reference from your bank/, 'the chase is still readable on a paid row');
+  assert.ok(!/tapstall\.test\/p\//.test(settled.ask), 'but it offers no link that would only fail at the end: ' + settled.ask);
+  assert.equal(settled.proof_url, undefined, 'and the row carries no capability the shop did not need to mint');
+});
+
+test('the shop can file the code the buyer sent in chat, and it is called what it is', async () => {
+  const h = 'zzfile' + String(Date.now()).slice(-5);
+  const reg = await call('/api/register', { method: 'POST', body: {
+    handle: h, shop_name: 'File Test', whatsapp: '263771234567', rail: 'zipit', pay_account: '1234567890', currency: 'USD',
+  } });
+  assert.equal(reg.status, 201, reg.text);
+  const key = JSON.parse(env.STORES._map.get('store:' + h).value).admin_token;
+  const hdr = { 'x-tapstall-admin': key };
+  const ord = await call('/api/order', { method: 'POST', ip: '196.32.0.5', body: { handle: h, service: 'pickup',
+    buyer: { name: 'Rwot S', phone: '0780008811' }, items: [{ name: 'Box', price: 15 }] } });
+  await call('/api/mark', { method: 'POST', ip: '196.32.0.6', body: { cap: ord.json.mark_url.slice(3) } });   // counted, then the code arrives
+  const id = ord.json.order.id;
+  const docKey = 'order:' + h + ':' + id;
+  const filed = await call('/api/order/proof', { method: 'POST', headers: hdr, body: { handle: h, id, proof: ' 8812 .RT ' } });
+  assert.equal(filed.status, 200, filed.text);
+  assert.equal(filed.json.changed, true, 'and it is a write, on a settled order, because it is their ledger');
+  const doc = JSON.parse(env.ORDERS._map.get(docKey).value);
+  assert.equal(doc.buyer.proof, '8812 .RT', 'trimmed the same way a buyer’s field is');
+  assert.equal(doc.status, 'paid', 'a reference filed after the money was counted moves no money');
+  assert.equal(doc.proof_by, 'merchant', 'and the row says who put it there');
+  assert.equal(doc.proof_writes, undefined, 'a shop write does not eat the buyer’s three corrections');
+  const row = JSON.parse(env.ORDERS._map.get('list:' + h).value).find((x) => x.id === id);
+  assert.equal(row.proof, '8812 .RT', 'the ledger row agrees, so the badge leaves with the ask');
+  assert.equal((await call('/api/admin?handle=' + h, { headers: hdr })).json.orders.find((o) => o.id === id).ask, undefined,
+    'the chase sentence is gone, with no extra wiring, because proofAsk sees the value');
+  const audit = (await call('/api/admin?handle=' + h, { headers: hdr })).json.audit.find((a) => a.act === 'proof');
+  assert.equal(audit.via, 'merchant', 'named as a shop write in the paper trail, not smuggled in as the buyer’s');
+  const again = await call('/api/order/proof', { method: 'POST', headers: hdr, body: { handle: h, id, proof: '8812 .RT' } });
+  assert.equal(again.json.changed, false, 'the same value twice is not a second edit');
+  assert.equal(env.ORDERS._writesTo(docKey), env.ORDERS._writesTo(docKey), 'and it is refused before any write is spent');
+  const empty = await call('/api/order/proof', { method: 'POST', headers: hdr, body: { handle: h, id, proof: '   ' } });
+  assert.equal(empty.status, 422, 'a blank box is answered, not obeyed: ' + empty.text);
+  assert.match(empty.json.error, /^Nothing to file — type the code they sent you\.$/,
+    'in the shop’s own voice, because the buyer’s sentence would read as an insult at the wrong end: ' + empty.json.error);
+  const buyerVoice = await call('/api/proof', { method: 'POST', ip: '196.32.0.7', body: { cap: (await call('/api/admin?handle=' + h, { headers: hdr })).json.orders.find((o) => o.id === id).proof_url || 'x', proof: '' } });
+  assert.ok(buyerVoice.status === 422 || buyerVoice.status === 409 || buyerVoice.status === 401,
+    'the buyer’s door answers a blank with its own sentence, whatever the state: ' + buyerVoice.text);
+  const ghost = await call('/api/order/proof', { method: 'POST', headers: hdr, body: { handle: h, id: 'nope', proof: 'X' } });
+  assert.equal(ghost.status, 404, 'an id the shop does not have is not written to');
+  const anon = await call('/api/order/proof', { method: 'POST', body: { handle: h, id, proof: 'X' } });
+  assert.equal(anon.status, 401, 'no key, no write — this door is not public at all: ' + anon.text);
+  assert.equal(anon.json.need_login, true, 'and it sends the merchant to sign in, the same as any other shop write');
+  const withCap = await call('/api/order/proof', { method: 'POST', body: { cap: ord.json.proof_url.slice(3), handle: h, id, proof: 'X' } });
+  assert.equal(withCap.status, 401, 'a capability cannot be traded up into the merchant door: it is not read here');
+  const got = await call('/api/order/proof?handle=' + h + '&id=' + id);
+  assert.equal(got.status, 405, 'and it is POST-only like every other write');
+});
+
 test('a save frees the picture it dropped even when the index cannot see it yet', async () => {
   // Production fact this exists for: KV's list() is only eventually consistent, and
   // the file a merchant just took off is usually the newest key in the namespace, so

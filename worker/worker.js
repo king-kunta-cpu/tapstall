@@ -30,7 +30,7 @@ import {
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '0.7.3';
+const VERSION = '0.7.4';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 const MAX_ORDERS_KEPT = 200;
@@ -233,7 +233,7 @@ async function route(req, url, env, ctx) {
   }
 
   // ---- merchant authority: a code becomes a cookie, and only POSTs act ----
-  const MUT = /^\/api\/(mark|proof|settings|settings\/revert|menu|revoke|auth|pin\/change|pin\/reset|login|logout|recover|image)$/;
+  const MUT = /^\/api\/(mark|proof|order\/proof|settings|settings\/revert|menu|revoke|auth|pin\/change|pin\/reset|login|logout|recover|image)$/;
   // /api/mark answers its own 405, because it also has to recognise a v0.2
   // ?token= link and trade it for a session rather than dead-end the merchant.
   const selfHandled = p === '/api/mark';
@@ -257,6 +257,9 @@ async function route(req, url, env, ctx) {
   if (p === '/api/lookup') return lookup(url, env);
   if (p === '/api/mark') return markPaid(req, url, env);
   if (p === '/api/proof' && req.method === 'POST') return proofAdd(req, url, env);
+  // The shop's half of the same field, on the shop's own authority: no capability is
+  // read here, so no link — including a leaked one — can reach this write.
+  if (p === '/api/order/proof' && req.method === 'POST') return proofFile(req, url, env);
   if (p === '/api/admin') return adminView(req, url, env);
   if (p === '/api/settings' && req.method === 'POST') return settingsEdit(req, url, env);
   if (p === '/api/settings/revert' && req.method === 'POST') return revertPending(req, url, env);
@@ -761,7 +764,7 @@ async function proofAdd(req, url, env) {
   const key = `order:${st.handle}:${p.id}`;
   const o = await env.ORDERS.get(key, "json");
   if (!o) return no("no such order", 404);
-  const r = proofAccept(o, { proof: b.proof == null ? null : String(b.proof), payer: b.payer == null ? null : String(b.payer) });
+  const r = proofAccept(o, { proof: b.proof == null ? null : String(b.proof), payer: b.payer == null ? null : String(b.payer) }, 'buyer');
   if (!r.ok) return no(r.msg, r.why === "settled" ? 409 : r.why === "spent" ? 429 : 422, st.handle);
   if (r.changed) {
     const when = new Date().toISOString();
@@ -939,7 +942,10 @@ async function adminView(req, url, env) {
       // should be able to see "changed 3 days ago" without the dashboard ever
       // holding a credential it could leak
       pin_set_at: st.pin ? (st.pin.set_at || null) : null },
-    orders: orders.filter(Boolean).map(withAsk),
+    // read-time, like the sentence itself: a mint costs one HMAC and no KV write, so
+    // the dashboard can hand every open row a live link without storing anything that
+    // outlives the request
+    orders: await Promise.all(orders.filter(Boolean).map((o) => withAsk(o, st, url.origin, env))),
     // the owner sees the real queued value — cancelling is useless if they
     // cannot check what was typed — while the append-only log keeps it masked
     pending: st.pending ? { keys: Object.keys(st.pending.fields), apply_at: st.pending.apply_at, in_ms: Math.max(0, st.pending.apply_at - Date.now()), fields: st.pending.fields } : null,
@@ -2649,11 +2655,69 @@ async function opsStoreDetail(url, env) {
 /* A row that owes the shop a payment code carries the words to ask for it, written by
  * the same function the slip came from. Read-time on purpose: the sentence depends on
  * the rail as frozen on the order, and a merchant who renames what they call it should
- * not have to wait for a re-price to get the new wording. */
-function withAsk(o) {
+ * not have to wait for a re-price to get the new wording.
+ *
+ * And the sentence ends at a door, because "send it here" was a promise this platform
+ * could not keep. The merchant's two taps — *WhatsApp buyer* and *Copy slip* — both
+ * append `ask`, so minting the link here is the whole of making the chase actionable.
+ * It is minted fresh on every read and stored nowhere, which is also how a buyer who
+ * closed the receipt gets the door back: they do not need the old link, they need the
+ * next message. */
+async function withAsk(o, st, origin, env) {
   if (!o) return o;
-  const a = proofAsk(o);
-  return a ? { ...o, ask: a } : o;
+  if (!origin || !proofOpen(o)) {
+    const bare = proofAsk(o);
+    return bare ? { ...o, ask: bare } : o;
+  }
+  const cap = await issueCap(env.ADMIN_SECRET || 'dev-secret',
+    { a: 'proof', h: st.handle, id: o.id, g: String(st.auth_gen || '0') }, PROOF_WINDOW_SEC);
+  const here = origin + '/p/' + cap;
+  const a = proofAsk(o, { here });
+  return a ? { ...o, ask: a, proof_url: here } : o;
+}
+
+/* ------------------------------------------------------------------------------------
+ * the shop's own half of the same field
+ *
+ * The buyer's door closes when the order is settled, and the refusal text sends people
+ * to the chat — so a code that arrives in the chat has to be able to land somewhere,
+ * or the honest answer is "your record is now wrong forever". Hence the shop can file
+ * what it was sent, on its own authority, with no capability in sight: `identify`
+ * only. Which is why this is `/api/order/proof` and not a wider `/api/mark` — a link
+ * that a phone can fetch must never gain a second field to write, and this handler
+ * cannot be reached by one. It also has no budget and no closing hour, because both
+ * exist to bound a stranger, not the owner of the ledger.
+ * ---------------------------------------------------------------------------------- */
+async function proofFile(req, url, env) {
+  const b = await readBody(req);
+  const who = await identify(req, env, slug(String(b.handle || url.searchParams.get('handle') || '')));
+  if (!who || !who.st) return json({ ok: false, error: 'no store' }, 404);
+  const lr = lockRes(who); if (lr) return lr;
+  if (who.anonymous) return json({ ok: false, error: 'not signed in', need_login: true }, 401);
+  if (who.bad) { await authFail(env, who.st.handle); return json({ ok: false, error: 'bad key or revoked session' }, 403); }
+  const st = who.st;
+  const key = `order:${st.handle}:${String(b.id || '')}`;
+  const o = await env.ORDERS.get(key, 'json');
+  if (!o) return json({ ok: false, error: 'no such order' }, 404);
+  const r = proofAccept(o, { proof: b.proof == null ? null : String(b.proof), payer: b.payer == null ? null : String(b.payer) }, 'merchant');
+  if (!r.ok) return json({ ok: false, error: r.msg }, r.why === 'empty' ? 422 : 400);
+  if (!r.changed) return json({ ok: true, changed: false, code: o.code, proof: r.proof, status: o.status, note: 'That is what the order already says.' });
+  const when = new Date().toISOString();
+  o.buyer = Object.assign({}, o.buyer || {}, { proof: r.proof, payer: r.payer });
+  o.proof_at = when; o.proof_by = 'merchant';
+  await env.ORDERS.put(key, JSON.stringify(o));
+  const listKey = `list:${st.handle}`;
+  const list = (await env.ORDERS.get(listKey, 'json')) || [];
+  const row = list.find((x) => x && x.id === o.id);
+  if (row) {
+    row.payer = o.buyer.payer; row.proof = o.buyer.proof; row.proof_by = 'merchant'; row.proof_at = when;
+    await env.ORDERS.put(listKey, JSON.stringify(list));
+  }
+  // the response says whether the log held, in the same words a mark uses: a gap in
+  // the paper trail is not a failed tap, and the merchant must not retype to be sure
+  const logged = await pushAudit(env, st, { act: 'proof', via: 'merchant', fields: [`${o.code || o.id} ← ${o.buyer.proof || o.buyer.payer}`], ip: ipOf(req) });
+  return json({ ok: true, changed: true, code: o.code, proof: o.buyer.proof, status: o.status, logged,
+    note: 'Filed on ' + (o.code || 'the order') + (o.status === 'paid' ? ' — the money was already counted, so nothing else moved.' : '.') });
 }
 
 function opsOrderLite(o) {

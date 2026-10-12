@@ -99,7 +99,7 @@ export const proofNoun = (rail) => {
  * button, the slip a merchant copies and pastes) — a second copy of a sentence is a
  * second place to be rude in.
  */
-export function proofAsk(order = {}) {
+export function proofAsk(order = {}, opt = {}) {
   const rail = (order.pricing || {}).rail;
   // No rail on the order means nothing was ever decided about proof, and inventing a
   // policy for an order that never had one is how a merchant ends up apologising for
@@ -114,9 +114,20 @@ export function proofAsk(order = {}) {
   if (mode === 'none') return '';
   if (cleanProof((order.buyer || {}).proof)) return '';        // they answered; nobody is chased
   const noun = proofNoun(rail);
+  // `here` is a door the caller has actually minted. With it, the sentence stops
+  // pointing at the chat and points at a field; without it the words are exactly
+  // what they were before, because a store page has no buyer and a settled order has
+  // no link, and an invented "add it here" is a dead end printed in somebody else's
+  // voice. The URL is not cleaned: it is ours, already absolute, and `cleanProof`
+  // would eat its colons.
+  const here = (opt && typeof opt.here === 'string') ? opt.here.trim() : '';
   return mode === 'require'
-    ? 'Need: ' + noun.label + ' — your app shows it right after it sends. Send it here and I can confirm your order today.'
-    : 'If your app gave you one, send the ' + noun.word + ' too — it is how I find your payment faster.';
+    ? 'Need: ' + noun.label + ' — your app shows it right after it sends. '
+      + (here ? 'Add it here and I can confirm your order today: ' + here
+              : 'Send it here and I can confirm your order today.')
+    : 'If your app gave you one, send the ' + noun.word + ' too — '
+      + (here ? 'add it here and it goes straight on the order: ' + here
+              : 'it is how I find your payment faster.');
 }
 
 /**
@@ -148,14 +159,24 @@ export function proofOpen(order) {
   return !s || PROOF_OPEN.indexOf(s) >= 0;
 }
 
-/** Pure, so the whole state machine is testable without a request: what may be
- *  written, by whom, how often, and what to say when it may not. */
-export function proofAccept(order, input) {
+/**
+ * Pure, so the whole state machine is testable without a request: what may be
+ * written, by whom, how often, and what to say when it may not.
+ *
+ * `by` is the whole difference between the two doors. A buyer's writes are bounded,
+ * because the door is a URL that can end up in a group chat; the shop's are not,
+ * because it is their ledger and because the most legitimate write in the file is the
+ * code a buyer sent in WhatsApp after the money had already been counted. Same field,
+ * same cleaning, same refusal to touch `status` — that part is not negotiable either
+ * way, and it is why one function holds both doors rather than two that can drift.
+ */
+export function proofAccept(order, input, by) {
+  const mine = by === 'merchant';
   const o = order && typeof order === 'object' ? order : {};
   const b = input && typeof input === 'object' ? input : {};
   const used = Number(o.proof_writes) || 0;
   const left = Math.max(0, PROOF_WRITES_MAX - used);
-  if (!proofOpen(o)) {
+  if (!mine && !proofOpen(o)) {
     return { ok: false, why: 'settled', left, writes: used,
       msg: 'This order is already ' + o.status + ', so its record is closed. Message the shop if the code needs correcting — do not try again here.' };
   }
@@ -165,18 +186,24 @@ export function proofAccept(order, input) {
   const proof = b.proof == null ? cleanProof(had.proof) : cleanProof(b.proof);
   const payer = b.payer == null ? cleanPayer(had.payer, 'loose') : cleanPayer(b.payer, 'loose');
   if (!proof && !payer) {
-    return { ok: false, why: 'empty', left, writes: used, msg: 'Type the code your app printed after the payment — that is all that is needed.' };
+    // the same refusal, in the voice of whoever is standing at the field: a buyer is
+    // told where to look, a shop is told what it failed to do, and either sentence
+    // read from the wrong side is a support message
+    return { ok: false, why: 'empty', left, writes: used,
+      msg: mine ? 'Nothing to file — type the code they sent you.'
+                : 'Type the code your app printed after the payment — that is all that is needed.' };
   }
   const changed = proof !== cleanProof(had.proof) || payer !== cleanPayer(had.payer, 'loose');
   if (!changed) {
     return { ok: true, changed: false, proof, payer, left, writes: used,
       msg: 'That is what the shop already has, so nothing was rewritten.' };
   }
-  if (left <= 0) {
+  if (!mine && left <= 0) {
     return { ok: false, why: 'spent', left: 0, writes: used,
       msg: 'You have added this ' + PROOF_WRITES_MAX + ' times, which is all the order allows. Message the shop if it still needs correcting.' };
   }
-  return { ok: true, changed: true, proof, payer, left: left - 1, writes: used + 1 };
+  return { ok: true, changed: true, proof, payer, by: mine ? 'merchant' : 'buyer',
+    left: mine ? left : left - 1, writes: mine ? used : used + 1 };
 }
 
 export function normaliseRail(def, key) {

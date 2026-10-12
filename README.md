@@ -206,6 +206,26 @@ verified ZW/SA tariffs) but it is now a **default, not the whole answer**:
   silent the moment a code is on file, so the chase sentence leaves the row, the slip and
   the CSV with no new wiring, and its "send it here" wording becomes literally true.
 
+- **The chase carries the door, and the shop can file what it was sent.** Two halves of
+  the same loop, both needed once a buyer could write their own code. (1) `withAsk` in
+  `worker/worker.js` mints a fresh `proof` capability while it writes the row's `ask`
+  sentence — `proofAsk(order, { here })` swaps one clause, so *"Send it here"* becomes
+  *"Add it here … `<absolute /p/ link>`"*, and the merchant's two existing taps
+  (*WhatsApp buyer*, *Copy slip*) both append `ask`, which is the whole of making the
+  chase actionable with no new UI. Minting is read-time, one HMAC, no KV write, and it is
+  why a lost receipt is not a lost capability: the buyer needs the next message, not the
+  old link. A settled order's row keeps its sentence and gains **no** link — `proofOpen`
+  decides both. (2) `POST /api/order/proof` is the shop's own write of the same field:
+  `identify` only, no capability read anywhere, so it cannot be reached by a fetchable
+  URL — that is why it is a new route rather than one more field on `/api/mark`, and it
+  is the one place this release refuses to touch a working money path. No budget and no
+  closing hour apply to it, because both exist to bound a stranger; `proof_by` records
+  which hand did it (`buyer` / `merchant`), and the audit row says the same. The ledger
+  row grows one input and one button when a code is owed or the order is open, prefilled
+  so correcting is the same gesture as filing; an empty box is not a filing, in either
+  voice (`Nothing to file — type the code they sent you.` vs the buyer's *"type what your
+  app printed"*), which is why `proofAccept`'s refusals take `by` as well.
+
 An invalid description at sign-up becomes `cash` rather than a rejected
 registration: a merchant who never opens the shop is worse than one whose slip
 says "pay on collection" until they fix it.

@@ -1256,6 +1256,19 @@ function row(o) {
     + (p.rail && p.rail.proof === 'require' && !(o.buyer && o.buyer.proof) && o.status !== 'paid'
         ? ' <span class="badge">no ' + esc(p.rail.proof_label || 'code') + ' — ask them</span>' : '')
     + '</div>'
+    /* Theirs to type, and theirs to fix — but the common case at 9pm is the code
+       arriving in WhatsApp, so the shop gets the same field on its own side. One box,
+       on the row where a code is owed or the order is still open, prefilled with what
+       the buyer sent: "correct it" is then the same gesture as "file it", and a row
+       that needs nothing shows nothing. */
+    + (o.ask || open(o)
+        ? '<div style="display:flex;gap:.4rem;margin-top:.45rem;align-items:center">'
+          + '<input data-pf="' + esc(o.id) + '" maxlength="40" autocapitalize="characters" spellcheck="false"'
+          + ' placeholder="' + esc((p.rail && p.rail.proof_label) || 'code from their app') + '"'
+          + ' value="' + esc((o.buyer && o.buyer.proof) || '') + '"'
+          + ' style="flex:1;min-width:0;font:inherit;padding:.35rem .5rem;border:1px solid #cfd8e3;border-radius:8px;background:#fff">'
+          + '<button class="sm" data-pfs="' + esc(o.id) + '">File it</button></div>'
+        : '')
     + (p.fee_absorbed_by_merchant ? '<div class="pay">payment cost you absorb: ' + p.fee_absorbed_by_merchant.toFixed(2) + ' (' + esc(p.rail && p.rail.label || '') + ')</div>' : '')
     + ((o.risk_flags || []).length ? '<div class="flags">⚠ ' + esc(o.risk_flags.join(' · ')) + '</div>' : '')
     + (open(o) ? '<button class="ok big" data-pay="' + esc(o.id) + '" style="margin-top:.5rem">Paid — money arrived</button>' : '')
@@ -1282,6 +1295,16 @@ function bind(scope) {
   qa('[data-cp]', root).forEach(function (b) { b.onclick = function () {
     var o = byId(b.getAttribute('data-cp')); if (!o) return;
     copyText(orderSlip(o)); b.textContent = 'Copied ✓';
+  }; });
+  qa('[data-pfs]', root).forEach(function (b) { b.onclick = function () {
+    var id = b.getAttribute('data-pfs'); var inp = b.parentNode.querySelector('[data-pf="' + id + '"]');
+    if (!inp || !inp.value.trim()) { if (inp) inp.focus(); return; }   // an empty box is not a filing
+    var was = b.textContent; b.disabled = true; b.textContent = '…';
+    api('/api/order/proof', { handle: S.handle, id: id, proof: inp.value }).then(function (r) {
+      if (!r.j || !r.j.ok) { b.disabled = false; b.textContent = was;
+        q('#toDo').insertAdjacentHTML('afterbegin', '<div class="flags">' + esc((r.j && r.j.error) || 'did not file') + '</div>'); return; }
+      load();
+    });
   }; });
 }
 function orderSlip(o) {
