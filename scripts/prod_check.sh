@@ -239,6 +239,35 @@ ckw "a double tap is a no-op, not a double count" '"already":true' "$REPLAY"
 UNDO=$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"$(printf '%s' "$POST" | python3 -c "import sys,json;print(json.load(sys.stdin).get('undo_url','/c/none')[3:])")"'"}' "$ORIGIN/api/mark")
 ckw "undo returns it to awaiting_payment" '"awaiting_payment"' "$UNDO"
 
+# ---- the buyer's own door (0.7.3): one public write, one field, one order
+# The order is open again, which is exactly when a buyer is allowed to add the code
+# their app printed. These lines are the promise the feature was built on, read off
+# the live Worker: the door exists, it is scoped to one field, and a stranger with a
+# made-up link gets nothing.
+PURL=$(printf '%s' "$ORD" | python3 -c "import sys,json;print(json.load(sys.stdin).get('proof_url',''))" 2>/dev/null)
+PCAP=${PURL#/p/}
+MPCAP=${MARK#/c/}
+ckw "the receipt is handed a code link of its own" '^/p/v1\.' "$PURL"
+ck  "  · a different capability from the shop's, not the same one on a new path" '^diff$' "$(if [[ -z "$PCAP" || -z "$MPCAP" || "$PCAP" == "$MPCAP" ]]; then echo same; else echo diff; fi)"
+BFORM=$(curl -s -m 30 -A 'Mozilla/5.0 (compatible; Slackbot/1.0; +https://slack.com/faq)' "$ORIGIN/p/$PCAP")
+ckw "  · a crawler that fetches it gets a form it cannot fire" 'method=post action="/api/proof"' "$BFORM"
+ck  "  · the page says out loud what the link cannot do" 'cannot mark anything paid' "$BFORM"
+ck  "  · and quotes the shop's own ask rather than inventing one" 'Reference from your bank|Code from the app|app shows' "$BFORM"
+BPROBE="ZCPROBE$(date +%s | tail -c 6)"
+BPOST=$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"$PCAP"'","proof":"'"$BPROBE"'"}' "$ORIGIN/api/proof")
+ckw "the buyer's POST lands, and is called a change" '"changed":true' "$BPOST"
+ckw "  · with the value echoed back trimmed, not reshaped" "$BPROBE" "$BPOST"
+ck  "  · and the answer counts what is left, so nobody guesses" '"left":2' "$BPOST"
+KVBUY=$(curl -s -m 30 -H "Authorization: Bearer $TOK" "https://api.cloudflare.com/client/v4/accounts/$ACCT/storage/kv/namespaces/$ORD_KV/values/order:$HANDLE:$ID")
+ckw "  · on the order document, named as the buyer's" '"proof_by":"buyer"' "$KVBUY"
+ckw "  · the money state untouched by a public write" '"status":"awaiting_payment"' "$KVBUY"
+nk  "  · and no link is stored on the order for a reader to reuse" '/p/v1' "$KVBUY"
+DASHB=$(curl -s -m 30 -H "x-tapstall-admin: $ADMIN_KEY" "$ORIGIN/api/admin?handle=$HANDLE")
+ckw "  · the ledger row carries it, so the chase sentence leaves on its own" "$BPROBE" "$DASHB"
+BOGUS=$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"v1.9999999999.eyJhIjoicHJvb2YifQ.deadbeef","proof":"XX"}' "$ORIGIN/api/proof")
+ckw "a cap nobody minted is refused in the same words as an expired one" 'does not open this field' "$BOGUS"
+ck  "  · and the write endpoint is POST-only, so a prefetch cannot use it" '^405$' "$(code "$ORIGIN/api/proof")"
+
 echo "[5] settings: cosmetic instant, money held 15 minutes, cancellable"
 HOURS=$(printf '%s' "$STORE" | python3 -c "import sys,json;print(json.load(sys.stdin).get('hours','') or 'open')" 2>/dev/null)
 PROBE="ZZ-PROBE-$(date +%s | tail -c 6)"

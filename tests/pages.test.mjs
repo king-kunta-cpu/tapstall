@@ -486,3 +486,23 @@ test('the ask for a missing code is in the message a merchant already has a butt
   assert.ok(!/Need:/.test(body) && !/send the code/i.test(body), 'the page invents no sentence of its own — one authority, in the Worker');
   assert.ok(/o\.buyer && o\.ask|o\.ask \? '\\n' \+ o\.ask/.test(a), 'the copied slip carries it too, because that is the other half of the same tap');
 });
+
+/* ------------------------------------------------------------------ 0.7.3 the receipt's second half */
+const storeHtml = page('store');
+test('the receipt offers the code field, and only when a code is owed', () => {
+  assert.match(storeHtml, /var addProof = \(pay\.proof \|\| !pay\.proof_mode \|\| pay\.proof_mode === 'none'\) \? ''/, 'one gate, and it is written so an answered order says nothing at all');
+  assert.match(storeHtml, /o\.proof_url/, 'and the gate opens on the link the order response handed back');
+  assert.match(storeHtml, /add your code here|add it here/, 'the sentence is an instruction with a door in it, not an apology');
+  assert.match(storeHtml, /the shop cannot see your payment until it is on the order/, 'a required code is named as a blocker, once, plainly');
+  assert.ok(!/screenshot/.test(storeHtml.match(/addProof[\s\S]{0,700}/)[0]), 'and it never asks for a picture: this is the field a code goes in, not an upload');
+});
+test('the buyer’s link is not stitched into anything the shop reads', () => {
+  for (const n of ['admin', 'dash', 'store']) {
+    const src = n === 'store' ? storeHtml : (existsSync(join(root, 'pages', n + '.html')) ? page(n) : '');
+    assert.ok(!/\/p\/\$\{|proofCap/.test(src), n + ' does not mint or hold a capability, it only renders what the order response gave it');
+  }
+  // where the write is allowed to happen, in the source that ships
+  assert.match(worker, /\/api\/proof' && req\.method === 'POST'/, 'the route is POST-only at the router, not just in the handler');
+  assert.match(worker, /a: 'proof', h: st\.handle, id, g:/, 'and the mint binds the link to one handle, one order and the shop’s current generation');
+  assert.ok(!/order\.proof_url/.test(worker), 'the link is never stored on the order document, so the merchant cannot hold it');
+});

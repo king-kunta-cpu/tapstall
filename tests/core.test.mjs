@@ -895,3 +895,51 @@ test('what the money doors were asked for is counted, once an hour', () => {
   assert.equal(C.hookAuditKey(stamp, 'refused'), 'hooks:2026101210:refused');
   for (const s of C.HOOK_AUDIT_STATUSES) assert.match(C.hookAuditKey(stamp, s), /^hooks:\d{10}:/);
 });
+
+/* ---------------------------------------------------- 0.7.3 the buyer adds their own code */
+test('the rules a buyer can write under are a function, not a page', () => {
+  const open = { status: 'awaiting_payment', buyer: { proof: '', payer: '' } };
+  assert.equal(C.proofAccept(open, { proof: ' 88 12.x ' }).proof, '88 12.x', 'the same intake as the cart: trimmed, never reshaped');
+  assert.equal(C.proofAccept(open, {}).why, 'empty', 'an empty box is an answer, and it is “type the code”');
+  assert.equal(C.proofAccept(open, { proof: '   ' }).why, 'empty', 'spaces are not a reference');
+  assert.equal(C.proofAccept({ status: 'cod', buyer: {} }, { proof: 'COD 1' }).ok, true, 'cash on delivery is still an order a buyer can annotate');
+  for (const st of ['paid', 'cancelled']) {
+    const r = C.proofAccept({ status: st, buyer: {} }, { proof: 'X' });
+    assert.equal(r.ok, false, st + ' is the shop’s word, and a buyer does not overwrite it');
+    assert.equal(r.why, 'settled');
+    assert.match(r.msg, /Message the shop/i, 'a closed door with somewhere else to go');
+  }
+  assert.equal(C.proofAccept(open, { proof: '<b>x</b>' }).proof, 'bx/b', 'the cleaning the cart applies, applied here as well');
+});
+test('three corrections, and a replay costs nothing', () => {
+  let o = { status: 'awaiting_payment', buyer: { proof: '', payer: '' } };
+  const left = [];
+  for (let i = 0; i < 5; i++) {
+    const r = C.proofAccept(o, { proof: 'R' + i });
+    left.push(r.left + (r.ok ? '' : ':' + r.why));
+    if (r.ok && r.changed) o = { status: o.status, buyer: { proof: r.proof, payer: r.payer }, proof_writes: r.writes };
+  }
+  assert.deepEqual(left, ['2', '1', '0', '0:spent', '0:spent'], 'three accepted writes, then the door shuts on every later try');
+  assert.equal(C.PROOF_WRITES_MAX, 3, 'and the number is a named constant, because it is a promise made in three places');
+  const same = C.proofAccept(o, { proof: 'R2' });
+  assert.equal(same.ok, true, 'the value already on the order is not a fourth write');
+  assert.equal(same.changed, false, 'it changed nothing, and says so instead of quietly rewriting');
+  assert.equal(same.left, 0, 'and it is free: a retry after a lost response must not spend the budget');
+  assert.equal(C.proofAccept(o, { proof: '   ' }).why, 'empty', 'blank is refused before it can read as “clear the field”');
+  const doc = C.proofAccept(o, {});
+  assert.equal(doc.ok, true, 'nothing to change reads as fine rather than as an error');
+  assert.equal(C.PROOF_WINDOW_SEC, 72 * 3600, 'the same 72 hours a confirm link gets: a buyer’s door must not outlive the shop’s own');
+  // the number is checked where both sentences are read: see the live test's 72-hours pair
+});
+test('an absent field is left alone, not erased', () => {
+  const o = { status: 'awaiting_payment', buyer: { proof: 'KEEP-1', payer: '+263771234567' } };
+  assert.equal(C.proofAccept(o, { proof: 'KEEP-1' }).changed, false, 'a form with no payer box must not wipe a payer that was typed');
+  const r = C.proofAccept(o, { proof: 'KEEP-2' });
+  assert.equal(r.payer, '+263771234567', 'and a real edit carries the untouched half forward');
+  assert.equal(r.proof, 'KEEP-2');
+  assert.equal(C.proofAccept({ status: 'paid', buyer: o.buyer }, { proof: 'KEEP-1' }).why, 'settled',
+    'the same value does not reopen a settled order');
+  assert.equal(C.proofOpen({ status: 'awaiting_payment' }), true);
+  assert.equal(C.proofOpen({ status: 'paid' }), false);
+  assert.equal(C.proofOpen({}), true, 'an order with no status yet is open — refusing would strand it');
+});

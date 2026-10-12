@@ -1,5 +1,77 @@
 # Tapstall — status
 
+## The buyer closes the loop themselves (2026-10-12, v0.7.3)
+
+**The ask, kept exactly.** *"letting a buyer add their code after the order from the
+receipt page would close the loop properly … It needs a new public write, so the
+mitigation is a separate single-use token minted for that field only — not the existing
+`/c/` mark-paid capability, whose power I'm not widening without you saying so."* So
+`a:'mark'` has the same powers today that it had yesterday: one grep proves it,
+`git diff HEAD~1 -- worker/worker.js` touches `markPaid` not at all. What is new is a
+second kind of capability, `a:'proof'`, minted at order time as
+`/p/<cap>`, and one endpoint behind it.
+
+**One deviation, chosen deliberately: it is not single-use, it is three.** A
+mistyped TxID is the ordinary failure of this exact flow, and a buyer who has one
+chance and blows it does the thing the feature exists to prevent — they message the
+shop. So the budget is `PROOF_WRITES_MAX = 3` *accepted* writes, counted on the order
+(`proof_writes`), not in the token, so a replay after the limit is inert rather than a
+fresh allowance; and the door closes outright the moment the shop settles the order,
+which is the tighter half of the promise. A resubmit of the value already on file costs
+no write and says `changed: false`, because a retry after a lost response must not eat
+an allowance.
+
+**What the whole policy is, in one pure function.** `proofAccept(order, input)` in
+`core.js`: open states only (`awaiting_payment`, `cod`), never `status`, never
+`cleanAcct`, cleaning by the same `cleanProof`/`cleanPayer(…, 'loose')` the cart uses, an
+absent field left alone instead of cleared (so an empty second submit is not a way to
+erase evidence), and refusal text that points at the chat rather than at another try.
+`proofOpen` is shared by the page and the machine, so the form is never offered where the
+write would fail. The route pair is `GET /p/<cap>` → a page with a plain
+`<form method=post action="/api/proof">` — a form is the floor and `fetch` never enters
+it, because the buyer is on whatever browser their bank app opened — and `POST
+/api/proof`, added to `MUT` so a link-prefetching crawler gets `405` and changes nothing.
+Gates in order: POST, own rate bucket, `verifyCap` *and* `p.a === 'proof'`,
+`p.g === st.auth_gen` (so the merchant's one lever, *Revoke*, closes the buyer's door
+too — the revoke note now says so), order exists, then the state machine.
+
+**Cost, because $0 is a product decision.** Two `ORDERS` puts per accepted write — the
+order document and the ledger row — which is exactly what a mark already spends; zero
+puts on a refusal, a replay, a forgery or an expiry. No KV key per token and no delete,
+because the capability is stateless (HMAC, 43-char tag, 72 h) and "single-use" was
+bought with a counter on the order instead of a write per click. `rateLimited` grew an
+optional bucket (`rl:proof:<ip>:<hour>`, 6/min) so a buyer on the shop's carrier NAT
+does not spend the shop's order allowance, and the default key shape is byte-identical
+to what every existing budget assertion reads.
+
+**Not widened, and stated on the page.** A `proof` cap pointed at `/api/mark` gets the
+same `link_expired` answer as an expired link, so nothing leaks about which kind it was;
+a `mark` cap pointed at `/p/` gets the dead-link card. The link is minted into the
+order *response* and never stored on the order document — a merchant reading the ledger
+would otherwise hold a URL that writes into a field labelled `proof_by: 'buyer'`, and
+the label would stop being true. The audit row is `act: 'proof', via: 'buyer'`.
+
+**The free win.** `proofAsk` already returns `''` as soon as a code is on file, so the
+chase sentence leaves the ledger row, the slip and the CSV with no new wiring — and its
+words, *"Send it here and I can confirm your order today"*, became literally true for
+the first time.
+
+**Checked.** `npm test` 195/195 (core 74 · live 79 · pages 32 · limits 10 — +10 tests
+over 0.7.2, six of them driving the real handler: mint, page, write, ledger row, audit
+row, status untouched, three-then-shut, empty-is-not-erase, forged and wrong-kind caps
+both directions, revoke, and the throttle bucket's isolation). `prod_check.sh` gained
+14 lines on the live Worker, including reading the order document back out of KV to
+prove `"status":"awaiting_payment"` survived a public write and that no `/p/` link is
+in the stored order.
+
+**Left alone on purpose.** `/c/` still does not check `p.g` against `st.auth_gen`, so
+*Revoke* does not yet kill a confirm link the way it kills a code link — a real,
+pre-existing gap in a money path, which is a one-line change and its own conversation,
+not a passenger here. The buyer page is built with `shell()` rather than published as a
+`tpl:` template: the confirm page earns a template because it carries the money state;
+a one-field form does not need a re-skin lever, and a second lever is a second thing to
+secure.
+
 ## The shop can introduce itself, and there is something to find (2026-10-12, v0.7.2)
 
 **Same instruction, taken further.** *"Take pointers from my google bots"* was asked

@@ -119,6 +119,66 @@ export function proofAsk(order = {}) {
     : 'If your app gave you one, send the ' + noun.word + ' too — it is how I find your payment faster.';
 }
 
+/**
+ * The buyer's own second chance, and the only public write in this product.
+ *
+ * A code arrives *after* the order: the buyer has the confirmation on their screen
+ * at the moment they have it, and the merchant's ledger is the wrong place to type
+ * it in. So the receipt hands out a link, and the link is a capability minted for
+ * one field on one order — not a wider version of the merchant's confirm link,
+ * which is the other kind of thing a leaked URL could do. Three properties, in
+ * order of how much they cost to give up: it writes one field, it cannot touch
+ * `status`, and it stops being usable when the order is settled.
+ *
+ * Three writes rather than one, because the common failure is a mistyped TxID and
+ * a buyer who cannot fix their own typo will message the shop instead, which is
+ * the exact traffic this feature exists to remove.
+ */
+export const PROOF_WINDOW_SEC = 72 * 3600;
+export const PROOF_WRITES_MAX = 3;
+/** The states a buyer may still write into. `paid` and `cancelled` are the shop's
+ *  record of what happened, and nothing a buyer sends reopens one. */
+const PROOF_OPEN = ['awaiting_payment', 'cod'];
+
+/** Whether a buyer may still write into this order. One definition, because the page
+ *  that offers the form and the machine that accepts the write must never disagree
+ *  about whether a door is open. */
+export function proofOpen(order) {
+  const s = (order && typeof order === 'object' ? order : {}).status;
+  return !s || PROOF_OPEN.indexOf(s) >= 0;
+}
+
+/** Pure, so the whole state machine is testable without a request: what may be
+ *  written, by whom, how often, and what to say when it may not. */
+export function proofAccept(order, input) {
+  const o = order && typeof order === 'object' ? order : {};
+  const b = input && typeof input === 'object' ? input : {};
+  const used = Number(o.proof_writes) || 0;
+  const left = Math.max(0, PROOF_WRITES_MAX - used);
+  if (!proofOpen(o)) {
+    return { ok: false, why: 'settled', left, writes: used,
+      msg: 'This order is already ' + o.status + ', so its record is closed. Message the shop if the code needs correcting — do not try again here.' };
+  }
+  const had = o.buyer && typeof o.buyer === 'object' ? o.buyer : {};
+  // an absent field is "not being changed", not "being cleared": a blank second
+  // submit must not be a way to erase the evidence the buyer already gave
+  const proof = b.proof == null ? cleanProof(had.proof) : cleanProof(b.proof);
+  const payer = b.payer == null ? cleanPayer(had.payer, 'loose') : cleanPayer(b.payer, 'loose');
+  if (!proof && !payer) {
+    return { ok: false, why: 'empty', left, writes: used, msg: 'Type the code your app printed after the payment — that is all that is needed.' };
+  }
+  const changed = proof !== cleanProof(had.proof) || payer !== cleanPayer(had.payer, 'loose');
+  if (!changed) {
+    return { ok: true, changed: false, proof, payer, left, writes: used,
+      msg: 'That is what the shop already has, so nothing was rewritten.' };
+  }
+  if (left <= 0) {
+    return { ok: false, why: 'spent', left: 0, writes: used,
+      msg: 'You have added this ' + PROOF_WRITES_MAX + ' times, which is all the order allows. Message the shop if it still needs correcting.' };
+  }
+  return { ok: true, changed: true, proof, payer, left: left - 1, writes: used + 1 };
+}
+
 export function normaliseRail(def, key) {
   const d = def && typeof def === 'object' ? def : {};
   const label = String(d.label || '').trim().slice(0, 40);

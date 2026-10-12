@@ -415,6 +415,16 @@ var TERM = /*__TAPSTALL_TERM__*/null;
 
   function showDone(o) {
     var pr = o.pricing || {}, pay = o.pay || {};
+    /* The one thing a buyer still has to do is type what their own app printed, and
+       they are looking at the confirmation right now. So the receipt holds the door
+       open: one field, this order only, no chat needed. An order that already has
+       the code says nothing, and a rail that never asked says nothing either. */
+    var addProof = (pay.proof || !pay.proof_mode || pay.proof_mode === 'none') ? '' : '<p class="hint">'
+      + (o.proof_url
+          ? (pay.proof_mode === 'require'
+              ? 'Paid? <a href="' + esc(o.proof_url) + '">add your code here</a> — the shop cannot see your payment until it is on the order.'
+              : 'If your app gave you a code, <a href="' + esc(o.proof_url) + '">add it here</a> — it goes on the order without you messaging anybody.')
+          : 'You did not send the code the app shows. The shop will message you for it — nothing else about your order is delayed.') + '</p>';
     var h = '<div class="done"><div class="tick">✓</div>' +
       '<b>Order ' + esc(o.order.code) + ' received</b>' +
       '<div class="badge">Stored with the shop — no screenshot needed</div>' +
@@ -430,7 +440,7 @@ var TERM = /*__TAPSTALL_TERM__*/null;
       (pay.payer_from ? '<div class="kv"><span>From</span><span>' + esc(pay.payer_from) + '</span></div>' : '') +
       '<div class="kv"><span>Reference</span><span>' + esc(pay.reference || o.order.code) + '</span></div>' +
       (pay.proof ? '<div class="kv"><span>' + esc(pay.proof_label || 'Code from the app') + '</span><span>' + esc(pay.proof) + '</span></div>' : '') +
-      (!pay.proof && pay.proof_mode === 'require' ? '<p class="hint">You did not send the code the app shows. The shop will message you for it — nothing else about your order is delayed.</p>' : '') +
+      addProof +
       '<div class="copy" id="cp">Copy payment reference + amount</div>' +
       '<ol class="steps">' + (pay.steps || []).map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('') + '</ol>' +
       '<p class="hint">' + esc(pay.note || '') + '</p>' +

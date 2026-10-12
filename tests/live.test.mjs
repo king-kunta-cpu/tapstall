@@ -1889,6 +1889,186 @@ test('the words to ask for a missing code are already written, on the row', asyn
   assert.ok(!/proof/i.test(a.ask.slice(0, 5)) || /Need/.test(a.ask), 'and it opens with what is needed, not with an apology');
 });
 
+/* ------------------------------------------------------------------ 0.7.3 the buyer's own write */
+
+let late = {};   // one store, one order, several tests: the minting is the interesting part
+async function lateOrder(ip, buyer) {
+  const r = await call('/api/order', { method: 'POST', ip, body: { handle: late.handle, service: 'pickup',
+    buyer: Object.assign({ name: 'Tafadzwa M', phone: '0780009911' }, buyer || {}), items: [{ name: 'Box', price: 42 }] } });
+  assert.equal(r.status, 201, r.text);
+  return r;
+}
+const proofCapOf = (r) => {
+  assert.match(r.json.proof_url, /^\/p\/v1\./, 'the receipt carries a code link, and it is its own kind: ' + JSON.stringify(r.json.proof_url));
+  return r.json.proof_url.slice(3);
+};
+
+test('the code a buyer has not typed yet gets a link of its own, not the shop’s', async () => {
+  late.handle = 'zzlate' + String(Date.now()).slice(-5);
+  const reg = await call('/api/register', { method: 'POST', body: {
+    handle: late.handle, shop_name: 'Late Code Test', whatsapp: '263771234567', rail: 'zipit', pay_account: '1234567890', currency: 'USD',
+  } });
+  assert.equal(reg.status, 201, reg.text);
+  const ord = late = Object.assign(late, await lateOrder('196.31.0.1'));
+  late.cap = proofCapOf(ord);
+  assert.equal(ord.json.proof_writes, 3, 'and the page says how many goes in it, so nobody has to guess if a second try is allowed');
+
+  // the promise that made this acceptable at all: a URL a stranger could read is
+  // handed to the buyer, and it is kept nowhere the merchant can pick it up
+  const doc = JSON.parse(env.ORDERS._map.get('order:' + late.handle + ':' + ord.json.order.id).value);
+  assert.equal(doc.proof_url, undefined, 'the order document does not hold the buyer’s link');
+  assert.ok(!/\/p\/v1\./.test(JSON.stringify(doc)), 'and nothing else written at order time leaks it either');
+  assert.match(doc.confirm_url, /\/c\/v1\./, 'the shop’s own link is stored, because the shop needs it again');
+  late.key = JSON.parse(env.STORES._map.get('store:' + late.handle).value).admin_token;
+
+  const page = await call('/p/' + late.cap);
+  assert.equal(page.status, 200, page.text.slice(0, 160));
+  assert.match(page.text, /action="\/api\/proof"/, 'a plain form is the floor: no JS, nothing to learn');
+  assert.ok(page.text.includes('name=cap'), 'the link itself is what authorises the write');
+  assert.match(page.text, /cannot mark anything paid/, 'and the page says out loud what it cannot do');
+  assert.match(page.text, /Need: Reference from your bank/, 'the shop’s own words about what is missing are quoted, not rewritten');
+  assert.equal(page.headers.get('x-robots-tag'), 'noindex, nofollow', 'a buyer’s receipt is not content to be crawled');
+  assert.ok(!/REF-99|EC 88/.test(page.text), 'nothing from another order is on the page');
+
+  // a confirm link and a code link are different kinds of thing, and the routes know it
+  const asProof = await call('/p/' + ord.json.mark_url.slice(3));
+  assert.equal(asProof.status, 401, 'the shop’s money link does not open the buyer’s field');
+  assert.match(asProof.text, /finished/i, 'and it says so in words that do not blame the buyer');
+  // the two kinds of link are the same length of time, and the promise is kept in the
+  // prose on both pages, which is the only place a reader can compare them
+  const dead = await call('/p/' + 'v1.9999999999.eyJhIjoicHJvb2YifQ.deadbeef');
+  assert.match(dead.text, /72 hours/, 'a spent code link says what it was worth, in the units the shop’s own links use: ' + dead.text.slice(0, 200));
+  assert.equal(dead.status, 401, 'an unparseable link is the same answer as a spent one');
+  const asMark = await call('/c/' + late.cap);
+  assert.match(asMark.text, /72 hours/, 'and the shop’s page says the same number, so the two cannot drift apart');
+  assert.match(asMark.text, /expired/i, 'nor the other way round: a code link opens the dead-link page, not a live confirmation');
+  const tryMark = await call('/api/mark', { method: 'POST', ip: '196.31.0.20', body: { cap: late.cap } });
+  assert.equal(tryMark.status, 401, 'and pointing a code cap at the money endpoint outright is refused: ' + tryMark.text);
+  assert.equal(tryMark.json.error, 'link_expired', 'with the same words any dead link gets, so nothing about the kind of cap leaks out');
+  assert.equal(JSON.parse(env.ORDERS._map.get('order:' + late.handle + ':' + ord.json.order.id).value).status, 'awaiting_payment',
+    'and the order is still open, exactly as it was');
+});
+
+test('what the buyer sends lands on the order, the ledger and the paper trail, and moves nothing', async () => {
+  const r = await call('/api/proof', { method: 'POST', ip: '196.31.0.2', body: { cap: late.cap, proof: ' RBZ 8812.x ' } });
+  assert.equal(r.status, 200, r.text);
+  assert.equal(r.json.ok, true);
+  assert.equal(r.json.changed, true, 'a real edit is called a real edit');
+  assert.equal(r.json.left, 2, 'and the page tells them what is left, in the same breath');
+  assert.equal(r.json.proof, 'RBZ 8812.x', 'trimmed, never reshaped — an app prints what it prints');
+
+  const key = 'order:' + late.handle + ':' + late.json.order.id;
+  const doc = JSON.parse(env.ORDERS._map.get(key).value);
+  assert.equal(doc.buyer.proof, 'RBZ 8812.x', 'it is on the order');
+  assert.equal(doc.buyer.name, 'Tafadzwa M', 'nothing else about the buyer moved');
+  assert.equal(doc.status, 'awaiting_payment', 'THE ONE THING: a buyer’s link never touches the money state');
+  assert.equal(doc.proof_by, 'buyer', 'and the row says where it came from, so the merchant knows who to thank');
+  assert.match(doc.proof_at, /^\d{4}-\d{2}-\d{2}T/, 'with when');
+
+  const row = JSON.parse(env.ORDERS._map.get('list:' + late.handle).value).find((x) => x.id === late.json.order.id);
+  assert.equal(row.proof, 'RBZ 8812.x', 'on the ledger row too, so the list answers without opening the document');
+  const dash = await call('/api/admin?handle=' + late.handle, { headers: { 'x-tapstall-admin': late.key } });
+  const shown = dash.json.orders.find((o) => o.id === late.json.order.id);
+  assert.equal(shown.buyer.proof, 'RBZ 8812.x', 'the merchant sees it in their own ledger');
+  assert.equal(shown.ask, undefined, 'and the sentence asking for it is gone, with no wiring at all: proofAsk falls silent on its own');
+  const audit = dash.json.audit.find((a) => a.act === 'proof');
+  assert.ok(audit, 'the write is in the paper trail: ' + JSON.stringify(dash.json.audit).slice(0, 200));
+  assert.equal(audit.via, 'buyer', 'named as a buyer write, not smuggled in as a merchant one');
+  assert.ok(audit.fields.join(' ').includes('RBZ 8812.x'), 'with the value, because a reference is not a secret from the shop');
+
+  // no JS, no fetch, just a form: the path a Nokia browser takes
+  const posted = await call('/api/proof', { method: 'POST', ip: '196.31.0.3',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: form({ cap: late.cap, form: '1', proof: 'RBZ 8812.x' }) });
+  assert.equal(posted.status, 200, posted.text.slice(0, 200));
+  assert.match(posted.text, /Sent to the shop/, 'a form post gets a page back, not a JSON blob');
+  assert.match(posted.text, /nothing was rewritten/, 'the same value twice is said to be the same value, not a second edit');
+  assert.equal(JSON.parse(env.ORDERS._map.get(key).value).proof_writes, 1, 'and it cost the order nothing to try');
+});
+
+test('three corrections, then the door shuts — and a settled order shut it already', async () => {
+  // an order that came with a code from the cart still gets its three corrections:
+  // the budget counts writes through this door, and nothing else
+  const ord = late = Object.assign(late, await lateOrder('196.31.0.4', { proof: 'FROM CART' }));
+  const cap = proofCapOf(ord);
+  const key = 'order:' + late.handle + ':' + ord.json.order.id;
+  const put = (proof, ip) => call('/api/proof', { method: 'POST', ip, body: { cap, proof } });
+  assert.equal(JSON.parse(env.ORDERS._map.get(key).value).buyer.proof, 'FROM CART', 'the cart value is on the order, untouched');
+  assert.equal((await put('SECOND', '196.31.0.5')).json.left, 2, 'first through this door, so two left');
+  assert.equal((await put('THIRD', '196.31.0.6')).json.left, 1, 'and one');
+  assert.equal((await put('FOURTH', '196.31.0.6')).json.left, 0, 'the last one, spent');
+  const spentBefore = env.ORDERS._writesTo(key);
+  const shut = await put('FIFTH', '196.31.0.7');
+  assert.equal(shut.status, 429, 'the fourth correction is refused: ' + shut.text);
+  assert.match(shut.json.error, /message the shop/i, 'with words that point at the chat instead of another try: ' + shut.json.error);
+  assert.equal(JSON.parse(env.ORDERS._map.get(key).value).buyer.proof, 'FOURTH', 'the refused attempt wrote nothing');
+  assert.equal(env.ORDERS._writesTo(key), spentBefore, 'and it cost no write either — a refusal that writes is a way to spend a tenant’s daily budget for nothing');
+
+  // blank is not how you undo a typo: an absent field must not erase the evidence
+  const blank = await put('', '196.31.0.8');
+  assert.equal(blank.status, 422, 'a submit with nothing in it is answered, not obeyed: ' + blank.text);
+  assert.match(blank.json.error, /Type the code/i, 'and it says what to do about it');
+  assert.equal(JSON.parse(env.ORDERS._map.get(key).value).buyer.proof, 'FOURTH', 'the reference on file survived an empty try');
+
+  // the shop settles it; from that moment the record is closed to a buyer
+  const mark = await call('/api/mark', { method: 'POST', ip: '196.31.0.9', body: { cap: ord.json.mark_url.slice(3) } });
+  assert.equal(mark.status, 200, mark.text);
+  const late2 = await put('TOO LATE', '196.31.0.10');
+  assert.equal(late2.status, 409, 'after the money is marked, no buyer write at all: ' + late2.text);
+  assert.match(late2.json.error, /already paid/, 'and the reason is the order’s state, not a token expiry');
+  assert.equal(JSON.parse(env.ORDERS._map.get(key).value).buyer.proof, 'FOURTH', 'nothing moved');
+  const page = await call('/p/' + cap);
+  assert.ok(!page.text.includes('<form'), 'the page stops offering the field, rather than offering it and failing');
+  assert.match(page.text, /closed from here/, 'and says where to take it instead');
+});
+
+test('a code link cannot become a money link, and one lever closes both', async () => {
+  const ord = late = Object.assign(late, await lateOrder('196.31.0.11'));
+  const cap = proofCapOf(ord);
+  const forged = await call('/api/proof', { method: 'POST', ip: '196.31.0.12', body: { cap: cap.slice(0, -6) + 'AAAAAA', proof: 'X' } });
+  assert.equal(forged.status, 401, 'an edited tag is the same answer as an expired link: ' + forged.text);
+  assert.match(forged.json.error, /does not open this field/, 'and no detail about why, since either way there is nothing to gain');
+  const wrongKind = await call('/api/proof', { method: 'POST', ip: '196.31.0.13', body: { cap: ord.json.mark_url.slice(3), proof: 'X' } });
+  assert.equal(wrongKind.status, 401, 'the shop’s own confirm cap is refused here too — a cap is not a skeleton key: ' + wrongKind.text);
+  const get = await call('/api/proof?cap=' + cap);
+  assert.equal(get.status, 405, 'and the write is POST-only, so a crawler that fetches links adds nothing');
+  assert.equal(get.headers.get('allow'), 'POST');
+  const noCap = await call('/api/proof', { method: 'POST', ip: '196.31.0.14', body: { proof: 'X' } });
+  assert.equal(noCap.status, 401, 'no cap, nothing: ' + noCap.text);
+  const otherOrder = await call('/api/proof', { method: 'POST', ip: '196.31.0.15', body: { cap, proof: 'X', id: 'whatever' } });
+  assert.equal(otherOrder.status, 200, 'an extra field in the body is ignored, not obeyed — the cap names the order: ' + otherOrder.text);
+  const doc = JSON.parse(env.ORDERS._map.get('order:' + late.handle + ':' + ord.json.order.id).value);
+  assert.equal(doc.buyer.proof, 'X', 'and it landed on the order the link was minted for');
+
+  // the merchant's one lever: revoke bumps the generation every signed thing is bound to
+  const key = JSON.parse(env.STORES._map.get('store:' + late.handle).value).admin_token;
+  const revoked = await call('/api/revoke', { method: 'POST', headers: { 'x-tapstall-admin': key }, body: { handle: late.handle } });
+  assert.equal(revoked.status, 200, revoked.text);
+  const after = await call('/api/proof', { method: 'POST', ip: '196.31.0.16', body: { cap, proof: 'AFTER' } });
+  assert.equal(after.status, 410, 'a link minted before the lever is dead after it: ' + after.text);
+  assert.match(after.json.error, /closed its code links/, 'named as the shop closing it, because that is what happened');
+  assert.equal(JSON.parse(env.ORDERS._map.get('order:' + late.handle + ':' + ord.json.order.id).value).buyer.proof, 'X', 'nothing landed');
+  const page = await call('/p/' + cap);
+  assert.equal(page.status, 410, 'the page is honest about it too, rather than showing a field that will fail');
+});
+
+test('the buyer’s door is throttled on its own, and stays off the shop’s allowance', async () => {
+  const ord = late = Object.assign(late, await lateOrder('196.31.0.17'));
+  const cap = proofCapOf(ord);
+  const ip = '196.31.0.18';
+  let blocked = 0;
+  for (let i = 0; i < 9; i++) {
+    const r = await call('/api/proof', { method: 'POST', ip, body: { cap, proof: 'FLOOD' + i } });
+    if (r.status === 429) blocked++;
+  }
+  assert.ok(blocked >= 3, 'six attempts a minute per visitor, and the ninth onward is refused: ' + blocked);
+  const doc = JSON.parse(env.ORDERS._map.get('order:' + late.handle + ':' + ord.json.order.id).value);
+  assert.ok(['FLOOD0', 'FLOOD1', 'FLOOD2'].includes(doc.buyer.proof), 'the writes that happened are the first three, then the order’s own limit took over: ' + doc.buyer.proof);
+  // a buyer on the shop’s NAT keeps their order allowance: the buckets are separate
+  const other = await call('/api/order', { method: 'POST', ip: '196.31.0.19', body: { handle: late.handle, service: 'pickup',
+    buyer: { name: 'Someone Else', phone: '0780001234' }, items: [{ name: 'Box', price: 5 }] } });
+  assert.equal(other.status, 201, 'ordering from the same address is untouched by a flooding neighbour: ' + other.text);
+});
+
 test('a save frees the picture it dropped even when the index cannot see it yet', async () => {
   // Production fact this exists for: KV's list() is only eventually consistent, and
   // the file a merchant just took off is usually the newest key in the namespace, so

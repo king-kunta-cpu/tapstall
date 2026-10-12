@@ -186,6 +186,26 @@ verified ZW/SA tariffs) but it is now a **default, not the whole answer**:
   Nothing is stored (a renamed field updates yesterday's wording), nothing is said when
   the buyer answered or the rail needs nothing, and the page never invents its own copy.
 
+- **The buyer can answer it themselves, from the receipt.** A code exists about ninety
+  seconds after the order does, and the person holding it is looking at their own screen.
+  So `POST /api/order` mints a third link, `/p/<cap>`, alongside the shop's two: a
+  capability of kind `proof`, bound to one handle, one order id and the store's current
+  `auth_gen`, valid for the same 72 hours as a confirm link. `/api/proof` is the only
+  public write in the product, and `proofAccept` in `core.js` is the whole policy as a
+  pure function: `awaiting_payment` and `cod` only, `status` never, one field at a time,
+  an absent field left alone rather than cleared, a value identical to the one on file
+  answered `changed: false` at no cost, and **three** accepted writes before the door
+  shuts — three because a mistyped TxID is the common case and a buyer who cannot fix
+  their own typo goes back to messaging the shop, which is what this exists to remove.
+  The capability is *not* a widened `/c/`: `a:'proof'` is refused by the money endpoint
+  and `a:'mark'` by this one, both answered in the same words as an expired link. It is
+  minted for the response and deliberately never stored on the order document, so the
+  merchant cannot hold a URL that writes a field the ledger labels `proof_by: buyer`.
+  Each accepted write costs two `ORDERS` puts — the document and the ledger row, the same
+  two a mark spends — and every refusal costs nothing. The free part: `proofAsk` falls
+  silent the moment a code is on file, so the chase sentence leaves the row, the slip and
+  the CSV with no new wiring, and its "send it here" wording becomes literally true.
+
 An invalid description at sign-up becomes `cash` rather than a rejected
 registration: a merchant who never opens the shop is worse than one whose slip
 says "pay on collection" until they fix it.

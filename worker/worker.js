@@ -21,6 +21,7 @@ import {
   cleanImg, sniffImage, imgKeyOf, imgRefOf, newImgId, referencedImages, IMG_MAX_BYTES,
   IMG_TARGET_BYTES,
   cleanProof, cleanPayer, proofNoun, proofAsk, PROOF_MODES,
+  proofAccept, proofOpen, PROOF_WINDOW_SEC, PROOF_WRITES_MAX,
   issueCap, verifyCap, randomKey, validateSettings, stageSettings, applyPending, maskField,
   newTxRef, TX_WINDOW_SEC, payfastSignedOk, txMatches,
   seoFacts, seoHead, seoJsonLdTag, ROBOTS_TXT, sitemapXml, GUIDES, guideOf,
@@ -29,7 +30,7 @@ import {
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '0.7.2';
+const VERSION = '0.7.3';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 const MAX_ORDERS_KEPT = 200;
@@ -232,7 +233,7 @@ async function route(req, url, env, ctx) {
   }
 
   // ---- merchant authority: a code becomes a cookie, and only POSTs act ----
-  const MUT = /^\/api\/(mark|settings|settings\/revert|menu|revoke|auth|pin\/change|pin\/reset|login|logout|recover|image)$/;
+  const MUT = /^\/api\/(mark|proof|settings|settings\/revert|menu|revoke|auth|pin\/change|pin\/reset|login|logout|recover|image)$/;
   // /api/mark answers its own 405, because it also has to recognise a v0.2
   // ?token= link and trade it for a session rather than dead-end the merchant.
   const selfHandled = p === '/api/mark';
@@ -255,6 +256,7 @@ async function route(req, url, env, ctx) {
   if (p === '/api/register' && req.method === 'POST') return register(req, url, env);
   if (p === '/api/lookup') return lookup(url, env);
   if (p === '/api/mark') return markPaid(req, url, env);
+  if (p === '/api/proof' && req.method === 'POST') return proofAdd(req, url, env);
   if (p === '/api/admin') return adminView(req, url, env);
   if (p === '/api/settings' && req.method === 'POST') return settingsEdit(req, url, env);
   if (p === '/api/settings/revert' && req.method === 'POST') return revertPending(req, url, env);
@@ -264,6 +266,9 @@ async function route(req, url, env, ctx) {
 
   // The one-tap confirm link: GET renders an inert page, the browser posts.
   if ((m = p.match(/^\/c\/([A-Za-z0-9._-]{20,400})$/))) return confirmPage(env, m[1]);
+  // The buyer's own write, on its own path and its own capability kind: `/c/` marks
+  // money, `/p/` adds a reference, and neither link can do the other's job.
+  if ((m = p.match(/^\/p\/([A-Za-z0-9._-]{20,400})$/))) return proofPage(env, m[1]);
 
   if (p === '/a') return adminEntry(req, url, env);
 
@@ -497,6 +502,12 @@ async function placeOrder(req, url, env, ctx) {
   const cancelCap = await issueCap(secret, { a: 'mark', h: st.handle, id, s: 'cancelled' }, MARK_TTL);
   order.confirm_url = `${url.origin}/c/${markCap}`;
   order.cancel_url = `${url.origin}/c/${cancelCap}`;
+  /* The buyer's link to add their own code later. Deliberately NOT stored on the
+   * order: a merchant who reads the order document would otherwise hold a URL that
+   * writes into a field labelled as coming from the buyer, and `via: 'buyer'` in the
+   * audit log would stop being true. The capability exists in the response, for the
+   * person who needs it, and nowhere else. */
+  const proofCap = await issueCap(secret, { a: 'proof', h: st.handle, id, g: String(st.auth_gen || '0') }, PROOF_WINDOW_SEC);
 
   /* The order document is written BEFORE the buyer is answered. It used to sit
    * in ctx.waitUntil, which meant a failed write — a spent KV write budget, a
@@ -523,6 +534,9 @@ async function placeOrder(req, url, env, ctx) {
     mark_url: `/c/${markCap}`,
     confirm_url: order.confirm_url,
     cancel_url: `/c/${cancelCap}`,
+    // the receipt's second half: they have the code on screen right now
+    proof_url: `/p/${proofCap}`,
+    proof_writes: PROOF_WRITES_MAX,
   }, 201);
 }
 
@@ -665,6 +679,117 @@ async function markPaid(req, url, env) {
   // guessing whether to tap again
   return json({ ok: true, id: o.id, code: o.code, status: o.status, label, logged, amount: o.pricing && o.pricing.pay_now, undo_url: '/c/' + undo });
 }
+/* ------------------------------------------------------------------------------------
+ * the buyer's half: one field, on a link of its own
+ *
+ * A payment code arrives after the order does, and the receipt is where that moment
+ * happens. So the receipt gets a door — with one room behind it. This handler cannot
+ * touch `status`, it closes when the shop settles the order, and it is a different
+ * capability kind from the merchant's confirm link, which means a `/p/` URL leaked
+ * into a group chat is worth a reference field and nothing else.
+ * ---------------------------------------------------------------------------------- */
+
+/** The page behind a buyer's link: the order as the shop sees it, the field, one button. */
+async function proofPage(env, cap) {
+  const p = await verifyCap(env.ADMIN_SECRET || "dev-secret", cap);
+  const card = (title, lines, code, tail) => html(shell(title, `<h2 style="margin:.1rem 0 .5rem">${esc(title)}</h2>`
+    + lines.map((t) => `<p class=t>${t}</p>`).join("") + (tail || "")), code, NOINDEX);
+  if (!p || p.a !== "proof") {
+    return card("This link is finished",
+      ["A code link lasts 72 hours after the order, and all it can ever do is add a reference to that one order. If it has closed, send the code in the chat with the shop — they can find the order by its amount."], 401);
+  }
+  const st = await getStore(env, p.h);
+  if (!st || String(p.g) !== String(st.auth_gen || "0")) {
+    return card("The shop closed its code links",
+      ["Nothing is wrong with your order. Revoking access on the shop closes these links too, so send the code to the shop directly."], 410);
+  }
+  const o = await env.ORDERS.get(`order:${st.handle}:${p.id}`, "json");
+  if (!o) return card("Order not found", ["It is not on this shop's list any more."], 404);
+  const back = `<p class=t><a href="/s/${esc(st.handle)}">Back to ${esc(st.name || st.handle)}</a></p>`;
+  const rail = (o.pricing || {}).rail;
+  const noun = proofNoun(rail);
+  const onFile = cleanProof((o.buyer || {}).proof);
+  const left = Math.max(0, PROOF_WRITES_MAX - (Number(o.proof_writes) || 0));
+  const open = proofOpen(o);
+  const amount = `${(Number(o.total) || 0).toFixed(2)} ${esc(o.currency || "")}`.trim();
+  const pay = o.pay || {};
+  const ask = proofAsk(o);
+  const wa = String(st.whatsapp || "").replace(/[^0-9]/g, "");
+  const state = !open
+    ? `<p>This order is ${esc(o.status)}, so its record is closed from here. ${esc(left > 0 ? "If the code needs correcting, message the shop — they can fix it on their side." : "Message the shop and they will fix it on their side.")}</p>`
+    : left <= 0
+      ? "<p>You have added this as many times as the order allows. Message the shop if it still needs correcting.</p>"
+      : `<form method=post action="/api/proof" style="margin-top:.9rem">`
+        + `<input type=hidden name=cap value="${esc(cap)}"><input type=hidden name=form value=1>`
+        + `<label class=t for=proof>${esc(onFile ? "Correct the reference" : noun.label)}</label>`
+        + `<input id=proof name=proof value="${esc(onFile)}" maxlength=40 autocapitalize=characters spellcheck=false autocomplete=off`
+        + ` style="font:inherit;width:100%;box-sizing:border-box;padding:.65rem .7rem;margin:.35rem 0 .6rem;border:1px solid #cfd8e3;border-radius:10px">`
+        + `<button type=submit>Send it to the shop</button>`
+        + `<p class=t style="margin-top:.5rem">${esc(noun.hint)}</p>`
+        + `<p class=t style="margin-top:.7rem">One link, this order only. It adds a reference — it cannot mark anything paid, and the shop still decides when the money has arrived.</p>`
+        + (left < PROOF_WRITES_MAX ? `<p class=t>${left} more ${left === 1 ? "correction" : "corrections"} allowed on this order.</p>` : "")
+        + (wa ? `<p class=t style="text-align:center"><a href="https://wa.me/${wa}?text=${encodeURIComponent(`Order ${o.code || ""} — my payment is ${amount}`)}">or send it in the chat</a></p>` : "")
+        + `</form>`;
+  const body = `<p class=t>${esc(st.name || st.handle)}</p>`
+    + `<h2 style="margin:.15rem 0 .5rem">Order <b>${esc(o.code || "")}</b></h2>`
+    + `<p class=t><b>${amount}</b> · ${esc(o.status || "open")}${rail && rail.label ? " · " + esc(rail.label) : ""}</p>`
+    + (pay.account ? `<p class=t>Paid to <b>${esc(pay.account)}</b></p>` : "")
+    + (onFile ? `<p>The shop has <b>${esc(onFile)}</b> on this order.</p>` : (ask ? `<p class=t>${esc(ask)}</p>` : ""))
+    + state + back;
+  return html(shell("Add your payment code", body), 200, NOINDEX);
+}
+
+/**
+ * The write. Same shape as `markPaid`, minus the money: POST-only, its own rate
+ * bucket, the capability re-verified on the way in, and the store's revoke generation
+ * re-checked so the one lever at the top of the shop still closes this door.
+ */
+async function proofAdd(req, url, env) {
+  const ip = ipOf(req);
+  if (await rateLimited(env, ip, "proof:", PRL)) return json({ ok: false, error: "too many attempts from you — wait a minute and send it again" }, 429);
+  const b = await readBody(req);
+  const asPage = b.form === "1";
+  const no = (msg, code, handle) => asPage
+    ? html(shell("Not added", `<h2 style="margin:.1rem 0 .5rem">Not added</h2><p class=t>${esc(msg)}</p>`
+        + (handle ? `<p class=t><a href="/s/${esc(handle)}">Back to the shop</a></p>` : ""), code, NOINDEX))
+    : json({ ok: false, error: msg }, code);
+  const p = b.cap ? await verifyCap(env.ADMIN_SECRET || "dev-secret", String(b.cap)) : null;
+  if (!p || p.a !== "proof") return no("that link does not open this field any more", 401);
+  const st = await getStore(env, p.h);
+  if (!st) return no("no such shop", 404);
+  if (String(p.g) !== String(st.auth_gen || "0")) return no("this shop has closed its code links", 410);
+  const key = `order:${st.handle}:${p.id}`;
+  const o = await env.ORDERS.get(key, "json");
+  if (!o) return no("no such order", 404);
+  const r = proofAccept(o, { proof: b.proof == null ? null : String(b.proof), payer: b.payer == null ? null : String(b.payer) });
+  if (!r.ok) return no(r.msg, r.why === "settled" ? 409 : r.why === "spent" ? 429 : 422, st.handle);
+  if (r.changed) {
+    const when = new Date().toISOString();
+    o.buyer = Object.assign({}, o.buyer || {}, { proof: r.proof, payer: r.payer });
+    o.proof_writes = r.writes; o.proof_at = when; o.proof_by = "buyer";
+    await env.ORDERS.put(key, JSON.stringify(o));
+    // and onto the row the merchant reads, so the chase sentence disappears from the
+    // place it was written: the same two writes a mark spends, no more
+    const listKey = `list:${st.handle}`;
+    const list = (await env.ORDERS.get(listKey, "json")) || [];
+    const row = list.find((x) => x && x.id === o.id);
+    if (row) {
+      row.payer = o.buyer.payer; row.proof = o.buyer.proof; row.proof_by = "buyer"; row.proof_at = when;
+      await env.ORDERS.put(listKey, JSON.stringify(list));
+    }
+    await pushAudit(env, st, { act: "proof", via: "buyer", fields: [`${o.code || o.id} ← ${o.buyer.proof || o.buyer.payer}`], ip });
+  }
+  const note = `Payment reference ${r.proof || r.payer} is on order ${o.code || ""}.`
+    + (r.changed ? "" : " That is what the shop already had, so nothing was rewritten.")
+    + (r.left > 0 ? ` You can correct it ${r.left} more time${r.left === 1 ? "" : "s"} while the order is open.` : "");
+  if (asPage) {
+    return html(shell("Sent", `<h2 style="margin:.1rem 0 .5rem">Sent to the shop</h2><p>${esc(note)}</p>`
+      + `<p class=t>You can close this now — settling the order is the shop's to do.</p>`
+      + `<p class=t><a href="/s/${esc(st.handle)}">Back to ${esc(st.name || st.handle)}</a></p>`), 200, NOINDEX);
+  }
+  return json({ ok: true, changed: r.changed, code: o.code, proof: o.buyer.proof, payer: o.buyer.payer, left: r.left, note });
+}
+
 /* -------------------------------------------------------------- register */
 async function register(req, url, env) {
   const b = await req.json().catch(() => null);
@@ -1097,14 +1222,20 @@ async function adminPut(req, env) {
 }
 
 /* ------------------------------------------------------------ plumbing */
-async function rateLimited(env, ip) {
+async function rateLimited(env, ip, bucket, rl) {
   if (!env.STORES) return false;
-  const key = `rl:${ip}:${Math.floor(Date.now() / (RL.windowSec * 1000))}`;
+  const win = rl || RL;
+  const key = `rl:${bucket || ''}${ip}:${Math.floor(Date.now() / (win.windowSec * 1000))}`;
   const n = Number((await env.STORES.get(key)) || 0);
-  if (n >= RL.max) return true;
-  await env.STORES.put(key, String(n + 1), { expirationTtl: RL.windowSec + 10 });
+  if (n >= win.max) return true;
+  await env.STORES.put(key, String(n + 1), { expirationTtl: win.windowSec + 10 });
   return false;
 }
+/** Its own bucket, wider than an order's and narrower than nothing: one buyer adds a
+ *  code once or twice, and the ceiling exists only so the field is not a free write
+ *  oracle. `proof:` keeps it off the order counter, because a buyer and a shop behind
+ *  one carrier NAT should not be spending each other's allowance. */
+const PRL = { windowSec: 60, max: 6 };
 async function incr(env, key) {
   if (!env.STORES) return 1;
   const n = Number((await env.STORES.get(key)) || 0) + 1;
@@ -1903,7 +2034,7 @@ async function revokeKeys(req, url, env) {
   await pushAudit(env, st, { act: 'revoke', via: who.via, ip: ipOf(req) });
   const res = json({
     ok: true, api_key: st.admin_token,
-    note: 'Every session and API key for this store is dead — the new key is above. Your PIN still signs you in; change it inside the dashboard if you think somebody knows it.',
+    note: 'Every session and API key for this store is dead, and so is any payment-code link a buyer was holding — the new key is above. Your PIN still signs you in; change it inside the dashboard if you think somebody knows it.',
   });
   return withCookie(res, ...KILL_COOKIES);
 }
