@@ -1,5 +1,46 @@
 # Tapstall — status
 
+## The field can be handed back (2026-10-12, v0.8.1)
+
+**The seventh reading of the same instruction found the seam the sixth left open.** A filed code
+is a *sealed* field: `proofAsk` goes quiet once a value is on file, `withAsk` mints nothing while
+the field is full, and the buyer’s link is spent by the write that used it. That is correct while
+the code is good. It is a dead end the moment it is not — a screenshot nobody can read, a payment
+reversed and re-sent, a reference from the wrong wallet. The 410 card has been telling buyers to
+“ask the shop and they can change it on their side” since yesterday, and the shop could change a
+code but could never **send the field back**.
+
+- **`proofVoid(order)`** (core, pure, its own truth table): both halves of the field clear, the
+  write count restarts, and an already-empty field answers `changed: false` — a second tap is a
+  second tap, not a failure. It never claims to have touched `status`, because it cannot.
+- **One more field on the shop’s route, not one more verb on the buyer’s.** `/api/order/proof`
+  takes `void`; `/api/proof` builds its input from `proof` and `payer` alone, so there is nothing
+  for a buyer to borrow. `pages.test.mjs` counts it in the source: `b.void` in exactly one
+  condition, `proofVoid(` in exactly one handler, and the public door’s `proofAccept` call spelled
+  out so a body passed through whole would fail the test.
+- **A hand-back turns the nonce over**, so every link minted for the cleared code dies — spent or
+  live — and a stale tab cannot file over a decision the shop just made. The idempotent case
+  rotates nothing and writes nothing, which the live test checks by comparing the row and the
+  document before and after.
+- **A filed code keeps the merchant’s box open after the money is counted**
+  (`o.ask || open(o) || o.buyer.proof`). The row comment has promised “correct it is the same
+  gesture as file it” since 0.7.4; on a paid order the field was hidden, so the promise was only
+  true while it was unnecessary.
+- **The buyer’s device keeps the fresh door** while the field still has changes: `pfKeepScript`
+  writes into the same five-slot list `pfAdd` maintains, so the `Correct it` offer survives a
+  reload for the first time — nothing else ever wrote that link down, because a read mints only
+  for an empty field. `pfTok` cuts the token at the `/p/` marker rather than at character three,
+  because the receipt’s URL is relative and a ledger read’s is absolute.
+
+`prod_check.sh` gains 15 write-gated lines (blocked on a capped day, as the rule says) and 6
+static ones. Every new pattern was replayed against the shipped page bytes and against the exact
+JSON the routes emit, and six of them against values they must *not* match — two needed their
+parentheses escaped before they matched anything at all, which is what that replay is for.
+
+**Also fixed:** `load_secrets` now looks in `$HOME/.secrets` as well as the repo’s, and tolerates a
+secret file with no trailing newline — `read` returns 1 at EOF, and under `set -e` that was a
+deploy that died *after* reading the token correctly, silently, in 160 ms.
+
 ## One link, one change (2026-10-12, v0.8.0)
 
 **The instruction has always said *single-use token*, and until today it did not mean that.**

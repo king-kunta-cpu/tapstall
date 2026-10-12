@@ -177,6 +177,10 @@ var TERM = /*__TAPSTALL_TERM__*/null;
     a.push({ c: String(code || '').slice(0, 16), u: url, t: Date.now() });
     pfSave(a.slice(-PF_MAX)); pfRender();
   }
+  /* A door is `/p/<cap>` on the receipt and `<origin>/p/<cap>` on a ledger read, and this box
+     is fed by both across a reload. Cutting the first three characters is right exactly as long
+     as nobody changes the surface; finding the marker is right either way. */
+  function pfTok(u) { var i = String(u || '').indexOf('/p/'); return i < 0 ? '' : u.slice(i + 3); }
   function pfDone(code) {
     var a = pfLoad(), n = a.filter(function (x) { return x.c !== String(code || ''); });
     if (n.length !== a.length) pfSave(n);
@@ -479,7 +483,7 @@ var TERM = /*__TAPSTALL_TERM__*/null;
        path, so the box is an enhancement, never a requirement. */
     var pfBox = '<div style="background:#fff;color:#101418;border-radius:12px;padding:.7rem;margin:.6rem 0 0">'
       + '<form id="pff" method="post" action="/api/proof">'
-      + '<input type="hidden" name="cap" value="' + esc(o.proof_url.slice(3)) + '">'
+      + '<input type="hidden" name="cap" value="' + esc(pfTok(o.proof_url)) + '">'
       + '<input type="hidden" name="form" value="1">'
       + '<label for="fPfCode">' + esc(pay.proof_label || 'Code from the app') + '</label>'
       + '<input id="fPfCode" name="proof" maxlength="40" autocapitalize="characters" spellcheck="false" autocomplete="off"'
@@ -541,7 +545,7 @@ var TERM = /*__TAPSTALL_TERM__*/null;
     if (needDoor) $('pff').onsubmit = function (ev) {
       ev.preventDefault();
       var btn = $('pfBtn'), msg = $('pfMsg'), code = ($('fPfCode').value || '').trim();
-      var body = { cap: o.proof_url.slice(3), proof: code };
+      var body = { cap: pfTok(o.proof_url), proof: code };
       if (pay.ask_payer) body.payer = ($('fPfPayer').value || '').trim();
       btn.disabled = true; btn.textContent = 'Sending…';
       fetch('/api/proof', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
@@ -554,7 +558,10 @@ var TERM = /*__TAPSTALL_TERM__*/null;
             // used up, so the kept entry goes with it: one line under the notice bar and
             // this box are the same door, and it is closed now either way
             if (j.proof_url) o.proof_url = j.proof_url;
-            pfDone(o.order.code);
+            // while the field still has changes on it the door stays on the device, in this
+            // same slot: the link this box used is dead, and the only place the fresh one was
+            // ever written is this answer. Nothing re-mints it while a code is on file.
+            if (j.proof_url && j.left > 0) pfAdd(o.order.code, j.proof_url); else pfDone(o.order.code);
             $('pff').outerHTML = '<div class="kv"><span>' + esc(pay.proof_label || 'Code from the app')
               + '</span><span><b>' + esc(j.proof || code) + '</b>'
               + (j.payer ? ', from ' + esc(j.payer) : '') + '</span></div>'

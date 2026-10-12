@@ -1086,13 +1086,21 @@ function row(o) {
        on the row where a code is owed or the order is still open, prefilled with what
        the buyer sent: "correct it" is then the same gesture as "file it", and a row
        that needs nothing shows nothing. */
-    + (o.ask || open(o)
+    + (o.ask || open(o) || (o.buyer && o.buyer.proof)
         ? '<div style="display:flex;gap:.4rem;margin-top:.45rem;align-items:center">'
           + '<input data-pf="' + esc(o.id) + '" maxlength="40" autocapitalize="characters" spellcheck="false"'
           + ' placeholder="' + esc((p.rail && p.rail.proof_label) || 'code from their app') + '"'
           + ' value="' + esc((o.buyer && o.buyer.proof) || '') + '"'
           + ' style="flex:1;min-width:0;font:inherit;padding:.35rem .5rem;border:1px solid #cfd8e3;border-radius:8px;background:#fff">'
-          + '<button class="sm" data-pfs="' + esc(o.id) + '">File it</button></div>'
+          + '<button class="sm" data-pfs="' + esc(o.id) + '">File it</button>'
+          // emptying the box is not how a field is cleared — a stray blank submit must never
+          // erase the evidence a buyer gave. This is the deliberate version of the same act:
+          // the code goes off the order, the buyer's spent link is superseded, and the order
+          // asks them again in its own words, with three changes on it
+          + ((o.buyer && o.buyer.proof)
+              ? '<button class="sm" data-pfv="' + esc(o.id) + '" title="Clear their code and let them send it again">Hand it back</button>'
+              : '')
+          + '</div>'
         : '')
     + (p.fee_absorbed_by_merchant ? '<div class="pay">payment cost you absorb: ' + p.fee_absorbed_by_merchant.toFixed(2) + ' (' + esc(p.rail && p.rail.label || '') + ')</div>' : '')
     + ((o.risk_flags || []).length ? '<div class="flags">⚠ ' + esc(o.risk_flags.join(' · ')) + '</div>' : '')
@@ -1120,6 +1128,17 @@ function bind(scope) {
   qa('[data-cp]', root).forEach(function (b) { b.onclick = function () {
     var o = byId(b.getAttribute('data-cp')); if (!o) return;
     copyText(orderSlip(o)); b.textContent = 'Copied ✓';
+  }; });
+  qa('[data-pfv]', root).forEach(function (b) { b.onclick = function () {
+    var id = b.getAttribute('data-pfv'); var was = b.textContent; b.disabled = true; b.textContent = '…';
+    // no confirm() step: the merchant loses nothing they own — the buyer retypes from their
+    // own app — and a dialog on the row where the fix is obvious is a second tap for nothing
+    api('/api/order/proof', { handle: S.handle, id: id, void: 1 }).then(function (r) {
+      b.disabled = false; b.textContent = was;
+      if (!r.j || !r.j.ok) { q('#toDo').insertAdjacentHTML('afterbegin', '<div class="flags">'
+        + esc((r.j && r.j.error) || 'did not hand it back') + '</div>'); return; }
+      load();
+    });
   }; });
   qa('[data-pfs]', root).forEach(function (b) { b.onclick = function () {
     var id = b.getAttribute('data-pfs'); var inp = b.parentNode.querySelector('[data-pf="' + id + '"]');

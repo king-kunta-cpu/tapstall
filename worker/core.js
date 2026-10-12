@@ -171,6 +171,51 @@ export function proofUsed(order = {}, nonce) {
   return !!(bound && got && bound !== got);
 }
 
+/**
+ * The shop handing the field back — the one thing that makes "one link, one change" a
+ * loop rather than a dead end.
+ *
+ * A buyer's link is spent by the write that used it, and `proofAsk` goes quiet once a code
+ * is on file, so a filed code is also a *sealed* field: nothing the buyer can do reopens
+ * it, and no door is minted again. That is right while the code is good and wrong the moment
+ * it is not — a screenshot nobody can read, a payment reversed and re-sent, a reference from
+ * the wrong wallet. So the only way back is an act of the shop, on its own authority, on the
+ * route that already files a code: clear the field, and let the order ask again.
+ *
+ * It is not the buyer's to take. `proofAccept` refuses an empty submission from either side
+ * (a blank second tap must not erase evidence), and only this function clears anything, and
+ * only the merchant route calls it. `status` is still untouchable: handing back a code is not
+ * un-counting money, and on a settled order the field clears while the door stays shut —
+ * `withAsk` asks the order's status, not this function.
+ *
+ * Pure, like the rest of the state machine: it decides what a hand-back means and says it;
+ * rotating the nonce and writing the row are the caller's.
+ */
+export function proofVoid(order) {
+  const o = order && typeof order === 'object' ? order : {};
+  const had = o.buyer && typeof o.buyer === 'object' ? o.buyer : {};
+  const proof = cleanProof(had.proof);
+  const payer = cleanPayer(had.payer, 'loose');
+  const used = Number(o.proof_writes) || 0;
+  if (!proof && !payer) {
+    // a double tap is not an error: the second one has nothing to hand back, and the shop
+    // should be told the field is already theirs rather than shown a failure
+    return { ok: true, changed: false, writes: used, left: Math.max(0, PROOF_WRITES_MAX - used),
+      msg: 'Nothing to hand back — that field is already empty.' };
+  }
+  const rail = (o.pricing || {}).rail;
+  // the rail's own word, the same one the chase uses: a shop that calls it a "slip
+  // number" should not be handed a sentence about a "reference" at the moment it is
+  // deciding whether to trust the answer
+  const noun = String(proofNoun(rail).word || 'code').toLowerCase();
+  return {
+    ok: true, changed: true, proof: '', payer: '', writes: 0, left: PROOF_WRITES_MAX,
+    cleared: [proof, payer].filter(Boolean),
+    msg: 'Handed back — the ' + noun + ' is off the order and the field is theirs again, '
+      + 'with ' + PROOF_WRITES_MAX + ' changes on it.',
+  };
+}
+
 export function proofOpen(order) {
   const s = (order && typeof order === 'object' ? order : {}).status;
   return !s || PROOF_OPEN.indexOf(s) >= 0;

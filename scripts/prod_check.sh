@@ -352,6 +352,36 @@ ck  "  · no public door reaches this write at all" '^401$' "$(code -X POST -H '
 ck  "  · a GET is refused, so a link prefetch files nothing" '^405$' "$(code "$ORIGIN/api/order/proof")"
 ckw "  · and a blank box is answered in the shop's own voice" 'Nothing to file' "$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" -d '{"handle":"'"$HANDLE"'","id":"'"$ID2"'","proof":"   "}' "$ORIGIN/api/order/proof")"
 
+# 0.8.1: the field can be sent back. A filed code seals it — `proofAsk` goes quiet once a value
+# is on file and `withAsk` mints nothing while the field is full — so a mis-read code stops being
+# a problem only when the shop chooses to clear it. That has to be a deliberate act (a blank box
+# stays a refusal on both sides) and the shop's alone. Every line here is a write, so on a capped
+# day they are blocked and on a live one they are the proof.
+HB=$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" \
+  -d '{"handle":"'"$HANDLE"'","id":"'"$ID2"'","void":1}' "$ORIGIN/api/order/proof")
+ckw "the shop hands an unreadable code back, on the route that files it" '"void":[[:space:]]*true' "$HB"
+ckw "  · the answer restarts the buyer's budget instead of spending it" 'with [0-9]+ changes on it' "$HB"
+ckw "  · and says the order will ask again, in words with no link in them" '"ask":true' "$HB"
+KVHB=$(curl -s -m 30 -H "Authorization: Bearer $TOK" "https://api.cloudflare.com/client/v4/accounts/$ACCT/storage/kv/namespaces/$ORD_KV/values/order:$HANDLE:$ID2")
+ckw "  · the field is empty on the document, with a stamp of its own" '"proof_void_at":"' "$KVHB"
+ckw "  · and nothing still claims a filing happened" '"proof_by":""' "$KVHB"
+ckw "  · the write count is back at the top, which is the whole point of it" '"proof_writes":0' "$KVHB"
+ckw "  · a second tap on an empty field is a state, not a failure" '"changed":false' \
+  "$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" -d '{"handle":"'"$HANDLE"'","id":"'"$ID2"'","void":1}' "$ORIGIN/api/order/proof")"
+ckw "  · and it spent nothing to say so" '"proof_writes":0' \
+  "$(curl -s -m 30 -H "Authorization: Bearer $TOK" "https://api.cloudflare.com/client/v4/accounts/$ACCT/storage/kv/namespaces/$ORD_KV/values/order:$HANDLE:$ID2")"
+DASH3=$(curl -s -m 30 -H "x-tapstall-admin: $ADMIN_KEY" "$ORIGIN/api/admin?handle=$HANDLE")
+ROW3=$(printf '%s' "$DASH3" | python3 -c "import sys,json;print(json.dumps(next((o for o in json.load(sys.stdin).get('orders',[]) if o.get('id')=='$ID2'), {})))" 2>/dev/null)
+ckw "an empty field asks again, so a door is minted for it a third time" '"proof_url":"[^"]*/p/v1' "$ROW3"
+PURL3=$(printf '%s' "$ROW3" | python3 -c "import sys,json;print(json.load(sys.stdin).get('proof_url',''))" 2>/dev/null)
+CAP3=${PURL3##*/p/}
+ckw "  · a link minted before the hand-back cannot file over it" '^(409|410)$' \
+  "$(code -X POST -H 'content-type: application/json' -d '{"cap":"'"$CAP2"'","proof":"STALE AFTER VOID"}' "$ORIGIN/api/proof")"
+ckw "  · while the new one writes, on the buyer's side of the counter" '"changed":true' \
+  "$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"$CAP3"'","proof":"AGAIN-$(date +%s | tail -c 6)"}' "$ORIGIN/api/proof")"
+ckw "  · and void is not the buyer's word, whatever they put in the json" 'Type the code your app printed' \
+  "$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"$CAP3"'","proof":"","void":1}' "$ORIGIN/api/proof")"
+
 echo "[5] settings: cosmetic instant, money held 15 minutes, cancellable"
 HOURS=$(printf '%s' "$STORE" | python3 -c "import sys,json;print(json.load(sys.stdin).get('hours','') or 'open')" 2>/dev/null)
 PROBE="ZZ-PROBE-$(date +%s | tail -c 6)"
@@ -717,6 +747,12 @@ nkw  "  · and does not pretend a bad link is news about the order" '"final":tru
 ck "the dashboard ships the picker and a name for the field" 'data-rd="proof"' "$SHIP_A"
 ck "  · the ledger row prints who sent it and which code they gave" 'o\.buyer\.proof' "$SHIP_A"
 ck "  · and the CSV has a header name for every column it writes" 'payer,proof_of_payment,flags' "$SHIP_A"
+ck "the ledger row can hand the field back, in words a merchant reads" 'Hand it back' "$SHIP_A"
+ck "  · the button exists only where there is something to hand back" '<button class="sm" data-pfv' "$SHIP_A"
+ck "  · it carries the one verb the buyer's door does not have" 'void: 1' "$SHIP_A"
+ck "  · a filed code keeps the box open even after the money was counted" 'open(o) || (o.buyer && o.buyer.proof)' "$SHIP_A"
+ck "the receipt cuts its door token at the marker, not at character three" "indexOf\\('/p/'\\)" "$SHIP_S"
+ck "  · and keeps the fresh door on the device while the field has changes left" "j.left > 0\\) pfAdd\\(o.order.code, j.proof_url\\)" "$SHIP_S"
 
 echo "[11] money in: the webhook doors are shut until somebody arms them"
 # A public POST that can extend a paid plan is the most interesting route on this

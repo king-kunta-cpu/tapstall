@@ -45,7 +45,17 @@ load_secrets() {
   export CF_TOKEN CF_ACCOUNT
   for pair in "CF_TOKEN:cf_token" "CF_ACCOUNT:cf_account"; do
     var="${pair%%:*}"; file="${pair##*:}"
-    if [[ -z "${!var:-}" && -f ".secrets/$file" ]]; then read -r "$var" < ".secrets/$file"; fi
+    # the repo's own .secrets first (it is where a checkout puts one), then the home
+    # directory, because this repo is cloned and re-cloned more than it is configured
+    # and a $HOME/.secrets that deploy.sh cannot see is a broken deploy for no reason
+    if [[ -z "${!var:-}" ]]; then
+      for d in ".secrets" "$HOME/.secrets"; do
+        # `|| true`: a secret file with no trailing newline makes `read` return 1 at EOF,
+        # and under set -e that kills the deploy after the value was already read — the
+        # token is in the variable and the script is dead, which looks like a bad token
+        if [[ -f "$d/$file" ]]; then read -r "$var" < "$d/$file" || true; break; fi
+      done
+    fi
     export "$var"
     [[ -n "${!var:-}" ]] || die "set $var (env or .secrets/$file)"
   done

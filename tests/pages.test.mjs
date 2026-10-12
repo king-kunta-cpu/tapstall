@@ -526,7 +526,7 @@ test('the receipt page holds the door open itself, one box, no navigation', () =
     'and the box is drawn inside the dark paybox as a light card, so it is legible without a new stylesheet');
   assert.match(storeHtml, /<form id="pff" method="post" action="\/api\/proof">/,
     'it is a form first: with JS switched off it posts to the same route the link opens');
-  assert.match(storeHtml, /name="cap" value="' \+ esc\(o\.proof_url\.slice\(3\)\)/,
+  assert.match(storeHtml, /name="cap" value="' \+ esc\(pfTok\(o\.proof_url\)\)/,
     'the token inside it is the one this very response handed this browser, escaped, and nothing else');
   assert.match(storeHtml, /name="proof" maxlength="40" autocapitalize=characters|name="proof" maxlength="40" autocapitalize="characters"/,
     'the same field the door has, same length, same no-autocorrect rule');
@@ -573,3 +573,53 @@ test('a returning buyer finds the door again, on the device it was left on', () 
   assert.match(worker, /\/\^\[A-Za-z0-9\._-\]\{20,400\}\$\/.test\(k\)/,
     'only for a value with the shape a capability has, spelled as the client filter above spells it');
 });
+
+/* The shop's side of the code field, and the one gesture that keeps "one link, one change" a
+   loop instead of a seal: an empty box is not how a filed code is cleared (a stray blank submit
+   must never erase evidence), so clearing has to be a button the merchant means. */
+test('the ledger row hands the field back with a word, not with a blank', () => {
+  const admin = page('admin');
+  assert.match(admin, /data-pfv="/, 'a button of its own, on the row where a code is on file');
+  assert.match(admin, /\(o\.buyer && o\.buyer\.proof\)\s*\?\s*'<button class="sm" data-pfv="/,
+    'and it only exists when there is something to hand back — no dead control on a row that owes nothing');
+  assert.match(admin, /Clear their code and let them send it again/, 'title spells it out, because the verb is ambiguous');
+  assert.match(admin, /api\('\/api\/order\/proof', \{ handle: S\.handle, id: id, void: 1 \}\)/,
+    'one field on the route that already files, and the route needs a shop session to hear it');
+  assert.ok(!/confirm\(/.test(admin.slice(admin.indexOf("data-pfv"), admin.indexOf("data-pfv") + 1200)),
+    'no dialog on the way: the merchant loses nothing they own, and the buyer retypes from their own app');
+  // the box itself used to hide on a paid order that already had a code, which left "correct
+  // it" unreachable exactly when a mis-read code is noticed — the row comment promised it
+  assert.match(admin, /\+ \(o\.ask \|\| open\(o\) \|\| \(o\.buyer && o\.buyer\.proof\)/,
+    'so a row with a filed code shows its field whatever the status says');
+
+  const storeHtml = page('store');
+  assert.match(storeHtml, /function pfTok\(u\) \{ var i = String\(u \|\| ''\)\.indexOf\('\/p\/'\)/,
+    'a door is cut at the marker, not at character three: the receipt link is relative and a ledger link is not');
+  assert.match(storeHtml, /value="' \+ esc\(pfTok\(o\.proof_url\)\)/, 'into the form field');
+  assert.match(storeHtml, /var body = \{ cap: pfTok\(o\.proof_url\), proof: code \};/, 'and into the json');
+  assert.match(storeHtml, /if \(j\.proof_url && j\.left > 0\) pfAdd\(o\.order\.code, j\.proof_url\); else pfDone\(o\.order\.code\);/,
+    'and the fresh door the answer handed back is kept on the device while the field still has changes, because nothing else ever writes it down');
+
+  // two files, one storage shape: the Worker's keep script must not invent a second format
+  assert.match(worker, /\.push\(\{c:"' \+ String\(code \|\| ''\)\.slice\(0, 16\) \+ '",u:"\/p\/'/,
+    'the script writes c/u exactly as pfAdd does');
+  assert.match(worker, /if\(n\.length>5\)n=n\.slice\(-5\)/, 'and trims to the same five the storefront keeps');
+  assert.match(storeHtml, /PF_MAX = 5/, 'five, said in both places, with this line as the pin');
+});
+
+/* The release's whole safety claim in one grep: the public door reads two fields and no verb.
+   `void` is a word the shop's route understands and the buyer's cannot, because the buyer's
+   input is built field by field before it reaches proofAccept. */
+test('a buyer’s door has no verb that clears, and no way to borrow one', () => {
+  const proofAdd = worker.slice(worker.indexOf('async function proofAdd'), worker.indexOf('/* ------', worker.indexOf('async function proofAdd')));
+  assert.match(proofAdd, /proofAccept\(o, \{ proof: b\.proof == null \? null : String\(b\.proof\), payer: b\.payer == null \? null : String\(b\.payer\) \}, 'buyer'\)/,
+    'its input is named, not forwarded — a whole body passed through would be a body full of fields');
+  assert.ok(!proofAdd.includes('proofVoid('), 'and nothing on that path clears anything');
+  assert.equal((worker.match(/b\.void/g) || []).length, 3, 'and read in one condition, spelled three times so a form tick and a json boolean both mean it');
+  assert.equal(worker.split('proofVoid(').length - 1, 1, 'and the clearing helper is called from exactly one handler');
+  assert.match(worker, /if \(b\.void === true \|\| b\.void === '1' \|\| b\.void === 'true'\)/,
+    'from the shop route only, spelled so a form tick and a json boolean both mean it');
+  assert.ok(/act: 'proof', via: 'merchant'/.test(worker.slice(worker.indexOf('const v = proofVoid(o)'), worker.indexOf('const v = proofVoid(o)') + 2400)),
+    'and it is written down as an act, in the trail the merchant can read back');
+});
+

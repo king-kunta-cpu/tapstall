@@ -274,6 +274,13 @@ verified ZW/SA tariffs) but it is now a **default, not the whole answer**:
   it prunes that link from the phone that kept it, and it mints nothing in the refusal. The
   shop filing a code from the chat spends the buyer's link the same way; a cap or an order
   from before the rule is honoured and binds itself on its first write (v0.8.0).
+- **A filed code can be handed back.** Sealing the field when a value is on file is right while
+  the code is good and a dead end when it is not, so the shop's ledger row grew one deliberate
+  gesture — `Hand it back` — that clears the reference, restarts the buyer's three changes, and
+  turns the order's nonce over so every link minted for the old code is dead, spent or live. It
+  is the shop's route only: the buyer's door reads two fields and no verb, a blank box is still
+  refused on both sides, and an already-empty field is answered as a state rather than a failure
+  (v0.8.1).
 
 An invalid description at sign-up becomes `cash` rather than a rejected
 registration: a merchant who never opens the shop is worse than one whose slip

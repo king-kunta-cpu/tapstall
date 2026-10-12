@@ -997,3 +997,33 @@ test('proofUsed: a link is worth one change, and only once the order says so', (
   assert.equal(C.proofUsed({ pcap: '' }, ''), false, 'and two empties are the same case, said twice because they arrive separately');
   assert.equal(C.proofUsed({ pcap: 7 }, '7'), false, 'KV round-trips numbers as strings, and a nonce is not a type');
 });
+
+test('proofVoid: what it takes for a shop to hand the field back', () => {
+  const rail = { key: 'zipit', type: 'manual', spec: 'bank', proof: 'ask', proof_label: 'Reference from your bank' };
+  const open = { status: 'awaiting_payment', pricing: { rail }, buyer: { proof: 'RBZ 8891', payer: '0771234567' }, proof_writes: 2, pcap: 'old' };
+  const v = C.proofVoid(open);
+  assert.deepEqual({ ok: v.ok, changed: v.changed, proof: v.proof, payer: v.payer },
+    { ok: true, changed: true, proof: '', payer: '' }, 'both halves of the field go, because half a reference is not evidence either');
+  assert.deepEqual(v.cleared, ['RBZ 8891', '0771234567'], 'and the answer names what it removed, so a merchant can read it back to the buyer');
+  assert.equal(v.writes, 0, 'a hand-back restarts the chain, which is the whole point of it');
+  assert.equal(v.left, C.PROOF_WRITES_MAX, 'and says so in the number the buyer will meet next');
+  assert.match(v.msg, /the reference is off the order/, 'in the rail’s own word, not ours: ' + v.msg);
+
+  // nothing to hand back is a state, not a mistake: a double tap must not be an error
+  const empty = C.proofVoid({ status: 'awaiting_payment', pricing: { rail }, buyer: {} });
+  assert.deepEqual({ ok: empty.ok, changed: empty.changed }, { ok: true, changed: false }, 'idempotent, so a second tap is just a second tap');
+  assert.match(empty.msg, /already empty/, 'and it says what it found rather than what it refused');
+
+  // a payer with no code is still something on the field (the number the rail searches by)
+  const onlyPayer = C.proofVoid({ status: 'awaiting_payment', pricing: { rail }, buyer: { payer: '077 000 1111' }, proof_writes: 1 });
+  assert.equal(onlyPayer.changed, true, 'a lone sender number is on file, and it can be wrong too');
+  assert.deepEqual(onlyPayer.cleared, ['0770001111'.replace(/0770001111/, '077 000 1111')], 'cleaned the way the field cleans, which is not the way it was typed');
+
+  // the decision does not depend on the order being payable: what happens next does, and
+  // that is withAsk’s business — this function must not pretend to know about money
+  const paid = C.proofVoid({ ...open, status: 'paid' });
+  assert.equal(paid.changed, true, 'a code mis-read after the money was counted is still a code mis-read');
+  assert.equal(C.proofVoid(null).changed, false, 'and an order that is not there has nothing to hand back');
+  assert.equal(C.proofVoid({}).ok, true, 'no throw, no drama: {} is just an empty field');
+  assert.ok(!('status' in C.proofVoid(open)), 'the answer never claims to have touched status, because it cannot');
+});

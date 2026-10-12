@@ -2872,3 +2872,112 @@ test('one link, one change: the row mints fresh, the shop spends the buyer’s l
   assert.equal(bound.buyer.proof, 'LEGACY OK');
   assert.ok(bound.pcap, 'and the order is bound from that write on');
 });
+
+/* A buyer's link is spent by the write that used it, `proofAsk` goes quiet once a code is on
+   file, and `withAsk` mints nothing while the field is full — so a filed code also *seals* it.
+   Right while the code is good; a dead end the moment it is not. The way out cannot be the
+   buyer's (that is what the budget is for), so it is the shop's, on the route that already
+   files: clear the field, turn the nonce over, and let the order ask again. */
+test('a code the shop cannot read is handed back, not argued about', async () => {
+  const h = 'zzback' + String(Date.now()).slice(-5);
+  const reg = await call('/api/register', { method: 'POST', body: {
+    handle: h, shop_name: 'Hand It Back', whatsapp: '263771234567', rail: 'zipit', pay_account: '1234567890', currency: 'USD',
+  } });
+  assert.equal(reg.status, 201, reg.text);
+  const skey = JSON.parse(env.STORES._map.get('store:' + h).value).admin_token;
+  const admin = () => call('/api/admin?handle=' + h, { headers: { 'x-tapstall-admin': skey } });
+  const ord = await call('/api/order', { method: 'POST', ip: '196.44.0.1', body: { handle: h, service: 'pickup',
+    buyer: { name: 'Rudo T', phone: '0780006611' }, items: [{ name: 'Box', price: 31 }] } });
+  assert.equal(ord.status, 201, ord.text);
+  const id = ord.json.order.id, key = 'order:' + h + ':' + id;
+  const doc = () => JSON.parse(env.ORDERS._map.get(key).value);
+  const row = () => JSON.parse(env.ORDERS._map.get('list:' + h).value).find((x) => x.id === id);
+
+  const w1 = await call('/api/proof', { method: 'POST', ip: '196.44.0.2', body: { cap: ord.json.proof_url.slice(3), proof: 'blurry photo' } });
+  assert.equal(w1.status, 200, w1.text.slice(0, 140));
+  const held = w1.json.proof_url;
+  assert.ok(held && w1.json.left === 2, 'the write left a live link in the hand that wrote it: ' + w1.text.slice(0, 140));
+  assert.equal(row().proof, 'blurry photo');
+  const quiet = (await admin()).json.orders.find((x) => x.id === id);
+  assert.equal(quiet.proof_url, undefined, 'while a code is on file the order offers no door to anybody');
+  assert.ok(!quiet.ask, 'and it stops chasing: nothing to ask for');
+
+  const back = await call('/api/order/proof', { method: 'POST', ip: '196.44.0.3',
+    headers: { 'x-tapstall-admin': skey }, body: { handle: h, id, void: true } });
+  assert.equal(back.status, 200, back.text.slice(0, 160));
+  assert.deepEqual({ ok: back.json.ok, void: back.json.void, changed: back.json.changed, proof: back.json.proof },
+    { ok: true, void: true, changed: true, proof: '' }, 'the answer says what it did, in the field the dashboard reads');
+  assert.equal(back.json.ask, true, 'and that the order is open enough to ask again');
+  assert.match(back.json.note, /Handed back — the .{1,20} is off the order and the field is theirs again, with 3 changes on it\./, back.json.note);
+  assert.equal(doc().buyer.proof, '', 'the field is empty again');
+  assert.equal(doc().proof_writes, 0, 'the chain restarts, so the buyer gets three changes and not the two they had left');
+  assert.equal(doc().proof_at, '', 'and no stale timestamp still claims a filing');
+  assert.ok(doc().proof_void_at, 'with a stamp of its own for whoever asks later');
+  assert.equal(doc().status, 'awaiting_payment', 'handing a code back does not move money, and this route could not move it if it wanted to');
+  assert.equal(doc().pcap !== w1.json.proof_url.slice(3), true, 'the nonce turned over');
+  assert.equal(row().proof, '', 'the ledger row went empty with it, so nobody reads a code that is not on the order');
+  assert.equal(row().pcap, doc().pcap, 'and its nonce moved too, because the next read mints from it');
+  const aud = (await admin()).json.audit.find((r) => r.act === 'proof' && /handed back/.test(JSON.stringify(r)));
+  assert.ok(aud, 'the paper trail records the hand-back as an act, not a silence');
+
+  // and the same tap on a field that is already empty is a state, not a failure — answered
+  // without a write, so a double click cannot rotate the door the buyer was just given
+  const pcapNow = doc().pcap, rowNow = JSON.stringify(row());
+  const twice = await call('/api/order/proof', { method: 'POST', ip: '196.44.0.7',
+    headers: { 'x-tapstall-admin': skey }, body: { handle: h, id, void: true } });
+  assert.equal(twice.status, 200, twice.text.slice(0, 140));
+  assert.deepEqual({ ok: twice.json.ok, changed: twice.json.changed }, { ok: true, changed: false },
+    'nothing was handed back, and the answer says so: ' + twice.text.slice(0, 140));
+  assert.match(twice.json.note, /already empty/, 'in words that do not read like a refusal');
+  assert.equal(doc().pcap, pcapNow, 'so the live door still opens — an idempotent tap must not supersede a link');
+  assert.equal(JSON.stringify(row()), rowNow, 'and the ledger row was not touched either');
+
+  /* Every link minted for the cleared field dies with it — the spent one *and* the live one
+     the last answer handed back. A stale door that still wrote would put a code on an order the
+     shop has just declared it wants again, from a browser tab that has no idea. */
+  for (const [label, cap] of [['held live link', held.slice(3)], ['the original', ord.json.proof_url.slice(3)]]) {
+    const dead = await call('/api/proof', { method: 'POST', ip: '196.44.0.4', body: { cap, proof: 'SOME OTHER CODE' } });
+    assert.deepEqual({ status: dead.status, why: dead.json.why, used: dead.json.used },
+      { status: 410, why: 'used', used: true }, label + ' is superseded by rotation, not by the field: ' + dead.text.slice(0, 120));
+  }
+
+  const again = (await admin()).json.orders.find((x) => x.id === id);
+  assert.ok(again.ask, 'the chase is back on the row, in the order’s own words');
+  const freshUrl = again.proof_url;
+  assert.ok(freshUrl, 'and a door is minted again, because the field is empty and the order is open');
+  const w2 = await call('/api/proof', { method: 'POST', ip: '196.44.0.5',
+    body: { cap: freshUrl.slice(freshUrl.indexOf('/p/') + 3), proof: 'READABLE 2' } });
+  assert.equal(w2.status, 200, 'the buyer files again with no help from anybody: ' + w2.text.slice(0, 140));
+  assert.equal(w2.json.left, 2, 'one of three, not three of three — the budget counts this chain only');
+  assert.equal(doc().buyer.proof, 'READABLE 2');
+
+  // `void` is not the buyer's word: the public door builds its input from proof and payer
+  const tried = await call('/api/proof', { method: 'POST', ip: '196.44.0.6',
+    body: { cap: w2.json.proof_url.slice(3), proof: '', void: 1 } });
+  assert.equal(tried.status, 422, 'a blank from the buyer is still just a blank: ' + tried.text.slice(0, 120));
+  assert.match(tried.json.error, /Type the code your app printed/, 'and they are told what the field wants, not that they were clever');
+  assert.equal(doc().buyer.proof, 'READABLE 2', 'nothing was erased');
+  assert.ok(JSON.stringify(doc()).includes('READABLE 2'), 'and the order still says so, twice checked because this is the destructive one');
+
+
+  /* On a settled order the field clears and no door is minted — `withAsk` asks the order's
+     status, and the refusal at the door says "settled" rather than "used", which is the
+     precedence 0.7.7 fixed and this release must not undo. */
+  const paid = doc(); paid.status = 'paid';
+  env.ORDERS._map.set(key, { value: JSON.stringify(paid) });
+  const settled = await call('/api/order/proof', { method: 'POST', ip: '196.44.0.9',
+    headers: { 'x-tapstall-admin': skey }, body: { handle: h, id, void: true } });
+  assert.equal(settled.status, 200, 'a shop may still clear its own record: ' + settled.text.slice(0, 140));
+  assert.equal(settled.json.ask, false, 'but it is told the order is not going to ask');
+  assert.match(settled.json.note, /is paid, so nothing is being asked of them/, 'in the words the merchant reads, and with no link vocabulary in them: ' + settled.json.note);
+  assert.equal(doc().buyer.proof, '', 'and it happened — the void does not consult proofOpen, because the code was filed by the shop’s own hand');
+  const rowAfter = (await admin()).json.orders.find((x) => x.id === id);
+  assert.equal(rowAfter.proof_url, undefined, 'no door on a settled order, in either place');
+  const doorOnPaid = await call('/api/proof', { method: 'POST', ip: '196.44.0.10',
+    body: { cap: freshUrl.slice(freshUrl.indexOf('/p/') + 3), proof: 'TOO LATE' } });
+  assert.deepEqual({ status: doorOnPaid.status, why: doorOnPaid.json.why }, { status: 409, why: 'settled' },
+    'the order is closed, and that is the true answer even though the link is also dead: ' + doorOnPaid.text.slice(0, 120));
+  const shopRefiles = await call('/api/order/proof', { method: 'POST', ip: '196.44.0.11',
+    headers: { 'x-tapstall-admin': skey }, body: { handle: h, id, proof: 'FROM THE CHAT' } });
+  assert.equal(shopRefiles.status, 200, 'the shop can file what arrives in the chat afterwards, as it always could: ' + shopRefiles.text.slice(0, 120));
+});

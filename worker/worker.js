@@ -21,7 +21,7 @@ import {
   cleanImg, sniffImage, imgKeyOf, imgRefOf, newImgId, referencedImages, IMG_MAX_BYTES,
   IMG_TARGET_BYTES,
   cleanProof, cleanPayer, proofNoun, proofAsk, PROOF_MODES, notifyText,
-  proofAccept, proofOpen, proofUsed, PROOF_WINDOW_SEC, PROOF_WRITES_MAX,
+  proofAccept, proofOpen, proofUsed, proofVoid, PROOF_WINDOW_SEC, PROOF_WRITES_MAX,
   issueCap, verifyCap, randomKey, validateSettings, stageSettings, applyPending, maskField,
   newTxRef, TX_WINDOW_SEC, payfastSignedOk, txMatches,
   seoFacts, seoHead, seoJsonLdTag, ROBOTS_TXT, sitemapXml, GUIDES, guideOf,
@@ -30,7 +30,7 @@ import {
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '0.8.0';
+const VERSION = '0.8.1';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 const MAX_ORDERS_KEPT = 200;
@@ -799,20 +799,30 @@ async function proofPage(env, cap) {
  * nothing. The url half is the client's own storage shape, `/^\/p\/[A-Za-z0-9._-]{20,400}$/`,
  * pinned against it in pages.test.mjs so the two files cannot drift apart silently.
  */
-function pfForgetScript(handle, code, cap) {
+function pfDoorScript(handle, code, cap, mode) {
   const h = String(handle || '');
   if (!/^[a-z0-9-]{2,30}$/.test(h)) return '';
   const c = String(code || '');
   const k = String(cap || '');
+  const keep = mode === 'keep' && /^[A-Za-z0-9._-]{20,400}$/.test(k);
   const test = [
     /^[A-Za-z0-9_-]{1,16}$/.test(c) ? 'String(x.c)==="' + c + '"' : '',
     /^[A-Za-z0-9._-]{20,400}$/.test(k) ? 'String(x.u)==="/p/' + k + '"' : '',
   ].filter(Boolean).join('||');
-  if (!test) return '';
+  if (!test && !keep) return '';
+  // both shapes drop the entry they name; `keep` then puts the fresh door in that slot, so
+  // the line under the notice bar is never a link that can only answer "used"
+  const drop = keep
+    ? (/^[A-Za-z0-9_-]{1,16}$/.test(c) ? 'String(x.c)==="' + c + '"' : 'String(x.u)==="/p/' + k + '"')
+    : test;
+  const put = keep ? '.push({c:"' + String(code || '').slice(0, 16) + '",u:"/p/' + k + '",t:Date.now()})' : '';
   return '<script>try{var k="tp_pf_' + h + '",a=JSON.parse(localStorage.getItem(k)||"[]");'
-    + 'if(Object.prototype.toString.call(a)==="[object Array]"){var n=a.filter(function(x){return !(x&&(' + test + '))});'
+    + 'if(Object.prototype.toString.call(a)==="[object Array]"){var n=a.filter(function(x){return !(x&&(' + drop + '))})'
+    + put + ';if(n.length>5)n=n.slice(-5);'
     + 'if(n.length!==a.length)localStorage.setItem(k,JSON.stringify(n))}}catch(e){}</script>';
 }
+function pfForgetScript(handle, code, cap) { return pfDoorScript(handle, code, cap, 'forget'); }
+function pfKeepScript(handle, code, cap) { return pfDoorScript(handle, code, cap, 'keep'); }
 
 /**
  * The write. Same shape as `markPaid`, minus the money: POST-only, its own rate
@@ -926,7 +936,14 @@ async function proofAdd(req, url, env) {
     + (r.changed ? "" : " That is what the shop already had, so nothing was rewritten.")
     + (r.left > 0 ? ` You can correct it ${r.left} more time${r.left === 1 ? "" : "s"} while the order is open.` : "");
   if (asPage) {
-    return html(shell("Sent", `<h2 style="margin:.1rem 0 .5rem">Sent to the shop</h2><p>${esc(note)}</p>` + pfForgetScript(st.handle, o.code, String(b.cap || ""))
+    // the kept line and the box are the same door, so when this answer carries a fresh one
+    // the device takes it: a buyer who mistyped, closed the page, and came back tomorrow
+    // should find the offer still standing — `withAsk` mints nothing while a code is on file,
+    // so this response is the only place the next link exists
+    return html(shell("Sent", `<h2 style="margin:.1rem 0 .5rem">Sent to the shop</h2><p>${esc(note)}</p>`
+      + (r.changed && r.left > 0 && freshUrl
+          ? pfKeepScript(st.handle, o.code, freshUrl.slice(3))
+          : pfForgetScript(st.handle, o.code, String(b.cap || "")))
       + (r.changed && r.left > 0
           ? `<p class=t><a href="${esc(freshUrl)}">Correct it</a> — this field takes ${r.left} more ${r.left === 1 ? "change" : "changes"} on this order.</p>`
           : "")
@@ -2862,6 +2879,34 @@ async function proofFile(req, url, env) {
   const key = `order:${st.handle}:${String(b.id || '')}`;
   const o = await env.ORDERS.get(key, 'json');
   if (!o) return json({ ok: false, error: 'no such order' }, 404);
+  // Handed back, not filed. `void` is not a buyer's word and cannot become one: the public
+  // door builds its input from `proof` and `payer` alone and calls `proofAccept`, which only
+  // ever writes; nothing but a signed-in shop can reach this branch, and it clears rather than
+  // sets, so the power it adds is the power the ledger row already has.
+  if (b.void === true || b.void === '1' || b.void === 'true') {
+    const v = proofVoid(o);
+    if (!v.changed) return json({ ok: true, changed: false, void: false, code: o.code, proof: '', note: v.msg });
+    const when = new Date().toISOString();
+    o.buyer = Object.assign({}, o.buyer || {}, { proof: '', payer: '' });
+    o.proof_writes = 0; o.proof_at = ''; o.proof_by = ''; o.proof_void_at = when;
+    // a field sent back is a new chain, so the nonce turns over with it: every link minted for
+    // the code just cleared is dead, spent or not, and `withAsk` mints the next one from here
+    o.pcap = randomKey(8);
+    await env.ORDERS.put(key, JSON.stringify(o));
+    const listKey = `list:${st.handle}`;
+    const list = (await env.ORDERS.get(listKey, 'json')) || [];
+    const row = list.find((x) => x && x.id === o.id);
+    if (row) {
+      row.payer = ''; row.proof = ''; row.proof_by = ''; row.proof_at = ''; row.pcap = o.pcap;
+      await env.ORDERS.put(listKey, JSON.stringify(list));
+    }
+    const logged = await pushAudit(env, st, { act: 'proof', via: 'merchant',
+      fields: [`${o.code || o.id} ↩ ${v.cleared.join(' · ')} cleared, field handed back`], ip: ipOf(req) });
+    return json({ ok: true, changed: true, void: true, code: o.code, proof: '', status: o.status, logged,
+      ask: proofOpen(o), note: v.msg + (proofOpen(o)
+        ? ' The order will ask them for it again, wherever your chase goes.'
+        : ' This order is ' + o.status + ', so nothing is being asked of them — file whatever they send you.') });
+  }
   const r = proofAccept(o, { proof: b.proof == null ? null : String(b.proof), payer: b.payer == null ? null : String(b.payer) }, 'merchant');
   if (!r.ok) return json({ ok: false, error: r.msg }, r.why === 'empty' ? 422 : 400);
   if (!r.changed) return json({ ok: true, changed: false, code: o.code, proof: r.proof, status: o.status, note: 'That is what the order already says.' });
