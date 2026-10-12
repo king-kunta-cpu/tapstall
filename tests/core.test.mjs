@@ -486,7 +486,15 @@ test('the public page publishes one number, not all of them', () => {
   assert.ok(!blob.includes('SECRET'), 'and the API key never rides along');
   assert.ok(!('rail_accts' in out), 'the map itself stays private');
   assert.equal(out.rail_info.spec, 'phone', 'the shape is public so the form asks the right question');
-  assert.equal(out.open.open, false, 'and open/closed is computed here, not on the buyer’s clock');
+  // Monday-only fixture, so the two answers are pinned to a clock rather than to the
+  // day this happens to run on: it is the shop's clock that decides, and the page must
+  // agree with it at 11:00 and at 09:00 on a Wednesday.
+  const at = (iso) => Date.parse(iso);
+  assert.equal(C.publicStore(st, undefined, at('2026-10-14T07:00:00Z')).open.open, false,
+    'shut when the shop’s clock is outside its slots — computed here, not on the buyer’s');
+  assert.match(C.publicStore(st, undefined, at('2026-10-14T07:00:00Z')).open.label, /opens Mon/, 'and it says when it next opens');
+  assert.equal(C.publicStore(st, undefined, at('2026-10-12T09:00:00Z')).open.open, true,
+    'open when the shop’s clock is inside one');
 });
 
 /* ------------------------------------------------------------ store images */

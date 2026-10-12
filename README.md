@@ -332,9 +332,9 @@ this cannot regress between two people noticing.
 
 ## Verified
 
-`node --test tests/` → **162 pass** (59 unit on `core.js` — money, menu, rails,
+`node --test tests/` → **163 pass** (59 unit on `core.js` — money, menu, rails,
 hours, image references and sniffing, and every rail's proof policy with the
-dashboard's mirror of it compared cell by cell; 65 driving the real bundled Worker
+dashboard's mirror of it compared cell by cell; 66 driving the real bundled Worker
 against an in-memory KV — the full journey plus the authority model: forged/expired/
 revoked codes, inert GETs, the 15-minute hold, masked audit, cross-origin refusal,
 every `/ops` gate, lever and template rule, an upload that is stored, served, refused
@@ -347,8 +347,9 @@ two tenants (Harare/USD/EcoCash, Durban/ZAR/PayShap), order → one-tap paid,
 cross-tenant isolation, expiry → cron suspension → 503 → webhook → reinstated
 (`plan: annual`, 746 days). `/__selftest` reports bindings, all five templates,
 pricing, and a `secret_leak_check`. `scripts/prod_check.sh` (194 assertions today,
-several of them per-tenant loops) against the live Worker at v0.6.8 → **154 passed,
-40 blocked, 0 failed**: eleven sections, covering the crawler prefetch, the 405s, the CORS split, the
+several of them per-tenant loops) against the live Worker → **194 passed, 0 blocked,
+0 failed** on a day the account can write (the same run on a spent one reads
+154/40/0, and every difference is a line that needs an order to exist): eleven sections, covering the crawler prefetch, the 405s, the CORS split, the
 15-minute hold, masked audit, revocation, self-serve recovery, cross-tenant
 refusal and — from v0.4.0 — the two consoles: money pages present in KV, `/ops`
 refusing an anonymous reader, the cookie's flags, a lever needing the confirm

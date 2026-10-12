@@ -1,5 +1,52 @@
 # Tapstall — status
 
+## A removed picture is freed by the save that removed it (2026-10-12, v0.6.9)
+
+**What the daily check caught, hours after 0.6.8 shipped.** `prod_check.sh` went red on
+one line: *the file the shop stopped pointing at is gone, not orphaned* — it answered
+`200`. The picture had been uploaded, set as the logo, taken off again, and it was still
+being served. First instinct was the CDN: `GET /i/…` carries `cache-control: public,
+max-age=31536000, immutable`, and a cached copy would explain a `200` forever. It wasn't
+that — the same URL with a cache-buster also answered `200`, and Cloudflare wasn't
+tagging the response at all (no `cf-cache-status`, no `Age`). The object was really
+there: listing the namespace showed `img:mamatoe:<id>` alive, ~140 bytes nobody points
+at, while the store document and `config.json` had no reference to it.
+
+**The cause is one sentence in Cloudflare's own docs:** `list()` is eventually
+consistent. `pruneImages` enumerated the namespace and deleted whatever the listing said
+was unreferenced — and the file a merchant just took off is *by definition the newest key
+in the namespace*, the one the index is most likely not to have seen yet. So the sweep
+missed precisely the case it existed for, and caught the older orphan a minute later on
+the next save. (That is also why the 0.6.6 manual proof passed: by then, more time had
+elapsed.) A test in `tests/live.test.mjs` asserted the delete on a synchronous in-memory
+stub, where the listing is never behind — so the bug was invisible to every suite and only
+production could show it.
+
+**Fix.** `pruneImages(env, st, before)` now takes the refs the store held *before* this
+save — `referencedImages(st)` sampled before the mutation, cheap and in-memory — and
+deletes those directly, without consulting the index. The listing sweep still runs
+afterwards as the janitor for everything else (a store document edited by an operator, a
+revert that drops a whole shelf), which is where eventual consistency is harmless.
+Wrong-direction risk was checked and is nil: if the listing hasn't caught up on a file
+that *is* still referenced, the sweep simply skips it — a later save frees it — while the
+direct path can only delete a ref this very save is dropping.
+
+**Provable, not asserted.** The new live test stubs `env.STORES.list` to return no keys
+— the lag, simulated, because the stub is instant — and requires the picture to be gone
+in the same save that dropped it. With the fix: **66/66 live, 163/163 overall**. With
+`before` not passed (the old behaviour): that one test fails and nothing else does, which
+is what a regression guard is for. `prod_check.sh`'s picture line is the production half
+of the same claim.
+
+**Also today, while chasing it:** the orphan my own probe left (`img:mamatoe:YH9E3B6Qen`)
+was freed by the worker's next save ✓ no litter left behind — and an API-token `DELETE`
+on a key path is not usable from a sandbox (`10025`: the path with a colon'd key does not
+resolve, encoded or not), so the KV console's own delete is not a lever here. Cleanup of
+anything the worker did not free means a bulk delete, which the free token also refuses.
+Note for the record: only an empty `User-Agent` is refused on this zone (Cloudflare's
+browser integrity check) — a browser, `curl`, `Googlebot` and `WhatsApp/2.x` all fetch a
+storefront `200`, so link previews in the app where the whole product lives are fine.
+
 ## The message a merchant would have to type is typed for them (2026-10-12, v0.6.8)
 
 **The one tap rule, applied to the follow-up.** 0.6.7 put a flag on the ledger row —

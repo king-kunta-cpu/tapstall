@@ -1876,3 +1876,23 @@ test('the words to ask for a missing code are already written, on the row', asyn
     'it is written at read time, not stored: a renamed field should not strand a sentence in an old order');
   assert.ok(!/proof/i.test(a.ask.slice(0, 5)) || /Need/.test(a.ask), 'and it opens with what is needed, not with an apology');
 });
+
+test('a save frees the picture it dropped even when the index cannot see it yet', async () => {
+  // Production fact this exists for: KV's list() is only eventually consistent, and
+  // the file a merchant just took off is usually the newest key in the namespace, so
+  // a sweep built on the listing alone misses exactly the picture they removed. The
+  // refs this save dropped are therefore deleted without asking the index. The stub is
+  // instant, so the lag has to be simulated for the difference to be provable at all.
+  const up = await sendImage(PNG1);
+  await call('/api/settings', { method: 'POST', body: { handle: 'mamatoe', logo: up.json.ref }, headers: { 'x-tapstall-admin': adminKey() } });
+  const live = await call(up.json.ref);
+  assert.equal(live.status, 200, 'it is on the shop now: ' + live.text);
+  const real = env.STORES.list;
+  env.STORES.list = async () => ({ keys: [] });          // an index that has not caught up
+  let off;
+  try { off = await call('/api/settings', { method: 'POST', body: { handle: 'mamatoe', logo: '' }, headers: { 'x-tapstall-admin': adminKey() } }); }
+  finally { env.STORES.list = real; }
+  assert.equal(off.status, 200, off.text);
+  assert.equal((await call(up.json.ref)).status, 404, 'gone in the save that dropped it, not on a later one');
+  assert.ok(env.STORES._deleted('img:mamatoe:' + up.json.ref.split('/').pop()), 'and by delete, so the ceiling and the bill both move back');
+});

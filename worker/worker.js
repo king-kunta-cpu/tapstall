@@ -26,7 +26,7 @@ import {
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '0.6.8';
+const VERSION = '0.6.9';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 const MAX_ORDERS_KEPT = 200;
@@ -1420,6 +1420,7 @@ async function menuEdit(req, env) {
   }
   const st = who.st;
   const was = st.menu || {};
+  const refsBefore = referencedImages(st);       // before the mutation, so a dropped picture is known
   // The handle rides along so a reference can be checked against the store saving
   // it: /i/other-shop/abc is not a picture of this shop's food.
   const next = sanitizeMenu(Object.assign({}, b.menu, { handle: st.handle }));
@@ -1435,7 +1436,7 @@ async function menuEdit(req, env) {
   // drops the whole shelf — so the sweep runs on every one of them rather than on a
   // guess about which edits touch images. It is a list plus deletes for keys nobody
   // references, and a merchant saves a menu a handful of times a day at most.
-  await pruneImages(env, st);
+  await pruneImages(env, st, refsBefore);
   const eff = await loadProducts(st, env);
   return json({
     ok: true, edits: touched, items: eff.length,
@@ -1551,23 +1552,36 @@ async function imageUpload(req, env) {
  * merchant abandoned does not sit on the 1 GB forever. One list per call, and a
  * list is not one of the 1,000 writes a day.
  */
-async function pruneImages(env, st) {
+/**
+ * Free the bytes nobody points at any more. `before` is the set of refs the store
+ * held *before* this save: those are deleted directly, because KV's list() is only
+ * eventually consistent and the file a merchant just took off is usually the newest
+ * key in the namespace — a sweep that depends on the listing alone leaves precisely
+ * the picture they removed, orphaned until some later save happens to notice it.
+ * The listing still runs after that, as the janitor for everything else.
+ */
+async function pruneImages(env, st, before) {
   const prefix = 'img:' + st.handle + ':';
+  const keep = referencedImages(st);
+  let gone = 0;
+  const dropped = new Set(Array.from(before || []).filter((ref) => !keep.has(ref) && ref.indexOf('/i/') === 0));
+  for (const ref of dropped) {
+    try { await env.STORES.delete(prefix + String(ref).split('/').pop()); gone++; }
+    catch (e) { /* the day's delete budget; the sweep below or a later save tries again */ }
+  }
   let keys = [];
   try {
     const r = await env.STORES.list({ prefix, limit: 1000 });
     keys = (r && r.keys) || [];
-  } catch (e) { return 0; }
-  if (!keys.length) return 0;
-  const keep = referencedImages(st);
-  let live = 0, gone = 0;
+  } catch (e) { return dropped.size ? keep.size : 0; }
+  let live = 0;
   for (const k of keys) {
     const id = String(k.name).slice(prefix.length);
     const ref = imgRefOf(st.handle, id);
     if (keep.has(ref)) live++;
-    else { try { await env.STORES.delete(k.name); gone++; } catch (e) { /* budget; next save tries again */ } }
+    else if (!dropped.has(ref)) { try { await env.STORES.delete(k.name); gone++; } catch (e) { /* budget; next save tries again */ } }
   }
-  if (gone) console.log('image_prune', st.handle, gone);
+  if (gone) console.log('image_prune', st.handle, gone, 'freed');
   return live;
 }
 
@@ -1688,6 +1702,7 @@ async function settingsEdit(req, url, env) {
   }
   const before = {};
   for (const k of keys) before[k] = maskField(k, st[k]);
+  const refsBefore = referencedImages(st);       // the logo about to be replaced, if any
   const { changed, staged } = stageSettings(st, v.soft, v.money, HOLD_MS, Date.now());
   const after = {};
   for (const k of keys) {
@@ -1697,7 +1712,7 @@ async function settingsEdit(req, url, env) {
   if (changed || staged) await writeStore(env, st);
   // Swapping or clearing the logo orphans its bytes: the store document holds a
   // path, so the file itself has nobody left who points at it.
-  if (changed && v.soft.logo !== undefined) await pruneImages(env, st);
+  if (changed && v.soft.logo !== undefined) await pruneImages(env, st, refsBefore);
   const logged = (changed || staged) ? await pushAudit(env, st, { act: 'settings', via: who.via, changed, staged, before, after, ip: ipOf(req) }) : true;
   const held = Object.keys(v.money);
   return json({

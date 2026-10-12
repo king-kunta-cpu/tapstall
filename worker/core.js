@@ -713,7 +713,10 @@ export const PUBLIC_KEYS = [
 ];
 // `catalog` is optional and only ever widens what a store is allowed to mean;
 // a page rendered without it still prices correctly for the built-in tariffs.
-export function publicStore(st, catalog) {
+export function publicStore(st, catalog, nowMs) {
+  // nowMs exists so the open/closed line can be proven against a fixed clock: a test
+  // that asserts what today happens to be is a test that fails on Mondays, which is
+  // exactly how it was written first.
   if (!st) return null;
   const out = {};
   for (const k of PUBLIC_KEYS) if (st[k] !== undefined) out[k] = st[k];
@@ -739,7 +742,7 @@ export function publicStore(st, catalog) {
   out.pay_account = det.acct || '';
   out.pay_holder = det.holder || '';
   out.pay_till = det.till || '';
-  out.open = { known: true, ...openNow(st) };
+  out.open = { known: true, ...openNow(st, nowMs) };
   return out;
 }
 
