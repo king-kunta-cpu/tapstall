@@ -1,0 +1,38 @@
+name: pause-old-hunta-workers
+# ONE-OFF maintenance (2026-10-12, STPi owner request): pause the old Hunta machine's
+# workers on this CF account (workers.dev routes OFF; code, KV, D1 untouched — flipping
+# the route back on restores them). tapstall itself is NOT touched. This workflow only
+# triggers on its own path and will be removed after it runs.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/pause-old-hunta-workers.yml']
+permissions: { contents: read }
+jobs:
+  pause:
+    runs-on: ubuntu-latest
+    steps:
+      - name: pause old-machine workers (workers.dev routes off, code untouched)
+        env:
+          CF: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT: "0c6059d950fad268faa25cbb6d21ef77"
+        run: |
+          set -e
+          echo "== workers on this account =="
+          curl -s -H "Authorization: Bearer $CF" \
+            "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/workers/scripts" \
+            | python3 -c "import sys,json; [print(' -', s['id']) for s in json.load(sys.stdin)['result']]"
+          for w in hunta-mint hunta-mint-a hunta-leads contentops-edge; do
+            echo "== pausing $w (workers.dev route off) =="
+            curl -s -X PUT -H "Authorization: Bearer $CF" -H "Content-Type: application/json" \
+              -d '{"enabled": false}' \
+              "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/workers/scripts/$w/subdomain" \
+              | python3 -c "import sys,json; d=json.load(sys.stdin); print('   ->', 'OK' if d.get('success') else d.get('errors'))"
+          done
+          echo "== final states =="
+          for w in hunta-mint hunta-mint-a hunta-leads contentops-edge; do
+            curl -s -H "Authorization: Bearer $CF" \
+              "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT/workers/scripts/$w/subdomain" \
+              | python3 -c "import sys,json; d=json.load(sys.stdin); print('   $w enabled =', d.get('result',{}).get('enabled'))"
+          done
