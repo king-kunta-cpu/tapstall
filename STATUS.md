@@ -6,10 +6,19 @@
 receipt page would close the loop properly … It needs a new public write, so the
 mitigation is a separate single-use token minted for that field only — not the existing
 `/c/` mark-paid capability, whose power I'm not widening without you saying so."* So
-`a:'mark'` has the same powers today that it had yesterday: one grep proves it,
-`git diff HEAD~1 -- worker/worker.js` touches `markPaid` not at all. What is new is a
-second kind of capability, `a:'proof'`, minted at order time as
-`/p/<cap>`, and one endpoint behind it.
+`a:'mark'` has the same powers today that it had yesterday, and that is a checkable
+claim rather than a promise — the command to re-run whenever it is doubted:
+
+```
+git show 3d91692 -- worker/worker.js | grep -E "^[+-]" | grep -E "markPaid|confirmPage|a: .mark."
+```
+
+One line comes back, and it is a comment inside the new handler saying that it copies
+`markPaid`'s shape: no added or removed line lies inside either function, and the
+`a: 'mark'` mint is byte-identical. What is new is a second kind of capability,
+`a:'proof'`, minted at order time as `/p/<cap>`, and one endpoint behind it. The only
+shared guard that moved is `MUT` gaining `proof`, and that takes a power away: a GET
+to `/api/proof` answers `405`, so a link prefetcher cannot add a reference either.
 
 **One deviation, chosen deliberately: it is not single-use, it is three.** A
 mistyped TxID is the ordinary failure of this exact flow, and a buyer who has one
