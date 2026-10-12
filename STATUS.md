@@ -25,7 +25,10 @@ storefront's only persistent order affordance is that list of doors (`pages/stor
   mine that said "receipt" while every shipped sentence was clean, which is precisely how a copy
   guard gets weakened and then stops being one.
 - **prod_check reads the live copy**: one probe, four reads of its body (`why`, `used`, the chat
-  clause, and an `nkw` that the error names no receipt box). Still blocked on a capped day.
+  clause, and an `nkw` that the error names no receipt box). Measured on the live Worker after
+  this release: **205 passed / 96 blocked / 0 failed** — the two new lines sit in the blocked
+  column because every POST to the door is answered by the rate limiter on a capped day, which is
+  the same rule that has kept the other 96 honest since 0.7.8.
 
 **Checked.** `npm test` **219/219** (core 80 · live 90 · pages 39 · limits 10). The three new
 `prod_check` patterns were replayed with `grep -qE` against the exact body `/api/proof` returns for
