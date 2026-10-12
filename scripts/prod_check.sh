@@ -586,7 +586,25 @@ ck "the dashboard ships the picker and a name for the field" 'data-rd="proof"' "
 ck "  · the ledger row prints who sent it and which code they gave" 'o\.buyer\.proof' "$SHIP_A"
 ck "  · and the CSV has a header name for every column it writes" 'payer,proof_of_payment,flags' "$SHIP_A"
 
-echo "[11] tidy up"
+echo "[11] money in: the webhook doors are shut until somebody arms them"
+# A public POST that can extend a paid plan is the most interesting route on this
+# Worker, so the exact old exploit is a standing assertion here rather than a memory.
+# It must be answered without a write: on 2026-10-12 this same pair of fields bought
+# 100 years of plan, which is why the terms now only ever come from an intent this
+# Worker minted.
+PAID0=$(printf '%s' "$STORE" | python3 -c "import sys,json;print(json.load(sys.stdin).get('paid_until') or 0)" 2>/dev/null)
+for door in payfast flutterwave; do
+  RAW=$(curl -s -m 30 -X POST -H 'content-type: application/x-www-form-urlencoded' \
+    -d 'payment_status=COMPLETE&status=successful&custom_str1='"$HANDLE"'|36500' \
+    "$ORIGIN/api/hook/$door")
+  ck "$door: a handle plus a number of days buys nothing" '^0$' "$(printf '%s' "$RAW" | grep -cE '"activated"')"
+  ck "  · and the answer is a refusal, not a success" 'ok"?: *(false|true)|"ignored"' "$RAW"
+done
+ck "the payfast door names the setting it needs instead of shrugging" 'PAYFAST_PASSPHRASE|signature' "$(curl -s -m 30 -X POST -H 'content-type: application/x-www-form-urlencoded' -d 'payment_status=COMPLETE&custom_str1=mamatoe-1234567890abcdef' "$ORIGIN/api/hook/payfast")"
+PAID1=$(curl -s -m 30 -H "Authorization: Bearer $TOK" "https://api.cloudflare.com/client/v4/accounts/$ACCT/storage/kv/namespaces/$KV/values/store:$HANDLE" | python3 -c "import sys,json;print(json.load(sys.stdin).get('paid_until') or 0)" 2>/dev/null)
+ck "  · and the plan on file did not move, so a probe is free" '^'"$PAID0"'$' "$PAID1"
+
+echo "[12] tidy up"
 CK2=$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" \
   -d '{"handle":"'"$HANDLE"'","id":"'"$ID"'","status":"cancelled"}' "$ORIGIN/api/mark")
 ckw "probe order cancelled" '"status":"cancelled"' "$CK2"

@@ -1,5 +1,73 @@
 # Tapstall — status
 
+## A public POST can no longer hand anybody a paid plan (2026-10-12, v0.7.0)
+
+**Found while auditing my own money model, not reported by anyone.** The proof-of-payment
+work made me re-read every path that can move money. `POST /api/hook/payfast` was a public
+route that believed whoever called it: `payment_status=COMPLETE&custom_str1=<handle>|<days>`
+extended that store by `days` — a number taken from the request — with no signature check,
+no amount check, no replay guard, and without ever looking at the payment intent `checkout`
+had minted. I measured it on production against a real store: `36500` days went through.
+(The record was put back to the exact bytes it held before, `paid_until` 2027-10-10 and
+`plan=annual`, and the repair is what proved the KV read-after-write lag noted below.)
+`hookFlutterwave` had the right shape and then gated its verify hash behind
+`env.FW_SECRET &&` — in production that variable is unset, so the check was switched off
+by the absence of a config line.
+
+**The rule now, in one sentence: a notice may confirm a payment, never describe a deal.**
+`checkout` mints `tx:<handle>-<16 random base64url chars>` holding
+`{handle, days, amount, currency, at}` with `expirationTtl: 1800`, and hands the button
+only that reference (`custom_str1`). The hook reads the record back and takes every term
+from it: how long, how much, which store. `custom_str2=36500` in the notice is now
+decoration. The 30-minute TTL is not a nicety — an old payment link that still honours last
+month's price is a pricing bug with a receipt.
+
+**Both doors are shut until armed, in the same shape as `markPaid`:** capability first,
+effect second. Unconfigured, `/api/hook/payfast` answers `503` naming `PAYFAST_PASSPHRASE`
+and `/api/hook/flutterwave` answers `503` naming `FW_SECRET`, so "nobody set it" is a loud
+refusal instead of an open door — the opposite of the `&&` bug above. Once armed, a PayFast
+notice must carry a signature over the sorted, decoded fields (`payfastSignedOk`), compared
+in `sigEq` without leaking how much of it matched. Workers' WebCrypto has no MD5, so
+`md5Hex` is ours, pinned in the suite against five published vectors and run differentially
+against Python's `hashlib` over 70 inputs (empty string, 63/64/65-byte block boundaries,
+unicode, 1000 bytes) — 0 mismatches. Both readings of the provider's empty-field rule are
+accepted, because their own samples disagree and picking the strict one would silently
+refuse real payments; neither reading is forgeable without the passphrase.
+
+**Refusals are engineered to cost the merchant nothing.** Amount or currency that does not
+match the intent, or a spent/expired intent, answers `200 {ok:true, ignored:"…"}` — nothing
+to retry, nothing written — and **leaves the intent unspent**, so the genuine notice can
+still land minutes later; rate limits and a provider's own retry storm must never be able to
+consume a real payment. A duplicate `pf_payment_id` answers `{ok:true, already:true}`
+(30-day key) rather than "unknown reference", which is what stops a provider retrying
+forever; on success the intent is deleted, so a second copy of the same notice has nothing
+to spend. Flutterwave additionally gets **asked back** when `FLW_API_KEY` exists
+(`GET /v3/transactions/{id}/verify`): the provider's word about its own success is not
+evidence, `status` must be `successful` and amount/currency must match, and an unreachable
+provider is a `502` with the intent left unspent rather than a lost sale. The hooks now share
+the order rate limiter by IP.
+
+**What a merchant would notice:** nothing on the storefront; on renewal, a stale payment
+window says "start again" instead of honouring an old price. `tests/core.test.mjs` 64/64
+(five new: ref shape, canonical string, signature, amount, spent-ref), `tests/live.test.mjs`
+68/68 (two new: the exact old exploit against the live handler — refused, `paid_until`
+unchanged — and a full signed notice that activates, replays as `already`, then finds
+nothing to spend; plus the Flutterwave 503/401/verify-failure/amount-mismatch path with the
+provider fetch stubbed). Whole suite **170/170**. `prod_check.sh` is at **200 assertions,
+all green**, and `[11]` is the exploit itself as a standing line: a handle plus a number of
+days buys nothing at either door, and the store's `paid_until` read straight from KV is
+byte-identical after the probes. Writing those tests caught a bug in code I had just written
+(a truthy test on `fields[k] != null && fields[k] !== ''` let a blank field into the signed
+string) and a design mistake in the handler (idempotency was checked after the intent, so a
+retry of a *successful* payment answered "unknown reference").
+
+**One thing to know about KV:** a `GET` on the REST API right after a `PUT` can return the
+**old** value — I watched it stay stale for over 8 seconds on a store document. Repairs that
+are relative (subtract a year, add a year) must not be re-applied on the strength of that
+read; the safe form is an absolute value derived from arithmetic you can check, then a
+read-back **loop**. My first repair attempt did exactly that, and the second read was of my
+own double-applied write.
+
 ## A removed picture is freed by the save that removed it (2026-10-12, v0.6.9)
 
 **What the daily check caught, hours after 0.6.8 shipped.** `prod_check.sh` went red on

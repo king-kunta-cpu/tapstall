@@ -701,3 +701,62 @@ test('the ask is a sentence, not a second form to fill', () => {
   assert.match(renamed, /Need: M-Pesa code/, 'a renamed field is asked for by that name');
   assert.ok(!/M-PESA CODE/.test(renamed), 'and the merchant’s capitalisation survives: it is their word, not a token');
 });
+
+/* The money-in path. These functions decide whether a plan moves, so the primitives
+ * are pinned against things computed elsewhere — the MD5 vectors are from Python's
+ * hashlib, not from this implementation. */
+test('md5 is the MD5, checked against other people’s numbers', () => {
+  assert.equal(C.md5Hex(''), 'd41d8cd98f00b204e9800998ecf8427e');
+  assert.equal(C.md5Hex('abc'), '900150983cd24fb0d6963f7d28e17f72');
+  assert.equal(C.md5Hex('payment_status=COMPLETE&foo=bar'), 'd05a90eb880eb7a4e0ddf594f0461e2e');
+  assert.equal(C.md5Hex('amount_gross=4500&payment_status=COMPLETE?passphrase=pp'), '92e82fb7448efd4f78e2414a2eb42fde');
+  assert.equal(C.md5Hex('Ünïcode ✓'), '769df59d614789c7d7f90278b10ffed4', 'encoded as UTF-8, as every provider does');
+  assert.equal(C.md5Hex('0'.repeat(64)).length, 32, 'a block boundary still returns hex');
+});
+
+test('the payfast string is the fields, sorted, without the signature, plus the passphrase', () => {
+  const f = { payment_status: 'COMPLETE', amount_gross: '4500', custom_str1: 'a-b', signature: 'deadbeef', empty_field: '' };
+  assert.equal(C.payfastCanonical(f, 'pp', false), 'amount_gross=4500&custom_str1=a-b&payment_status=COMPLETE?passphrase=pp',
+    'in order, values as decoded, the signature excluded, and an empty field left out');
+  assert.equal(C.payfastCanonical(f, 'pp', true), 'amount_gross=4500&custom_str1=a-b&empty_field=&payment_status=COMPLETE?passphrase=pp',
+    'the other reading keeps the blank — the spec samples disagree, so verification tries both');
+  assert.equal(C.payfastCanonical(f, ''), 'amount_gross=4500&custom_str1=a-b&payment_status=COMPLETE', 'no passphrase, no suffix');
+  assert.equal(C.payfastSignature(f, 'pp'), C.md5Hex(C.payfastCanonical(f, 'pp', false)), 'the signature is the hash of that string, nothing else');
+  assert.notEqual(C.payfastSignature({ ...f, amount_gross: '1' }, 'pp'), C.payfastSignature(f, 'pp'), 'one cent changes it, which is the point');
+  // a notice is accepted if it was signed either way, and never without the passphrase
+  const signed = (obj) => ({ ...obj, signature: C.md5Hex(C.payfastCanonical(obj, 'pp', true)) });
+  assert.equal(C.payfastSignedOk(signed(f), 'pp'), true, 'signed with the blanks included');
+  const strict = { ...f, signature: C.md5Hex(C.payfastCanonical(f, 'pp', false)) };
+  assert.equal(C.payfastSignedOk(strict, 'pp'), true, 'or with them left out');
+  assert.equal(C.payfastSignedOk({ ...f, signature: 'x'.repeat(32) }, 'pp'), false, 'a shape that is not the hash is still refused');
+  assert.equal(C.payfastSignedOk(f, 'pp'), false, 'and no signature field at all is no payment');
+  assert.equal(C.payfastSignedOk(signed({ ...f, amount_gross: '1' }), 'pp') , true, 'note: this is the same string the sender signed — what protects the plan is that only the passphrase holder can produce it');
+});
+
+test('a signature is compared without leaking how much of it was right', () => {
+  assert.equal(C.sigEq('abc123', 'abc123'), true);
+  assert.equal(C.sigEq('abc123', 'abc124'), false);
+  assert.equal(C.sigEq('abc123', 'abc12'), false, 'a length difference is a mismatch, not a panic');
+  assert.equal(C.sigEq('', ''), false, 'nothing is never a signature');
+  assert.equal(C.sigEq(undefined, 'x'), false);
+});
+
+test('what a notice may claim about money is checked against what was asked for', () => {
+  const tx = { handle: 'h', days: 365, amount: 45.05, currency: 'USD' };
+  assert.equal(C.txMatches(tx, { amount_gross: '4505', amount_currency: 'USD' }).ok, true, 'cents match, currency matches');
+  assert.match(C.txMatches(tx, { amount_gross: '4500', amount_currency: 'USD' }).why, /amount on the notice/, '45.00 is not 45.05');
+  assert.match(C.txMatches(tx, { amount_gross: '4505', amount_currency: 'ZAR' }).why, /priced in USD/, 'the asset is verified too, not just the number');
+  assert.match(C.txMatches(tx, {}).why, /does not match/, 'a notice with no amount at all says nothing about having paid');
+  assert.match(C.txMatches(null, { amount_gross: '4505' }).why, /spent|expired/, 'a spent or window-closed reference is not a payment');
+  const local = { handle: 'h', days: 30, amount: 4, currency: 'ZAR', local_cents: 7600 };
+  assert.equal(C.txMatches(local, { amount_gross: '7600', amount_currency: 'ZAR' }).ok, true, 'a plan priced in rand is checked in rand');
+  assert.equal(C.txMatches(local, { amount_gross: '400', amount_currency: 'ZAR' }).ok, false, 'and not against the USD figure by accident');
+});
+
+test('a payment reference cannot be walked, and a payment window closes', () => {
+  const a = C.newTxRef('mamatoe'), b = C.newTxRef('mamatoe');
+  assert.match(a, /^mamatoe-[A-Za-z0-9_-]{16}$/, 'the handle is the thread support can see, the rest is not guessable');
+  assert.notEqual(a, b);
+  assert.ok(C.newTxRef('x'.repeat(60)).length <= 30 + 1 + 16, 'a long handle is cut, not concatenated past the key’s dignity');
+  assert.equal(C.TX_WINDOW_SEC, 1800, 'thirty minutes: long enough to pay, short enough that the price is still the price');
+});

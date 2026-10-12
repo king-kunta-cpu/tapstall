@@ -22,11 +22,12 @@ import {
   IMG_TARGET_BYTES,
   cleanProof, cleanPayer, proofNoun, proofAsk, PROOF_MODES,
   issueCap, verifyCap, randomKey, validateSettings, stageSettings, applyPending, maskField,
+  newTxRef, TX_WINDOW_SEC, payfastSignedOk, txMatches,
   EDITABLE_FIELDS, SOFT_FIELDS, sign, adminStore, normaliseRail, resolveRail,
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '0.6.9';
+const VERSION = '0.7.0';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 const MAX_ORDERS_KEPT = 200;
@@ -278,7 +279,7 @@ async function route(req, url, env, ctx) {
   if (p === '/api/checkout' && req.method === 'POST') return checkout(req, url, env);
   if (p === '/api/renew-ref' && req.method === 'POST') return renewRef(req, env);
   if (p === '/api/hook/flutterwave' && req.method === 'POST') return hookFlutterwave(req, url, env);
-  if (p === '/api/hook/payfast' && req.method === 'POST') return hookPayfast(url, env);
+  if (p === '/api/hook/payfast' && req.method === 'POST') return hookPayfast(req, url, env);
 
   return null;
 }
@@ -777,10 +778,18 @@ async function checkout(req, url, env) {
   if (!rec) return json({ ok: false, error: 'unknown renew token' }, 404);
   const days = clamp(Number(b.days) || 365, 30, 1460);
   const amount = round2(PRICE_USD * (days / 365));
-  const txRef = `${rec.handle}-${Date.now()}`;
-  await env.STORES.put('tx:' + txRef, JSON.stringify({ handle: rec.handle, days, amount }));
+  // The reference is random and the record carries the terms: a ref built from the
+  // clock is one a stranger can walk, and anything the caller may repeat is something
+  // a caller can change. The window is why an old link says "start again" rather than
+  // activating a month later at a price that no longer exists.
+  const txRef = newTxRef(rec.handle);
+  await env.STORES.put('tx:' + txRef, JSON.stringify({ handle: rec.handle, days, amount, currency: 'USD', at: Date.now() }),
+    { expirationTtl: TX_WINDOW_SEC });
   return json({
-    ok: true, tx_ref: txRef, amount, days,
+    ok: true, tx_ref: txRef, amount, days, window_sec: TX_WINDOW_SEC,
+    // what a payment button has to echo back as custom_str1: the only thread that
+    // ties a notice to terms this Worker chose, instead of terms the sender typed
+    custom_str1: txRef,
     // the slug of the Flutterwave *payment link* in whoever's account is
     // receiving money; it is external configuration, so it is a secret and not a
     // string in the source — the brand can change without breaking payouts
@@ -824,10 +833,32 @@ async function hookFlutterwave(req, url, env) {
   const data = body.data || {};
   const txRef = data.tx_ref || body.tx_ref;
   if (!txRef) return json({ ok: false, error: 'no tx_ref' }, 400);
-  if (env.FW_SECRET && req.headers.get('verif-hash') !== env.FW_SECRET) return json({ ok: false, error: 'bad verif-hash' }, 401);
+  // Fail closed. A check that only applies "if configured" is a check that is off
+  // until somebody notices it was never turned on, and this one moves a paid plan.
+  if (!env.FW_SECRET) return json({ ok: false, error: 'the renewal webhook is not armed — set FW_SECRET on this Worker (the verify hash in the Flutterwave dashboard), then this notice will be accepted' }, 503);
+  if (req.headers.get('verif-hash') !== env.FW_SECRET) return json({ ok: false, error: 'bad verif-hash' }, 401);
   if (data.status && data.status !== 'successful') return json({ ok: true, ignored: data.status });
   const tx = await env.STORES.get('tx:' + txRef, 'json');
-  if (!tx) return json({ ok: true, ignored: 'unknown tx_ref' });
+  if (!tx) return json({ ok: true, ignored: 'no payment intent on file for that reference — it was spent, or its window closed' });
+  // Never take a payment's word for its own success: when an API key exists, the
+  // transaction is fetched back and the status and the amount are read from that.
+  if (env.FLW_API_KEY) {
+    let v = null;
+    try {
+      const vr = await fetch('https://api.flutterwave.com/v3/transactions/' + encodeURIComponent(data.id || tx.tx_id || '') + '/verify',
+        { headers: { Authorization: 'Bearer ' + env.FLW_API_KEY } });
+      v = await vr.json();
+    } catch (e) { v = null; }
+    if (!v || !v.data || v.data.status !== 'successful') {
+      // the intent is left unspent on purpose: a provider that is briefly unreachable
+      // must not cost a merchant a payment they really made
+      return json({ ok: false, error: 'the payment could not be confirmed with Flutterwave just now — nothing was changed, it will be checked again on the next notice' }, 502);
+    }
+    if (Number(v.data.amount) !== round2(Number(tx.amount))) return json({ ok: false, error: 'the amount on the transaction is not the amount this plan costs' }, 400);
+    if (String(v.data.currency || tx.currency || 'USD').toUpperCase() !== String(tx.currency || 'USD').toUpperCase()) {
+      return json({ ok: false, error: 'paid in a currency this plan is not priced in' }, 400);
+    }
+  }
   const st = await getStore(env, tx.handle);
   if (!st) return json({ ok: false, error: 'store gone' }, 410);
   st.paid_until = Math.max(Date.now(), st.paid_until || 0) + tx.days * 864e5;
@@ -839,17 +870,50 @@ async function hookFlutterwave(req, url, env) {
   return json({ ok: true, activated: st.handle, paid_until: new Date(st.paid_until).toISOString() });
 }
 
-async function hookPayfast(url, env) {
-  const m = String(url.searchParams.get('payment_status') || '');
-  const [handle, days] = String(url.searchParams.get('custom_str1') || '').split('|');
-  if (m !== 'COMPLETE' || !handle) return json({ ok: false, ignored: m || 'no data' });
-  const st = await getStore(env, handle);
+/**
+ * PayFast's ITN. Everything this may conclude about a payment comes from two places:
+ * the signature PayFast computed over the notice, and the intent this Worker minted
+ * when the merchant asked to renew. The request itself is trusted for nothing — not
+ * the handle, not the number of days, not the amount.
+ */
+async function hookPayfast(req, url, env) {
+  const ip = ipOf(req);
+  if (await rateLimited(env, ip)) return json({ ok: false, error: 'too many notices from you, wait a minute' }, 429);
+  const body = await req.text().catch(() => '');
+  // the body is the notice; the query string is accepted too because PayFast echoes it
+  const fields = Object.fromEntries(new URLSearchParams(body || url.search));
+  const status = String(fields.payment_status || '');
+  if (status !== 'COMPLETE') return json({ ok: true, ignored: status || 'no status' });
+  const pp = String(env.PAYFAST_PASSPHRASE || '');
+  if (!pp) return json({ ok: false, error: 'the renewal webhook is not armed — set PAYFAST_PASSPHRASE on this Worker (the same passphrase as the payment button), then this notice will be accepted' }, 503);
+  if (!payfastSignedOk(fields, pp)) {
+    return json({ ok: false, error: 'signature does not verify' }, 400);
+  }
+  // One payment, one credit — asked before anything else, because the answer to a
+  // retry of a payment that already landed is "already applied", not "unknown
+  // reference": a provider told the second keeps retrying the first. The id is inside
+  // the signed string, so it is the provider's own number, not the sender's.
+  const pid = String(fields.pf_payment_id || '');
+  const seenKey = 'paid:' + (pid || String(fields.custom_str1 || ''));
+  if (await env.STORES.get(seenKey)) return json({ ok: true, already: true, note: 'that payment was already applied' });
+  const ref = String(fields.custom_str1 || '');
+  if (ref.length < 6) return json({ ok: true, ignored: 'no reference this Worker minted' });
+  const tx = await env.STORES.get('tx:' + ref, 'json');
+  const check = txMatches(tx, fields);
+  if (!check.ok) return json({ ok: true, ignored: check.why });        // nothing to retry, nothing written
+  const st = await getStore(env, tx.handle);
   if (!st) return json({ ok: false, error: 'store gone' }, 410);
-  st.paid_until = Math.max(Date.now(), st.paid_until || 0) + (Number(days) || 365) * 864e5;
-  st.plan = 'term'; st.suspended = false;
+  st.paid_until = Math.max(Date.now(), st.paid_until || 0) + (Number(tx.days) || 365) * 864e5;
+  st.plan = (Number(tx.days) || 0) >= 300 ? 'annual' : 'term';
+  st.suspended = false; st.warned_at = null;
+  await env.STORES.put(seenKey, JSON.stringify({ handle: st.handle, ref, at: new Date().toISOString() }), { expirationTtl: 30 * 86400 });
+  // Flutterwave needs no marker of its own: the minted intent is deleted on success,
+  // so a replay there has nothing to spend. Here the intent is spent the same way, and
+  // the extra key is what lets a retry be answered with the truth instead of a shrug.
+  await env.STORES.delete('tx:' + ref);
   await writeStore(env, st);
-  await env.STORES.delete('term:' + handle);
-  return json({ ok: true, activated: handle });
+  await env.STORES.delete('term:' + st.handle);
+  return json({ ok: true, activated: st.handle, paid_until: new Date(st.paid_until).toISOString(), days: tx.days });
 }
 
 /* ------------------------------------------------------------------ cron */

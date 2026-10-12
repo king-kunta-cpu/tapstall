@@ -364,3 +364,25 @@ is a secret set and a redeploy, never an edit to shipped code (renewal works thr
 until then); email delivery needs the `EMAIL` binding to be created in the
 dashboard once; buyers' phone numbers are stored per order (POPIA/Zim GDPR
 posture is "minimise + 180-day TTL on the fingerprint hash", not zero-knowledge).
+
+## How a payment is believed
+
+Renewal money arrives by provider webhook, and a webhook is a public POST that
+*claims* to be somebody. Both doors are therefore **shut until configured**:
+`/api/hook/payfast` answers `503` naming `PAYFAST_PASSPHRASE` until that secret
+exists, and `/api/hook/flutterwave` answers `503` naming `FW_SECRET`. Neither has a
+"verify if configured" mode, because a check that defaults to off is a check that
+stays off. This is the same shape as `markPaid`: capability first, effect second.
+
+What an armed door may conclude lives in `core.js`, so it can be read and tested:
+
+| Rule | Where | Why it is there |
+|---|---|---|
+| The terms come **only** from the intent this Worker minted | `POST /api/checkout` → `tx:<random 16>`, `expirationTtl: 1800` | a notice cannot name a shop, a number of days, or a price; the 30-minute window is why an old link says "start again" instead of honouring last month's price |
+| PayFast's signature over the sorted, decoded fields is required | `payfastCanonical` / `payfastSignedOk`, MD5 pinned in the suite against vectors from Python's `hashlib` | Workers' WebCrypto has no MD5, so the primitive is ours and is checked; both readings of the provider's spec are accepted (their samples disagree) — the strict direction would silently refuse a real payment, and it cannot be forged either way |
+| Amount **and** currency on the notice must equal what was asked | `txMatches` | "someone paid something" is not "someone paid the price" |
+| Flutterwave is asked back when `FLW_API_KEY` exists | `GET /transactions/{id}/verify` | never take a payment's word for its own success; an unreachable provider answers `502` and leaves the intent unspent rather than losing a payment that happened |
+| Success spends the intent and records `paid:<provider id>` for 30 days | both hooks | one payment, one credit; a retry is answered `already: true`, not double-counted |
+
+Both hooks are rate-limited by IP like an order, and everything they refuse writes
+nothing — so a probe, a replay and a guess all cost the same: nothing.

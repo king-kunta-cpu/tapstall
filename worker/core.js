@@ -1245,3 +1245,105 @@ export function menuPrice(products, items) {
   }
   return { items: out, notes, unknown, authoritative, repriced: notes.some((n) => n.indexOf('repriced') === 0) };
 }
+
+/* ------------------------------------------------------------------ money in
+ * A payment that extends a plan is the one write in this product that must not be
+ * reachable by whoever asks loudest. Everything an inbound provider notice asserts is
+ * decided here, in plain functions, so the rules can be read and tested:
+ *   · the terms come from a record this Worker minted, never from the caller;
+ *   · the provider's own signature over the fields is required, not "if configured";
+ *   · the amount and the currency have to match what was asked for;
+ *   · the record is spent on the first success, so a replay credits nothing twice.
+ */
+export const TX_WINDOW_SEC = 1800;          // the payment window: half an hour, then it is moot
+export const newTxRef = (handle) => String(handle).slice(0, 30) + '-' + randomKey(12);
+
+/** MD5 over UTF-8 bytes. Workers' WebCrypto refuses MD5, and PayFast's signature spec
+ *  is MD5, so the primitive lives here and is pinned in the suite against vectors
+ *  computed elsewhere — a security function nobody can check is a liability. */
+export function md5Hex(input) {
+  const data = new TextEncoder().encode(String(input));
+  const S = [7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
+             5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
+             4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
+             6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21];
+  const K = new Int32Array(64);
+  for (let i = 0; i < 64; i++) K[i] = Math.floor(Math.abs(Math.sin(i + 1)) * 4294967296);
+  const len = data.length;
+  const padded = new Uint8Array((((len + 8) >> 6) + 1) * 64);
+  padded.set(data); padded[len] = 0x80;
+  const bits = len * 8;
+  for (let i = 0; i < 8; i++) padded[padded.length - 8 + i] = Math.floor(bits / Math.pow(2, 8 * i)) & 0xff;
+  let a0 = 1732584193, b0 = -271733879, c0 = -1732584194, d0 = 271733878;
+  const words = new Int32Array(padded.buffer);
+  for (let off = 0; off < words.length; off += 16) {
+    const M = words.subarray(off, off + 16);
+    let A = a0, B = b0, C = c0, D = d0;
+    for (let i = 0; i < 64; i++) {
+      let F = 0, g = 0;
+      if (i < 16) { F = (B & C) | (~B & D); g = i; }
+      else if (i < 32) { F = (D & B) | (~D & C); g = (5 * i + 1) % 16; }
+      else if (i < 48) { F = B ^ C ^ D; g = (3 * i + 5) % 16; }
+      else { F = C ^ (B | ~D); g = (7 * i) % 16; }
+      F = (F + A + K[i] + M[g]) | 0;
+      A = D; D = C; C = B;
+      B = (B + ((F << S[i]) | (F >>> (32 - S[i])))) | 0;
+    }
+    a0 = (a0 + A) | 0; b0 = (b0 + B) | 0; c0 = (c0 + C) | 0; d0 = (d0 + D) | 0;
+  }
+  return [a0, b0, c0, d0].map((n) => {
+    let s = '';
+    for (let i = 0; i < 4; i++) s += ('0' + ((n >> (i * 8)) & 0xff).toString(16)).slice(-2);
+    return s;
+  }).join('');
+}
+/**
+ * The string PayFast signs: every field but `signature`, values as decoded, sorted by
+ * name, `k=v` joined with `&`, and the passphrase appended as a query when there is one.
+ * `keepEmpty` decides whether a field sent blank is part of what was signed — the
+ * providers' own samples disagree, so verification tries both (see payfastSignedOk):
+ * the choice cannot be forged either way, and getting it wrong in the strict direction
+ * would silently refuse a real payment, which is the worse failure by a long way.
+ */
+export function payfastCanonical(fields, passphrase, keepEmpty) {
+  const keys = Object.keys(fields || {}).filter((k) => k !== 'signature')
+    .filter((k) => keepEmpty ? fields[k] != null : String(fields[k] == null ? '' : fields[k]) !== '')
+    .sort();
+  const base = keys.map((k) => k + '=' + String(fields[k] == null ? '' : fields[k])).join('&');
+  const pp = String(passphrase || '');
+  return pp ? base + '?passphrase=' + pp : base;
+}
+export function payfastSignature(fields, passphrase) {
+  return md5Hex(payfastCanonical(fields, passphrase, false));
+}
+/** True when the notice carries a signature either reading of the spec produces. */
+export function payfastSignedOk(fields, passphrase) {
+  const given = String((fields || {}).signature || '');
+  if (!given) return false;
+  return sigEq(md5Hex(payfastCanonical(fields, passphrase, false)), given)
+    || sigEq(md5Hex(payfastCanonical(fields, passphrase, true)), given);
+}
+/** Equal, but without letting the length or an early mismatch show: a signature check
+ *  that returns on the first byte is a oracle for building one byte at a time. */
+export function sigEq(a, b) {
+  const x = String(a || ''), y = String(b || '');
+  if (x.length !== y.length || !x) return false;
+  let diff = 0;
+  for (let i = 0; i < x.length; i++) diff |= x.charCodeAt(i) ^ y.charCodeAt(i);
+  return diff === 0;
+}
+/** What the minted record has to see in the notice before a plan moves: the money, in
+ *  the currency we asked for, and nothing about the terms taken from the caller. */
+export function txMatches(tx, fields) {
+  if (!tx || typeof tx !== 'object') return { ok: false, why: 'no payment intent on file for that reference — it was spent, or it expired' };
+  const want = Math.round((Number(tx.amount) || 0) * 100);
+  const cur = String(tx.currency || 'USD').toUpperCase();
+  const gotCur = String(fields.amount_currency || cur).toUpperCase();
+  if (gotCur !== cur) return { ok: false, why: 'paid in ' + gotCur + ', this plan is priced in ' + cur };
+  const got = Math.round(Number(fields.amount_gross != null ? fields.amount_gross : tx.local_cents != null ? tx.local_cents : NaN));
+  const wantCents = tx.local_cents != null ? Math.round(Number(tx.local_cents)) : want;
+  if (!(got > 0) || got !== wantCents) {
+    return { ok: false, why: 'the amount on the notice does not match the amount that was asked for' };
+  }
+  return { ok: true };
+}

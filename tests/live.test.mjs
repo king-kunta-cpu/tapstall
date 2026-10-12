@@ -1896,3 +1896,127 @@ test('a save frees the picture it dropped even when the index cannot see it yet'
   assert.equal((await call(up.json.ref)).status, 404, 'gone in the save that dropped it, not on a later one');
   assert.ok(env.STORES._deleted('img:mamatoe:' + up.json.ref.split('/').pop()), 'and by delete, so the ceiling and the bill both move back');
 });
+
+/* ------------------------------------------------------ money in: the webhooks */
+/* A notice from a payment provider is the only input in this product that can hand
+ * somebody a paid plan. Everything here is about the fact that it cannot also decide
+ * the terms, be believed about the money, or be repeated. */
+const { createHash } = await import('node:crypto');
+const md5 = (s) => createHash('md5').update(s, 'utf8').digest('hex');   // computed here, not by the code under test
+const storeDoc = (h) => JSON.parse(env.STORES._map.get('store:' + h).value);
+const FORM = { 'content-type': 'application/x-www-form-urlencoded' };   // `raw:` would swallow .text, and these bodies are form fields
+const PF_PP = 'test-pp';
+/* A notice is assembled the way a provider assembles one: the fields go on the wire,
+ * and the passphrase exists only inside the string that gets signed. Getting that
+ * backwards is how a test passes against a thing no sender would ever send. */
+const notice = (f) => {
+  const wire = Object.keys(f).sort().map((k) => k + '=' + f[k]).join('&');
+  return wire + '&signature=' + md5(wire + '?passphrase=' + PF_PP);
+};
+const ipN = ((n) => () => '196.31.0.' + (++n))(0);
+
+test('a payfast notice cannot buy a plan for a handle it was told', async () => {
+  const ip = ipN();
+  const reg = await call('/api/register', { method: 'POST', body: { handle: 'zzhook' + String(Date.now()).slice(-5), shop_name: 'Hook Test', whatsapp: '263771234567' } });
+  assert.equal(reg.status, 201, reg.text);
+  const h = reg.json.handle;
+  const paid0 = storeDoc(h).paid_until || 0;
+  const token = (storeDoc(h).renew_url || '').split('/renew/')[1];
+  assert.ok(token, 'a renew token exists to mint from');
+  const chk = await call('/api/checkout', { method: 'POST', ip: ipN(), body: { token, days: 365, email: 'a@b.c' } });
+  assert.equal(chk.status, 200, chk.text);
+  const ref = chk.json.tx_ref, cents = Math.round(Number(chk.json.amount) * 100);
+  assert.equal(chk.json.custom_str1, ref, 'the button is told exactly which field has to come back');
+  assert.equal(chk.json.window_sec, 1800, 'and for how long the price stands');
+  assert.match(ref, /^[a-z0-9-]+-[A-Za-z0-9_-]{16}$/, 'a reference nobody can walk');
+
+  // The production exploit, verbatim: a handle and a number of days.
+  const evil = await call('/api/hook/payfast', { method: 'POST', ip, headers: FORM, body: 'payment_status=COMPLETE&custom_str1=' + h + '|36500' });
+  assert.equal(evil.status, 503, 'the door is shut until it is armed: ' + evil.text);
+  assert.match(evil.text, /PAYFAST_PASSPHRASE/, 'and it names the thing to set rather than shrugging');
+  assert.equal(storeDoc(h).paid_until, paid0, 'nothing moved');
+
+  env.PAYFAST_PASSPHRASE = PF_PP;
+  try {
+    const unsigned = await call('/api/hook/payfast', { method: 'POST', ip: ipN(), headers: FORM,
+      body: 'payment_status=COMPLETE&custom_str1=' + ref + '&amount_gross=' + cents + '&amount_currency=USD' });
+    assert.equal(unsigned.status, 400, 'armed, and still unsigned: ' + unsigned.text);
+    assert.match(unsigned.text, /signature does not verify/);
+    assert.ok(env.STORES._map.get('tx:' + ref), 'a refused notice leaves the intent alone, so a real one can still land');
+
+    const wrong = await call('/api/hook/payfast', { method: 'POST', ip: ipN(), headers: FORM, body: notice(
+      { payment_status: 'COMPLETE', custom_str1: ref, amount_gross: '1', amount_currency: 'USD', pf_payment_id: '7' }) });
+    assert.equal(wrong.status, 200, 'nothing to retry, nothing to credit: ' + wrong.text);
+    assert.match(wrong.json.ignored, /amount on the notice/, 'paid a cent, wanted the plan price');
+    assert.equal(storeDoc(h).paid_until, paid0, 'and one cent did not buy a year');
+
+    // custom_str2 is the trap: the notice offers a term nobody offered this store
+    const f = { payment_status: 'COMPLETE', custom_str1: ref, amount_gross: String(cents), amount_currency: 'USD', pf_payment_id: '99001', custom_str2: '36500' };
+    const wire = notice(f);
+    const good = await call('/api/hook/payfast', { method: 'POST', ip: ipN(), headers: FORM, body: wire });
+    assert.equal(good.status, 200, good.text);
+    assert.equal(good.json.activated, h, 'a signed notice with a minted intent behind it works first time');
+    const after = storeDoc(h);
+    assert.equal(after.paid_until - paid0, 365 * 86400000, 'the term is the one this Worker offered, not the 36500 in the notice');
+    assert.equal(after.plan, 'annual');
+    assert.equal(after.suspended, false);
+
+    const replay = await call('/api/hook/payfast', { method: 'POST', ip: ipN(), headers: FORM, body: wire });
+    assert.equal(replay.json.already, true, 'the same payment, sent again: ' + replay.text);
+    assert.equal(storeDoc(h).paid_until, after.paid_until, 'and the ledger did not move');
+    const spent = await call('/api/hook/payfast', { method: 'POST', ip: ipN(), headers: FORM,
+      body: notice({ ...f, pf_payment_id: '99002' }) });
+    assert.match(spent.json.ignored, /spent|expired/, 'and the intent is gone, so it cannot be cashed twice: ' + spent.text);
+  } finally { delete env.PAYFAST_PASSPHRASE; }
+});
+
+test('the flutterwave notice is refused until it is armed, and then asked again by us', async () => {
+  const reg = await call('/api/register', { method: 'POST', body: { handle: 'zzfw' + String(Date.now()).slice(-5), shop_name: 'FW Test', whatsapp: '263771234567' } });
+  assert.equal(reg.status, 201, reg.text);
+  const h = reg.json.handle;
+  const paid0 = storeDoc(h).paid_until || 0;
+  const mint = async () => {
+    const token = (storeDoc(h).renew_url || '').split('/renew/')[1];
+    const c = await call('/api/checkout', { method: 'POST', ip: ipN(), body: { token, days: 365, email: 'a@b.c' } });
+    assert.equal(c.status, 200, c.text);
+    return c.json;
+  };
+  let r = mint();
+  const first = await r;
+  const noSecret = await call('/api/hook/flutterwave', { method: 'POST', ip: ipN(), body: { data: { tx_ref: first.tx_ref, status: 'successful', amount: first.amount, id: 11 } } });
+  assert.equal(noSecret.status, 503, 'an unconfigured verify hash is not the same thing as no verify hash needed: ' + noSecret.text);
+  assert.match(noSecret.text, /FW_SECRET/);
+  assert.equal(storeDoc(h).paid_until, paid0, 'nothing was activated by a stranger');
+
+  env.FW_SECRET = 'vh';
+  const savedFetch = globalThis.fetch;
+  try {
+    const badHash = await call('/api/hook/flutterwave', { method: 'POST', ip: ipN(), headers: { 'verif-hash': 'nope' }, body: { data: { tx_ref: first.tx_ref, status: 'successful' } } });
+    assert.equal(badHash.status, 401, 'the hash is checked, not consulted');
+    const okHash = await call('/api/hook/flutterwave', { method: 'POST', ip: ipN(), headers: { 'verif-hash': 'vh' }, body: { data: { tx_ref: first.tx_ref, status: 'successful', amount: first.amount, id: 11 } } });
+    assert.equal(okHash.json.activated, h, 'with no API key configured the minted intent is the authority: ' + okHash.text);
+    assert.equal(storeDoc(h).paid_until - paid0, 365 * 86400000, 'and the terms still come from our record');
+    const again = await call('/api/hook/flutterwave', { method: 'POST', ip: ipN(), headers: { 'verif-hash': 'vh' }, body: { data: { tx_ref: first.tx_ref, status: 'successful' } } });
+    assert.match(again.json.ignored, /spent|window/, 'one intent, one activation: ' + again.text);
+
+    env.FLW_API_KEY = 'k';
+    const second = await mint();
+    globalThis.fetch = async () => new Response(JSON.stringify({ data: { status: 'failed' } }), { headers: { 'content-type': 'application/json' } });
+    const refused = await call('/api/hook/flutterwave', { method: 'POST', ip: ipN(), headers: { 'verif-hash': 'vh' }, body: { data: { tx_ref: second.tx_ref, status: 'successful', amount: second.amount, id: 21 } } });
+    assert.equal(refused.status, 502, 'the provider is asked, and its answer wins: ' + refused.text);
+    assert.equal(storeDoc(h).paid_until, paid0 + 365 * 86400000, 'and nothing moved');
+    assert.ok(env.STORES._map.get('tx:' + second.tx_ref), 'a provider that is briefly unreachable must not cost a real payment: the intent is still there');
+
+    globalThis.fetch = async () => new Response(JSON.stringify({ data: { status: 'successful', amount: 1.11, currency: 'USD' } }), { headers: { 'content-type': 'application/json' } });
+    const short = await call('/api/hook/flutterwave', { method: 'POST', ip: ipN(), headers: { 'verif-hash': 'vh' }, body: { data: { tx_ref: second.tx_ref, status: 'successful', amount: second.amount, id: 22 } } });
+    assert.equal(short.status, 400, 'the amount on the transaction is checked, not waved through: ' + short.text);
+    assert.match(short.text, /not the amount this plan costs/);
+
+    globalThis.fetch = async () => new Response(JSON.stringify({ data: { status: 'successful', amount: second.amount, currency: 'USD' } }), { headers: { 'content-type': 'application/json' } });
+    const done = await call('/api/hook/flutterwave', { method: 'POST', ip: ipN(), headers: { 'verif-hash': 'vh' }, body: { data: { tx_ref: second.tx_ref, status: 'successful', amount: second.amount, id: 23 } } });
+    assert.equal(done.json.activated, h, done.text);
+    assert.equal(storeDoc(h).paid_until - paid0, 730 * 86400000, 'verified, so the second year landed');
+  } finally {
+    globalThis.fetch = savedFetch; delete env.FW_SECRET; delete env.FLW_API_KEY;
+  }
+});
