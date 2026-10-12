@@ -10,9 +10,11 @@ mitigation is a separate single-use token minted for that field only — not the
 claim rather than a promise — the command to re-run whenever it is doubted:
 
 ```
-git show 3d91692 -- worker/worker.js | grep -E "^[+-]" | grep -E "markPaid|confirmPage|a: .mark."
+git log -1 --grep="buyer adds their own payment code" -p -- worker/worker.js \
+  | grep -E "^[+-]" | grep -E "markPaid|confirmPage|a: .mark."
 ```
 
+(The 0.7.3 commit is `3d91692`; the lookup is by message so the command survives a rebase.)
 One line comes back, and it is a comment inside the new handler saying that it copies
 `markPaid`'s shape: no added or removed line lies inside either function, and the
 `a: 'mark'` mint is byte-identical. What is new is a second kind of capability,
