@@ -537,4 +537,9 @@ test('a returning buyer finds the door again, on the device it was left on', () 
   assert.ok(!/you have not paid|still owed|you owe|unpaid/.test(pf.slice(0, 700)),
     'and it accuses nobody: nothing on this page can read the order back, so nothing here may claim to know');
   assert.match(storeHtml, /aria-label="Dismiss"/, 'a line like this must be puttable down by hand too');
+  // and the door page itself has to be able to say the same thing without knowing the order:
+  // a revocation or a deletion never reached the document, so the link is all it can name
+  assert.match(worker, /String\(x\.u\)==="\/p\/' \+ k/, 'the Worker prunes by the stored url as well as the code');
+  assert.match(worker, /\/\^\[A-Za-z0-9\._-\]\{20,400\}\$\/.test\(k\)/,
+    'only for a value with the shape a capability has, spelled as the client filter above spells it');
 });

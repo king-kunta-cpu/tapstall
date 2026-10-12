@@ -240,6 +240,17 @@ verified ZW/SA tariffs) but it is now a **default, not the whole answer**:
   sentence when a code is owed on an open order, pointing at the door in their ledger
   rather than pasting a live write into an inbox that gets forwarded.
 
+- **Every answer at the door puts it down.** A link that could no longer be honoured used to
+  stay on the buyer's phone for its full 72 hours, so the storefront kept offering a door that
+  could only answer "not added". `pfForgetScript` now takes the cap as well as the code: a
+  revocation or a deleted order never reached the document, so the link is the one thing such a
+  page knows. Four answers may prune — settled, out of corrections, order gone, shop closed its
+  links — and three may not: an empty box, a busy minute, an unverified link. Writing it found
+  two bugs of its own: the page-shaped refusals had been passing their status into
+  `shell(title, body)`, which takes two arguments, so every "Not added" answered HTTP 200 with
+  no robots tag; and a rate-limited form post handed the browser a JSON blob, which is now a
+  page that says nothing was lost and keeps the entry where it is.
+
 An invalid description at sign-up becomes `cash` rather than a rejected
 registration: a merchant who never opens the shop is worse than one whose slip
 says "pay on collection" until they fix it.

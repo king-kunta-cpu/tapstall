@@ -1,5 +1,46 @@
 # Tapstall — status
 
+## Every answer at the door closes it (2026-10-12, v0.7.7)
+
+**Fourth time the same instruction came back, and what was left was the door's own manners.**
+The field, the chase that ends at it, the device that remembers it and the sender number that
+completes the record are all shipped. A link that could no longer be honoured was not: it sat in
+the buyer's phone for its full 72 hours, so the storefront went on offering a door that could
+only ever answer "not added".
+
+**One script, two ways to name an entry.** `pfForgetScript(handle, code, cap)` prunes on either
+half. A page that reached the order prunes by its code, as it did. A page that never got there —
+a shop that revoked its links (410), an order that is gone (404), a refusal posted after either —
+prunes by `String(x.u)==="/p/<cap>"`, the link being all it knows. Each half is shape-checked
+before a byte is emitted, and the url half is spelled with the storefront's own filter
+(`/^[A-Za-z0-9._-]{20,400}$/`), pinned in `pages.test.mjs` so neither file can drift alone.
+
+**What may prune, and what may not.** Final answers do: settled, out of corrections, order gone,
+links closed. Non-answers do not: an empty box (422), a busy minute (429), a link that never
+verified (401). The last one cannot name a key at all — a cap reveals its shop only once it
+verifies — and its entries die on the client at exactly the hour the token dies, so nothing
+waits on it. A refusal that is *final* is where the buyer learns the truth, and the storefront
+line cannot be corrected from the outside: nobody polls the order from a phone, and the door is
+the only place the order is ever read back to the person holding it.
+
+**Two bugs this found, both mine, both already shipped in this loop.** `shell()` takes a title
+and a body; `no()` in `proofAdd` handed it four arguments, so every page-shaped refusal — the 422
+"type the code", the 409 "already paid", the 410 — answered **HTTP 200 with no `X-Robots-Tag`**.
+Invisible in the words, invisible to an assertion that reads only the body: the new test reads the
+status and the header. The second: a buyer who pressed Send seven times in a minute got a raw JSON
+blob in the browser, because the rate limit answers before the body is read. It answers with a page
+now — "Nothing you have already sent was lost, and one more minute is all it needs" — decided from
+the request's own content type, which is the only thing visible that early.
+
+**Checked.** `npm test` **206/206** (core 77 · live 85 · pages 34 · limits 10). The new live test
+walks one order through all seven states and asserts the entry survives exactly where it should:
+blank → 422, keeps it; flood → 429 page, keeps it; settled page and settled post → prune; deleted
+order → prune; revocation, on the page *and* on the write path → prune; forged cap → no script at
+all. `prod_check.sh` gains three lines, one of which (`nk`, an unverified link running nothing)
+verifies today with no KV write at all, and the two that need an order are `ckw` as usual on a
+capped day. The Worker moved to 0.7.7 on both hostnames; `pages/store.html` did not change, so the
+storefront page is still the one waiting for the 00:20 UTC publish.
+
 ## The door is kept, and it takes the whole record (2026-10-12, v0.7.5 → v0.7.6)
 
 **Third time the same instruction came back, so the same loop got its last two edges.**

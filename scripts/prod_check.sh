@@ -295,6 +295,13 @@ FSEND=$(curl -s -m 30 -X POST -H 'content-type: application/x-www-form-urlencode
   -d 'form=1&cap='"$PCAP"'&proof='"$BPROBE" "$ORIGIN/api/proof")
 ck  "  · the page a no-JS buyer gets after sending carries the same line" "tp_pf_$HANDLE" "$FSEND"
 ckw "  · and a resend of the same value rewrites nothing, which is why a retry is free" 'nothing was rewritten' "$FSEND"
+# 0.7.7: every answer the door can give puts it down, and a busy minute does not
+ckw  "  · the door is forgettable by the link alone, which is all a refusal knows" 'String(x\.u)==="/p/' "$BFORM"
+nk   "  · a link nobody minted runs nothing in a browser, not even a tidy-up" '<script>' \
+  "$(curl -s -m 30 -A 'Mozilla/5.0' "$ORIGIN/p/v1.9999999999.eyJhIjoicHJvb2YifQ.deadbeef")"
+FBLANK=$(curl -s -m 30 -o /dev/null -w '%{http_code}' -X POST -H 'content-type: application/x-www-form-urlencoded' \
+  -d 'form=1&cap='"$PCAP"'&proof=' "$ORIGIN/api/proof")
+ckw  "  · a refusal page is refused by its status too, and not only by its words" '^422$' "$FBLANK"
 
 # ---- 0.7.4: the chase carries the door, and the shop can file what it was sent
 # The buyer's door closes when the order is settled, and the refusal text sends people
@@ -695,9 +702,12 @@ ck "the payfast door names the setting it needs instead of shrugging" 'PAYFAST_P
 PAID1=$(curl -s -m 30 -H "Authorization: Bearer $TOK" "https://api.cloudflare.com/client/v4/accounts/$ACCT/storage/kv/namespaces/$KV/values/store:$HANDLE" | python3 -c "import sys,json;print(json.load(sys.stdin).get('paid_until') or 0)" 2>/dev/null)
 ck "  · and the plan on file did not move, so a probe is free" '^'"$PAID0"'$' "$PAID1"
 HOUR=$(date -u +%Y%m%d%H)
+# The counter the next two lines read is written by the Worker, not by this script, so on a
+# day with no KV writes left it is not "absent because broken" — it is absent because nothing
+# could create it. Same rule as the order-shaped lines: report it as blocked, not red.
 LED=$(curl -s -m 30 -H "Authorization: Bearer $TOK" "https://api.cloudflare.com/client/v4/accounts/$ACCT/storage/kv/namespaces/$KV/values/hooks:$HOUR:refused")
-ck "  · and the refusal was counted, once, for the whole hour" "^{.*"version"" "$LED"
-ck "  · with the reason in the operator's words, not the attacker's" 'not armed|signature|verif-hash|tx_ref|reference' "$LED"
+ckw "  · and the refusal was counted, once, for the whole hour" "^{.*"version"" "$LED"
+ckw "  · with the reason in the operator's words, not the attacker's" 'not armed|signature|verif-hash|tx_ref|reference' "$LED"
 
 echo "[12] being found: what a crawler and a WhatsApp preview actually receive"
 # The page cache is max-age=60/s-maxage=300, so these fetch a busted URL: a green line

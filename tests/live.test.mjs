@@ -2600,3 +2600,69 @@ test('the guides are served, dated, and stamped with the host that answered', as
     assert.match(sm.text, new RegExp('<loc>https://tapstall\\.test/guide/' + slug + '</loc>'), slug + ' is in the sitemap, so it is not an orphan');
   }
 });
+
+test('an answer that ends the door puts it down; a busy minute and a blank box do not', async () => {
+  const h = 'zzclose' + String(Date.now()).slice(-5);
+  const reg = await call('/api/register', { method: 'POST', body: {
+    handle: h, shop_name: 'Close Test', whatsapp: '263771234567', rail: 'zipit', pay_account: '1234567890', currency: 'USD',
+  } });
+  assert.equal(reg.status, 201, reg.text);
+  const ord = await call('/api/order', { method: 'POST', ip: '196.35.0.1', body: { handle: h, service: 'pickup',
+    buyer: { name: 'Farai M', phone: '0780004411' }, items: [{ name: 'Box', price: 12 }] } });
+  assert.equal(ord.status, 201, ord.text);
+  const cap = ord.json.proof_url.slice(3);
+  const key = 'order:' + h + ':' + ord.json.order.id;
+  // the storefront's own entry, so "pruned" means something here rather than a regex hope
+  const prunes = (t) => new RegExp('"tp_pf_' + h + '"[\\s\\S]{0,600}?String\\(x\\.u\\)==="/p/' + cap.replace(/[^A-Za-z0-9._-]/g, '\\$&') + '"');
+  const post = (body, ip) => call('/api/proof', { method: 'POST', ip,
+    headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: form(body) });
+
+  // an empty box is not an answer about the order, so the door stays where it is
+  const blank = await post({ cap, form: '1', proof: '' }, '196.35.0.2');
+  assert.equal(blank.status, 422, blank.text.slice(0, 160));
+  assert.ok(!/tp_pf_/.test(blank.text), 'the page that says "type the code" keeps the link — a form slip must not cost a buyer their door');
+  assert.equal(blank.headers.get('x-robots-tag'), 'noindex, nofollow',
+    'and the refusal is a refusal in its headers too: this page path used to answer HTTP 200 with no robots tag, because shell() has two parameters and was handed four');
+  // a minute of flooding is also not an answer, and a form post gets words, not JSON
+  let seen = null;
+  for (let i = 0; i < 8; i++) seen = await post({ cap, form: '1', proof: 'FLOOD' + i }, '196.35.0.3');
+  assert.equal(seen.status, 429, 'the eighth send in a minute is refused: ' + seen.text.slice(0, 120));
+  assert.match(seen.text, /<h2/, 'as a page, because a browser posted it');
+  assert.match(seen.text, /Nothing you have already sent was lost/, 'and it says so in the order\u2019s terms, not a rate limiter\u2019s');
+  assert.ok(!/tp_pf_/.test(seen.text), 'while waiting costs the buyer nothing: the link is still in their phone when they come back');
+
+  // now the answers that are final, one by one
+  const mark = await call('/api/mark', { method: 'POST', ip: '196.35.0.4', body: { cap: ord.json.mark_url.slice(3) } });
+  assert.equal(mark.status, 200, mark.text);
+  const settled = await call('/p/' + cap);
+  assert.match(settled.text, /closed from here/, 'a settled order explains itself as it always did');
+  assert.match(settled.text, prunes(settled.text), 'and takes the line off the storefront while it is at it');
+  const latePost = await post({ cap, form: '1', proof: 'TOO LATE' }, '196.35.0.5');
+  assert.equal(latePost.status, 409, latePost.text.slice(0, 160));
+  assert.match(latePost.text, /Not added/, 'the refusal a buyer sees if they were already typing');
+  assert.match(latePost.text, prunes(latePost.text), 'is the same answer, so it closes the same door');
+  assert.ok(!/<form/.test(latePost.text), 'and it does not offer the field again to be refused again');
+
+  // an order document that is not there any more: same shape of answer, same closing
+  env.ORDERS._map.delete(key);
+  const missing = await call('/p/' + cap);
+  assert.equal(missing.status, 404, missing.text.slice(0, 120));
+  assert.match(missing.text, /Order not found/);
+  assert.match(missing.text, prunes(missing.text), 'a link to a deleted order is not a door worth keeping for 72 hours');
+  // the shop pulls its whole set of links; the generation moves, so every cap before it is
+  // answered by the revocation rather than by the missing order it also happens to have
+  const key2 = JSON.parse(env.STORES._map.get('store:' + h).value).admin_token;
+  const rev = await call('/api/revoke', { method: 'POST', headers: { 'x-tapstall-admin': key2 }, body: { handle: h } });
+  assert.equal(rev.status, 200, rev.text);
+  const gone = await call('/p/' + cap);
+  assert.equal(gone.status, 410, 'and a page this early still explains the real reason');
+  assert.match(gone.text, prunes(gone.text), 'pruned by the link alone — a refusal this early never reached the order, so no code is known to it');
+  assert.match(gone.text, /"tp_pf_/);
+  const lateRev = await post({ cap, form: '1', proof: 'AFTER' }, '196.35.0.6');
+  assert.equal(lateRev.status, 410, lateRev.text.slice(0, 140));
+  assert.match(lateRev.text, prunes(lateRev.text), 'the write path closes it too, so the two halves cannot disagree');
+  // a link that never verified cannot name a shop, so it names no key and runs nothing
+  const dead = await call('/p/' + 'v1.9999999999.eyJhIjoicHJvb2YifQ.deadbeef');
+  assert.equal(dead.status, 401, dead.text.slice(0, 120));
+  assert.ok(!/<script>/.test(dead.text), 'and that stays true: an unverified link executes nothing in a buyer\u2019s browser, even to tidy up');
+});
