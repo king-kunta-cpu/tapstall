@@ -5,3 +5,6 @@ node_modules/
 *.log
 .DS_Store
 __pycache__/
+
+# the publish watcher log: a runtime artifact, not a source file
+.publish-watch.log
