@@ -80,6 +80,26 @@ export function cleanPayer(v, spec) {
  *  reshaping: a code is matched against what the bank or the SMS says, so the
  *  digits a buyer typed are the digits the merchant needs — upper-casing or
  *  stripping a dash is how a valid proof stops matching. */
+/**
+ * Which rails reconcile by the sender's number. Said once, because four surfaces ask it — the
+ * slip a buyer is handed, the store config the storefront obeys, the door page, and this page's
+ * own fallback for a config cached before the field existed — and every one of them that keeps
+ * its own copy drifts. They had already drifted: the config surface omitted a `cod` guard the
+ * slip had, and the storefront's fallback recognised only two of the four shapes, so a ZIPIT or
+ * a PayShap shop whose buyer held a stale config was asked for nothing where the whole
+ * reconciliation is a number.
+ *
+ * The spec is passed in as *resolved*, by each caller, because the two sources resolve a missing
+ * one differently (`det.spec` is always set; a raw rail's is not) and a helper that silently
+ * defaults would quietly change what a buyer is asked. It may not do that from the inside.
+ */
+export const PAYER_SPECS = ['phone', 'shapid', 'wallet', 'bank'];
+export function railWantsPayer(rail) {
+  const r = rail && typeof rail === 'object' ? rail : {};
+  if (r.type === 'cod' || r.type === 'auto') return false;   // nothing to match, or it matches itself
+  return PAYER_SPECS.indexOf(r.spec) >= 0;
+}
+
 export const cleanProof = (v) => String(v == null ? '' : v).trim().replace(/[^A-Za-z0-9 ._\/-]/g, '').replace(/\s+/g, ' ').slice(0, 40);
 /** What a rail wants when its merchant has not said. Derived from the shapes: a
  *  hand-checked wallet or phone payment asks, a bank transfer cannot be matched
@@ -810,7 +830,7 @@ export function payInstructions(st = {}, order = {}, pricing = {}) {
     till: det.till, reference: ref, amount: pricing.pay_now, currency: cur,
     // Manual rails are the ones where "which number did he send from?" is the whole
     // reconciliation, so the buyer is asked — and the answer rides on the slip.
-    ask_payer: !cod && rail.type !== 'auto' && ['phone', 'shapid', 'wallet', 'bank'].indexOf(det.spec) >= 0,
+    ask_payer: railWantsPayer({ type: rail.type, spec: det.spec }),
     payer_from: from,
     // what the buyer's receipt and the merchant's ledger both show, plus the two
     // words that tell a buyer where to look for it
@@ -923,7 +943,7 @@ export function publicStore(st, catalog, nowMs) {
                     // the storefront asks for the sender's number only on rails where
                     // that is how a payment gets found, so it needs the shape here
                     spec: r.spec || 'wallet',
-                    ask_payer: r.type !== 'auto' && ['phone','shapid','wallet','bank'].indexOf(r.spec || 'wallet') >= 0,
+                    ask_payer: railWantsPayer({ type: r.type, spec: r.spec || 'wallet' }),
                     // and whether to ask for the app's code, what that shop calls it,
                     // and whether they will not do without it
                     proof: r.proof || proofDefault(r.type, r.spec || 'wallet'),

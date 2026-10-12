@@ -349,7 +349,12 @@ test('the dashboard can hold a number per method and a week of hours', () => {
 test('the storefront asks for the sending number only where it explains a payment', () => {
   const s = page('store');
   assert.ok(s.includes('id="fPayer"'), 'the buyer can say what number the payment comes from');
-  assert.ok(/R\.type === 'manual'/.test(s), 'but only on a manual rail, decided by the shape the server published');
+  // widened on purpose by the release that unified the rule: `manual` was this page's own
+  // narrower guess (two of four specs, one of three types), and a page inventing a policy is
+  // how a ZIPIT shop with a stale cache ended up asking for nothing
+  assert.ok(/R\.type !== 'auto' && R\.type !== 'cod'/.test(s),
+    'where the page must guess it guesses with the server\u2019s rule, not a narrower one of its own');
+  assert.ok(/R\.ask_payer !== undefined \? !!R\.ask_payer/.test(s), 'and it still obeys the published field first');
   assert.ok(/Should read/.test(s) && /pay\.holder/.test(s), 'the name to check the confirmation against is on the slip');
   assert.ok(/pay\.till/.test(s), 'and so is the till, when the merchant has one');
   assert.ok(/CFG\.open/.test(s), 'the open/closed line is computed on the shop clock, not the visitor’s');
@@ -669,5 +674,27 @@ test('a refusal promises only what the device can still deliver', () => {
   assert.equal(msgs.length, 2, 'both refusals are found by this test, not one: ' + JSON.stringify(msgs));
   assert.ok(msgs.every((s) => !/receipt/i.test(s)), 'and neither promises a box a hand-back has closed: ' + msgs.join(' | '));
   assert.match(refusal, /a newer link from this order still works/, 'the spent answer points at what may exist without naming a screen');
+});
+
+/* The rule lives once; the surfaces obey it. This test exists because the same question — "does
+   this rail find a payment by the number it came from?" — was answered in four places, and two
+   of them had quietly disagreed: the store config omitted the cod guard the slip carried, and
+   the storefront's fallback for a cached pre-0.7.6 config knew two of the four shapes, so a bank
+   or ShapID shop with a stale cache asked for nothing at all. */
+test('who is asked for a sender number is one rule, said in two files', () => {
+  const core = readFileSync(join(root, 'worker', 'core.js'), 'utf8');
+  assert.match(core, /export const PAYER_SPECS = \['phone', 'shapid', 'wallet', 'bank'\];/,
+    'the list is an exported constant, so a page can be checked against it without importing it');
+  assert.equal((core.match(/PAYER_SPECS/g) || []).length, 2, 'the list is read in exactly one place: the helper');
+  assert.equal((core.match(/railWantsPayer\(/g) || []).length, 3, 'and the helper is written once, read twice — the slip and the store config');
+  const rest = core.replace(/export const PAYER_SPECS[^\n]*\n/, '');
+  assert.ok(!/\[\s*'phone'/.test(rest), 'and no second array of specs survives in core: ' + (rest.match(/\[\s*'phone'[^\]]*\]/) || [''])[0].slice(0, 80));
+  const storeHtml = page('store');
+  const at = storeHtml.indexOf('R.ask_payer !== undefined');
+  assert.ok(at > 0, 'the storefront still obeys what it is told first');
+  const fb = storeHtml.slice(at, at + 320);
+  for (const sp of ['phone', 'shapid', 'wallet', 'bank'])
+    assert.ok(fb.includes("R.spec === '" + sp + "'"), 'and its fallback knows ' + sp + ' because the list is the same one');
+  assert.match(fb, /R\.type !== 'auto' && R\.type !== 'cod'/, 'and excludes the two types with nothing to match, as core does');
 });
 

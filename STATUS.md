@@ -1,5 +1,38 @@
 # Tapstall — status
 
+## One rule, four places (2026-10-12, v0.8.4)
+
+A deferred line in this file — *"unify `ask_payer` behind `railWantsPayer(rail)`"* — was not
+tidiness. The question "does this rail find a payment by the number it came from?" was answered
+four times, and two of the answers had quietly split:
+
+- `rail_info.ask_payer` (what the storefront obeys) omitted the `cod` guard that
+  `payInstructions` (what the buyer's slip is frozen from) carried;
+- `pages/store.html`'s fallback for a config cached before the field existed recognised **two of
+  four** specs and required `type === 'manual'`, so a ZIPIT (bank) or PayShap (shapid) shop whose
+  buyer held a stale config was asked for *nothing* — on the one rail shape where a number is the
+  entire reconciliation.
+
+Now: `PAYER_SPECS` and `railWantsPayer(rail)` in core, defined once and read once; the slip and
+the store config call the helper; the storefront's legacy guess names the same four shapes. The
+helper takes the spec **as each caller resolved it** rather than defaulting internally, because a
+silent `|| 'wallet'` inside a shared rule is how a refactor quietly changes what a buyer is asked.
+
+**Pinned, not promised:** a `core` test walks the catalogue (`cash`/`payfast`/`ozow` false,
+`ecocash_usd`/`ecocash_zig`/`innbucks`/`onepay`/`zipit`/`payshap` true) so a shape that flips is
+caught by behaviour; a `pages` test counts the source (`PAYER_SPECS` twice — definition and use;
+`railWantsPayer(` three times — one writer, two readers) and asserts no second `['phone', …]`
+array survives in core. One existing test had to be updated, not silenced: it pinned the storefront
+to `R.type === 'manual'`, which *was* the drift; it now pins the page to the server's rule and to
+obeying the published field first.
+
+**Checked.** `npm test` **221/221** (core 81 · live 90 · pages 40 · limits 10), `deploy.sh --check`
+green, Worker live and confirmed at 0.8.4 on both hostnames. The two page publishes still wait on
+the day's KV budget, which is what `scripts/publish_watch.sh` is now for: it slept to the reset the
+API reports (00:00 UTC + 2 min), runs `--templates`, and then greps the *served* bytes for the
+controls themselves — `id="pff"` on `/s/mamatoe`, `data-pfv` on `/a` — the dry run on a capped day
+correctly reporting `NOT SERVED YET … ×0` for both.
+
 ## A refusal is a claim about the device (2026-10-12, v0.8.3)
 
 0.8.2 gave the retired link the right *blame* and left the wrong *direction*. Its card said:

@@ -406,7 +406,7 @@ var TERM = /*__TAPSTALL_TERM__*/null;
       // page's: the worker knows a hosted card link has no number to match and a
       // ZIPIT has nothing else to match. So the page obeys what it is told, with the
       // old shape test as the fallback for a config cached before this shipped.
-      (R && (R.ask_payer !== undefined ? !!R.ask_payer : (R.type === 'manual' && (R.spec === 'phone' || R.spec === 'wallet')))
+      (R && (R.ask_payer !== undefined ? !!R.ask_payer : (R.type !== 'auto' && R.type !== 'cod' && (R.spec === 'phone' || R.spec === 'shapid' || R.spec === 'wallet' || R.spec === 'bank')))
         ? '<label>Number you will pay from <span style="font-weight:400;color:#93a5b6;font-size:.82em">(optional — helps us find your payment)</span></label><input id="fPayer" inputmode="tel" placeholder="0712345678">'
         : '') +
       // The code their own app prints. Optional unless the shop said it cannot do

@@ -1043,3 +1043,25 @@ test('proofSuperseded: the link died, but not by the buyer\u2019s hand', () => {
     'whitespace is not a code: the same cleaning the field itself uses decides it');
   assert.equal(C.proofSuperseded(null, 'x'), false, 'and an order that is not there is answered, not thrown');
 });
+
+test('railWantsPayer: the four surfaces that ask this question ask the same one', () => {
+  const yes = ['phone', 'shapid', 'wallet', 'bank'];
+  assert.deepEqual(C.PAYER_SPECS, yes, 'one array, in this order, so a page can be pinned against it');
+  for (const sp of yes) assert.equal(C.railWantsPayer({ type: 'manual', spec: sp }), true, sp + ' is found by its number');
+  for (const sp of ['none', 'link', 'cash', undefined, ''])
+    assert.equal(C.railWantsPayer({ type: 'manual', spec: sp }), false, sp + ' has no number to match');
+  for (const t of ['cod', 'auto'])
+    assert.equal(C.railWantsPayer({ type: t, spec: 'phone' }), false, t + ' is not a hand-checked rail whatever its spec says');
+  assert.equal(C.railWantsPayer(null), false, 'a rail nobody configured asks for nothing');
+
+  // and against the catalogue itself, because the drift this closed was in the shapes, not in
+  // the rule: a hosted link confirms itself, a ZIPIT has nothing else to go on
+  const want = { cash: false, payfast: false, ozow: false, ecocash_usd: true, ecocash_zig: true,
+    innbucks: true, onepay: true, zipit: true, payshap: true };
+  for (const [key, expect] of Object.entries(want)) {
+    const r = C.RAILS[key];
+    assert.ok(r, key + ' is still in the catalogue');
+    assert.equal(C.railWantsPayer(r), expect, key + ' (' + r.type + '/' + r.spec + ')');
+  }
+});
+
