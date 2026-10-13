@@ -6,11 +6,12 @@
   "name": "tapstall",
   "private": true,
   "scripts": {
-    "build": "scripts/build_bundle.sh .build",
-    "check": "scripts/deploy.sh --check",
-    "deploy": "scripts/deploy.sh",
-    "test": "node --test tests/"
+    "build": "bash scripts/build_bundle.sh .build",
+    "check": "bash scripts/deploy.sh --check",
+    "deploy": "bash scripts/deploy.sh",
+    "test": "node --test tests/",
+    "quota": "bash scripts/quota.sh"
   },
   "type": "module",
-  "version": "0.4.1"
+  "version": "0.9.1"
 }

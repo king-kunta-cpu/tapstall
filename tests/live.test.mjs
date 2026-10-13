@@ -18,6 +18,7 @@ import { existsSync, readFileSync, readdirSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { unpackRow, packRow, orderRow, ROW_META_CAP } from '../worker/core.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const dir = mkdtempSync(join(tmpdir(), 'zl-'));
@@ -74,17 +75,49 @@ function kvStub() {
     },
     async put(key, value, opts) {
       writes++; tally(key);
-      m.set(key, { value: typeof value === 'string' ? value : toBin(value), exp: opts?.expirationTtl });
+      // Metadata is not a nicety here: the ledger row *is* the metadata, and a stub that dropped it
+      // would make every row look lost while the platform had it all along.
+      m.set(key, { value: typeof value === 'string' ? value : toBin(value), exp: opts?.expirationTtl,
+        meta: opts && opts.metadata !== undefined ? opts.metadata : undefined });
     },
     async delete(key) { deletes++; gone.push(key); tally('del:' + key); m.delete(key); },
     async list(arg) {
       const prefix = typeof arg === 'string' ? arg : (arg && arg.prefix) || '';
       const keys = [...m.keys()].filter((k) => !prefix || k.startsWith(prefix))
         .filter((k) => !k.startsWith('rl:') && !k.startsWith('__ping'))
-        .map((k) => ({ name: k }));
+        .map((k) => {
+          const meta = m.get(k).meta;
+          return meta === undefined ? { name: k } : { name: k, metadata: meta };
+        });
       return { keys, list_complete: true, cursor: '' };
     },
   };
+}
+
+// The ledger row is metadata on the order document (v0.9.1), so "the row the merchant's list
+// shows" means reading the document's metadata and expanding it with the same table the Worker
+// packs with. A hand-written copy of that mapping here would drift and agree with nothing.
+function storedRow(handle, id) {
+  const rec = env.ORDERS._map.get(`order:${handle}:${id}`);
+  return rec && rec.meta ? unpackRow(rec.meta) : null;
+}
+function storedRows(handle) {
+  const prefix = `order:${handle}:`;
+  const out = [];
+  for (const [k, v] of env.ORDERS._map) {
+    if (!k.startsWith(prefix) || !v.meta) continue;
+    const r = unpackRow(v.meta);
+    r.id = k.slice(prefix.length);
+    out.push(r);
+  }
+  return out;
+}
+function indexWritesFor(handle) { return env.ORDERS._writesTo('list:' + handle); }
+// A test that edits an order document has to write the row with it. That is the same rule the
+// Worker follows — `saveOrder` is the only writer of an order key, which is why the row cannot
+// drift from the order — and a test that pokes a document directly is a writer too.
+async function putDoc(handle, id, doc) {
+  await env.ORDERS.put(`order:${handle}:${id}`, JSON.stringify(doc), { metadata: packRow(orderRow(doc)) });
 }
 
 const env = {
@@ -917,7 +950,10 @@ test('the template editor publishes, validates, and can be undone from git', asy
   for (const n of ['store', 'onboard', 'admin', 'fees', 'index', 'confirm', 'renew', 'ops', 'sample-menu']) {
     assert.ok(names.includes(n), 'the console lists ' + n);
   }
-  assert.equal(list.json.templates.every((t) => t.live), true, 'every page is present in KV');
+  assert.equal(list.json.templates.every((t) => t.live), true, 'every page is live, from the bundle if nothing else');
+  assert.equal(list.json.templates.every((t) => t.inlined > 200), true,
+    'and the bundle carries all of them: since v0.9.1 a page publish can fail and a merchant still gets a page');
+  assert.equal(list.json.templates.every((t) => !t.override), true, 'with no override in the way');
 
   const read = await call('/ops/api/template?name=renew', { cookie: c });
   assert.match(read.json.html, /__KIT__|\.card/, 'the editor loads a real page');
@@ -937,19 +973,25 @@ test('the template editor publishes, validates, and can be undone from git', asy
   const pub = await call('/ops/api/template', { method: 'POST', cookie: c, confirm: true, body: { name: 'renew', html: edited } });
   assert.equal(pub.status, 200, pub.text);
   assert.equal(pub.json.matches, true, 'the answer proves KV holds exactly what was sent');
+  assert.equal((await call('/ops/api/template?name=renew', { cookie: c })).json.from, 'override',
+    'the console publishes an override, which is the copy that outranks the bundle — not the KV publish key, which a redeploy would silently un-serve');
   const served = await call('/renew/' + renewToken());
   assert.equal(served.status, 200);
   assert.ok(served.text.includes('<!-- OPS-PUBLISHED -->'), 'a template edit is live at once — no deploy, no cache clear');
   assert.ok(!/\/\*__TAPSTALL_RENEW__\*\/null/.test(served.text), 'and the payload still gets injected into a hand-edited page');
 
-  // deleting the KV copy must fall back to the builder, so a bad publish never
-  // leaves merchants staring at "Template missing"
+  // Both KV copies go, and the page must still be a page: it is in the bundle. This is the
+  // release's actual promise — a spent write budget, a refused put, a bad hand-publish can leave a
+  // shop with a stale override or none, never with "Template missing".
+  await env.STORES.delete('tpl-ovr:renew');
   await env.STORES.delete('tpl:renew');
+  assert.equal((await call('/ops/api/template?name=renew', { cookie: c })).json.from, 'bundle', 'the console says so, in words');
   const fb = await call('/renew/' + renewToken());
-  assert.equal(fb.status, 200, 'the renewal page still renders from code when KV has nothing');
+  assert.equal(fb.status, 200, 'and the renewal page still renders, from the bundle, with KV empty');
   assert.ok(fb.text.length > 1200 && /renew|plan|year/i.test(fb.text), 'fallback is the real page, not an error');
   await call('/ops/api/template', { method: 'POST', cookie: c, confirm: true, body: { name: 'renew', html: read.json.html } });
-  assert.ok((await call('/ops/api/template?name=renew', { cookie: c })).json.bytes === read.json.bytes, 'the console can put the page back');
+  assert.equal((await call('/ops/api/template?name=renew', { cookie: c })).json.from, 'override', 'the console can put a page back, and says which copy is live while it is');
+  await env.STORES.delete('tpl-ovr:renew');   // and hands the shop's own bundle copy back, cleanly
 });
 
 test('signing out ends the session for real', async () => {
@@ -1822,11 +1864,11 @@ test('a rail that cannot match a transfer without a code asks for one', async ()
   const doc = JSON.parse(env.ORDERS._map.get('order:' + h + ':' + withProof.json.order.id).value);
   assert.equal(doc.buyer.proof, 'REF-99.x/1', 'kept exactly as typed, spaces trimmed, nothing reshaped');
   assert.equal(doc.buyer.payer, 'Standard Bank 6288112233', 'what they typed is what is stored — the rail is chosen by the shop, and a payer may outlive it');
-  const rows = JSON.parse(env.ORDERS._map.get('list:' + h).value);
-  const row = rows.find((r) => r.id === withProof.json.order.id);
-  assert.equal(row.proof, 'REF-99.x/1', 'and on the ledger row, so the list does not need the document to answer');
-  assert.equal(row.payer, 'Standard Bank 6288112233', 'and the ledger row agrees with the slip');
-  assert.equal(rows.find((r) => r.id === bare.json.order.id).proof, '', 'a row with nothing says nothing rather than lying about it');
+  const row = storedRow(h, withProof.json.order.id);
+  assert.equal(row.proof, 'REF-99.x/1', 'and the ledger row carries it, so the list never opens the document to answer');
+  assert.equal(row.payer, 'Standard Bank 6288112233', 'and the row agrees with the slip');
+  assert.equal(storedRow(h, bare.json.order.id).proof, '', 'a row with nothing says nothing rather than lying about it');
+  assert.equal(indexWritesFor(h), 0, 'and no row-array write was spent to get there: the row rode on the document');
 
   const key = JSON.parse(env.STORES._map.get('store:' + h).value).admin_token;
   const dash = await call('/api/admin?handle=' + h, { headers: { 'x-tapstall-admin': key } });
@@ -1985,8 +2027,8 @@ test('what the buyer sends lands on the order, the ledger and the paper trail, a
   assert.equal(doc.proof_by, 'buyer', 'and the row says where it came from, so the merchant knows who to thank');
   assert.match(doc.proof_at, /^\d{4}-\d{2}-\d{2}T/, 'with when');
 
-  const row = JSON.parse(env.ORDERS._map.get('list:' + late.handle).value).find((x) => x.id === late.json.order.id);
-  assert.equal(row.proof, 'RBZ 8812.x', 'on the ledger row too, so the list answers without opening the document');
+  assert.equal(storedRow(late.handle, late.json.order.id).proof, 'RBZ 8812.x',
+    'on the ledger row too, in the same write — there is no second copy for the buyer’s value to fail to reach');
   const dash = await call('/api/admin?handle=' + late.handle, { headers: { 'x-tapstall-admin': late.key } });
   const shown = dash.json.orders.find((o) => o.id === late.json.order.id);
   assert.equal(shown.buyer.proof, 'RBZ 8812.x', 'the merchant sees it in their own ledger');
@@ -2151,8 +2193,7 @@ test('the shop can file the code the buyer sent in chat, and it is called what i
   assert.equal(doc.status, 'paid', 'a reference filed after the money was counted moves no money');
   assert.equal(doc.proof_by, 'merchant', 'and the row says who put it there');
   assert.equal(doc.proof_writes, undefined, 'a shop write does not eat the buyer’s three corrections');
-  const row = JSON.parse(env.ORDERS._map.get('list:' + h).value).find((x) => x.id === id);
-  assert.equal(row.proof, '8812 .RT', 'the ledger row agrees, so the badge leaves with the ask');
+  assert.equal(storedRow(h, id).proof, '8812 .RT', 'the ledger row agrees, so the badge leaves with the ask');
   assert.equal((await call('/api/admin?handle=' + h, { headers: hdr })).json.orders.find((o) => o.id === id).ask, undefined,
     'the chase sentence is gone, with no extra wiring, because proofAsk sees the value');
   const audit = (await call('/api/admin?handle=' + h, { headers: hdr })).json.audit.find((a) => a.act === 'proof');
@@ -2266,9 +2307,10 @@ test('both halves of the buyer’s record land in one write, and both are logged
   assert.equal(dashRow.buyer.payer, '+263 77 999 0001', 'so it is the live surfaces that carry what arrived late, as they must');
   assert.equal(doc.proof_writes, 1, 'two fields, one write counted — the budget is per visit to the door, not per box');
   assert.equal(env.ORDERS._writesTo(key), before + 1, 'and one put, not two');
-  const row = JSON.parse(env.ORDERS._map.get('list:' + hp).value).find((x) => x.id === ord.json.order.id);
+  const row = storedRow(hp, ord.json.order.id);
   assert.equal(row.proof, 'MLINE 4471', 'both land on the ledger row the merchant reads');
   assert.equal(row.payer, '+263 77 999 0001', 'the ledger row agrees with the document, spaced as typed');
+  assert.equal(indexWritesFor(hp), 0, 'and that is one put for the pair, not the two the old index cost');
   const dash = await call('/api/admin?handle=' + hp, { headers: { 'x-tapstall-admin': JSON.parse(env.STORES._map.get('store:' + hp).value).admin_token } });
   const audit = dash.json.audit.filter((x) => x.act === 'proof')[0];
   assert.match(audit.fields.join(' '), /MLINE 4471 · \+263 77 999 0001/, 'the paper trail lists both, not whichever came first: ' + JSON.stringify(audit));
@@ -2824,14 +2866,38 @@ test('a capped account fails closed at the door, politely, and never answers 500
   try {
     const page = await call('/api/proof', { method: 'POST', ip: '196.38.0.1',
       headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: form({ cap: 'v1.9999999999.eyJhIjoicHJvb2YifQ.deadbeef', form: '1', proof: 'X' }) });
-    assert.equal(page.status, 503, 'a garbage cap and a spent budget say 503 rather than 401, and that is the honest order: ' + page.text.slice(0, 120));
+    assert.equal(page.status, 401, 'a garbage cap is answered for what it is, because the throttle no longer needs a write to count: ' + page.text.slice(0, 120));
     assert.match(page.text, /<h2/, 'still a page, because a browser posted it');
     assert.ok(!/tp_pf_/.test(page.text), 'and still no prune: today\u2019s budget is not tomorrow\u2019s answer');
     const api = await call('/api/proof', { method: 'POST', ip: '196.38.0.2', body: { cap: 'nope', proof: 'X' } });
-    assert.equal(api.status, 503, api.text.slice(0, 120));
-    assert.equal(api.json.who, 'buyer', 'the JSON reader is told whose problem this is');
+    assert.equal(api.status, 401, api.text.slice(0, 120));
+    // The door the buyer's own write still needs is the one that says 503, because it is a write
+    // that failed and not a credential that was wrong: same answer, for the reason it has always
+    // had, and the throttle's own bookkeeping is no longer part of what a buyer can be refused for.
+    const live = await call('/api/order', { method: 'POST', ip: '196.38.0.4', body: { handle: h, service: 'pickup',
+      buyer: { name: 'Rudo Closed', phone: '0780003355' }, items: [{ name: 'Box', price: 12 }] } });
+    env.STORES.put = sp; env.ORDERS.put = op;
+    const withCap = await call('/api/order', { method: 'POST', ip: '196.38.0.5', body: { handle: h, service: 'pickup',
+      buyer: { name: 'Rudo Closed', phone: '0780003366' }, items: [{ name: 'Box', price: 13 }] } });
+    env.STORES.put = async () => { throw new Error('put() limit exceeded for the day'); };
+    env.ORDERS.put = async () => { throw new Error('put() limit exceeded for the day'); };
+    assert.ok(withCap.json.proof_url, 'the order before the budget went carries a live link: ' + withCap.text.slice(0, 120));
+    const real = await call('/api/proof', { method: 'POST', ip: '196.38.0.6', body: { cap: withCap.json.proof_url.slice(3), proof: 'X' } });
+    assert.equal(real.status, 503, 'a real write the account cannot do is still named as that: ' + real.text.slice(0, 140));
+    // The claim this release could have quietly dropped: with no counter to write, does the ceiling
+    // still close? It does — the limit is a *decision*, and the write was only ever how isolates told
+    // each other about it. Six refused tries from one address, on a day nothing can be written.
+    env.STORES.put = async () => { throw new Error('put() limit exceeded for the day'); };
+    env.ORDERS.put = async () => { throw new Error('put() limit exceeded for the day'); };
+    let refused = 0;
+    for (let n = 0; n < 12; n++) {
+      const r = await call('/api/proof', { method: 'POST', ip: '196.38.0.9', body: { cap: 'nope', proof: 'X' } });
+      if (r.status === 429) refused++;
+    }
+    assert.ok(refused >= 4, 'the ceiling holds on a day with no writes: ' + refused + ' of 12 refused');
     const read = await call('/api/lookup', { method: 'POST', ip: '196.38.0.3', body: { handle: h, code: 'NOPE' } });
     assert.notEqual(read.status, 500, 'a read that needs no write answers normally, so the shop can still look things up: ' + read.text.slice(0, 120));
+    void live;
   } finally {
     env.STORES.put = sp; env.ORDERS.put = op;
   }
@@ -2874,7 +2940,7 @@ test('one link, one change: the row mints fresh, the shop spends the buyer’s l
     headers: { 'x-tapstall-admin': skey }, body: { handle: h, id: ord.json.order.id, proof: 'FROM CHAT' } });
   assert.equal(filed.status, 200, filed.text);
   const docNow = JSON.parse(env.ORDERS._map.get(key).value);
-  const rowNow = JSON.parse(env.ORDERS._map.get('list:' + h).value).find((x) => x.id === ord.json.order.id);
+  const rowNow = storedRow(h, ord.json.order.id);
   assert.equal(rowNow.pcap, docNow.pcap, 'the row’s nonce moved with the document’s, so the next read mints a live one');
   const spent = await call('/api/proof', { method: 'POST', ip: '196.39.0.5', body: { cap: held.slice(3), proof: 'MINE INSTEAD' } });
   assert.equal(spent.status, 410, 'and the buyer’s link is spent by the shop’s entry, not merely outranked: ' + spent.text.slice(0, 120));
@@ -2912,7 +2978,7 @@ test('a code the shop cannot read is handed back, not argued about', async () =>
   const id = ord.json.order.id, key = 'order:' + h + ':' + id;
   const doc = () => JSON.parse(env.ORDERS._map.get(key).value);
   const CAP_BEFORE_VOID = ord.json.proof_url.slice(3);   // the link the buyer came in on, kept for the page half of this test
-  const row = () => JSON.parse(env.ORDERS._map.get('list:' + h).value).find((x) => x.id === id);
+  const row = () => storedRow(h, id);
 
   const w1 = await call('/api/proof', { method: 'POST', ip: '196.44.0.2', body: { cap: ord.json.proof_url.slice(3), proof: 'blurry photo' } });
   assert.equal(w1.status, 200, w1.text.slice(0, 140));
@@ -3077,12 +3143,19 @@ test('the hand-back verb answers to every shape a client sends it', async () => 
   }
 });
 
-/* The ledger row is a second document, written just after the order, and a read served from
-   another edge can still hold the snapshot from before the order existed. The mirror used to
-   be `if (row) { … }` — one skipped read, one permanent wrong answer: a code on the order and
-   "no proof yet" in the merchant's list, with nothing left to correct it. `mirrorRow` reads
-   again. This test is the only thing standing between that bug and a customer. */
-test('a code that lands while the ledger is catching up still reaches the ledger', async () => {
+/* This is where `mirrorRow` lived: the row was a second document, and a read served from another
+   edge could hold the snapshot from before the order existed, so a code on the order could sit
+   beside "no proof yet" in the merchant's list for as long as nothing touched it. The retry loop
+   was a good answer to a bad shape. v0.9.1 removes the shape — the row is metadata on the order
+   document, one write, no window — so this test now proves the absence, and that a shop whose
+   frozen legacy index is deliberately wrong still reads a correct ledger. */
+test('a stale ledger index cannot lose a row any more, because the row is the write', async () => {
+  // This test used to prove the retry loop worked: `mirrorRow` read the shared array, got a cold
+  // edge's snapshot of it, slept, retried, and eventually folded the row in. The loop is gone
+  // because the array is: the row is metadata on the order document, so the write that changes an
+  // order *is* the write that indexes it, and there is no window in which one has landed and the
+  // other has not. What is proved here is that claim, and that a shop holding an old index — the
+  // frozen `list:<handle>` key every pre-0.9.1 store has — reads the same ledger either way.
   const h = 'zzlag' + String(Date.now()).slice(-5);
   const reg = await call('/api/register', { method: 'POST', body: {
     handle: h, shop_name: 'Lag', whatsapp: '263771234567', rail: 'zipit', pay_account: '1234567890', currency: 'USD',
@@ -3091,27 +3164,44 @@ test('a code that lands while the ledger is catching up still reaches the ledger
   const ord = await call('/api/order', { method: 'POST', ip: '196.46.0.1', body: { handle: h, service: 'pickup',
     buyer: { name: 'Rudo T', phone: '0780006611' }, items: [{ name: 'Box', price: 22 }] } });
   assert.equal(ord.status, 201, ord.text);
-  const id = ord.json.order.id, key = 'list:' + h;
-  const rowOf = () => JSON.parse(env.ORDERS._map.get(key).value).find((x) => x.id === id);
-  assert.equal(rowOf().proof, '', 'nothing filed yet — the row carries the field, blank — and it is in the list');
-  const snapshot = JSON.parse(env.ORDERS._map.get(key).value).filter((x) => x.id !== id);
+  const id = ord.json.order.id;
+  assert.equal(storedRow(h, id).proof, '', 'the row exists from the moment the order does — not after an index caught up');
+  assert.equal(ord.json.order.status, 'awaiting_payment');
 
-  const realGet = env.ORDERS.get.bind(env.ORDERS);
-  let staleServed = 0;
-  env.ORDERS.get = (k, opt) => (k === key && staleServed++ < 2)
-    ? Promise.resolve(snapshot)                                   // what a colder edge still holds
-    : realGet(k, opt);
+  // An order from before rows rode on documents: a document with no metadata, and the shop's
+  // frozen index holding its row. This is every live shop, so reading them has to keep working.
+  const legacyDoc = { id: 'older01', code: 'OLD-01', at: '2020-01-01T00:00:00.000Z', status: 'paid',
+    buyer: { name: 'Before', phone: '' }, pricing: { total: 9, tax: 0, pay_now: 9 } };
+  env.ORDERS._map.set('order:' + h + ':older01', { value: JSON.stringify(legacyDoc) });
+  env.ORDERS._map.set('list:' + h, { value: JSON.stringify([{ id: 'older01', code: 'OLD-01', at: legacyDoc.at, total: 9, status: 'paid', name: 'Before' }]) });
   const w = await call('/api/proof', { method: 'POST', ip: '196.46.0.2',
     body: { cap: ord.json.proof_url.slice(3), proof: 'AFTER THE LAG' } });
-  env.ORDERS.get = realGet;
-
   assert.equal(w.status, 200, w.text.slice(0, 140));
   assert.ok(w.json.changed, 'the write itself landed: ' + w.text.slice(0, 140));
-  assert.ok(staleServed >= 2, 'the test really answered it stale reads first: ' + staleServed);
-  const row = rowOf();
-  assert.equal(row.proof, 'AFTER THE LAG', 'and the ledger caught up instead of shrugging');
-  assert.equal(row.proof_by, 'buyer', 'with the same attribution the order document carries');
-  assert.ok(row.pcap, 'and the rotated nonce, so the next read mints the buyer a live link');
+  assert.equal(storedRow(h, id).proof, 'AFTER THE LAG', 'and the ledger has it, on the first read, with nothing to retry');
+
+  const skey = JSON.parse(env.STORES._map.get('store:' + h).value).admin_token;
+  const dash = await call('/api/admin?handle=' + h, { headers: { 'x-tapstall-admin': skey } });
+  assert.ok(dash.json.orders.find((o) => o.id === id && o.buyer.proof === 'AFTER THE LAG'),
+    'the merchant sees it in the dashboard: ' + JSON.stringify(dash.json.orders.map((o) => [o.id, o.buyer && o.buyer.proof])));
+  assert.ok(dash.json.orders.find((o) => o.id === 'older01'), 'and the frozen index still supplies the rows that predate it');
+  const bk = await call('/api/books?handle=' + h, { headers: { 'x-tapstall-admin': skey } });
+  assert.ok(bk.json.summary.orders >= 2, 'the ledger counts a row whose document never had metadata at all: ' + JSON.stringify(bk.json.summary).slice(0, 160));
+  assert.equal(indexWritesFor(h), 0, 'and not one index write was spent across an order, a proof and a month of books');
+
+  // and the second half of what the array used to do badly: an order past the 200-row cap used to
+  // push the oldest row out of the ledger and out of the month, because the index was a fixed-size
+  // array. Rows are per-document now, so the cap bounds a *page*, not a shop's history.
+  const h2 = 'zzcap' + String(Date.now()).slice(-5);
+  await call('/api/register', { method: 'POST', body: {
+    handle: h2, shop_name: 'Cap', whatsapp: '263771234567', rail: 'zipit', pay_account: '1234567890', currency: 'USD',
+  } });
+  for (let n = 0; n < 12; n++) {
+    await call('/api/order', { method: 'POST', ip: '196.46.1.' + (n + 2), body: { handle: h2, service: 'pickup',
+      buyer: { name: 'Buyer ' + n, phone: '07800066' + String(n).padStart(2, '0') }, items: [{ name: 'Box', price: 20 + n }] } });
+  }
+  assert.equal(storedRows(h2).length, 12, 'twelve orders, twelve rows — none of them displaced by the twelfth');
+  assert.equal(indexWritesFor(h2), 0, 'and not one write spent on an index, twelve orders in');
 });
 
 
@@ -3272,16 +3362,18 @@ test('0.8.6 the page does not offer a button the API has already refused', async
   assert.equal(page.status, 200, 'the door answers with a page, always: ' + page.text.slice(0, 120));
   assert.match(page.text, /"state":\s*"expired"/, 'the KV template path still gets a state it knows');
   assert.match(page.text, /"revoked":\s*true/, 'plus the fact that lets a re-skinned page say why');
-  // The floor branch: same refusal, with no form in it — a button that 410s is the defect 0.8.3
-  // was about, and this page is built by the Worker when the template is gone.
-  const tpl = env.STORES._map.get('tpl:confirm');
-  env.STORES._map.delete('tpl:confirm');
-  const floor = await call('/c/' + cap);
-  env.STORES._map.set('tpl:confirm', tpl);
-  assert.equal(floor.status, 410);
-  assert.match(floor.text, /closed its payment links/);
-  assert.ok(!/action="\/api\/mark"/.test(floor.text), 'a closed link must not render a form that cannot work');
-  assert.ok(!/fetch\("\/api\/mark"/.test(floor.text), 'nor an auto-send that will be refused');
+  // A half-published page used to be the way a merchant lost the confirm skin, and the floor
+  // caught them. The bundle means there is no "skin is gone" state to catch any more, which is the
+  // better answer to the same fear: a stub published by hand is refused, the real page is served,
+  // and the payload the page needs still arrives.
+  await call('/ops/api/template', { method: 'POST', cookie: 'tp_ops=' + opsCookie, confirm: false,
+    body: { name: 'confirm', html: '<!doctype html><p>half a page</p>' } }).catch(() => {});
+  env.STORES._map.set('tpl-ovr:confirm', { value: '<!doctype html><p>half a page</p>' });   // under the floor of what counts as a page
+  const stubbed = await call('/c/' + cap);
+  await env.STORES.delete('tpl-ovr:confirm');
+  assert.equal(stubbed.status, 200, 'a stub in the override key cannot blank a live door: ' + stubbed.text.slice(0, 120));
+  assert.match(stubbed.text, /"revoked":\s*true/, 'and it is the bundle skin that answers, with the state in it');
+  assert.ok(!/half a page/.test(stubbed.text), 'the stub is not served to a buyer');
 });
 
 
@@ -3384,15 +3476,18 @@ test('0.8.7 a confirm skin that cannot draw the closure is not handed it', async
   assert.match(before.text, /"revoked":\s*true/);
 
   const tpl = env.STORES._map.get('tpl:confirm');
-  env.STORES._map.set('tpl:confirm', {
-    value: String(tpl.value).replace(/S\.revoked[^}]*\}/g, '').replace(/revoked/g, 'unused'),
+  env.STORES._map.set('tpl-ovr:confirm', {
+    value: String(tpl ? tpl.value : await call('/ops/api/template?name=confirm', { cookie: 'tp_ops=' + opsCookie })).replace(/S\.revoked[^}]*\}/g, '').replace(/revoked/g, 'unused'),
   });
+  assert.ok(env.STORES._map.get('tpl-ovr:confirm').value.length > 200, 'the probe skin is a real page, minus the branch');
   const stale = await call('/c/' + cap);
   assert.equal(stale.status, 410, 'an out-of-date skin gets no chance to lie: ' + stale.text.slice(0, 140));
   assert.match(stale.text, /closed its payment links/);
   assert.ok(!/"revoked":/.test(stale.text), 'and the answer is the floor page, not the payload with nothing to draw it');
-  env.STORES._map.set('tpl:confirm', tpl);
-  assert.match((await call('/c/' + cap)).text, /"revoked":\s*true/, 'put the template back, and the skin is trusted again');
+  await env.STORES.delete('tpl-ovr:confirm');
+  assert.match((await call('/c/' + cap)).text, /"revoked":\s*true/, 'take the override away, and the bundle skin is trusted again');
+  assert.ok(!/action="\/api\/mark"/.test(stale.text), 'the floor the stale skin fell back to renders no form that cannot work');
+  assert.ok(!/fetch\("\/api\/mark"/.test(stale.text), 'nor an auto-send that will be refused');
 });
 
 test('0.8.7 a link minted by the previous release is judged by its date, like a cap', async () => {
@@ -3427,29 +3522,30 @@ test('0.8.7 a link minted by the previous release is judged by its date, like a 
 test('0.8.7 a closed link on the floor has no button on it, and no sentence that is not true', async () => {
   const tok = 'skinprobe';
   env.STORES._map.set('renew:' + tok, { value: JSON.stringify({ handle: 'renewgen', made: Date.now(), g: 'gen-then' }) });
-  const tpl = env.STORES._map.get('tpl:renew');
-  env.STORES._map.delete('tpl:renew');
+  // Since v0.9.1 the bundle carries the renew skin, so "the skin is down" is no longer a matter of
+  // deleting a KV key — it is a hand-published page that cannot draw the state. Same promise, real
+  // door: an override skin with no closed branch must not be handed the closed state, and the floor
+  // answers instead, in the same words, with no way to pay through a dead link.
+  const skin = (await call('/ops/api/template?name=renew', { cookie: 'tp_ops=' + opsCookie })).json.html;
+  const cannotDraw = skin.replace(/state === 'closed'/g, "state === '__no_panel_for_this__'");
+  assert.ok(!/state === 'closed'/.test(cannotDraw), 'the probe really is a skin without the branch');
+  await call('/ops/api/template', { method: 'POST', cookie: 'tp_ops=' + opsCookie, confirm: true, body: { name: 'renew', html: cannotDraw } });
   const floor = await call('/renew/' + tok);
   assert.equal(floor.status, 410, 'a state the skin cannot draw is answered by the floor, in the real code');
   assert.match(floor.text, /closed its links/, 'with the same words, so a screenshot cannot contradict the API');
   assert.ok(!/id=pay|getElementById\('pay'\)|Pay and /.test(floor.text), 'and a closed link renders no way to pay through it');
-  // The erased-token answer, with the skin still down: it used to point at the welcome email,
-  // which is precisely the link a revocation kills. Same test, one deleted template, both facts.
+  await env.STORES.delete('tpl-ovr:renew');
+
+  // The bundle skin *can* draw it, and does, with the copy the release settled on: the dashboard is
+  // named, the retired sentence about the welcome email is gone from both page and floor.
+  const drawn = await call('/renew/' + tok);
+  assert.equal(drawn.status, 200, 'the skin answers for a state it has a panel for');
+  assert.match(drawn.text, /plan card|dashboard/, 'and the panel says where the working link is');
+  assert.ok(!/welcome email/.test(drawn.text), 'no page a merchant can open points at the link a revoke kills');
   const goneFloor = await call('/renew/nothingsuchtoken');
-  assert.equal(goneFloor.status, 404, 'nothing on the books and no skin, so the floor owns the answer');
-  assert.match(goneFloor.text, /plan card in your/, 'the dashboard is named first');
-  assert.ok(!/welcome email/.test(goneFloor.text), 'and the retired sentence is gone, not left alongside the new one');
-  env.STORES._map.set('tpl:renew', tpl);
+  assert.ok(!/welcome email/.test(goneFloor.text), 'the erased-token answer is the same story from the skin');
   env.STORES._map.delete('renew:' + tok);
-
-  // With the skin back up, the same unknown token is drawn by the page: a panel of its own, saying
-  // the same thing about where the working link is.
-  const gone = await call('/renew/nothingsuchtoken');
-  assert.equal(gone.status, 200, 'the skin still draws its unknown-token panel: ' + gone.text.slice(0, 120));
-  assert.match(gone.text, /no longer on the books/);
-  assert.match(gone.text, /dashboard/);
 });
-
 
 /* ---------------------------------------------------------------------------------------------
  * v0.8.8 — one rule, all four doors.
@@ -3586,7 +3682,7 @@ test('0.9.0 an inclusive shop totals the same number on the shelf, the preview a
 });
 
 test('0.9.0 the ledger row carries the tax, so the books never need the order document', async () => {
-  const rows = JSON.parse(env.ORDERS._map.get('list:vatmode').value);
+  const rows = storedRows('vatmode');
   const row = rows.find((x) => x.id === vat.pid);
   assert.ok(row, 'the row is there');
   assert.equal(row.tax, 15);
@@ -3680,14 +3776,14 @@ test('0.9.0 send receipt to buyer is one tap into the chat they messaged in', as
   const doc = orderDoc('vatmode', vat.pid);
   assert.ok(vat.pid, 'the order response names the row it created, which is what a receipt is asked for');
   doc.buyer.phone = '';
-  await env.ORDERS.put('order:vatmode:' + vat.pid, JSON.stringify(doc));
+  await putDoc('vatmode', vat.pid, doc);
   const noNum = await call('/api/receipt?handle=vatmode&order=' + vat.pid + '&fmt=wa', { cookie: vat.sh.cookie });
   assert.equal(noNum.status, 200);
   assert.equal(noNum.json.need_number, true);
   assert.match(noNum.json.text, /TAX INVOICE/, 'the text is handed over instead, because there was no way to send it');
   const back = orderDoc('vatmode', vat.pid);
   back.buyer.phone = '263771234567';
-  await env.ORDERS.put('order:vatmode:' + vat.pid, JSON.stringify(back));
+  await putDoc('vatmode', vat.pid, back);
 });
 
 test('0.9.0 an unregistered shop gets a receipt, and the words that say why it is not an invoice', async () => {
@@ -3716,7 +3812,7 @@ test('0.9.0 the row a zero-rate was set on is taxed at nothing, end to end', asy
   const p = o.json.pricing;
   assert.equal(p.tax, 6, '15% of the plate, nothing of the meal');
   assert.equal(p.subtotal, 66);
-  const rows = JSON.parse(env.ORDERS._map.get('list:vatplain').value);
+  const rows = storedRows('vatplain');
   const row = rows.find((x) => x.id === o.json.order.id);
   assert.equal(row.tax, 6, 'and the ledger row holds that figure, so the books do not have to guess');
   const per = new Date().toISOString().slice(0, 7);
@@ -3726,7 +3822,7 @@ test('0.9.0 the row a zero-rate was set on is taxed at nothing, end to end', asy
   assert.equal(b.json.summary.vat.vat, 6, 'the meal contributes nothing to it, and is still on the invoice');
   const zero = b.json.summary.vat.rates.find((x) => x.rate_pct === 0);
   assert.ok(zero.gross >= 20, 'the nil-rated gross is reported, which is the line a ZIMRA return asks for');
-  const rowJson = JSON.parse(env.ORDERS._map.get('list:vatplain').value).find((x) => x.id === o.json.order.id);
+  const rowJson = storedRow('vatplain', o.json.order.id);
   assert.ok(rowJson.vat_by && rowJson.vat_by['15'] && rowJson.vat_by['0'], 'and the row itself holds the split, so the answer needed no document read');
   assert.equal(rowJson.vat_by['15'].tax, 6);
   assert.equal(rowJson.vat_by['0'].gross, 20);
@@ -3873,4 +3969,39 @@ test('0.9.0 the books answer on a day the account cannot write', async () => {
   assert.equal(rec.status, 200, 'and the receipt, which is printed from the row and the document that already exist');
   assert.match(rec.text, /Tax invoice|TAX INVOICE/, 'a printed receipt is not a write, so a spent day still prints one');
   env.STORES.put = sPut; env.ORDERS.put = oPut;
+});
+
+test('0.9.1 the bundle carries every page, and no KV write stands between it and a merchant', async () => {
+  // Pages used to be KV keys, which made publishing a page a budgeted act and serving one a read:
+  // on a day the account's 1,000 writes were gone, a fix in git was a fix customers never saw, and
+  // CI's own remedy was four cron slots a day hoping for a write to land. It is a bundle constant
+  // now. What has to be true is that it is *populated* in what actually ships — an empty map would
+  // pass every other test in this file by falling through to KV, which is exactly how a regression
+  // here would hide.
+  const st = await call('/__selftest');
+  assert.equal(st.json.pages_inlined, 11, 'every page the console can name is in the bundle: ' + JSON.stringify(st.json.pages_inlined));
+  assert.ok(st.json.pages_bytes > 200000, 'and they are real pages, not markers: ' + st.json.pages_bytes + ' bytes');
+  assert.equal(st.json.pages_store_from, 'bundle', 'the storefront a merchant is served comes out of the Worker, not a KV read');
+  assert.equal(st.json.pages_served, true, 'and it is a page');
+  assert.equal(st.json.pages_no_longer_from_kv, true, 'the legacy key is a rollback target, not the source of truth');
+
+  // a spent budget cannot un-publish a page any more, because publishing one wrote nothing
+  const sPut = env.STORES.put;
+  env.STORES.put = async () => { throw new Error('QUOTA_EXCEEDED: too many writes today'); };
+  const shop = await call('/s/mamatoe');
+  const dash = await call('/a');
+  env.STORES.put = sPut;
+  assert.equal(shop.status, 200, 'the storefront answers on a day nothing can be written');
+  assert.ok(/<!doctype html>/i.test(shop.text), 'with the shipped HTML, not a placeholder');
+  assert.equal(dash.status, 200, 'and so does the dashboard door');
+  assert.ok(shop.text.includes('<h1') || shop.text.includes('id="'), 'the page has content in it');
+
+  // the fallback order, once, in the reader: override beats bundle beats legacy key beats the note
+  await env.STORES.delete('tpl-ovr:store'); await env.STORES.delete('tpl-ovr:renew');
+  const names = [];
+  for (const n of ['store', 'renew', 'no-such-page']) {
+    names.push((await call('/ops/api/template?name=' + n, { cookie: 'tp_ops=' + opsCookie })).json.from || 'refused');
+  }
+  assert.deepEqual(names, ['bundle', 'bundle', 'refused'],
+    'two real pages come from the bundle with no override in front of them, and a name that is not a page is refused rather than answered empty');
 });

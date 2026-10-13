@@ -2597,3 +2597,135 @@ export function meshMark(prev, ids, nowMs) {
   for (const k of Object.keys(items).sort().reverse().slice(0, 400)) kept[k] = items[k];
   return { at: iso, items: kept, sent: kept, count: Object.keys(kept).length };
 }
+
+/* ------------------------------------------------------------ the ledger row
+ *
+ * A row used to live in its own key — `list:<handle>`, a JSON array holding the shop's last 200
+ * orders — and every write to an order meant read-modify-write of that whole array. Three things
+ * were wrong with that, and only one of them was cost.
+ *
+ * Two buyers ordering in the same second each read the array, each unshifted their own order, and
+ * the slower write won: the other order stayed a document with no row, invisible in the dashboard
+ * and missing from the month's books. Nothing retried it, because nothing knew. It was also five
+ * subrequests per order (doc, list read, list write, then on a mark: list read, list write) and a
+ * 150 ms×4 wait whenever a just-written list had not reached the edge you were standing on — the
+ * `mirrorRow` loop, whose comment promised "the ledger keeps pace, or tries to". Trying was the
+ * problem: a failed mirror was silent, and a shop that cannot see an order concludes the platform
+ * lost their money.
+ *
+ * So the row is now *metadata on the order document*. KV gives metadata back from `list()` beside
+ * the key, so the index is the key space: one write per order, per mark, per correction, and there
+ * is no second copy to lose the race with. It is capped at 1,024 bytes by the platform, which is
+ * the only real constraint here and why `packRow` shrinks on purpose instead of failing: a
+ * merchant's 900-character proof note must not cost them a ledger row. What survives the shrink is
+ * the money, because the money is what the books are read for.
+ *
+ * `list:<handle>` is not deleted and not written again — the frozen legacy index keeps supplying any
+ * id that predates this change, so no shop needs a migration and no migration can half-run.
+ */
+export const ROW_META_CAP = 1000;           // the platform allows 1024; a hundred bytes of air
+export const MAX_ORDERS_KEPT = 200;
+
+/** The row for an order document, in the long form every consumer already reads. */
+export function orderRow(o) {
+  const p = (o && o.pricing) || {};
+  const v = p.vat || {};
+  return {
+    id: o.id, code: o.code, at: o.at, status: o.status, total: p.total,
+    name: (o.buyer && o.buyer.name) || '', phone: (o.buyer && o.buyer.phone) || '',
+    service: o.service, flags: o.risk_flags,
+    payer: (o.buyer && o.buyer.payer) || '', proof: (o.buyer && o.buyer.proof) || '',
+    prior_unpaid: o.prior_unpaid,
+    // the money split, frozen at order time rather than recomputed from the shop's settings today
+    tax: p.tax || 0, net: v.net != null ? v.net : 0, vat_pct: v.pct || 0, vat_mode: v.mode || 'excl',
+    vat_by: vatBuckets(p) || undefined,
+    pay_now: p.pay_now, rounding: p.unique_change || 0,
+    fee: p.fee || 0, fee_absorbed: p.fee_absorbed_by_merchant || 0,
+    rail: p.rail && p.rail.key,
+    // the ledger mints the buyer's link from the row, so the row has to know the current nonce
+    pcap: o.pcap || '',
+    marked_at: o.marked_at || null, proof_at: o.proof_at || '', proof_by: o.proof_by || '',
+  };
+}
+
+/* Short keys, because 1,024 bytes is the whole budget for a row. `unpackRow` is the only place
+ * that knows the mapping, so nothing downstream reads a one-letter field. */
+const ROW_K = {
+  id: 'i', code: 'c', at: 'a', status: 's', total: 't', name: 'n', phone: 'p', service: 'v',
+  flags: 'f', payer: 'y', proof: 'r', prior_unpaid: 'u', tax: 'x', net: 'e', vat_pct: 'q',
+  vat_mode: 'm', vat_by: 'b', pay_now: 'w', rounding: 'g', fee: 'd', fee_absorbed: 'o',
+  rail: 'l', pcap: 'k', marked_at: 'z', proof_at: 'h', proof_by: 'j',
+};
+
+/** Shrink a row into the metadata budget, giving up the words before the numbers. */
+export function packRow(row) {
+  const r = Object.assign({}, row || {});
+  const out = {};
+  for (const k of Object.keys(ROW_K)) {
+    if (r[k] === undefined || r[k] === null || r[k] === '' || (Array.isArray(r[k]) && !r[k].length)) continue;
+    out[ROW_K[k]] = r[k];
+  }
+  const size = () => JSON.stringify(out).length;
+  // The order is a decision: a proof URL and a name are nice in a list, and the money is not
+  // negotiable, so the strings go first and `pcap` — which only mints a link — goes last-but-one.
+  for (const [k, cap] of [['r', 96], ['y', 48], ['n', 40], ['v', 24]]) {
+    if (size() <= ROW_META_CAP) break;
+    if (typeof out[ROW_K[k]] === 'string' && out[ROW_K[k]].length > cap) out[ROW_K[k]] = out[ROW_K[k]].slice(0, cap);
+  }
+  for (const k of ['k', 'p', 'f', 'b']) {
+    if (size() <= ROW_META_CAP) break;
+    delete out[ROW_K[k]];
+  }
+  if (size() > ROW_META_CAP) {
+    // Nothing left that is fair game and it is still too big: keep the money and the identity,
+    // because a row that fits is a shop that can still close their month.
+    const keep = ['i', 'c', 'a', 's', 't', 'x', 'e', 'q', 'm', 'w', 'u'];
+    const tiny = {};
+    for (const k of keep) if (out[k] !== undefined) tiny[k] = out[k];
+    return tiny;
+  }
+  return out;
+}
+
+/**
+ * Back to the long form, tolerant of a row that shed fields to fit.
+ *
+ * The shed fields come back as what they were, not as `undefined`: a row that never carried a
+ * payment code and a row whose code was cleared are the same answer to everything downstream — the
+ * dashboard's `row.proof || 'no code yet'` and the merchant's eye should not have to know that
+ * `packRow` deletes empty strings to stay inside 1,024 bytes.
+ */
+export function unpackRow(meta) {
+  const out = {};
+  if (!meta || typeof meta !== 'object') return out;
+  for (const long of Object.keys(ROW_K)) {
+    const short = ROW_K[long];
+    out[long] = meta[short] !== undefined ? meta[short] : (ROW_DEFAULT[long] !== undefined ? ROW_DEFAULT[long] : '');
+  }
+  for (const k of Object.keys(meta)) {                     // a forward-compatible field, if a newer
+    const long = ROW_V[k];                                 // worker wrote one this one can read
+    if (long === undefined && meta[k] !== undefined) out[k] = meta[k];
+  }
+  return out;
+}
+const ROW_DEFAULT = { flags: [], vat_by: undefined, prior_unpaid: undefined, marked_at: null };
+const ROW_V = Object.fromEntries(Object.entries(ROW_K).map(([l, v]) => [v, l]));
+
+/**
+ * Newest first, from the documents, with the frozen legacy index filling any id that predates
+ * them. A row present in both is the same row — the document's is the one that was written last.
+ */
+export function mergeRows(fromDocs, fromIndex, cap) {
+  const seen = new Set();
+  const out = [];
+  for (const r of fromDocs || []) {
+    if (!r || !r.id || seen.has(r.id)) continue;
+    seen.add(r.id); out.push(r);
+  }
+  for (const r of fromIndex || []) {
+    if (!r || !r.id || seen.has(r.id)) continue;
+    seen.add(r.id); out.push(r);
+  }
+  out.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+  return out.slice(0, cap || MAX_ORDERS_KEPT);
+}

@@ -32,14 +32,15 @@ import {
   vatPlan, vatReturn, booksSummary, booksCsv, booksPeriods, vatBuckets, realPhoto, sampleArtUrl, mergeMenuPatch,
   receiptText, receiptHtml, sampleArtSvg, meshPack, meshJson, meshMark, meshWitness,
   MESH_RAILS, MESH_BUDGET,
+  orderRow, packRow, unpackRow, mergeRows, MAX_ORDERS_KEPT,   // the ledger row, and the cap on it
   EDITABLE_FIELDS, SOFT_FIELDS, sign, adminStore, normaliseRail, resolveRail,
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '0.9.0';
+const VERSION = '0.9.1';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
-const MAX_ORDERS_KEPT = 200;
+// MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
 const RL = { windowSec: 60, max: 8 };
 
 /* ---- rename compatibility: ZimLink -> Tapstall, 2026-10-10 -----------------
@@ -591,59 +592,81 @@ async function placeOrder(req, url, env, ctx) {
 
 
 /**
- * Put a patch on the merchant's ledger row for this order, and keep trying for a moment if
- * the row is not there yet. `list:<handle>` is written just after the order document, so a
- * read served by another edge can still be holding the snapshot from before the order
- * existed — and skipping the mirror then is permanent: the code sits on the order while the
- * ledger keeps saying "no proof yet" (or "awaiting payment" after a mark) until something
- * else touches that row. Reads are free at $0 hosting and the row is there on the first try
- * in the normal case, so the cost of the loop is paid only by the race.
+ * One write, and the ledger row is inside it.
+ *
+ * `persistOrder` used to write the document and then rewrite the shop's whole row array, and the
+ * array was where orders went to die: two buyers in the same second, one array read each, the
+ * slower write won, and the other order was left a document with no row — invisible in the
+ * dashboard, missing from the month's books, unrecoverable because nothing knew it had happened. It
+ * also cost three subrequests on the way in and two more on every mark, with a 150 ms×4 wait
+ * whenever a list that had just been written had not reached the edge you were standing on.
+ *
+ * The row is metadata on the document now. KV hands metadata back from `list()` beside the key, so
+ * the index is the key space: saving an order *is* indexing it, and there is no second copy to lose
+ * a race with. `mirrorRow` and its retry loop are gone — not replaced by something better, made
+ * unnecessary, which is why the mark path no longer says "or tries to".
  */
-async function mirrorRow(env, handle, id, patch) {
-  const key = 'list:' + handle;
-  for (let i = 0; i < 4; i++) {
-    const list = (await env.ORDERS.get(key, 'json')) || [];
-    const row = list.find((x) => x && x.id === id);
-    if (row) {
-      Object.assign(row, patch);
-      await env.ORDERS.put(key, JSON.stringify(list));
-      return true;
-    }
-    if (i < 3) await new Promise((r) => setTimeout(r, 150));
-  }
-  return false;
+async function saveOrder(env, handle, order) {
+  if (!env.ORDERS || !handle || !order || !order.id) return;
+  await env.ORDERS.put('order:' + handle + ':' + order.id, JSON.stringify(order),
+    { metadata: packRow(orderRow(order)) });
 }
 
 async function persistOrder(env, st, order) {
-  if (!env.ORDERS) return;
-  await env.ORDERS.put(`order:${st.handle}:${order.id}`, JSON.stringify(order));
-  const key = 'list:' + st.handle;
-  const cur = (await env.ORDERS.get(key, 'json')) || [];
-  cur.unshift({
-    id: order.id, code: order.code, at: order.at, total: order.pricing.total, name: order.buyer.name,
-    phone: order.buyer.phone, service: order.service, status: order.status, flags: order.risk_flags,
-    // the two things that turn "an alert for 12.34 arrived" into a matched payment,
-    // on the row list so the ledger does not need the order document to answer
-    payer: order.buyer.payer || '', proof: order.buyer.proof || '',
-    prior_unpaid: order.prior_unpaid,
-    // the money split, frozen at order time rather than recomputed from the shop's settings today:
-    // four numbers on the row, and a whole month can be reported and downloaded without reading a
-    // single order document. `unique_change` is here because it is not income and an accountant asks.
-    tax: order.pricing.tax || 0, net: (order.pricing.vat && order.pricing.vat.net) != null ? order.pricing.vat.net : 0,
-    vat_pct: (order.pricing.vat && order.pricing.vat.pct) || 0, vat_mode: (order.pricing.vat && order.pricing.vat.mode) || 'excl',
-    // and the split itself, one entry per rate, so a shop that sells zero-rated staples alongside
-    // taxed meals can file from the row list rather than from a phone call to an accountant
-    vat_by: vatBuckets(order.pricing) || undefined,
-    pay_now: order.pricing.pay_now, rounding: order.pricing.unique_change || 0,
-    fee: order.pricing.fee || 0, fee_absorbed: order.pricing.fee_absorbed_by_merchant || 0,
-    rail: order.pricing.rail && order.pricing.rail.key,
-    // the row is what the dashboard mints from, so the row has to know the current nonce
-    // or a shop's link to the buyer's field would be an unbound one
-    pcap: order.pcap || '',
-  });
-  await env.ORDERS.put(key, JSON.stringify(cur.slice(0, MAX_ORDERS_KEPT)));
+  await saveOrder(env, st && st.handle, order);
 }
 
+/**
+ * A shop's rows, newest first, out of one `list()` over its own key space.
+ *
+ * Reads are free at $0 hosting and metadata arrives with the key, so the ledger costs a page of a
+ * listing instead of a shared array that every write had to read first. Rows written before the
+ * metadata existed have none, and the frozen legacy index supplies them: nothing is migrated, and
+ * "half a migration" is not a state this can sit in, because there is no migration to half-finish.
+ * A document with neither a row nor an index entry still shows as a thin row, because counting an
+ * order a shop took is not the same as pricing one.
+ */
+async function ledgerRows(env, handle, cap) {
+  if (!env.ORDERS || !handle) return [];
+  const prefix = 'order:' + handle + ':';
+  const wanted = Math.max(Number(cap) || MAX_ORDERS_KEPT, 1);
+  const fromDocs = [];
+  const bare = [];
+  try {
+    let cursor, pages = 0;
+    do {
+      const l = await env.ORDERS.list({ prefix, limit: 1000, cursor });
+      for (const k of l.keys || []) {
+        const id = String(k.name || '').slice(prefix.length);
+        if (k.metadata) {
+          const r = unpackRow(k.metadata);
+          if (r.id !== id) r.id = id;                     // the key is the truth about who it is
+          fromDocs.push(r);
+        } else if (bare.length < wanted) {
+          bare.push(id);
+        }
+      }
+      cursor = l.list_complete ? undefined : l.cursor;
+    } while (cursor && ++pages < 5 && fromDocs.length + bare.length < wanted);
+  } catch (e) { /* an unreadable listing is answered by the index below, not by a guess */ }
+  const legacy = (await env.ORDERS.get('list:' + handle, 'json')) || [];
+  const have = new Set(fromDocs.map((r) => r.id));
+  const filled = [];
+  for (const r of legacy) {
+    // Only ids the documents could not supply: a row that shed fields to fit its budget must not be
+    // shadowed by the fatter copy the old index happens to still hold.
+    if (r && r.id && !have.has(r.id)) filled.push({ ...r, legacy: true });
+    if (filled.length >= wanted) break;
+  }
+  const merged = mergeRows(fromDocs, filled, wanted);
+  const known = new Set(merged.map((r) => r.id));
+  const thin = [];
+  for (const id of bare) {
+    if (known.has(id)) continue;
+    thin.push({ id, code: id.slice(-5).toUpperCase(), at: '', total: 0, status: 'unknown', thin: true });
+  }
+  return thin.length ? mergeRows(merged, thin, wanted) : merged;
+}
 
 const MARK_BASE = '/api/mark?handle=';
 
@@ -762,11 +785,8 @@ async function markPaid(req, url, env) {
     rec.unpaid = Math.max(0, (rec.unpaid || 0) - 1);
     await env.STORES.put(hk, JSON.stringify(rec), { expirationTtl: 180 * 86400 });
   }
-  await env.ORDERS.put(key, JSON.stringify(o));
-  // `marked_at` rides with the status: the cash basis is "the day the money arrived", and the row
-  // is the only thing the ledger reads, so a date that lives only on the order document would
-  // leave a shop unable to say which week a payment belonged to without pulling every document.
-  await mirrorRow(env, handle, o.id, { status: o.status, marked_at: o.marked_at });   // the ledger keeps pace, or tries to
+  // one write: the document and the row the dashboard reads are the same object now
+  await saveOrder(env, handle, o);   // the ledger keeps pace, or tries to
   const logged = await pushAudit(env, st, { act: 'mark', via: viaCap ? 'link' : 'session', fields: [o.code + ' → ' + want], ip: ipOf(req) });
   // an undo link for 15 minutes, same shape, opposite action
   // undo returns the order to whatever it was before this tap
@@ -1036,12 +1056,8 @@ async function proofAdd(req, url, env) {
     // link worth using next
     const nextNonce = randomKey(8);
     o.pcap = nextNonce;
-    await env.ORDERS.put(key, JSON.stringify(o));
-    // and onto the row the merchant reads, so the chase sentence disappears from the
-    // place it was written: the same two writes a mark spends, no more
-    await mirrorRow(env, st.handle, o.id, {
-      payer: o.buyer.payer, proof: o.buyer.proof, proof_by: "buyer", proof_at: when, pcap: nextNonce,
-    });
+    // one write: the document and the row the dashboard reads are the same object now
+    await saveOrder(env, st.handle, o);
     await pushAudit(env, st, { act: "proof", via: "buyer",
       fields: [`${o.code || o.id} ← ${[o.buyer.proof, o.buyer.payer].filter(Boolean).join(' · ')}`], ip });
   }
@@ -1201,7 +1217,7 @@ async function lookup(url, env) {
       handle, shop_name: st.shop_name, plan: st.plan, paid_until: st.paid_until,
       suspended: !!st.suspended, rail: st.rail, currency: st.currency,
       products: st.feed_cache ? st.feed_cache.count : 0, feed_error: st.feed_cache ? st.feed_cache.error : null,
-      orders_today: ((await env.ORDERS.get('list:' + handle, 'json')) || []).length,
+      orders_today: (await ledgerRows(env, handle, 400)).length,
     },
   });
 }
@@ -1229,7 +1245,7 @@ async function adminView(req, url, env) {
   if (g.res) return g.res;
   const who = g.who;
   const st = who.st;
-  const rows = (await env.ORDERS.get('list:' + handle, 'json')) || [];
+  const rows = await ledgerRows(env, handle);
   const orders = [];
   for (const r of rows.slice(0, 40)) orders.push(await env.ORDERS.get(`order:${handle}:${r.id}`, 'json'));
   return json({
@@ -1478,7 +1494,9 @@ const RENEW_CLOSED_WHY = 'This shop has closed its payment links, so this one op
 
 /* ------------------------------------------------------------ renew page */
 async function renewPage(env, token) {
-  let custom = await env.STORES.get('tpl:renew');
+  // through the one reader, so an operator's override and the bundle's copy both reach this page;
+  // reading the KV key by name here is how a hand-published page edited the storefront and not this one
+  let custom = (await tplPage(env, 'renew')).html || null;
   const rec = await env.STORES.get('renew:' + token, 'json');
   const shop = rec ? await getStore(env, rec.handle) : null;
   /* The renew link is revocable too: it is not a signed capability but a KV key with no expiry
@@ -1492,7 +1510,7 @@ async function renewPage(env, token) {
   if (closed && custom && !/state === ['"]closed['"]/.test(custom)) custom = null;
   if (custom && custom.length > 200) {
     const st = shop;
-    const rows = st ? ((await env.ORDERS.get('list:' + st.handle, 'json')) || []) : [];
+    const rows = st ? await ledgerRows(env, st.handle) : [];
     const data = {
       known: !!(st), token,
       state: closed ? 'closed' : null, why: closed ? RENEW_CLOSED_WHY : null,
@@ -1517,7 +1535,7 @@ async function renewPage(env, token) {
   const st = await getStore(env, rec.handle);
   if (!st) return html('<h1 style="font:16px system-ui;padding:2rem">Store not found.</h1>', 404);
   const left = Math.ceil(((st.paid_until || 0) - Date.now()) / 864e5);
-  const rows = (await env.ORDERS.get('list:' + st.handle, 'json')) || [];
+  const rows = await ledgerRows(env, st.handle);
   const gmv = rows.reduce((a, r) => a + (Number(r.total) || 0), 0);
   return html(`<!doctype html><html lang=en><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>Renew ${esc(st.shop_name)}</title>
@@ -1558,22 +1576,93 @@ async function adminPut(req, env) {
     return json({ ok: false, error: 'unauthorised' }, 403);
   }
   await authClear(env, '__put');
-  if (!/^tpl:(store|onboard|admin|fees|index|sample-menu)$/.test(String(b.key || ''))) return json({ ok: false, error: 'bad key' }, 422);
+  if (!/^tpl(-ovr)?:(store|onboard|admin|fees|index|sample-menu)$/.test(String(b.key || ''))) return json({ ok: false, error: 'bad key' }, 422);
   if (String(b.value || '').length < 200 || String(b.value || '').length > 400000) return json({ ok: false, error: 'bad size' }, 422);
   await env.STORES.put(b.key, b.value);
   return json({ ok: true, key: b.key, bytes: b.value.length });
 }
 
 /* ------------------------------------------------------------ plumbing */
+/* Counted in the isolate first, because a limit that writes on every request is a door an attacker
+ * can spend your *quota* through: this one used to put a key per request per window, so 1,000 free
+ * writes a day — the whole shop's order ledger for a day, every confirmation link and every settings
+ * save in it — was gone in about 1,000 refused attempts, sent by somebody who was never blocked.
+ * A local counter stops that (it costs the attacker their own requests, not the platform's budget)
+ * and it is faster: the guarded doors answered from a KV round trip they did not need.
+ *
+ * The KV key stays, and that is not decoration. Isolates are per-colo and they come and go, so a
+ * local count alone would let a distributed flood reset its allowance at every hop; the key is what
+ * makes the block hold across them. The difference is *when* it is touched: it is read only once an
+ * isolate is already halfway to the ceiling, and written only when a block actually starts. A normal
+ * buyer never spends a write. A flood spends one per (ip, window, bucket) and then finds the door
+ * shut everywhere.
+ *
+ * `LRU` is not a fairness claim — a cold isolate counts from zero, so the first `max/2` attempts of
+ * a fresh burst are free. `RL.max` was chosen for a human mistyping a PIN, not for a targeted
+ * attack, and the ceiling that matters for an attack (per-store attempts, lockouts) is counted on
+ * the store document, which no isolate-local trick can soften.
+ */
+const localHits = new Map();
+const LOCAL_TTL = 10 * 60e3;
+function localNote(ipKey, window) {
+  const now = Date.now();
+  if (localHits.size > 4096) for (const [k, v] of localHits) if (now - v.at > LOCAL_TTL) localHits.delete(k);
+  const hit = localHits.get(ipKey);
+  if (!hit || hit.window !== window) { localHits.set(ipKey, { window, n: 1, at: now }); return 1; }
+  hit.n++; hit.at = now;
+  return hit.n;
+}
+function localCount(ipKey, window) {
+  const hit = localHits.get(ipKey);
+  return hit && hit.window === window ? hit.n : 0;
+}
+
 async function rateLimited(env, ip, bucket, rl) {
   if (!env.STORES) return false;
   const win = rl || RL;
-  const key = `rl:${bucket || ''}${ip}:${Math.floor(Date.now() / (win.windowSec * 1000))}`;
-  const n = Number((await env.STORES.get(key)) || 0);
-  if (n >= win.max) return true;
-  await env.STORES.put(key, String(n + 1), { expirationTtl: win.windowSec + 10 });
+  const window = Math.floor(Date.now() / (win.windowSec * 1000));
+  const ipKey = `${bucket || ''}${ip}:${window}`;
+  // `seen` is the number of attempts this isolate has already counted, which is what the shared
+  // key holds — the two must mean the same thing or the ceiling moves by one depending on which
+  // isolate happens to answer, and "max per minute" would be a range instead of a number.
+  const seen = localNote(ipKey, window) - 1;
+  if (seen >= win.max) return true;                       // at the ceiling locally: refused, and KV cannot talk us out of it
+  if (seen + 1 < Math.ceil(win.max / 2)) return false;    // nowhere near it: no KV at all, which is the point
+  const key = 'rl:' + ipKey;
+  // Three answers a read can give, and the middle one is the trap. *Absent* is not "zero": a
+  // counter that was never armed says nothing, and treating it as a zero would reset this isolate's
+  // own count on the way up and let a flood run forever — which is the bug this function had before
+  // it had a local half. Present-and-lower is a different fact: somebody cleared it (an operator's
+  // lever, a revoke), and a clear is a decision to let this address try again. Unreadable is a third
+  // fact, answered by what this isolate saw, which keeps the ceiling a ceiling.
+  let raw = null;
+  try { raw = await env.STORES.get(key); } catch (e) { raw = undefined; void e; }
+  if (raw === undefined) {
+    if (seen >= win.max) return true;
+  } else if (raw !== null) {
+    const shared = Number(raw) || 0;
+    if (shared >= win.max) {
+      localHits.set(ipKey, { window, n: shared + 1, at: Date.now() });
+      return true;
+    }
+    if (shared < seen) localHits.set(ipKey, { window, n: shared + 1, at: Date.now() });
+  }
+  const shared2 = raw === null || raw === undefined ? seen : (Number(raw) || 0);
+  if (shared2 + 1 >= win.max) {
+    try { await env.STORES.put(key, String(shared2 + 1), { expirationTtl: win.windowSec + 10 }); }
+    catch (e) {
+      // A spent write budget used to be answered 503 on every guarded POST, which meant the buyer's
+      // own door closed at midnight UTC on the busiest day of the month because a *counter* could not
+      // be written. The ceiling is not lost — the next attempt reads the same absent key, counts
+      // locally, and is refused at the limit. What is given up is the cross-isolate arm of the block
+      // on that one day, and the store's own lockout counter (which is what guards a PIN, and is a
+      // write this budget already spends) is untouched.
+      void e;
+    }
+  }
   return false;
 }
+
 /** Its own bucket, wider than an order's and narrower than nothing: one buyer adds a
  *  code once or twice, and the ceiling exists only so the field is not a free write
  *  oracle. `proof:` keeps it off the order counter, because a buyer and a shop behind
@@ -1629,6 +1718,35 @@ async function selftest(env) {
           : { reason: 'error', note: msg.slice(0, 140) };
     }
     for (const tplName of ['store', 'onboard', 'admin', 'fees', 'index', 'confirm', 'renew', 'ops']) t['tpl_' + tplName] = ((await tpl(env, tplName)) || '').length > 200;
+    // Pages are inlined in v0.9.1, so the two facts that matter are that the bundle carries all of
+    // them and that a hand-published override still outranks it. Both are reads, so a day with no
+    // KV writes left still reports them, which is the whole point of moving pages out of KV.
+    // The guarded doors must cost the platform nothing until a block actually starts. That is a
+    // claim about a code path, so it is measured through the limiter itself — nine requests through
+    // `rateLimited` against a stub that counts puts — rather than reported as `true` beside the
+    // function it describes, which would stay true even if the function went back to writing on
+    // every request, which is exactly what it did before v0.9.1. Nine requests used to be nine
+    // writes; the answer here says one, and the one is the block being armed.
+    let rlPuts = 0, rlRefused = 0;
+    const rlMap = new Map();
+    const rlEnv = { STORES: {
+      // the shape this Worker's STORES keeps: get answers with the value, not a wrapper object —
+      // a probe stub that returned {value} would report the ceiling as never reached
+      get: async (k) => (rlMap.has(k) ? rlMap.get(k) : null),
+      put: async (k, v) => { rlPuts++; rlMap.set(k, v); },
+      delete: async (k) => { rlMap.delete(k); },
+    } };
+    const rlIp = '198.51.100.7:' + Date.now();   // its own bucket, so a probe never spends a buyer's allowance
+    for (let i = 0; i < 9; i++) if (await rateLimited(rlEnv, rlIp, 'selftest:', RL)) rlRefused++;
+    t.rate_limit_local_first = { requests: 9, ceiling: RL.max, writes: rlPuts, refused: rlRefused };
+    t.pages_inlined = Object.keys(INLINED_PAGES).filter((n) => (INLINED_PAGES[n] || '').length > 200).length;
+    t.pages_bytes = Object.values(INLINED_PAGES).reduce((a, v) => a + v.length, 0);
+    // Zero writes, like every other key here: `from` is the label the read already answered with,
+    // so production says *which* copy a merchant is being served without anybody asking it.
+    const ps = await tplPage(env, 'store');
+    t.pages_store_from = ps.from;
+    t.pages_served = ps.html.length > 200 && ps.from !== 'none';
+    t.pages_no_longer_from_kv = t.pages_inlined > 0 ? ps.from !== 'kv' : true;
   }
   const fake = { handle: 'selftest', currency: 'USD', tax_pct: 15.5, delivery_fee: 2, rail: 'ecocash_usd', surcharge_mode: 'absorb', unique_change: true, pay_account: '0771234567' };
   t.pricing = priceOrder(fake, [{ name: 'Test', price: 12.5, qty: 2, addons: [4], options: [{ name: 'L', up: 2 }] }], 'delivery', 'ecocash_usd');
@@ -1810,13 +1928,44 @@ async function railsCatalog(env) {
   return out;
 }
 
-async function tpl(env, name) {
+/* Every page this Worker serves, inlined by build_bundle.sh. The declaration below is what the
+ * tests and a local dev run see (empty: fall through to KV); the deployed bundle carries git's
+ * bytes in it, which is why a page publish costs no KV write and cannot lag a deploy. */
+const INLINED_PAGES = {};
+
+/**
+ * The page a merchant is served, in the order the platform can actually honour.
+ *
+ *  1. `tpl-ovr:<name>` — a page the operator console published by hand. It wins, because whoever
+ *     presses that button is fixing something that is wrong right now, and a redeploy is not always
+ *     available at 22:00 to the only person awake.
+ *  2. the bytes `build_bundle.sh` inlined, which are the bytes `npm test` passed;
+ *  3. `tpl:<name>` — the KV copy, for a Worker published before pages rode in the bundle. This is
+ *     what production was until v0.9.1, and a rollback lands back on it with nothing to undo;
+ *  4. a page that says what is missing, rather than a blank one.
+ *
+ * One KV read in the normal case: an inlined page never falls through to the legacy key.
+ */
+async function tplPage(env, name) {
+  if (env.STORES) {
+    const ovr = await env.STORES.get('tpl-ovr:' + name);
+    if (ovr && ovr.length > 200) return { html: ovr, from: 'override' };
+  }
+  const inline = INLINED_PAGES[name];
+  if (inline && inline.length > 200) return { html: inline, from: 'bundle' };
   if (env.STORES) {
     const v = await env.STORES.get('tpl:' + name);
-    if (v && v.length > 200) return v;
+    if (v && v.length > 200) return { html: v, from: 'kv' };
   }
+  return { html: '', from: 'none' };
+}
+
+async function tpl(env, name) {
+  const p = await tplPage(env, name);
+  if (p.html) return p.html;
   return '<!doctype html><meta charset=utf-8><body style="font:16px system-ui;padding:2rem"><h1>Template &ldquo;'
-    + name + '&rdquo; missing</h1><p>Run <code>./scripts/deploy.sh</code> to upload templates into KV.</p>';
+    + name + '&rdquo; missing</h1><p>Neither the bundle nor KV carries it. <code>./scripts/deploy.sh</code> puts git\'s'
+    + ' pages into the bundle; <code>./scripts/deploy.sh --pages-override ' + name + '</code> publishes one into KV as a stopgap.</p>';
 }
 async function sendMail(env, to, subject, text) {
   if (!env.EMAIL) return false;
@@ -2159,7 +2308,7 @@ async function booksView(req, url, env) {
   const g = await adminGate(req, env, handle);
   if (g.res) return g.res;
   const st = g.who.st;
-  const rows = (await env.ORDERS.get('list:' + handle, 'json')) || [];
+  const rows = await ledgerRows(env, handle);
   const opt = booksOpts(url);
   if (String(url.searchParams.get('fmt') || '').toLowerCase() === 'csv') {
     // A file, not a page: the point is that the number in the panel and the number in the
@@ -2185,7 +2334,7 @@ async function receiptView(req, url, env) {
   const st = g.who.st;
   const want = String(url.searchParams.get('order') || url.searchParams.get('id') || '').trim().slice(0, 60);
   if (!want) return json({ ok: false, error: 'order_required', note: 'Pass ?order=<order id or code>.' }, 422);
-  const rows = (await env.ORDERS.get('list:' + handle, 'json')) || [];
+  const rows = await ledgerRows(env, handle);
   const row = rows.find((r) => r && (String(r.id) === want || String(r.code || '').toLowerCase() === want.toLowerCase()));
   if (!row) return json({ ok: false, error: 'no_such_order', note: 'Only this shop’s own orders can be printed, and the order list holds ' + rows.length + '.' }, 404);
   const o = await env.ORDERS.get('order:' + handle + ':' + row.id, 'json');
@@ -2690,7 +2839,7 @@ function linkClosed(o) {
 
 async function confirmPage(env, cap) {
   const p = await verifyCap(env.ADMIN_SECRET || 'dev-secret', cap);
-  let custom = env.STORES ? await env.STORES.get('tpl:confirm') : null;
+  let custom = (await tplPage(env, 'confirm')).html || null;      // the same one reader, for the same reason
   if (custom && custom.length > 200) {
     // same state machine, markup from KV so the page can be re-skinned without
     // a redeploy; the inline builder below is the floor if the template is gone
@@ -2971,7 +3120,7 @@ async function opsState(env) {
   for (const h of handles) {
     const st = await getStore(env, h);
     if (!st) continue;
-    const rows = (await env.ORDERS.get('list:' + h, 'json')) || [];
+    const rows = await ledgerRows(env, h);
     const sum = opsSummarise(st, rows);
     sum.awaiting_reference = await opsRefs(env, h);
     sum.awaiting_ref = sum.awaiting_reference.length;
@@ -3331,7 +3480,7 @@ async function opsStoreDetail(url, env) {
   const handle = slug(url.searchParams.get('handle') || '');
   const st = await getStore(env, handle);
   if (!st) return json({ ok: false, error: 'no store' }, 404);
-  const rows = (await env.ORDERS.get('list:' + handle, 'json')) || [];
+  const rows = await ledgerRows(env, handle);
   const orders = [];
   for (const r of rows.slice(0, 15)) { const o = await env.ORDERS.get('order:' + handle + ':' + r.id, 'json'); if (o) orders.push(opsOrderLite(o)); }
   return json({
@@ -3414,10 +3563,8 @@ async function proofFile(req, url, env) {
     // a field sent back is a new chain, so the nonce turns over with it: every link minted for
     // the code just cleared is dead, spent or not, and `withAsk` mints the next one from here
     o.pcap = randomKey(8);
-    await env.ORDERS.put(key, JSON.stringify(o));
-    await mirrorRow(env, st.handle, o.id, {
-      payer: '', proof: '', proof_by: '', proof_at: '', pcap: o.pcap,
-    });
+    // one write: the document and the row the dashboard reads are the same object now
+    await saveOrder(env, st.handle, o);
     const logged = await pushAudit(env, st, { act: 'proof', via: 'merchant',
       fields: [`${o.code || o.id} ↩ ${v.cleared.join(' · ')} cleared, field handed back`], ip: ipOf(req) });
     return json({ ok: true, changed: true, void: true, code: o.code, proof: '', status: o.status, logged,
@@ -3435,10 +3582,8 @@ async function proofFile(req, url, env) {
   // whichever hand held it. A code that arrived in the chat should not leave a live field
   // open on the order for the next 72 hours.
   o.pcap = randomKey(8);
-  await env.ORDERS.put(key, JSON.stringify(o));
-  await mirrorRow(env, st.handle, o.id, {
-    payer: o.buyer.payer, proof: o.buyer.proof, proof_by: 'merchant', proof_at: when, pcap: o.pcap,
-  });
+  // one write: the document and the row the dashboard reads are the same object now
+  await saveOrder(env, st.handle, o);
   // the response says whether the log held, in the same words a mark uses: a gap in
   // the paper trail is not a failed tap, and the merchant must not retype to be sure
   const logged = await pushAudit(env, st, { act: 'proof', via: 'merchant',
@@ -3466,15 +3611,22 @@ async function opsTemplates(env) {
   const out = [];
   for (const name of OPS_TPL_NAMES) {
     const v = await env.STORES.get('tpl:' + name);
-    out.push({ name, bytes: v ? v.length : 0, live: !!(v && v.length > 200), sha: v ? (await hash(name + ':' + v.length + ':' + v.slice(0, 64))).slice(0, 8) : null });
+    const ovr = await env.STORES.get('tpl-ovr:' + name);
+    const inline = INLINED_PAGES[name] || '';
+    // `live` is what a merchant is served, and since v0.9.1 that is the override if there is one
+    // and the bundle otherwise — the KV publish key is only a rollback target now.
+    out.push({ name, bytes: (ovr && ovr.length > 200 ? ovr : inline).length, kv_bytes: v ? v.length : 0,
+      override: !!(ovr && ovr.length > 200), inlined: inline.length,
+      live: !!(ovr && ovr.length > 200) || inline.length > 200,
+      sha: (ovr && ovr.length > 200 ? ovr : inline) ? (await hash(name + ':' + (ovr || inline).length + ':' + (ovr || inline).slice(0, 64))).slice(0, 8) : null });
   }
   return json({ ok: true, templates: out }, 200, { 'Cache-Control': 'no-store' });
 }
 async function opsTemplateRead(url, env) {
   const name = safeTplName(url.searchParams.get('name'));
   if (!name) return json({ ok: false, error: 'bad template name' }, 422);
-  const v = await env.STORES.get('tpl:' + name);
-  return json({ ok: true, name, bytes: v ? v.length : 0, html: v || '' }, 200, { 'Cache-Control': 'no-store' });
+  const p = await tplPage(env, name);
+  return json({ ok: true, name, bytes: p.html.length, from: p.from, html: p.html || '' }, 200, { 'Cache-Control': 'no-store' });
 }
 function safeTplName(n) { const x = String(n || ''); return OPS_TPL_NAMES.indexOf(x) >= 0 ? x : null; }
 async function opsTemplateWrite(req, env) {
@@ -3486,7 +3638,9 @@ async function opsTemplateWrite(req, env) {
   if (html.length < 200) return json({ ok: false, error: 'refusing to publish a page shorter than 200 bytes' }, 422);
   if (!/^<!doctype html>/i.test(html.trim().slice(0, 40))) return json({ ok: false, error: 'must start with <!doctype html>' }, 422);
   if (/<script[^>]+src\s*=\s*["']?http/i.test(html)) return json({ ok: false, error: 'no remote scripts: these pages are single-file by design' }, 422);
-  const key = name === 'sample-menu' ? 'tpl:sample-menu' : 'tpl:' + name;
+  // the console publishes an *override*, which outranks the bundle and can be deleted; writing
+  // `tpl:<name>` would publish a page that a redeploy silently un-serves, which is worse than not
+  const key = (name === 'sample-menu' ? 'tpl-ovr:sample-menu' : 'tpl-ovr:' + name);
   const was = await env.STORES.get(key);
   if (b.restore) {
     // the committed copy is the safety net: a hand-edit that goes wrong in the

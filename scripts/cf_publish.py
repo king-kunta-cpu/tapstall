@@ -129,11 +129,10 @@ def main():
 
     afiles = {}
     if os.path.isdir(assets_dir):
-        # Static-asset uploads are not used: HTML is served from KV (tpl:*),
-        # which is hot-swappable without a redeploy and works on the free plan
-        # without the assets bundle format. The bundle is still built for
-        # parity with wrangler-based deploys.
-        print("note: %d asset file(s) available in %s, uploading via KV templates instead"
+        # Those files are the GitHub Pages mirror, not the Worker's pages: since v0.9.1 every
+        # page a merchant is served is a bundle constant (INLINED_PAGES), which costs no KV write
+        # and cannot lag the deploy. The assets dir stays in the build because CI uploads it.
+        print("note: %d asset file(s) in %s are the Pages mirror; the Worker's pages are inlined"
               % (sum(len(f) for _, _, f in os.walk(assets_dir)), assets_dir))
     md = dict(metadata)
     files = {"data": ("worker.js", open(script, "rb").read(), "application/javascript+module")}

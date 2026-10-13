@@ -708,22 +708,36 @@ test('who is asked for a sender number is one rule, said in two files', () => {
    83 runs — so two pages served yesterday's bytes for nine hours while a log line promised a
    nightly fix. This test is the difference between that and a mechanism: it fails if the retry
    collapses back to one slot, or if the job starts depending on an event that has to be pushed. */
-test('a stuck page has a retry that does not need a human or a push', () => {
+test('a page cannot stick, so the night is a check and not a retry', () => {
+  // This test used to demand four cron slots a day, because pages were KV keys: a release whose
+  // eight template writes fell off the end of the day's 1,000 left a merchant served git's *older*
+  // page, and the only cure was to try again after midnight, four times because GitHub drops
+  // scheduled runs. v0.9.1 removes the failure mode instead of scheduling around it — a page is a
+  // bundle constant, published by the same upload as the code that reads it — so what has to be
+  // true now is narrower and stronger: nothing in the pipeline spends a write on a page, the check
+  // that a page is current is local and runs before anything ships, and the night still looks.
   const wf = readFileSync(join(root, '.github', 'workflows', 'deploy.yml'), 'utf8');
-  const cron = (wf.match(/- cron: '([^']+)'/g) || []);
-  assert.ok(cron.length >= 1, 'the workflow declares a schedule at all');
   const sched = wf.slice(wf.indexOf('schedule:'), wf.indexOf('jobs:'));
-  const fields = (sched.match(/- cron: '([0-9]+) ([^']+)'/) || []).slice(1);
-  assert.equal(fields.length, 2, 'a schedule line with exactly two fields: ' + JSON.stringify(fields));
-  const hours = fields[1].split(',');
-  assert.ok(hours.length >= 3, 'at least three slots a day, because GitHub drops them: got ' + hours.join(','));
-  const job = wf.slice(wf.indexOf('pages-are-current:'), wf.indexOf('\n  worker:'));
-  assert.match(wf, /pages-are-current:\n\s+if: github\.event_name == 'schedule' \|\| github\.event_name == 'workflow_dispatch'/,
-    'the retry runs on the schedule, and a human can also pull it — it is never waiting for a push that may not come');
-  assert.match(job, /prod_check\.sh > \/tmp\/prodcheck\.log/, 'and the same job runs the live check, so a broken product is seen at night without anybody typing');
-  assert.match(job, /GITHUB_EVENT_NAME" = schedule \] && \[ "\$hr" != 00/, 'once a UTC day, not four times — the probes are cancelled, but they are still somebody\'s ledger');
-  assert.match(job, /deploy\.sh --templates > \/tmp\/templates\.log/, 'it does the one thing: put what differs, then verify');
-  assert.match(job, /exit \$code/, 'and it fails the run on a residual difference — a warning with exit 0 is how a stale page looked green');
+  const fields = sched.match(/- cron: '([0-9]+) ([0-9,]+) \* \* \*'/) || [];
+  assert.equal(fields[1], '20', 'one slot a day, twenty minutes in so it lands after the budget turns over: ' + JSON.stringify(fields.slice(1)));
+  assert.equal(fields[2], '0', 'at the start of the UTC day, the only hour the free plan guarantees');
+  assert.ok(!/--templates/.test(wf), 'and the workflow no longer re-publishes pages: there is nothing left to retry');
+  const job = wf.slice(wf.indexOf('night-check:'), wf.indexOf('\n  worker:'));
+  assert.match(job, /prod_check\.sh > \/tmp\/prodcheck\.log/, 'the night runs the live check, so a broken product is seen without anybody typing');
+  assert.match(job, /exit \$code/, 'and a red line fails the run — a warning with exit 0 is how a stale page looked green');
+
+  const dep = readFileSync(join(root, 'scripts', 'deploy.sh'), 'utf8');
+  assert.match(dep, /check_pages_in_bundle \.build/, 'a deploy proves the bundle carries every page before it uploads');
+  assert.match(dep, /if \[\[ "\$\{PAGES_KV:-0\}" == 1 \]\]; then/, 'the legacy KV publish exists only behind a switch, as a rollback target');
+  assert.equal((dep.match(/kv_put_tpl "\$STORES_ID" \$TPL_NAMES/g) || []).length, 1,
+    'the publish-to-KV line survives exactly once, inside the PAGES_KV branch — the default path writes no page');
+  assert.equal((dep.match(/verify_templates "\$STORES_ID"/g) || []).length, 1,
+    'and so does its read-back: a rollback copy is the only thing worth reading out of KV for');
+  assert.match(dep, /if \[\[ "\$MODE" == "--pages-override" \|\| "\$MODE" == "--pages-clear" \]\]/,
+    'the emergency door is a real mode, for the case that is left: a wrong page at 22:00');
+  assert.match(dep, /case " \$TPL_NAMES sample-menu " in .*die "\$PAGE_T is not a page this pipeline publishes/,
+    'and it takes only names that are actually pages, so a typo cannot publish a blank over a live screen');
+  assert.match(dep, /check_pages_in_bundle \/tmp\/zl-pages-check/, 'and --templates still answers the question it was always asked, locally');
 });
 
 /* The receipt keeps the door on the device only when the response says the budget, under
@@ -978,4 +992,68 @@ test('0.9.0 no page quotes a price or a picture the store did not give it', () =
   const core = readFileSync(join(root, 'worker', 'core.js'), 'utf8');
   assert.equal((core.match(/function realPhoto\(p\)/g) || []).length, 1, 'core decides what a photo is, once');
   assert.ok(!/function realPhoto/.test(worker) && !/realPhoto\s*=/.test(a), 'and no page or the worker keeps a second copy of that decision');
+});
+
+test('0.9.1 every write to an order document packs the row with it', () => {
+  // The ledger is the key space now: a row is KV metadata on the order document, which is what makes
+  // one write per order enough and makes an index that can lose a row impossible. It holds only as
+  // long as nobody writes an order key another way — so the scan that keeps the generation rule
+  // honest keeps this one honest too, over the whole file rather than one function.
+  const w = readFileSync(join(root, 'worker', 'worker.js'), 'utf8');
+  const puts = (w.match(/ORDERS\.put\([^;]*;/g) || []);
+  const orderPuts = puts.filter((line) => /order:/.test(line));
+  assert.equal(orderPuts.length, 1, 'exactly one place writes an order document, and it is saveOrder: ' + JSON.stringify(orderPuts));
+  assert.match(orderPuts[0], /metadata:\s*packRow\(orderRow\(order\)\)/);
+  assert.ok(!/function mirrorRow|await mirrorRow\(/.test(w),
+    'the read-modify-write of a shared row array is gone, not merely unused — only its name survives, in a comment explaining why');
+  assert.equal((w.match(/ORDERS\.get\('list:/g) || []).length, 1,
+    'the legacy index is read in exactly one function, so a second reader cannot appear beside it and disagree');
+  const core = readFileSync(join(root, 'worker', 'core.js'), 'utf8');
+  assert.match(core, /export const ROW_META_CAP = 1000/, 'and the budget a row has to fit is named, not assumed');
+});
+
+test('0.9.1 one reader decides which copy of a page a merchant is served', () => {
+  // Pages stopped being KV keys and became bundle bytes with an override key in front of them, so the
+  // priority is a rule now — and a rule every door must share. Two handlers used to `get('tpl:renew')`
+  // and `get('tpl:confirm')` straight out of KV, which meant an operator's hand-published renew page
+  // edited the storefront and left the renewal link serving the old copy: the same class of bug the
+  // credential comparison was caught for in 0.8.8, one layer down.
+  const w = readFileSync(join(root, 'worker', 'worker.js'), 'utf8');
+  const legacy = (w.match(/STORES\.get\('tpl:'/g) || []).length;
+  assert.equal(legacy, 2, 'the rollback key is read in exactly two places — the reader, and the console that reports it: ' + legacy);
+  const ovr = w.split('\n').map((l, i) => [i + 1, l]).filter(([, l]) => /STORES\.get\('tpl-ovr:'/.test(l));
+  assert.equal(ovr.length, 2, 'the override is read by the reader and by the console that reports what a merchant is being served, and by nobody else');
+  const inReader = w.slice(w.indexOf('async function tplPage'), w.indexOf('async function sendMail'));
+  assert.match(inReader, /STORES\.get\('tpl-ovr:'/, 'the reader is one of the two');
+  const body = w.slice(w.indexOf('async function tplPage'), w.indexOf('async function sendMail'));
+  assert.match(body, /tpl-ovr:/, 'override first');
+  assert.match(body, /INLINED_PAGES\[name\]/, 'bundle second');
+  assert.match(body, /'tpl:' \+ name/, 'legacy key third');
+  for (const fn of ['renewPage', 'confirmPage']) {
+    const i = w.indexOf('async function ' + fn);
+    assert.ok(i > 0, fn + ' exists');
+    assert.match(w.slice(i, i + 900), /await tplPage\(env, '[a-z-]+'\)/, fn + ' asks the reader instead of naming a key');
+  }
+  // and the bundle is filled by the builder, not at runtime: an empty map would pass every page test
+  const builder = readFileSync(join(root, 'scripts', 'build_bundle.sh'), 'utf8');
+  assert.match(builder, /const INLINED_PAGES = \{\};/, 'the builder fills the declaration worker.js keeps empty');
+  assert.match(builder, /pages missing or stubby/, 'and refuses to ship a bundle with a page missing');
+  assert.match(builder, /3 MB Worker limit/, 'with the platform bundle cap checked at build time, not by a 413 mid-release');
+});
+
+test('0.9.1 the floor still has the true sentence, even though a deploy makes it rare', () => {
+  // The floor — the page the Worker builds when there is no skin to fill — is now only reachable in
+  // production by a bundle that lost a page, which the builder refuses to ship. Its copy still
+  // matters, because a link that has been revoked is answered there, and the sentence it prints
+  // used to send people to a welcome email containing exactly that dead link. Asserted from source:
+  // the state is not reachable through a deleted key any more, and pretending otherwise would be a
+  // test that verifies a mechanism that no longer exists.
+  const w = readFileSync(join(root, 'worker', 'worker.js'), 'utf8');
+  const floor = w.slice(w.indexOf('if (!rec) return html(`'), w.indexOf('if (closed) return html(`'));
+  assert.ok(floor.length > 80, 'the erased-token floor is still written out, not inlined away');
+  assert.match(floor, /plan card in your <a href=\"\/a\">dashboard<\/a>/, 'it names where the working link genuinely is');
+  assert.ok(!/welcome email/.test(floor), 'and the retired sentence is gone from it, not left alongside the new one');
+  const closedFloor = w.slice(w.indexOf('if (closed) return html(`'), w.indexOf('const st = await getStore(env, rec.handle);'));
+  assert.match(closedFloor, /closed its links/);
+  assert.ok(!/id=pay/.test(closedFloor), 'a closed link renders no way to pay through it');
 });

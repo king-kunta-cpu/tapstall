@@ -70,50 +70,65 @@ KEYS=$(cf GET "/storage/kv/namespaces/$STORES_ID/keys?per_page=1" | jq -r '.resu
 # the shipped pages must be the generated ones, or KV would publish a stale UI
 python3 scripts/ui_kit.py check || die "pages/*.html are out of date with pages/src/ — run python3 scripts/ui_kit.py and commit"
 
-# --templates ships the pages and nothing else. It exists because the 1,000 free KV
-# writes a day can be spent by the time a release gets to them: the Worker goes out,
-# the HTML waits, and the only way to finish is to run something again after midnight.
-# This is that something. It spends a write only where KV differs from git, so a
-# nightly run on a quiet day costs nothing and proves the same fact every time.
-# Everything in pages/ named guide-* is published and verified, without a human
-# remembering to add it to a list. A written page that is never published is the
-# orphan failure the COREMERCH bot spends a whole subsystem hunting: here it is
-# impossible by construction, because the list is the directory.
+# Pages stopped being KV keys in v0.9.1: build_bundle.sh puts git's bytes in the Worker, and
+# `tplPage` serves them, so publishing a page spends no write, cannot be refused by a spent budget,
+# and cannot lag the build that was tested. What is left here is the two things the KV route was
+# actually for, kept on purpose:
+#
+#   --pages-override <name>   publish ONE page into `tpl-ovr:<name>`, which outranks the bundle.
+#                             The emergency door: the copy is wrong at 22:00 and a deploy is not
+#                             happening tonight. `--pages-clear <name>` takes it away again.
+#   PAGES_KV=1                also write the legacy `tpl:<name>` copies, so a rollback to a
+#                             pre-0.9.1 Worker still finds the current pages, not a stale month.
 TPL_NAMES="store onboard admin fees index confirm renew ops"
 for f in pages/guide-*.html; do          # the script has already cd'd to the repo root
   [[ -e "$f" ]] && TPL_NAMES="$TPL_NAMES $(basename "$f" .html)"
 done
 
-if [[ "$MODE" == "--templates" ]]; then
-  say "templates → KV only (no bundle, no worker publish)"
-  kv_put_tpl "$STORES_ID" $TPL_NAMES sample-menu.csv
-  # Read back, and fail on the difference. A step that prints a warning and exits 0
-  # is how a stale page stayed stale: the log said the truth and the pipeline said
-  # success, and the only reader of a green run is the person who was not there.
-  verify_templates "$STORES_ID" $TPL_NAMES sample-menu.csv \
-    || die "the pages above are not what customers are being served — the account could not write them today"
+if [[ "$MODE" == "--pages-override" || "$MODE" == "--pages-clear" ]]; then
+  PAGE_T="${2:-}"; [[ -n "$PAGE_T" ]] || die "which page? ./scripts/deploy.sh --pages-override admin"
+  if [[ "$MODE" == "--pages-clear" ]]; then
+    # deleting an override is a KV mutation, so it is said out loud rather than treated as free
+    kv_del_ovr "$STORES_ID" "$PAGE_T"
+    ok "tpl-ovr:$PAGE_T gone: the bundle's copy of $PAGE_T is what a merchant is served again"
+    exit 0
+  fi
+  case " $TPL_NAMES sample-menu " in *" $PAGE_T "*) : ;; *) die "$PAGE_T is not a page this pipeline publishes ($TPL_NAMES sample-menu)" ;; esac
+  FILE="pages/$PAGE_T.html"; [[ "$PAGE_T" == sample-menu ]] && FILE="pages/sample-menu.csv"
+  [[ -f "$FILE" ]] || die "no $FILE to publish"
+  kv_put_ovr "$STORES_ID" "$PAGE_T" "$FILE"
+  verify_override "$STORES_ID" "$PAGE_T" "$FILE" || die "the override in KV is not the file in git — see above"
+  ok "override published. It stays in front of the bundle until --pages-clear $PAGE_T: a page put there by hand has to be taken out by hand, which is the point of an override and the trap in one"
   exit 0
 fi
 
-say "templates → KV (hot-swappable: HTML edits need no redeploy)"
-kv_put_tpl "$STORES_ID" $TPL_NAMES sample-menu.csv
-
-# Read the served bytes back, on the main path too and not only in --templates mode.
-# This is the failure that looks like success: the Worker version goes up, one page does
-# not, and every log that does not compare git with KV says the deploy was fine — which
-# is what happened to a storefront change on a day the free KV writes were spent. It
-# warns rather than dies, because the Worker really did deploy and the nightly
-# `pages-are-current` run at 00:20 UTC is the retry: after the reset it puts any page
-# whose bytes differ and fails if the difference survives.
-if verify_templates "$STORES_ID" $TPL_NAMES sample-menu.csv; then :
-else
-  warn "a page above is not what customers are being served — the Worker is current, the page is not"
-  warn "four scheduled runs a day (00:20/06:20/12:20/18:20 UTC) retry it, and so does any push;"
-  warn "to finish now: ./scripts/deploy.sh --templates  (GitHub drops schedules — do not trust the night)"
+if [[ "$MODE" == "--templates" ]]; then
+  # Kept as a door, not as a mechanism. Since v0.9.1 there is nothing to publish: the answer a person
+  # typing this wants is "is the page a customer sees the page in git?", and that is now a local
+  # question — build, compare, report. No KV read, no KV write, and it works on a day the account
+  # has spent its budget, which is the only day anyone ever reached for this command.
+  say "templates: pages ride in the bundle now — checking the bundle instead of publishing to KV"
+  bash scripts/build_bundle.sh /tmp/zl-pages-check >/dev/null
+  check_pages_in_bundle /tmp/zl-pages-check $TPL_NAMES sample-menu
+  ok "every page in git is in the bundle a deploy uploads: nothing to publish, nothing to retry tonight"
+  exit 0
 fi
 
 say "building bundle"
 bash scripts/build_bundle.sh .build
+# The one fact a bundle has to get right, which used to be eight KV writes' worth of luck: every
+# page in pages/ is *inside* the file about to be uploaded. Checked locally, before anything leaves
+# the machine, because the answer is already known at that point — a read-back of KV could only
+# report it after the deploy, which is how "the Worker is current and the page is not" became a state
+# a shop could sit in for nine hours.
+check_pages_in_bundle .build $TPL_NAMES sample-menu
+
+if [[ "${PAGES_KV:-0}" == 1 ]]; then
+  say "also publishing the legacy KV copies (PAGES_KV=1): a rollback target, one write per differing page"
+  kv_put_tpl "$STORES_ID" $TPL_NAMES sample-menu.csv
+  verify_templates "$STORES_ID" $TPL_NAMES sample-menu.csv \
+    || warn "the rollback copies above are not current. The live pages are — they are in the bundle — so this costs a rollback, not a merchant"
+fi
 
 NAME="$WORKER_NAME" STORES_ID="$STORES_ID" ORDERS_ID="$ORDERS_ID" WITH_CRON=1 REDIRECT_TO="" \
   python3 scripts/gen_wrangler_toml.py

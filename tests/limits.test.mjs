@@ -192,8 +192,13 @@ test('a spent quota answers each reader in their own words', async () => {
     assert.match(rails.json.error, /1,000\/day|free storage writes/, 'and the operator is told the ceiling and the way round it');
     assert.ok(!/\[object Object\]|undefined/.test(rails.text), rails.text.slice(0, 200));
 
-    const order = await call('/api/order', { method: 'POST', body: { handle: T, buyer: { name: 'A', phone: '263700000000' }, items: [{ name: 'x', price: 1, qty: 1 }] } });
-    assert.equal(order.status, 503);
+    // A body that would be accepted on a day the account can write: since v0.9.1 the throttle stops
+    // spending a KV write per request, so nothing refuses this order until it reaches the write it
+    // genuinely needs. The old one-line stub body passed here by accident — it was being refused by
+    // the limiter's own failed write, and the assertion was reading a 503 that had nothing to do with
+    // the buyer's door. Now it proves the thing it says it proves.
+    const order = await call('/api/order', { method: 'POST', body: { handle: T, buyer: { name: 'Farai', phone: '0781234567' }, items: [{ name: 'Beef & rice', price: 6, qty: 1 }] } });
+    assert.equal(order.status, 503, order.text.slice(0, 160));
     assert.equal(order.json.who, 'buyer');
     assert.match(order.json.error, /message the shop/, 'a buyer is pointed at the shop, not at a plan upgrade');
     assert.ok(!/\$5|KV|wrangler|namespace/.test(order.json.error), 'no infra vocabulary in a buyer\u2019s face');

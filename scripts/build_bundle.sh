@@ -25,6 +25,29 @@ for need in ("function priceOrder", "function parseProducts", "const RAILS", "fu
 
 out = worker.replace(m.group(0), "/* ---- core.js, inlined by build_bundle.sh (source of truth: worker/core.js) ---- */\n" + body)
 assert "from './core.js'" not in out, "import survived inlining"
+
+# The pages ride in the bundle. This is the part that used to be eight KV `put`s per release, and
+# the reason a page could be current in git and stale for a customer for nine hours: a KV write is
+# a budgeted thing, and a deploy is not. Inlined, a page costs no write to publish, no read to
+# serve, and cannot disagree with the tests that ran on the same bytes. The operator console keeps
+# its hand-publish door (it writes `tpl-ovr:<name>`, which outranks the bundle) precisely because
+# the emergency case is "the deploy is not available at 22:00 and the page is wrong now".
+import json as _json, os as _os
+pages = {}
+for n in ('store', 'onboard', 'admin', 'confirm', 'renew', 'ops', 'index', 'fees',
+          'guide-whatsapp-shop-payments', 'guide-payment-reference-matching'):
+    for cand in ('pages/%s.html', 'pages/public/%s.html', 'pages/public/guide/%s.html'):
+        f = cand % n
+        if _os.path.exists(f):
+            pages[n] = open(f, encoding='utf-8').read()
+            break
+pages['sample-menu'] = open('pages/sample-menu.csv', encoding='utf-8').read() if _os.path.exists('pages/sample-menu.csv') else ''
+missing = [n for n, v in pages.items() if len(v) < 200 and n != 'sample-menu']
+assert not missing, "pages missing or stubby, and shipping a bundle without them is how a merchant gets a blank page: %s" % missing
+decl = "const INLINED_PAGES = {};"
+assert out.count(decl) == 1, "worker.js must declare `const INLINED_PAGES = {};` for the bundler to fill"
+out = out.replace(decl, "const INLINED_PAGES = " + _json.dumps(pages, ensure_ascii=False, separators=(',', ':')) + ";")
+print("pages inlined: %d files, %d bytes" % (len(pages), sum(len(v) for v in pages.values())))
 open(sys.argv[1], "w", encoding="utf-8").write(out + "\n")
 print("bundle: worker.js + core.js inlined (%d lines, %d bytes)" % (len(out.splitlines()), len(out)))
 PYEOF
@@ -39,5 +62,16 @@ if ls pages/public/data/*.csv >/dev/null 2>&1; then
 fi
 
 node --input-type=module --check < "$OUT/worker.js"   # ESM-aware: catches what plain --check misses
+# The free plan caps a bundle at 3 MB gzipped. The pages are the bulk of it, so the cap is checked
+# here at build time rather than discovered by a 413 from the API in the middle of a release.
+gzip -kf "$OUT/worker.js"
+GZ=$(stat -c %s "$OUT/worker.js.gz" 2>/dev/null || stat -f %z "$OUT/worker.js.gz")
+rm -f "$OUT/worker.js.gz"
+LIMIT=$((3 * 1024 * 1024))
+if [ "$GZ" -gt "$LIMIT" ]; then
+  echo "bundle is $GZ gzipped bytes, over the 3 MB Worker limit — pages are the bulk of it, so a page is too big" >&2
+  exit 1
+fi
+echo "bundle gzipped: $GZ of $LIMIT bytes"
 echo "assets: $(cd "$OUT/assets" && ls -A | tr '\n' ' ')"
 du -sh "$OUT" | awk '{print "bundle size:", $1}'

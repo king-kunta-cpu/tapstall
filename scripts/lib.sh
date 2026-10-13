@@ -102,6 +102,99 @@ kv_id() { # kv_id <title> <binding> [legacy title...] -> namespace id (creates o
   printf '%s\n' "$id"
 }
 
+# ---- pages are bundle bytes (v0.9.1) ---------------------------------------
+# Every page under pages/ is inlined into .build/worker.js by build_bundle.sh and served by
+# `tplPage` in the Worker, so publishing a page costs no KV write, cannot be refused by a spent
+# budget, and cannot disagree with the tests that ran on the same bytes. This is the check that
+# replaces the KV read-back: the answer is known locally, before anything leaves the machine, and it
+# is the same answer a rollback would need.
+check_pages_in_bundle() { # <bundle-dir> <names...>
+  local out="$1"; shift; local n bad=""
+  local file="$out/worker.js"
+  [[ -f "$file" ]] || die "no $file — build_bundle.sh did not run"
+  for n in "$@"; do
+    local src="pages/$n.html"
+    [[ "$n" == sample-menu ]] && src="pages/sample-menu.csv"
+    [[ -f "$src" ]] || { bad="$bad $n(no file in git)"; continue; }
+    # The middle of the file is compared, not its head: every page opens with the same doctype and
+    # the same kit lines, so a head-only match would pass for a bundle holding a different page.
+    if ! OUT="$file" SRC="$src" python3 "$ZBUNDLE_CHECK" "$n"; then bad="$bad $n"; fi
+  done
+  if [[ -n "$bad" ]]; then
+    die "the bundle does not carry:${bad} — shipping this serves those pages from the KV fallback, which is a rollback copy and may be months old"
+  fi
+  ok "bundle carries $# pages, byte-checked against git"
+}
+
+# The checker as its own file, because this is the third time a page of Python inside a single
+# quoted shell string inside a heredoc has cost an afternoon: an apostrophe in a comment ends the
+# string, bash keeps going, and the failure is reported as "your page is missing".
+ZBUNDLE_CHECK="${ZBUNDLE_CHECK:-$(dirname "${BASH_SOURCE[0]}")/check_bundle_pages.py}"
+
+# The emergency door, and its opposite: one page in front of the bundle, or that override removed.
+# Both are written through the namespace directly, because `tpl-ovr:` is not a key the Worker's own
+# guarded lever accepts, and an emergency that needs four hands is not an emergency door.
+kv_put_ovr() { # <namespace_id> <name> <file>
+  CF_TOKEN="$CF_TOKEN" CF_ACCOUNT="$CF_ACCOUNT" KV_NS="$1" TPL="$2" FILE="$3" python3 - <<'PYOV'
+import os, urllib.error, urllib.request
+tok, acct = os.environ["CF_TOKEN"], os.environ["CF_ACCOUNT"]
+ns, name, fn = os.environ["KV_NS"], os.environ["TPL"], os.environ["FILE"]
+key = "tpl-ovr:" + (name[:-4] if name.endswith(".csv") else name)
+body = open(fn, "rb").read()
+api = os.environ.get("CF_API_BASE", "https://api.cloudflare.com/client/v4")
+url = "%s/accounts/%s/storage/kv/namespaces/%s/values/%s" % (api, acct, ns, key)
+try:
+    req = urllib.request.Request(url, data=body, method="PUT", headers={"Authorization": "Bearer " + tok})
+    with urllib.request.urlopen(req, timeout=90) as r:
+        out = r.read().decode()
+    assert '"success":true' in out.replace(" ", ""), out[:200]
+    print("  ^ %s: %d bytes published as an override" % (name, len(body)))
+except urllib.error.HTTPError as e:
+    print("  x %s: HTTP %s %s" % (name, e.code, e.read().decode()[:300]))
+    # An override that will not land is the emergency door standing shut. There is no graceful
+    # version of this: the bundle copy stays live, which is fine for a shop and not fine for a fix,
+    # so say it and stop rather than exit 0 and let somebody believe the page changed.
+    raise SystemExit(1)
+PYOV
+}
+
+verify_override() { # <namespace_id> <name> <file>
+  CF_TOKEN="$CF_TOKEN" CF_ACCOUNT="$CF_ACCOUNT" KV_NS="$1" TPL="$2" FILE="$3" python3 - <<'PYOV'
+import hashlib, os, time, urllib.error, urllib.request
+tok, acct = os.environ["CF_TOKEN"], os.environ["CF_ACCOUNT"]
+ns, name, fn = os.environ["KV_NS"], os.environ["TPL"], os.environ["FILE"]
+key = "tpl-ovr:" + (name[:-4] if name.endswith(".csv") else name)
+want = hashlib.sha256(open(fn, "rb").read()).hexdigest()
+api = os.environ.get("CF_API_BASE", "https://api.cloudflare.com/client/v4")
+url = "%s/accounts/%s/storage/kv/namespaces/%s/values/%s" % (api, acct, ns, key)
+for try_no in (1, 2, 3, 4, 5):
+    try:  # the read-your-write window on KV is seconds, not a defect; five reads cover it and then
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"Authorization": "Bearer " + tok}), timeout=60) as r:
+            got = hashlib.sha256(r.read()).hexdigest()
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            raise SystemExit("  x %s: no override in KV — the write did not land" % name)
+        raise SystemExit("  x %s: read refused (HTTP %s); the override may be there, check again in a minute" % (name, e.code))
+    if got == want:
+        print("  = %s: KV holds exactly the file it was given" % name)
+        raise SystemExit(0)
+    time.sleep(6 * try_no)
+raise SystemExit("  x %s: KV holds different bytes than git, after five reads" % name)
+PYOV
+}
+
+kv_del_ovr() { # <namespace_id> <name>
+  local ns="$1" name="$2"
+  curl -s --max-time 60 -X DELETE "$CF_API/accounts/$CF_ACCOUNT/storage/kv/namespaces/$ns/values/tpl-ovr:$name" \
+    -H "Authorization: Bearer $CF_TOKEN" \
+    | python3 -c 'import sys,json
+try:
+    j = json.load(sys.stdin)
+    print("  v override removed" if j.get("success") else "  x " + json.dumps(j.get("errors"))[:200])
+except Exception as e:
+    print("  ? ", e)' >&2
+}
+
 # ---- templates into KV (hot-swap without redeploy) ------------------------
 kv_put_tpl() { # <namespace_id> <names...>
   # Publishes a page only when KV does not already hold this exact file: a

@@ -1,5 +1,86 @@
 # Tapstall — status
 
+## The write budget is the machine (2026-10-13, v0.9.1)
+
+Four sections, one motive — the first three are the pipeline, the fourth is the account it runs on. The account is free, which means 1,000 KV writes a day shared by every
+shop, every deploy, every probe and every rate-limit tick — and reads are 100,000, so a design that
+moves work from writes to reads costs nothing and buys the headroom back. The ask was to redesign the
+pipeline for maximum efficiency without spending performance to get it, so each of these had to be
+measured on the thing a merchant feels, not only on the counter.
+
+**1. The pages are in the bundle.** `deploy.sh` used to `PUT` all eleven page sources into
+`tpl:<name>` and read them back — 11 writes and 11 reads a release, warned-not-fatal, and on a day
+the budget ran out mid-deploy the merchant was served git's *older* page.
+Now `INLINED_PAGES` is a constant in the Worker, filled at build time; the bundle's asset upload is
+not metered in KV writes at all, so a release costs **0 page writes**, and the bytes the tests read are
+the bytes the Worker serves. Cost: 308,858 inlined bytes, 214,655 gzipped for the whole bundle,
+against a 3 MB cap. The reader is one function (`tplPage`) and it tries three sources in order:
+`tpl-ovr:<name>` (a hand-published emergency cover, still available, one write, verified five times on
+read-back), then the bundle, then the legacy `tpl:` key, which stays populated for one release so a
+rollback to 0.8.x still finds its pages. A page a merchant is served that is not in git is now a thing
+that needs an explicit override, and `opsTemplates` says which source each row came from. CI shed four
+cron slots to one (`20 0 * * *`), because the retry-every-6-hours existed only to hammer the KV writes
+that no longer happen — the *check* that the bundle carries every page runs locally, on any day,
+`./scripts/deploy.sh --templates`.
+
+**2. One write per order.** `saveOrder` used to put the document and then re-put `list:<handle>` — the
+ledger index — with `mirrorRow` retrying it four times at 150 ms between. Two writes an order, four in
+a burst, and the index grew every order forever until it began losing rows on a spent day. An order
+document now carries its own ledger row as **KV list metadata**: `packRow(orderRow(order))`, 26
+fields, 403 bytes, under the 1,024-byte metadata cap the API documents; a 4,000-character proof plus a
+400-character name still packs to 132 with every number intact, because the shedders run before
+truncation. `ledgerRows` pages the list, unions it with the frozen legacy index (marked `legacy:true`,
+so a correction that only exists in the doc still wins on id), and sorts. Consequences: **no
+migration** — old orders keep answering from the index and new ones arrive with their own row; the
+`list:` key never grows again; and the 113 order documents already in this namespace are today's
+proof, which `scripts/quota.sh` prints per shop. What the design refuses to do is lose the ledger: an
+order whose doc has no row and no index entry still reads back, `thin`, money-zero rather than
+absent, so a count can never look like it dropped.
+
+**3. The limiter stopped writing what it refuses.** `rateLimited` used to `put` a counter on every
+guarded request — so 8 buyer attempts after a quiet hour were 8 KV writes for a shop that had not
+bought anything, and the 9th was a 503 *because* of an error in the limiter, the exact bug v0.8.5 fixed
+in the menu guard. Now a count lives in the isolate (`localHits`) and is authoritative below half the
+ceiling — which is the whole flood case — the shared key is read above half-max and read-back into
+`n` so the ceiling cannot be reset by an isolate that has seen nothing, and KV is written **only when a
+block starts or holds**. The tradeoff, stated: a block set in another isolate is seen only after
+`ceil(max/2)` local requests, and a block started at `max` in another isolate while this one sat at
+zero is missed — so a distributed flood gets a few more requests in before the door shuts. A refused
+request is still refused in every case, and nothing about *correctness* moved: the PIN counters
+(`pinl:`, `lock:`) still write every attempt, because they guard a credential and are a different job.
+
+Verified before this claim was made: `npm test` green at 294 (101 core, 125 live, 10 limits, 58
+pages), including a 4,000-byte page riding the real bundler into `INLINED_PAGES` and back out
+byte-identical, a 12-attempt flood leaving zero KV writes, and a spent day where a real order still
+lands while corrections and the menu refuse. `prod_check.sh` reports `pages_inlined`, `pages_bytes`,
+`pages_store_from`, `pages_served`, `pages_no_longer_from_kv`, `rate_limit_local_first`.
+
+**4. The account move, half proven.** `scripts/kv_migrate.py` exports a namespace to a JSONL archive
+with each key's metadata and verifies a destination against it — run today against the live
+`zimlink-orders`: 118 keys out, `missing: 0, metadata mismatch: 0, value mismatch: 0`, byte-compared,
+and 38 more from `zimlink-stores`, 752,099 bytes for the whole account. It exports and verifies
+against the old account with a read-only token; the import side needs a working one. `MIGRATION.md`
+holds the inventory, the subdomain-name dance (the reason this cannot be a background copy: the
+`tapstall.` prefix must be released before it can be claimed, and the gap between those two is a window
+where no order can be placed), and the reason the mover is a script and not `kv:key bulk` — the ledger
+is KV *metadata* now, and a copy that drops metadata looks complete and answers every order with
+money zero.
+
+Two corrections recorded here rather than left implicit. `tests/limits.test.mjs` had been proving the
+menu guard's 503 with an order body that failed *validation* (422) or died in the limiter's own failed
+put — so the assertion had been passing for the wrong reason; it now posts a real order against a
+day with no writes left and reads the `who: 'buyer'` 503 that the guard actually emits. And the
+README's recipe for fixing a page without a deploy — `PUT` it into `tpl:store` — stopped working the
+moment the bundle became authoritative; it now points at `--pages-override`, which is the door that
+still opens.
+
+Still owed, and not fixable from here: the API token for the new account is invalid on arrival
+(`Invalid API Token`, every endpoint, from two networks), so the migration inventory in
+`MIGRATION.md` sits at 156 keys in the old namespaces and nothing has been created in
+`6527547015468a5ec705a1071010822d`. The old token deploys but cannot upload assets, which is why
+this release goes out through `scripts/cf_publish.py`. And the credentials under `uploads/` are still
+live and still need rotating.
+
 ## What we do about receipts, and the four bugs that answered it (2026-10-13, v0.9.0)
 
 The question asked was narrow — *are we issuing receipts?* — and the answer, read off the send

@@ -6,13 +6,14 @@ on:
     branches: [main]
     paths-ignore: ['ci-deploy.log']
   schedule:
-    # Four slots, not one. Measured on this repo: GitHub delivered ONE scheduled run
-    # (#56) in the workflow's first 83 runs, six hours late, and skipped the 00:20 slot
-    # entirely on the night two pages were waiting for it — so a stuck page stayed stuck
-    # for nine hours while a log line promised a nightly retry. A dropped slot is now a
-    # quarter of the mechanism; a quiet run spends no KV write at all, because
-    # `deploy.sh --templates` skips any page whose bytes already match git.
-    - cron: '20 0,6,12,18 * * *'
+    # One slot, on the day's first hour. It used to be four: pages were KV keys, a spent write
+    # budget could leave a page nine hours behind git, and the only cure was to try again after
+    # midnight — so four tries a day was the mechanism, and GitHub's habit of dropping scheduled
+    # runs (measured: one delivery in 83 runs) was the reason it was four and not one. Since
+    # v0.9.1 a page is a bundle byte, published by the same upload as the code that reads it, so
+    # there is nothing left to retry, and what the night has to do is *look*. One run a day of
+    # prod_check is the whole job, and the Actions minutes for the month go from about 240 to 60.
+    - cron: '20 0 * * *'
   workflow_dispatch: {}
 
 permissions:
@@ -32,27 +33,15 @@ jobs:
   # reset; on a day with nothing missing it spends no write at all, reads every page
   # back against git, and goes green in seconds. Four slots because one is not a
   # mechanism (see the cron comment above).
-  pages-are-current:
+  night-check:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: ship any page a spent KV budget held back
-        env:
-          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          WORKER_NAME: tapstall
-        run: |
-          # not a pipe into tail: a pipeline's status is tail's, so a stale page would
-          # read green. Keep the code, print the tail of it, then exit with the code.
-          set +e
-          bash ./scripts/deploy.sh --templates > /tmp/templates.log 2>&1
-          code=$?
-          tail -20 /tmp/templates.log
-          exit $code
 
-      # The other half of an unattended night: a stale page is fixed by this job, and a
-      # broken product is *seen* by this step. `prod_check.sh` is the 300-line check against
+      # The other half of an unattended night. A stale page is no longer a thing that can happen —
+      # git's bytes are the bundle and the bundle is what serves — so the night's job is to *look*:
+      # one production check a day, before the day's KV writes are spent by real traffic. `prod_check.sh` is the 300-line check against
       # the live Worker that only runs when a human types it, which is why 96 write-gated
       # assertions sat unexecuted for two days and reported health. Here it needs no PIN:
       # the login-door lines self-skip with a note, and everything else runs. `blocked` is

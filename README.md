@@ -74,10 +74,13 @@ tests/core.test.mjs   101 unit tests on the money, the parser, the menu, the rai
                       and the VAT
 tests/live.test.mjs   124 tests that run the real handler + cron against a stub KV
 tests/limits.test.mjs 10 tests on the free-tier budgets (writes, sizes, locks)
-tests/pages.test.mjs  55 tests on the shipped HTML itself (no browser needed)
-scripts/deploy.sh     one command: tests → KV → templates → bundle → deploy → triggers → self-check
-scripts/deploy.sh --templates   the pages only, for the morning after a day whose 1,000 KV writes ran out
-scripts/build_bundle.sh   inlines core.js into .build/worker.js, ESM syntax check
+tests/pages.test.mjs  58 tests on the shipped HTML itself (no browser needed)
+scripts/deploy.sh     one command: tests → bundle → deploy → triggers → live self-check. No page publish.
+scripts/deploy.sh --templates   does the bundle carry every page? reads git, writes nothing, works on a spent day
+scripts/deploy.sh --pages-override <name>   the emergency door: one KV write, read back five times
+scripts/build_bundle.sh   inlines core.js and pages/*.html into .build/worker.js, ESM syntax check
+scripts/check_bundle_pages.py   byte-for-byte: is this file, exactly, inside that bundle?
+scripts/quota.sh      what the account holds and what a release costs. reads, and only reads
 scripts/cf_publish.py     dependency-free publisher (fallback when wrangler is absent)
 scripts/set_triggers.py   verifies the schedule/route over HTTP rather than trusting a write
 ```
@@ -90,7 +93,18 @@ export CF_TOKEN=… CF_ACCOUNT=…     # or put them in .secrets/
 ./scripts/deploy.sh                 # the whole thing, including a live self-check
 ./scripts/deploy.sh --check         # tests + build, uploads nothing
 ./scripts/deploy.sh --push          # also creates/updates the GitHub repo + Pages
+./scripts/deploy.sh --templates      # does the bundle carry every page? reads git, writes nothing
+./scripts/quota.sh                   # what the account holds and what a release costs. reads only
 ```
+
+A release used to spend 11 KV writes publishing the pages and 11 reads reading them back, and every
+write was a chance to serve a merchant git's *older* page: a page lived only in KV, KV's write budget
+is 1,000 a day for the whole account, and `verify_templates` warned rather than died because the
+Worker really had deployed. From v0.9.1 the pages
+are compiled into the Worker's own bundle (`INLINED_PAGES`, filled by `scripts/build_bundle.sh`,
+asserted by `scripts/check_bundle_pages.py`), so git's bytes *are* the deployed bytes, the bundle
+upload is not metered in KV writes, and a release costs one write: the nightly `__selftest` probe,
+which has to write to know it can.
 
 Everything after that is automatic: `main` pushes run
 `.github/workflows/deploy.yml` (tests → Worker → Pages). For that to be
@@ -98,13 +112,18 @@ zero-touch, set three repository secrets — `CLOUDFLARE_API_TOKEN`,
 `CLOUDFLARE_ACCOUNT_ID`, `ADMIN_SECRET` (a long random hex; it salts buyer
 fingerprints and renewal tokens, so it must not rotate on every deploy).
 
-To fix a page without any deploy at all:
+To change one page without a deploy — the case the bundle cannot answer, a wrong page at 22:00:
 
 ```bash
-curl -X PUT --data-binary @pages/store.html \
-  "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT/storage/kv/namespaces/$NS/values/tpl:store" \
-  -H "Authorization: Bearer $CF_TOKEN"
+./scripts/deploy.sh --pages-override store     # one write, read back five times, printed either way
+./scripts/deploy.sh --pages-clear store        # and one to take it away; the bundle's copy is back
 ```
+
+This writes `tpl-ovr:store`, which outranks the bundle in `tplPage` — the reader is one function, and
+it tries override, then bundle, then the legacy `tpl:` key. Publishing `tpl:store` directly, the
+route this repo documented for four releases, now does nothing at all: the bundle is checked first,
+and `deploy.sh` no longer writes those keys except behind `PAGES_KV=1`, which exists so a rollback to
+0.8.x still finds its pages.
 
 ## The merchant journey, end to end
 
