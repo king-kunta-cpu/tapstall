@@ -10,7 +10,7 @@
 # changed. Exit code is 0 only if the whole path answered correctly.
 set -uo pipefail
 cd "$(dirname "$0")/.."
-O="${ORIGIN:-https://tapstall.simalidudu.workers.dev}"
+O="${ORIGIN:-https://tapstall.zlnew.workers.dev}"
 KEY="${1:-${KEY:-}}"
 PIN="${2:-${PIN:-}}"
 if [[ -z "$KEY" || -z "$PIN" ]]; then echo "usage: bash scripts/try_login.sh <store name> <PIN>" >&2; exit 2; fi

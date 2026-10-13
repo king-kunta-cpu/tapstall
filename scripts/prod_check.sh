@@ -18,7 +18,7 @@
 # failure hides.
 set -uo pipefail
 cd "$(dirname "$0")/.."
-ORIGIN="${ORIGIN:-https://tapstall.simalidudu.workers.dev}"
+ORIGIN="${ORIGIN:-https://tapstall.zlnew.workers.dev}"
 HANDLE="${HANDLE:-mamatoe}"
 TOK=$(cat /home/user/.secrets/cf_token 2>/dev/null || echo "${CLOUDFLARE_API_TOKEN:-}")
 ACCT=$(cat /home/user/.secrets/cf_account 2>/dev/null || echo "${CLOUDFLARE_ACCOUNT_ID:-}")
@@ -164,7 +164,7 @@ echo "store:  $HANDLE"
 # it move people without losing anything, and does it stay out of the scheduled
 # work? So the role is detected, not assumed — `ORIGIN=https://zimlink…` picks up
 # alias mode on its own, and ROLE=alias forces it.
-CANON="${CANON:-https://tapstall.simalidudu.workers.dev}"
+CANON="${CANON:-https://tapstall.zlnew.workers.dev}"
 ROLE="${ROLE:-auto}"
 if [[ "$ROLE" == "auto" ]]; then
   if [[ "$(code "$ORIGIN/onboard")" == "301" ]]; then ROLE=alias; else ROLE=app; fi

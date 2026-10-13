@@ -60,8 +60,8 @@ say "stores=$STORES_ID  orders=$ORDERS_ID"
 # have keys in it. Both are reads, so this costs nothing on a quota day.
 if [[ -f .deploy/state.json ]]; then
   PREVIOUS=$(jq -r '.kv_stores // empty' .deploy/state.json)
-  if [[ -n "$PREVIOUS" && "$PREVIOUS" != "$STORES_ID" ]]; then
-    die "STORES resolved to $STORES_ID but the last deploy used $PREVIOUS. Refusing to publish against a namespace that is not the one with the stores in it — check KV_STORES/KV_STORES_LEGACY before anything else."
+  if [[ -n "$PREVIOUS" && "$PREVIOUS" != "$STORES_ID" && "${DEPLOY_ACCOUNT_MOVE:-0}" != 1 ]]; then
+    die "STORES resolved to $STORES_ID but the last deploy used $PREVIOUS. Refusing to publish against a namespace that is not the one with the stores in it — check KV_STORES/KV_STORES_LEGACY before anything else; for a deliberate move to another account, say so with DEPLOY_ACCOUNT_MOVE=1."
   fi
 fi
 KEYS=$(cf GET "/storage/kv/namespaces/$STORES_ID/keys?per_page=1" | jq -r '.result_info.count // 0')

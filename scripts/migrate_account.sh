@@ -11,7 +11,7 @@
 #   … bash scripts/migrate_account.sh --apply            # and only then does it write
 #
 # Deliberately NOT in here: the workers.dev subdomain handover. Merchant links are
-# tapstall.simalidudu.workers.dev, the prefix is held by the source account, and releasing it before
+# tapstall.zlnew.workers.dev, the prefix is held by the source account, and releasing it before
 # claiming it leaves a window in which no order can be placed. That is a decision with an owner, so it
 # is printed at the end with the two calls and never taken automatically.
 set -euo pipefail

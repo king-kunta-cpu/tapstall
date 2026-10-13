@@ -13,7 +13,7 @@ that is where the incumbent refuses to work. The product is not limited to
 those two: a payment method or a country we have not priced is a config entry,
 not a release. See *Markets are data, not code*.
 
-**Live:** `https://tapstall.simalidudu.workers.dev/onboard`
+**Live:** `https://tapstall.zlnew.workers.dev/onboard`  (the previous origin, `tapstall.simalidudu.workers.dev`, 301s here per path — old receipts still reach the shop they name)
 (storefront `…/s/<handle>` and every link minted before the rename still work: the
 previous hostname `zimlink.simalidudu.workers.dev` is deployed as an alias and
 answers with a redirect for page visits)
@@ -499,7 +499,7 @@ see and cancel, and because revoking takes one press.
 
 | | |
 |---|---|
-| Onboarding (give this to merchants) | `https://tapstall.simalidudu.workers.dev/onboard` |
+| Onboarding (give this to merchants) | `https://tapstall.zlnew.workers.dev/onboard` |
 | A store | `…/s/<handle>` · its config `…/s/<handle>/config.json` · its menu `…/s/<handle>/feed.json` |
 | Merchant dashboard | `…/a` — opened by the code returned at sign-up and sent with each order; `POST /api/login`, `POST /api/logout`, `POST /api/recover`, `POST /api/revoke` |
 | Self-service settings | `POST /api/settings` · `POST /api/settings/revert` (fields from `GET /api/admin` → `editable`) |

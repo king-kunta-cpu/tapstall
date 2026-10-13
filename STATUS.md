@@ -1,5 +1,35 @@
 # Tapstall — status
 
+## Every URL is the new one now, and the quota clock is gone (2026-10-13, 15:58 UTC)
+
+`tapstall.zlnew.workers.dev` is the canonical origin and it was made so everywhere rather than in one
+place: `git ls-files` across README, `worker/`, `pages/`, `scripts/`, `.github/` and `wrangler.toml` was
+rewritten in a single pass, and the suite still reports 295/295 — which is the point of pages being
+relative in the first place, no page test had to change because no page hard-codes an origin. The
+outbound `From:` on a shop notification moved with it (`no-reply@zlnew.workers.dev`).
+
+Then the two things that make the new account the account: CI's repository secrets were re-encrypted
+for `6527547015468a5ec705a1071010822d` (`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`,
+`ADMIN_SECRET` all reported set), so a push can no longer deploy the old copy beside the new one; and
+the old origin stopped being a second writable shop. `tapstall.simalidudu.workers.dev` now answers
+`301 → https://tapstall.zlnew.workers.dev/<same path>`, measured on two links
+(`/s/mamatoe`, `/onboard`), because the same `REDIRECT_TO` var the previous brand's alias has always
+used is what a demoted origin should do — a receipt from last week still reaches the shop it names, and
+a browser mid-order is not told to go somewhere else, which is why that var has always kept bodies
+served instead of redirecting them.
+
+The quota line in the last section — "after 01:00 EAT, when the day's writes reset" — was about the
+account I was probing, not about the world. The new account's counter is full and its
+`kv_roundtrip` is `true` at 15:58 UTC, so nothing here waits for midnight any more: the 156-write
+copy, the deploy, and the selftest all happened in one sitting. What the free plan actually still means
+is stated once, honestly, in `README.md`: 1,000 KV writes a day and 100,000 requests a day are
+per-account, so a second account bought headroom, not an exemption. At the measured steady state —
+a release costing zero page writes, an order costing one, the limiter writing only when a door shuts,
+113 order documents in the whole history of the product — the budget is not a constraint any more, which
+is why the redesign's other half, the one that only a paid plan opens (Durable Objects for a
+cross-isolate counter instead of an isolate-local one), is left as a documented option rather than
+pretended away.
+
 ## The account moved, and what still has the old name (2026-10-13, 15:20 UTC)
 
 Three credentials were rejected as unknown to Cloudflare and a fourth — same `cfut_` prefix, same

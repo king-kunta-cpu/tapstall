@@ -26,7 +26,7 @@
 # you control (`nohup ... &`, or `at 00:05`) when you want the pages fixed before the next push.
 set -uo pipefail
 cd "$(dirname "$0")/.."
-LIVE="${LIVE:-https://tapstall.simalidudu.workers.dev}"
+LIVE="${LIVE:-https://tapstall.zlnew.workers.dev}"
 MARGIN="${MARGIN:-120}"
 TRY_GAP="${TRY_GAP:-300}"
 LOG=.publish-watch.log

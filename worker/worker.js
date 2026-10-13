@@ -1969,7 +1969,7 @@ async function tpl(env, name) {
 }
 async function sendMail(env, to, subject, text) {
   if (!env.EMAIL) return false;
-  await env.EMAIL.send(new EmailMessage('no-reply@simalidudu.workers.dev', to, subject, text));
+  await env.EMAIL.send(new EmailMessage('no-reply@zlnew.workers.dev', to, subject, text));
   return true;
 }
 
