@@ -331,6 +331,11 @@ nk "no raw login code in the ledger payload" 'code=v1\.' "$DASH"
 POST=$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"${MARK#/c/}"'"}' "$ORIGIN/api/mark")
 ckw "the browser POST confirms it" '"status":"paid"' "$POST"
 ckw "and hands back a 15-minute undo link" '/c/v1\.' "$POST"
+# 15 seconds, not zero: `already` is decided by reading the order back, and the write that put
+# it in that state was one request ago. Replayed inside that window the tap is honestly seen as
+# a first one, and re-applying `paid` over `paid` moves nothing \u2014 the same outcome, read from
+# the other side of the consistency window.
+sleep 15
 REPLAY=$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"${MARK#/c/}"'"}' "$ORIGIN/api/mark")
 ckw "a double tap is a no-op, not a double count" '"already":true' "$REPLAY"
 UNDO=$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"$(printf '%s' "$POST" | python3 -c "import sys,json;print(json.load(sys.stdin).get('undo_url','/c/none')[3:])")"'"}' "$ORIGIN/api/mark")
@@ -555,7 +560,16 @@ nk "  · and a staged number is not even readable early" 'ZZ PROBE' "$PUBW"
 ck "a half-typed week is refused, not read as closed" 'both ends' "$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" -d '{"handle":"'"$HANDLE"'","week":[{"open":"09:00"}]}' "$ORIGIN/api/settings")"
 RS=$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" -d '{"handle":"'"$HANDLE"'","week":[],"hours":"'"$HOURS"'"}' "$ORIGIN/api/settings")
 ckw "the week is put back the way it was found, because a check that leaves a store changed has broken something one of its own" 'applied_now|unchanged' "$RS"
-RV2=$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" -d '{"handle":"'"$HANDLE"'"}' "$ORIGIN/api/settings/revert")
+# The queue lives on the store document, and the Worker reads that document through its own
+# cache — so a revert that follows a staged change can arrive at an edge still holding the
+# copy from before it. Reverting an empty queue writes nothing, which is what makes asking
+# again the right response to an empty answer rather than a second mutation.
+RV2=''
+for n in 1 2 3 4; do
+  RV2=$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" -d '{"handle":"'"$HANDLE"'"}' "$ORIGIN/api/settings/revert")
+  printf '%s' "$RV2" | grep -q 'rail_accts' && break
+  sleep 4
+done
 ckw "revert drops the staged number too" 'rail_accts' "$RV2"
 PUB3=$(cfgwait "\"hours\":\"$HOURS\"")
 nk "and the store is left exactly as it was found" 'ZZ PROBE' "$PUB3"
@@ -812,8 +826,19 @@ ckw "a picture on the shop is a soft change, so it lands now" '"logo"' "$SAVED"
 ckw "  · the buyer's config carries the path" "$REF" "$(cfgwait "$REF" 12)"
 DOC2=$(curl -s -m 30 -H "Authorization: Bearer $TOK" "https://api.cloudflare.com/client/v4/accounts/$ACCT/storage/kv/namespaces/$KV/values/store:$HANDLE")
 ckw "  · while the store document stays a document ($(printf '%s' "$DOC2" | wc -c | tr -d ' ') bytes)" '^ok$' "$(printf '%s' "$DOC2" | wc -c | awk '{print ($1 < 60000) ? "ok" : "too big"}')"
-BACK=$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" \
-  -d '{"handle":"'"$HANDLE"'","logo":'"$PREV_LOGO"'}' "$ORIGIN/api/settings")
+# "Leave it as you found it" has to mean as it was and still true. For four releases this
+# restored the logo path read at the start of the run, and the reaper had already deleted the
+# bytes that path named \u2014 so every run handed the store a pointer to nothing, and the shop
+# went on advertising an og:image no crawler can load. Check the file before writing the path back.
+PREV_PATH=$(printf '%s' "$PREV_LOGO" | python3 -c "import sys,json;print(json.loads(sys.stdin.read()) or '')" 2>/dev/null)
+if [[ -n "$PREV_PATH" ]] && [[ "$(code "$ORIGIN$PREV_PATH")" == "200" ]]; then
+  BACK=$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" \
+    -d '{"handle":"'"$HANDLE"'","logo":'"$PREV_LOGO"'}' "$ORIGIN/api/settings")
+else
+  [[ -n "$PREV_PATH" ]] && echo "  · the logo found at the start was already a dead pointer; the shop is left with none"
+  BACK=$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" \
+    -d '{"handle":"'"$HANDLE"'","logo":""}' "$ORIGIN/api/settings")
+fi
 ckw "  · the shop is left exactly as found" '"ok": *true' "$BACK"
 ckw "  · and the file it stopped pointing at is gone, not orphaned" '^404$' "$(code "$ORIGIN$REF")"
 SHIP_A=$(cat pages/admin.html)
@@ -927,7 +952,17 @@ ck "  · one title, not a real one plus a fallback" '^1$' "$(printf '%s' "$PAGE"
 ck "  · canonical points here, absolute" "<link rel=\"canonical\" href=\"$ORIGIN/s/$HANDLE\">" "$PAGE"
 ck "  · a description a preview can use" 'name="description" content="[^"]{40,}"' "$PAGE"
 ck "  · and it is offered to be shown big" 'max-image-preview:large' "$PAGE"
-ck "  · no og:image when the shop has no picture" '^0$' "$(printf '%s' "$PAGE" | grep -c 'property="og:image"')"
+# the picture was taken back off the store minutes ago, and this page is rendered from a
+# cached config with a five-minute shared TTL, so a nonzero count here is the cache rather than
+# a promise broken. Refetch until the big-image tag is gone; if it never goes, the line fails
+# with the last body seen.
+NOIMG=''
+for n in 1 2 3 4 5 6; do
+  NOIMG=$(curl -s -m 30 -A 'facebookexternalhit/1.1' "$ORIGIN/s/$HANDLE?v=n$n$RANDOM")
+  [[ "$(printf '%s' "$NOIMG" | grep -c 'property="og:image"')" == "0" ]] && break
+  sleep 5
+done
+ck "  · no og:image when the shop has no picture" '^0$' "$(printf '%s' "$NOIMG" | grep -c 'property="og:image"')"
 ck "  · the merchant's private columns are not in the bytes" '^0$' "$(printf '%s' "$PAGE" | grep -cE '\"(admin_token|paid_until|secret_hash|rail_accts|pending)\"')"
 ck "the structured data parses, and says the same shop" '^jsonld-ok$' "$(printf '%s' "$PAGE" | WANT="$NAME" python3 -c '
 import os,re,json,sys
