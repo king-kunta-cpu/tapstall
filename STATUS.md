@@ -1921,3 +1921,69 @@ files. `scripts/prod_check.sh` gained two lines that the binding has to permit, 
 run proves it on production; today's KV budget is spent, so those two report `blocked` until the
 00:20 UTC slot and the target is two consecutive 0-failed runs.
 
+## The revocation had a second hole, and the fix had to stop needing memory (2026-10-13, v0.8.7)
+
+The sentence was re-sent: `/c/` links do not check `auth_gen`, so *Revoke* kills sessions and code
+links but not outstanding confirm links. 0.8.6 closed that. This round did the two things the first
+round left open — make the rule un-forgettable, and find out whether `/c/` was the only door.
+
+It was not. `/renew/<token>` is the one credential this product hands out that is not a signed
+capability: `alnumToken(14)` as a KV key, written once at registration, **no expiry, never
+rotated**. Three doors open on it. The plan page (`/renew/<tok>`), which renders the shop's order
+count and GMV. `POST /api/checkout`, which mints a gateway payment intent against the store with a
+caller-chosen length (30 to 1460 days). And `POST /api/renew-ref`, a public write that prepends a
+payment reference to `ref:<handle>` — the list the owner reconciles real EcoCash transfers
+against, on the exact reasoning that a sender number and a cents-suffix identify a payer. Anyone
+holding a retired renew link could add to that list, and *Revoke* could not stop them, because
+nothing that reads the token consulted the generation. The disclosure is the small part; the
+reference list is a trust channel, and it was unauthenticated after the one action whose whole
+purpose is "someone has my links".
+
+**The mint refuses now.** `core.js` has `BOUND_CAP_ACTIONS = ['mark','proof','sess','ops']`, and
+`issueCap` throws `cap_unbound` for any of them without `g`. Not a convention, because a convention
+is what failed: the field was easy to omit at a fifth call site, and every test in the repo that
+exercises the door would have gone on passing. A whitelist rather than "always require it", so the
+rule cannot quietly turn into a blanket and cost the next non-authority credential its simplicity.
+
+**The renew link is judged by the same function, not a copy of it.** `renewOk(rec, store)` reads
+`rec.g` and, if there is none, the record's `made` date, then calls `capGenOk` — the rule 0.8.6 put
+in the core for exactly this reason. No new semantics, so nothing to drift. A record with no `g`
+from before the release is honoured if it was minted after the shop's last revoke and closed if it
+predates it; a store that never pressed Revoke keeps every link it has ever been sent, which is
+almost all of them. No cliff, same as 0.8.6.
+
+**And the link is reissued, because the promise had to be true.** The refusal copy says the current
+link is on the plan card in the dashboard, which would have been a lie while `st.renew_url` kept
+pointing at the dead token. So `rotateRenewLink` deletes the old record, mints a fresh one under the
+new generation and moves the URL — called at every one of the four sites that bump `auth_gen`
+(dashboard revoke, owner-verified PIN reset, the console's `reset_pin`, the console's `revoke`). The
+generation check still governs the legacy records that rotation cannot reach. Erasure plus distrust,
+each covering what the other cannot.
+
+**A page that cannot draw a fact is not handed the fact.** `confirmPage` got the same treatment as
+the API: the refusal sets `revoked: true` inside the shape the template already knows, and the floor
+path renders "Link closed" with no form in it. For renew, the skin is used only if it actually
+carries a `state === 'closed'` branch; the KV copy is still the 0.8.5 page until `--templates` runs,
+and an out-of-date template would have answered a revocation with the generic "link is old" panel.
+The sniff means the floor takes that traffic instead, in the right words, today.
+
+Left alone on purpose. An attempt on a closed link is not audit-logged: the cap is validly signed, so
+its holder may retry as often as the expiry allows, and each attempt is a KV write against the
+shop's 1,000 a day; routing it through `authFail` instead would let a stranger freeze the merchant's
+own dashboard at twelve tries. A refusal is a fact about a link, not evidence about a person. What a
+live renew link discloses (order count, GMV, plan, days left) also stays, because it is the page's
+job to show a shop its own plan, and the fix was to make it revocable rather than to redesign it.
+
+Checked: 251/251 (core 88 · live 105 · pages 48 · limits 10). Mutated, to prove the guard has teeth
+— drop `g` from one production mint: `worker.js` still compiles, the scan fails and 49 live tests
+fail. Replace one renew door's check with `if (false)`: live fails. Delete the refusal from
+`issueCap`: core fails. Restored, the suite is green again. Seven new `__selftest` keys (`cap_bound_*`,
+`cap_stale_*`, `cap_current_*`, `cap_mint_refuses_unbound`, `cap_legacy_*`, `renew_link_revocable`)
+cost no KV writes, so `prod_check.sh` reads them off the deployed Worker on a day the account is
+silent — which is the only way to verify a revocation fix at 20:00 UTC on the day the budget ran out.
+
+One correction recorded here rather than left implicit: the free-plan reset in the quota note is
+midnight UTC (`secsToMidnightUTC`), and the `retry_in_sec` the endpoint reported today (42,765 s)
+matches a call made at 12:07 UTC, not the 19:27 I first converted it against. The code was right and
+my arithmetic was not; the nightly slot at `20 0,6,12,18` remains the right place for write-gated
+checks, since 00:20 UTC is the first minute the budget is open again.

@@ -315,6 +315,13 @@ verified ZW/SA tariffs) but it is now a **default, not the whole answer**:
   No cliff for the links already in buyers' hands: a cap with no generation is honoured if the order
   it points at moved after the revoke, refused if it predates it, and anything it cannot date is
   refused (v0.8.6).
+- **No mint can forget it, and the renew link is bound the same way.** The generation check now
+  lives in `issueCap` itself: an unbound `mark`, `proof`, `sess` or `ops` capability is refused at
+  the mint, so the defect cannot return as a missing field. Following the same thread found a second
+  link that outlived its revocation — `/renew/<token>`, a KV key with no expiry, which opened the plan
+  page, minted a checkout intent against the shop and filed a payment reference into the list the
+  owner reconciles by. It is judged by the same rule, Revoke reissues it, and the three doors answer
+  404 or 410 with a sentence pointing at the dashboard, where the working link genuinely is (v0.8.7).
 
 An invalid description at sign-up becomes `cash` rather than a rejected
 registration: a merchant who never opens the shop is worse than one whose slip

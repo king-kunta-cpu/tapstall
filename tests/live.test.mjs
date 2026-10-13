@@ -657,7 +657,7 @@ test('renew links are path-safe: a token can never contain a character the route
 });
 
 test('renew link resolves and mints a checkout even with no gateway configured', async () => {
-  const renewPath = new URL(store.renew_url, 'https://tapstall.test').pathname;
+  const renewPath = '/renew/' + renewToken();   // the live link, not the one captured at sign-up
   const page = await call(renewPath);
   assert.equal(page.status, 200, page.text.slice(0, 120));
   assert.ok(page.text.includes('Renew'), 'renew page renders');
@@ -709,7 +709,15 @@ test('cron suspends an expired store, blocks orders, then reinstates on payment'
 const SECRET = 'test-secret';
 const LOCKMAX = 12;
 let opsCookie = null;
-const renewToken = () => (store.renew_url || '').split('/').pop();
+/* The token a merchant actually holds is the one their plan card shows — and since 0.8.7, Revoke
+   retires that string and mints a new one, because a credential the kill switch cannot reach is a
+   hole in the kill switch. A fixture that kept the value from registration would be testing a link
+   the product itself has closed, so the current doc is read instead. */
+const renewToken = () => {
+  const raw = env.STORES._map.get('store:mamatoe');
+  const st = raw ? JSON.parse(raw.value) : null;
+  return String((st && st.renew_url) || store.renew_url || '').split('/').pop();
+};
 
 test('the money pages are generated from the same kit and carry their data hook', () => {
   for (const name of ['confirm', 'renew', 'onboard', 'admin', 'ops']) {
@@ -1303,7 +1311,13 @@ test('selftest reports green bindings, templates and pricing', async () => {
   assert.ok(Number(t.pricing.pay_now) > 0, 'pricing computed');
   assert.equal(t.secret_leak_check, true, 'publicStore strips secrets');
   for (const k of ['cap_roundtrip', 'cap_rejects_tamper', 'cap_rejects_other_secret', 'cap_rejects_expired',
-    'settings_rejects_bad', 'money_change_is_held', 'money_change_lands_late', 'masking_hides_values']) {
+    'settings_rejects_bad', 'money_change_is_held', 'money_change_lands_late', 'masking_hides_values',
+    // 0.8.7: the generation binding, asserted through the endpoint so it is checked on whatever
+    // bundle is actually deployed rather than on the source in this repo. These cost no KV writes,
+    // so they answer on a day the account has spent its 1,000 and every other line here is quiet.
+    'cap_bound_roundtrip', 'cap_stale_generation_refused', 'cap_current_generation_honoured',
+    'cap_mint_refuses_unbound', 'cap_legacy_judged_by_time', 'cap_legacy_refused_when_older',
+    'renew_link_revocable']) {
     assert.equal(t[k], true, 'selftest.' + k + ' = ' + JSON.stringify(t[k]));
   }
   assert.ok(t.scheduled && typeof t.scheduled.checked === 'number', 'cron body ran: ' + JSON.stringify(t.scheduled_error || t.scheduled));
@@ -3111,7 +3125,23 @@ test('a code that lands while the ledger is catching up still reaches the ledger
  * holding links minted by the previous release, so a link with no generation is judged by
  * whether the order it points at moved after the revoke.
  */
-const { issueCap } = await import('../worker/core.js');
+const { verifyCap } = await import('../worker/core.js');
+
+/* The pre-0.8.6 wire shape: the same signature over a payload with no `g`. It has to be built by
+   hand now, because the mint refuses to produce it — that refusal is 0.8.7 — and the migration
+   path still has to be tested against a token a real 0.8.5 Worker would have handed out. Each use
+   asserts the fixture verifies and carries no generation, so this cannot pass by producing a
+   string no door would ever accept. */
+async function legacyCap(secret, payload, ttlSec) {
+  const exp = Math.floor(Date.now() / 1000) + (ttlSec || 3600);
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const tag = Buffer.from(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(exp + '.' + body)))
+    .toString('base64url').replace(/=+$/, '').slice(0, 43);
+  return `v1.${exp}.${body}.${tag}`;
+}
+
 
 async function newShop(handle) {
   const r = await call('/api/register', {
@@ -3194,8 +3224,9 @@ test('0.8.6 no cliff: a pre-release link with no generation is judged by time', 
   gen.afterRevoke = await shopOrder(gen.sh, '196.7.0.3');
   assert.ok(Date.parse(gen.afterRevoke.order.at) > Number.parseInt(shopDoc('genbind').auth_gen, 36),
     'the order is newer than the last revoke — that is the whole reason a link with no generation is honourable here');
-  const legacy = await issueCap('test-secret', { a: 'mark', h: 'genbind', id: gen.afterRevoke.order.id, s: 'paid' }, 3600);
-  assert.equal(bodyOf(legacy).g, undefined, 'the hand-minted cap really is a pre-release shape');
+  const legacy = await legacyCap('test-secret', { a: 'mark', h: 'genbind', id: gen.afterRevoke.order.id, s: 'paid' });
+  assert.ok(await verifyCap('test-secret', legacy), 'the hand-built cap is a real one, not a string');
+  assert.equal(bodyOf(legacy).g, undefined, 'and it really is the pre-release shape: no generation');
   const r = await call('/api/mark', { method: 'POST', body: { cap: legacy } });
   assert.equal(r.status, 200, r.text.slice(0, 200));
   assert.equal(r.json.status, 'paid');
@@ -3204,7 +3235,8 @@ test('0.8.6 no cliff: a pre-release link with no generation is judged by time', 
 
 test('0.8.6 …and that same link dies the moment the shop revokes again', async () => {
   const older = await shopOrder(gen.sh, '196.7.0.4');
-  const legacy = await issueCap('test-secret', { a: 'mark', h: 'genbind', id: older.order.id, s: 'paid' }, 3600);
+  const legacy = await legacyCap('test-secret', { a: 'mark', h: 'genbind', id: older.order.id, s: 'paid' });
+  assert.ok(await verifyCap('test-secret', legacy), 'a real 0.8.5 cap, built the way that release built it');
   const again = await call('/api/revoke', {
     method: 'POST', cookie: (await loginWithPin('genbind', gen.sh.pin)).cookie, body: { handle: 'genbind' },
   });
@@ -3250,4 +3282,140 @@ test('0.8.6 the page does not offer a button the API has already refused', async
   assert.match(floor.text, /closed its payment links/);
   assert.ok(!/action="\/api\/mark"/.test(floor.text), 'a closed link must not render a form that cannot work');
   assert.ok(!/fetch\("\/api\/mark"/.test(floor.text), 'nor an auto-send that will be refused');
+});
+
+
+/* ---------------------------------------------------------------------------------------------
+ * v0.8.7 — the renew link belongs to a generation too, and no mint can forget one.
+ *
+ * Following the 0.8.6 thread to its end found the same hole in a second door, and the second door
+ * is the one that reaches the money: `/renew/<token>` is a KV key with no expiry that opens the
+ * plan page, mints a checkout intent against the shop, and files a payment reference into the list
+ * the owner reconciles real payments against. Revoke moved `auth_gen` and none of that noticed.
+ * A credential a kill switch cannot reach is a hole in the kill switch.
+ */
+const renewTok = (handle) => {
+  const raw = env.STORES._map.get('store:' + handle);
+  const st = raw ? JSON.parse(raw.value) : null;
+  return String((st && st.renew_url) || '').split('/renew/')[1] || '';
+};
+const renewRec = (tok) => {
+  const raw = env.STORES._map.get('renew:' + tok);
+  return raw ? JSON.parse(raw.value) : null;
+};
+const txCount = () => [...env.STORES._map.keys()].filter((k) => k.startsWith('tx:')).length;
+const refsFor = (handle) => {
+  const raw = env.STORES._map.get('ref:' + handle);
+  return raw ? JSON.parse(raw.value) : [];
+};
+
+const rg = {};
+
+test('0.8.7 a renew link is minted with the generation it was issued under', async () => {
+  rg.sh = await newShop('renewgen');
+  rg.tok = renewTok('renewgen');
+  assert.ok(rg.tok && rg.tok !== 'undefined', 'the welcome payload carries a renew link: ' + rg.tok);
+  const rec = renewRec(rg.tok);
+  assert.ok(rec, 'the record is on the books');
+  assert.equal(rec.handle, 'renewgen');
+  assert.equal(rec.g, '0', 'a shop that has never revoked is on generation zero');
+  assert.ok(Number.isFinite(Number(rec.made)) && Number(rec.made) > 0, 'and it carries the date it was minted, which is what an older link is judged by');
+
+  const page = await call('/renew/' + rg.tok);
+  assert.equal(page.status, 200, page.text.slice(0, 140));
+  const co = await call('/api/checkout', { method: 'POST', body: { token: rg.tok, days: 365 } });
+  assert.ok(co.status === 200 || co.status === 503, 'a live link still mints an intent: ' + co.status);
+  if (co.json.tx_ref) assert.ok(env.STORES._map.has('tx:' + co.json.tx_ref), 'and the intent is on the books');
+  const filed = await call('/api/renew-ref', { method: 'POST', body: { token: rg.tok, reference: 'GEN-REAL-1', amount: 60 } });
+  assert.equal(filed.status, 200, filed.text.slice(0, 160));
+  assert.equal(refsFor('renewgen').length, 1, 'the shop filed one reference while the link was live');
+});
+
+test('0.8.7 Revoke erases the renew record, so every door it opened stops answering', async () => {
+  const before = txCount();
+  const rv = await call('/api/revoke', { method: 'POST', cookie: rg.sh.cookie, body: { handle: 'renewgen' } });
+  assert.equal(rv.status, 200, rv.text.slice(0, 160));
+  assert.match(rv.json.note, /renew link/, 'the note names it, because a lever that says less than it does is a surprise waiting: ' + String(rv.json.note).slice(0, 110));
+  assert.notEqual(renewTok('renewgen'), rg.tok, 'and the dashboard link was reissued, so the promise on the closed page is one the product keeps');
+  assert.equal(renewRec(rg.tok), null, 'the old record is gone: erasure, not distrust — there is nothing left to honour or refuse');
+
+  const page = await call('/renew/' + rg.tok);
+  assert.match(page.text, /no longer on the books|closed its (payment )?links/,
+    'and the answer a shop gets on the retired link is the truth about the link, not a bill: ' + page.text.slice(0, 200));
+
+  const co = await call('/api/checkout', { method: 'POST', body: { token: rg.tok, days: 365 } });
+  assert.equal(co.status, 404, 'a payment intent cannot be minted on an erased link: ' + co.text.slice(0, 120));
+  assert.equal(co.json.error, 'unknown renew token');
+  assert.equal(txCount(), before, 'and nothing was written trying');
+
+  const file = await call('/api/renew-ref', { method: 'POST', ip: '196.7.9.2', body: { token: rg.tok, reference: 'BOGUS-STRANGER-1', amount: 60 } });
+  assert.equal(file.status, 404, file.text.slice(0, 160));
+  assert.match(file.json.error, /not on the books/, 'the write is closed too, with the same words the page uses');
+  assert.equal(refsFor('renewgen').length, 1, 'and the list the shop reconciles against still holds only its own entry');
+  assert.equal(refsFor('renewgen')[0].ref, 'GEN-REAL-1');
+});
+
+test('0.8.7 the reissued link works at once, so this is a revocation and not a freeze', async () => {
+  const st = JSON.parse(env.STORES._map.get('store:renewgen').value);
+  const fresh = renewRec(renewTok('renewgen'));
+  assert.equal(fresh.g, String(st.auth_gen), 'the new record carries the new generation, so it dies with the next revoke exactly as this one did');
+  assert.equal((await call('/renew/' + renewTok('renewgen'))).status, 200, 'the plan card’s link opens');
+  const filed = await call('/api/renew-ref', { method: 'POST', ip: '196.7.9.3', body: { token: renewTok('renewgen'), reference: 'GEN-REAL-2' } });
+  assert.equal(filed.status, 200, filed.text.slice(0, 160));
+  assert.equal(refsFor('renewgen').length, 2, 'and the shop can file against its own store again in the same minute');
+});
+
+test('0.8.7 a link minted by the previous release is judged by its date, like a cap', async () => {
+  // There is no `g` on a record written before this release, and deleting every merchant's renew
+  // link under their feet is not safety. So the date decides: made before the last revoke means
+  // closed, made after means the link stands. Refused here, and honoured there — one rule, the
+  // same one `capGenOk` applies to a signed link, with no second copy to drift.
+  const st = JSON.parse(env.STORES._map.get('store:renewgen').value);
+  const revokedAt = Number.parseInt(st.auth_gen, 36);
+  const plant = (name, rec) => env.STORES._map.set('renew:' + name, { value: JSON.stringify(rec) });
+
+  plant('legacyold', { handle: 'renewgen', made: revokedAt - 864e5 });
+  const dead = await call('/renew/legacyold');
+  assert.equal(dead.status, 200, 'the skin has a panel for this state, so the skin is used: ' + dead.text.slice(0, 120));
+  assert.match(dead.text, /"state":\s*"closed"/, 'and it is handed the fact, not the generic "link is old" story');
+  assert.match(dead.text, /closed its payment links/);
+  const deadWrite = await call('/api/renew-ref', { method: 'POST', ip: '196.7.9.4', body: { token: 'legacyold', reference: 'STALE-1' } });
+  assert.equal(deadWrite.status, 410, 'the write behind it is refused with the code, not just the copy: ' + deadWrite.text.slice(0, 120));
+  assert.equal(deadWrite.json.final, true);
+  assert.equal(refsFor('renewgen').length, 2, 'nothing was filed');
+
+  plant('legacynew', { handle: 'renewgen', made: Date.now() });
+  const alive = await call('/renew/legacynew');
+  assert.equal(alive.status, 200, 'made after the revoke: there is nothing this link is stale against');
+  assert.match(alive.text, /"state":\s*(null|"paid"|undefined)|Renew for a year|days left/, 'and the page draws the store, not the closure panel');
+  const aliveWrite = await call('/api/renew-ref', { method: 'POST', ip: '196.7.9.5', body: { token: 'legacynew', reference: 'STALE-2' } });
+  assert.equal(aliveWrite.status, 200, aliveWrite.text.slice(0, 120));
+  assert.equal(refsFor('renewgen').length, 3, 'so it files, like any link the shop has not closed');
+  env.STORES._map.delete('renew:legacyold'); env.STORES._map.delete('renew:legacynew');
+});
+
+test('0.8.7 a closed link on the floor has no button on it, and no sentence that is not true', async () => {
+  const tok = 'skinprobe';
+  env.STORES._map.set('renew:' + tok, { value: JSON.stringify({ handle: 'renewgen', made: Date.now(), g: 'gen-then' }) });
+  const tpl = env.STORES._map.get('tpl:renew');
+  env.STORES._map.delete('tpl:renew');
+  const floor = await call('/renew/' + tok);
+  assert.equal(floor.status, 410, 'a state the skin cannot draw is answered by the floor, in the real code');
+  assert.match(floor.text, /closed its links/, 'with the same words, so a screenshot cannot contradict the API');
+  assert.ok(!/id=pay|getElementById\('pay'\)|Pay and /.test(floor.text), 'and a closed link renders no way to pay through it');
+  // The erased-token answer, with the skin still down: it used to point at the welcome email,
+  // which is precisely the link a revocation kills. Same test, one deleted template, both facts.
+  const goneFloor = await call('/renew/nothingsuchtoken');
+  assert.equal(goneFloor.status, 404, 'nothing on the books and no skin, so the floor owns the answer');
+  assert.match(goneFloor.text, /plan card in your/, 'the dashboard is named first');
+  assert.ok(!/welcome email/.test(goneFloor.text), 'and the retired sentence is gone, not left alongside the new one');
+  env.STORES._map.set('tpl:renew', tpl);
+  env.STORES._map.delete('renew:' + tok);
+
+  // With the skin back up, the same unknown token is drawn by the page: a panel of its own, saying
+  // the same thing about where the working link is.
+  const gone = await call('/renew/nothingsuchtoken');
+  assert.equal(gone.status, 200, 'the skin still draws its unknown-token panel: ' + gone.text.slice(0, 120));
+  assert.match(gone.text, /no longer on the books/);
+  assert.match(gone.text, /dashboard/);
 });

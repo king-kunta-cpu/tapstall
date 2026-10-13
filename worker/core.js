@@ -259,6 +259,19 @@ export function proofSuperseded(order, nonce) {
   return !cleanProof(b.proof) && !cleanPayer(b.payer, 'loose');
 }
 
+/**
+ * The renew link is the one credential this product hands out that is not a signed
+ * capability: a random token as a KV key, with no expiry of its own, opening the plan page,
+ * the checkout intent and the "I paid, here is the reference" write. It is judged by the rule
+ * below, not by a second opinion that can drift: minted after the last revoke, or closed. A
+ * record from before any revoke stands, which is every store that never pressed Revoke.
+ */
+export function renewOk(rec, store) {
+  if (!rec || typeof rec !== 'object' || !store) return false;
+  const made = Number(rec.made) || Date.parse(String(rec.at || '')) || 0;
+  return capGenOk(rec, store, { at: made ? new Date(made).toISOString() : '' });
+}
+
 /* A credential that outlives the authority which minted it is not a credential.
    `auth_gen` is the generation every session and every payment-code link is bound to;
    the one-tap confirm link was the last thing in the product that ignored it, which is
@@ -1034,8 +1047,23 @@ export function randomKey(bytes = 16) {
   return b64u(b);
 }
 
+/**
+ * Every action a capability can perform is authority, so every one of them names the
+ * generation that issued it. A whitelist rather than a rule of thumb, because the cost of
+ * forgetting one is the bug this prevents: a mark cap without `g` stayed a live write for
+ * days after its merchant revoked it (0.8.6), and a mint site that drops the field is
+ * invisible to any test that only asks the door to work. So the mint refuses instead.
+ */
+export const BOUND_CAP_ACTIONS = ['mark', 'proof', 'sess', 'ops'];
+export function capNeedsGen(action) {
+  return BOUND_CAP_ACTIONS.indexOf(String(action || '')) !== -1;
+}
+
 /** Signed, stateless capability: `v1.<expiry>.<payload>.<tag>`. */
 export async function issueCap(secret, payload, ttlSec) {
+  if (payload && typeof payload === 'object' && capNeedsGen(payload.a)
+    && (payload.g === undefined || payload.g === null || payload.g === ''))
+    throw new Error('cap_unbound: a ' + payload.a + ' capability must carry the store generation (g)');
   const exp = Math.floor(Date.now() / 1000) + Math.max(300, Math.floor(ttlSec || 3600));
   const body = b64u(new TextEncoder().encode(JSON.stringify(payload)));
   return `v1.${exp}.${body}.${await hmacSig(secret, exp + '.' + body)}`;

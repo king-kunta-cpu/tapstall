@@ -175,15 +175,16 @@ test('slug + handle validation', () => {
 /* ---------- capability tokens: the thing that replaced the URL master key ---------- */
 const SEC = 'unit-secret';
 test('a capability round-trips and carries its payload', async () => {
-  const cap = await C.issueCap(SEC, { a: 'mark', h: 'shop', id: 'o9', s: 'paid' }, 900);
+  const cap = await C.issueCap(SEC, { a: 'mark', h: 'shop', id: 'o9', s: 'paid', g: 'g1' }, 900);
   assert.equal(cap.split('.').length, 4, 'v1.<exp>.<payload>.<tag>');
   const p = await C.verifyCap(SEC, cap);
   assert.deepEqual({ a: p.a, h: p.h, id: p.id, s: p.s }, { a: 'mark', h: 'shop', id: 'o9', s: 'paid' });
   assert.ok(p.exp >= Math.floor(Date.now() / 1000) + 800, 'expiry attached');
+  assert.equal(p.g, 'g1', 'and the payload keeps the generation it was minted under, byte for byte');
 });
 
 test('a capability dies on tamper, on expiry, on another secret and on garbage', async () => {
-  const cap = await C.issueCap(SEC, { a: 'sess', h: 'shop' }, 900);
+  const cap = await C.issueCap(SEC, { a: 'sess', h: 'shop', g: 'g1' }, 900);
   assert.equal(await C.verifyCap(SEC, cap.slice(0, -2) + 'xy'), null, 'edited tag');
   const b64u = (o) => Buffer.from(JSON.stringify(o)).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   const seg = cap.split('.'); seg[2] = b64u({ a: 'sess', h: 'other-shop' });
@@ -197,7 +198,7 @@ test('a capability dies on tamper, on expiry, on another secret and on garbage',
 });
 
 test('a minimum TTL keeps a link usable even if a caller asks for seconds', async () => {
-  const cap = await C.issueCap(SEC, { a: 'mark' }, 1);
+  const cap = await C.issueCap(SEC, { a: 'mark', g: 'g1' }, 1);
   const p = await C.verifyCap(SEC, cap);
   assert.ok(p && p.exp - Math.floor(Date.now() / 1000) >= 290, 'floored at 5 minutes');
 });
@@ -1112,4 +1113,56 @@ test('capGenOk: only whole generations, in either spelling', () => {
     'the legacy path is case-tolerant, because it only has to read a number');
   assert.equal(C.capGenOk({ g: '' }, genStore('0'), { at: iso(Date.now()) }), true, 'an empty g is the legacy case, not the empty-generation case');
   assert.equal(C.capGenOk({}, genStore('0'), { at: 'not a date' }), true, 'a never-revoked store never needs the date at all');
+});
+
+
+/* --------------------------------------------------------------------------- 0.8.7
+ * A mint that forgets the generation is not a style slip: it is the 0.8.6 bug returning by
+ * omission, and no test that only exercises the door can see it. So the refusal lives in the
+ * mint, where forgetting is impossible rather than discouraged. The renew link is the other
+ * credential that answers to `auth_gen`, and it is judged by the same function, because a
+ * second rule is a second opinion that can drift.
+ */
+test('an authority-bearing capability cannot be minted without the generation', async () => {
+  assert.deepEqual(C.BOUND_CAP_ACTIONS, ['mark', 'proof', 'sess', 'ops'],
+    'every capability kind this product mints that can change something');
+  for (const a of C.BOUND_CAP_ACTIONS) {
+    await assert.rejects(() => C.issueCap(SEC, { a, h: 'shop', id: 'o1' }, 600), /cap_unbound/,
+      a + ': an unbound mint must fail loudly, not ship a link outliving its revocation');
+    for (const g of [undefined, null, '']) {
+      await assert.rejects(() => C.issueCap(SEC, { a, h: 'shop', id: 'o1', g }, 600), /cap_unbound/,
+        a + ': ' + JSON.stringify(g) + ' is not a generation');
+    }
+    const cap = await C.issueCap(SEC, { a, h: 'shop', id: 'o1', g: 'g7' }, 600);
+    assert.equal((await C.verifyCap(SEC, cap)).g, 'g7', a + ': with the field the mint is normal');
+  }
+  // A whitelist, so the rule cannot quietly become "every cap must carry a generation": a
+  // credential that changes nothing has no authority to bind.
+  assert.equal(C.capNeedsGen('renew'), false);
+  assert.equal(C.capNeedsGen(''), false);
+  assert.equal(C.capNeedsGen(undefined), false);
+  const free = await C.issueCap(SEC, { a: 'renew', h: 'shop', id: 'o1' }, 600);
+  assert.ok(await C.verifyCap(SEC, free), 'an unbound non-authority cap still mints and verifies');
+});
+
+test('the renew link answers to the same rule as a signed capability', () => {
+  const now = Date.now();
+  const gen = now.toString(36);
+  assert.equal(C.renewOk({ made: now, g: gen }, { auth_gen: gen }), true, 'minted under the live generation');
+  assert.equal(C.renewOk({ made: now, g: 'older' }, { auth_gen: gen }), false,
+    'a stale generation is closed whatever the clock says, because the clock is not the authority');
+  assert.equal(C.renewOk({ made: now - 864e5, g: 'older' }, { auth_gen: gen }), false,
+    'and the date cannot rescue it');
+  assert.equal(C.renewOk({ made: now - 864e5 }, { auth_gen: '0' }), true,
+    'a shop that never revoked has nothing for its link to be too old for — no cliff');
+  assert.equal(C.renewOk({ made: 1000 }, { auth_gen: (now - 60000).toString(36) }), false,
+    'a pre-0.8.7 link made before the revoke dies with it, which is what Revoke means');
+  assert.equal(C.renewOk({ made: now }, { auth_gen: (now - 864e5).toString(36) }), true,
+    'and one made after it stands');
+  assert.equal(C.renewOk({ made: now }, { auth_gen: 'zz!not36' }), false,
+    'a generation that is not a date counts as one that moved');
+  assert.equal(C.renewOk(undefined, { auth_gen: gen }), false, 'no record, no link');
+  assert.equal(C.renewOk({ made: now, g: gen }, null), false, 'no store, no verdict of innocent');
+  assert.equal(C.renewOk({ g: 'x' }, { auth_gen: 'x' }), true,
+    'a record with no date is still judged on its generation, which is the stronger evidence');
 });

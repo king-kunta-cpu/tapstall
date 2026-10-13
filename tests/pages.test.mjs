@@ -819,3 +819,55 @@ test('a closed confirm link is drawn as closed, in both halves', () => {
   assert.match(page, /u\.why \|\| u\.error/, 'and so does the undo tap');
   assert.ok(built === built, 'the built page carries the same branch (it is a copy with the kit inlined)');
 });
+
+/* ---------------------------------------------------------------------------------------------
+ * 0.8.7 — three scans over the source, for the one rule that has to hold everywhere: a credential
+ * that carries authority belongs to the generation that minted it. Each is a scan rather than a
+ * behaviour test because the failure being guarded is the absence of a field. A behaviour test
+ * cannot see an absent field in a file it never opens; a scan can, and it is the same idiom the
+ * sender-number rule ended on in 0.8.4 — one place to look, so a fifth opinion has to be
+ * deliberate rather than accidental.
+ */
+test('every authority-bearing capability the Worker mints names the generation it was issued under', () => {
+  const chunks = worker.split('issueCap(').slice(1).map((c) => c.slice(0, 300));
+  const authority = chunks.filter((c) => /a:\s*['"](mark|proof|sess|ops)['"]/.test(c));
+  assert.ok(authority.length >= 9,
+    'the scan found ' + authority.length + ' mints of something with authority; if the product has fewer than nine, the list of what matters changed and this test should be read, not adjusted');
+  const unbound = authority.filter((c) => !/\bg:/.test(c));
+  assert.deepEqual(unbound.map((c) => c.slice(0, 100).replace(/\s+/g, ' ')), [],
+    'a mint without `g` is a link that outlives its own revocation');
+  // One mint deliberately does not carry the field, because it exists to prove the mint refuses:
+  // it goes through a named variable so the scan can see the intent instead of guessing at it.
+  assert.match(worker, /const orphan = \{ a: 'mark'[^\n]*\n[^\n]*cap_mint_refuses_unbound = await issueCap\(k, orphan, 600\)/,
+    'the selftest keeps exactly one unbound mint, and says why');
+  // A mint whose payload is a variable is the one shape this scan cannot read, so there is exactly
+  // one in the file and it is the probe. Anything else that starts hiding a payload behind a name
+  // has to be pointed at deliberately, which is the whole purpose of counting them.
+  const byVariable = chunks.filter((c) => !/a:/.test(c));
+  assert.equal(byVariable.length, 1, 'mints with no literal action: ' + byVariable.length);
+  assert.match(byVariable[0], /^k, orphan, 600\)/, 'the selftest probe, and nothing else');
+});
+
+test('every door a renew token opens checks the token against the generation', () => {
+  const opens = [];
+  let at = -1;
+  while ((at = worker.indexOf("STORES.get('renew:'", at + 1)) !== -1) opens.push(worker.slice(at, at + 900));
+  assert.equal(opens.length, 3, 'the plan page, the checkout intent and the reference write, no more and no fewer: ' + opens.length);
+  for (const o of opens)
+    assert.match(o, /renewOk\(/, 'a renew read that never consults the rule is a link Revoke cannot close');
+  assert.equal((worker.match(/await rotateRenewLink\(env, st\)/g) || []).length, 4,   // 4 call sites, not counting the definition
+    'and every site that moves the generation reissues the link, so "the current one is in your dashboard" is a fact and not a hope');
+});
+
+test('the closed state is decided once and drawn by both halves of the renew door', () => {
+  assert.match(worker, /state:\s*closed \? 'closed' : null/, 'the page is handed a state it can switch on');
+  assert.match(worker, /why:\s*closed \? RENEW_CLOSED_WHY : null/, 'and the sentence, from the same constant the API answers with');
+  const built = page('renew');
+  assert.match(built, /state === ['"]closed['"]/, 'the shipped page has a branch for it');
+  assert.match(src('renew'), /state === ['"]closed['"]/, 'and so does the authored one, or the built copy is lying about the source');
+  assert.match(worker, /!\/state === \['"\]closed\['"\]\/\.test\(custom\)/,
+    'the sniff that decides whether a skin may be handed the fact matches the page text exactly — an out-of-date template gets the floor instead of a blank card');
+  assert.match(worker, /const RENEW_CLOSED_WHY = 'This shop has closed its payment links/,
+    'in the shop’s own words: what happened, that nothing moved, and where the working link is');
+});
+

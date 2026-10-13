@@ -22,7 +22,7 @@ import {
   IMG_TARGET_BYTES,
   cleanProof, cleanPayer, proofNoun, proofAsk, PROOF_MODES, notifyText,
   proofAccept, proofOpen, proofUsed, proofSuperseded, proofVoid, PROOF_WINDOW_SEC, PROOF_WRITES_MAX,
-  issueCap, verifyCap, capGenOk, randomKey, validateSettings, stageSettings, applyPending, maskField,
+  issueCap, verifyCap, capGenOk, renewOk, randomKey, validateSettings, stageSettings, applyPending, maskField,
   newTxRef, TX_WINDOW_SEC, payfastSignedOk, txMatches,
   seoFacts, seoHead, seoJsonLdTag, ROBOTS_TXT, sitemapXml, GUIDES, guideOf,
   shareCopy, hookAuditKey, hookHourStamp,
@@ -30,7 +30,7 @@ import {
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '0.8.6';
+const VERSION = '0.8.7';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 const MAX_ORDERS_KEPT = 200;
@@ -1086,7 +1086,10 @@ async function register(req, url, env) {
   const pin = genPin();
   st.pin = await pinRecord(pin);
   await env.STORES.put('store:' + handle, JSON.stringify(st));
-  await env.STORES.put('renew:' + renewToken, JSON.stringify({ handle, made: Date.now() }));
+  // `g` because the link must die with the authority that issued it: `made` is what a legacy
+  // record is judged by, and a record with neither is the hole the Revoke was meant to close.
+  await env.STORES.put('renew:' + renewToken,
+    JSON.stringify({ handle, made: Date.now(), g: String(st.auth_gen || '0') }));
   const products = await loadProducts(st, env);          // cache honoured; a menu edit is applied after it, so it shows at once
   const err = st.feed_cache && st.feed_cache.error;
   if (st.owner_email) {
@@ -1181,6 +1184,12 @@ async function checkout(req, url, env) {
   const b = await req.json().catch(() => null) || {};
   const rec = await env.STORES.get('renew:' + String(b.token || ''), 'json');
   if (!rec) return json({ ok: false, error: 'unknown renew token' }, 404);
+  /* Refused before the write, so a dead link cannot reach the gateway carrying someone else's
+     shop name, and cannot spend the store's KV budget on the attempt either. */
+  const cSt = await getStore(env, rec.handle);
+  if (!cSt) return json({ ok: false, error: 'store not found' }, 404);
+  if (!renewOk(rec, cSt))
+    return json({ ok: false, error: 'links_revoked', final: true, why: RENEW_CLOSED_WHY }, 410);
   const days = clamp(Number(b.days) || 365, 30, 1460);
   const amount = round2(PRICE_USD * (days / 365));
   // The reference is random and the record carries the terms: a ref built from the
@@ -1215,6 +1224,12 @@ async function renewRef(req, env) {
   const b = await readBody(req);
   const rec = await env.STORES.get('renew:' + String(b.token || ''), 'json');
   if (!rec) return json({ ok: false, error: 'that renew link is not on the books any more — the current one is inside your dashboard' }, 404);
+  // A public write that a token alone authorises, into the list a shop reconciles real payments
+  // against. Someone holding a link the shop closed must not be able to add to it, so the link
+  // is checked before anything else is read and before anything is filed.
+  if (!renewOk(rec, await getStore(env, rec.handle)))
+    return json({ ok: false, error: 'links_revoked', final: true,
+      why: 'This shop has closed its links, so nothing can be filed through this one. The current link is inside your dashboard, or paste the reference to the number on your store page.' }, 410);
   const ref = String(b.reference || '').trim().slice(0, 80);
   if (ref.length < 3) return json({ ok: false, error: 'paste the payment reference (at least 3 characters)' }, 422);
   const key = 'ref:' + rec.handle;
@@ -1378,15 +1393,32 @@ async function runCron(env) {
   return out;
 }
 
+// What a closed link says, once, for all three doors it used to open. It names the reason (the
+// shop did this, on purpose), states that nothing moved, and says where the working link is,
+// because unlike a buyer the person holding this one has a dashboard.
+const RENEW_CLOSED_WHY = 'This shop has closed its payment links, so this one opens nothing and files nothing.'
+  + ' Nothing about the store has changed: the current link is on the plan card in your dashboard.';
+
 /* ------------------------------------------------------------ renew page */
 async function renewPage(env, token) {
-  const custom = await env.STORES.get('tpl:renew');
+  let custom = await env.STORES.get('tpl:renew');
   const rec = await env.STORES.get('renew:' + token, 'json');
+  const shop = rec ? await getStore(env, rec.handle) : null;
+  /* The renew link is revocable too: it is not a signed capability but a KV key with no expiry
+     of its own, and it opens the checkout intent and the payment-reference write as well as this
+     page. A Revoke that left it standing was a revoke with a hole in it, and the hole led to the
+     money door. Judged by the same rule as a mark cap, in the core, so nothing can drift. */
+  const closed = !!(rec && shop && !renewOk(rec, shop));
+  // The skin has no panel for this state, and its unknown-token panel points the shop at the
+  // welcome email, whose link is exactly what just died. A page that cannot draw a fact is not
+  // handed the fact: the floor answers, in the shop's own terms.
+  if (closed && custom && !/state === ['"]closed['"]/.test(custom)) custom = null;
   if (custom && custom.length > 200) {
-    const st = rec ? await getStore(env, rec.handle) : null;
+    const st = shop;
     const rows = st ? ((await env.ORDERS.get('list:' + st.handle, 'json')) || []) : [];
     const data = {
       known: !!(st), token,
+      state: closed ? 'closed' : null, why: closed ? RENEW_CLOSED_WHY : null,
       shop: st ? st.shop_name : null, handle: st ? st.handle : null,
       plan: st ? (st.plan || 'free60') : null, currency: st ? (st.currency || 'USD') : 'USD',
       left: st ? Math.ceil(((st.paid_until || 0) - Date.now()) / 864e5) : 0,
@@ -1397,7 +1429,14 @@ async function renewPage(env, token) {
     };
     return html(fillPage(custom, [['TAPSTALL_RENEW', data]]));
   }
-  if (!rec) return html(`<h1 style="font:16px system-ui;padding:2rem">That renew link is old. Use the one from your welcome email, or <a href="/onboard">create a store</a>.</h1>`, 404);
+  // The link is not on the books, which has two honest reasons: a shop that never registered, and
+  // a shop that revoked (the record goes with the generation, and a new one is minted for the
+  // dashboard). "Use the one from your welcome email" used to be the helpful half of this sentence
+  // and is now the wrong half, so the dashboard is named first and the email stays as the fallback.
+  if (!rec) return html(`<h1 style="font:16px system-ui;padding:2rem">That renew link is no longer on the books.</h1>
+<p style="font:15px/1.6 system-ui;padding:0 2rem;max-width:38rem;color:#444">The current one is on the plan card in your <a href="/a">dashboard</a> — it is reissued whenever the shop closes its links. If you never created a store, <a href="/onboard">start here</a>.</p>`, 404);
+  if (closed) return html(`<h1 style="font:16px system-ui;padding:2rem">This shop has closed its links</h1>
+<p style="font:15px/1.6 system-ui;padding:0 2rem;max-width:38rem;color:#444">${RENEW_CLOSED_WHY} <a href="/a">Sign in to your dashboard</a> and the current link is on the plan card.</p>`, 410);
   const st = await getStore(env, rec.handle);
   if (!st) return html('<h1 style="font:16px system-ui;padding:2rem">Store not found.</h1>', 404);
   const left = Math.ceil(((st.paid_until || 0) - Date.now()) / 864e5);
@@ -1426,7 +1465,7 @@ document.getElementById('pay').onclick=async()=>{
   const o=document.getElementById('out');o.textContent='opening payment…';
   const r=await fetch('/api/checkout',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({token:${JSON.stringify(token)},days:365})});
   const j=await r.json();
-  if(j.ok){o.innerHTML='If payment clears, this page renews itself. <a href="'+j.pay_url+'">Pay '+j.amount+' USD</a>';}else{o.textContent=j.error||'failed';}
+  if(j.ok){o.innerHTML='If payment clears, this page renews itself. <a href="'+j.pay_url+'">Pay '+j.amount+' USD</a>';}else{o.textContent=j.why||j.error||'failed';}
 };
 </script></html>`);
 }
@@ -1508,7 +1547,9 @@ async function selftest(env) {
       t.kv_roundtrip = false;
       t.kv_write_blocked = QUOTA_RE.test(msg)
         ? { reason: 'quota', retry_in_sec: secsToMidnightUTC(), note: 'the account has spent its free KV writes for today' }
-        : { reason: 'error', note: msg.slice(0, 140) };
+        : LIMIT_RE.test(msg)
+          ? { reason: 'limits', note: 'this run hit the Worker CPU or memory ceiling, not the write budget' }
+          : { reason: 'error', note: msg.slice(0, 140) };
     }
     for (const tplName of ['store', 'onboard', 'admin', 'fees', 'index', 'confirm', 'renew', 'ops']) t['tpl_' + tplName] = ((await tpl(env, tplName)) || '').length > 200;
   }
@@ -1520,12 +1561,28 @@ async function selftest(env) {
   t.slug = slug('Mama Too Catering!');
   t.secret_leak_check = !JSON.stringify(publicStore({ ...fake, admin_token: 'x', notify_email: 'a@b.c', owner_email: 'a@b.c', notify_webhook: 'https://x', feed_cache: {}, feed_url: 'https://y' })).includes('admin_token');
   const k = 'selftest-secret';
-  const cap = await issueCap(k, { a: 'mark', h: 'shop', id: 'o1', s: 'paid' }, 600);
+  const cap = await issueCap(k, { a: 'mark', h: 'shop', id: 'o1', s: 'paid', g: 'g1' }, 600);
   const back = await verifyCap(k, cap);
-  t.cap_roundtrip = !!(back && back.a === 'mark' && back.h === 'shop' && back.id === 'o1');
+  // The mint carries a generation, because that is the shape a production mint has: a selftest
+  // that minted something no caller would accept would prove the wrong thing while passing.
+  t.cap_roundtrip = !!(back && back.a === 'mark' && back.h === 'shop' && back.id === 'o1' && back.g === 'g1');
   t.cap_rejects_tamper = !(await verifyCap(k, cap.slice(0, -4) + 'AAAA'));
   t.cap_rejects_other_secret = !(await verifyCap('other', cap));
   t.cap_rejects_expired = !(await verifyCap(k, cap, Math.floor(Date.now() / 1000) + 3600));
+  /* The generation binding, proven on the bundle that is actually deployed. Every line here that
+     reads or writes a store row goes quiet on a day the account has spent its 1,000 writes; these
+     cost nothing, so they answer on that day too. */
+  const boundP = await verifyCap(k, await issueCap(k, { a: 'mark', h: 'shop', id: 'o1', s: 'paid', g: 'gen-now' }, 600));
+  t.cap_bound_roundtrip = !!(boundP && boundP.a === 'mark' && boundP.g === 'gen-now');
+  t.cap_stale_generation_refused = capGenOk({ g: 'gen-then' }, { auth_gen: 'gen-now' }, {}) === false;
+  t.cap_current_generation_honoured = capGenOk(boundP, { auth_gen: 'gen-now' }, {}) === true;
+  const orphan = { a: 'mark', h: 'shop', id: 'o1', s: 'paid' };   // deliberately unbound: this mint is the bug
+  t.cap_mint_refuses_unbound = await issueCap(k, orphan, 600).then(() => false, () => true);
+  t.cap_legacy_judged_by_time = capGenOk({}, { auth_gen: (Date.now() - 864e5).toString(36) }, { at: new Date().toISOString() }) === true;
+  t.cap_legacy_refused_when_older = capGenOk({}, { auth_gen: Date.now().toString(36) }, { at: new Date(Date.now() - 864e5).toISOString() }) === false;
+  t.renew_link_revocable = renewOk({ made: Date.now(), g: 'gen-now' }, { auth_gen: 'gen-now' }) === true
+    && renewOk({ made: Date.now(), g: 'gen-then' }, { auth_gen: 'gen-now' }) === false
+    && renewOk({ made: Date.now() - 864e5 }, { auth_gen: '0' }) === true;
   const v = validateSettings({ rail: 'nope', tax_pct: 999, hours: '8-5' }, Date.now(), { rails: await railsCatalog(env) });
   const cat = Object.assign(await railsCatalog(env), { test_momo: normaliseRail({ label: 'Test MoMo', pct: 0.01 }, 'test_momo') });
   // A rail the operator added this morning has to be selectable, resolvable and
@@ -2147,6 +2204,7 @@ async function pinReset(req, env) {
   st.pin = await pinRecord(next);
   st.auth_gen = Date.now().toString(36);
   delete st.pending;
+  await rotateRenewLink(env, st);          // the same lever moves the same set of credentials
   await writeStore(env, st);
   await pinClear(env, handle); await authClear(env, handle);
   await pushAudit(env, st, { act: 'pin_reset', via: 'owner', fields: ['pin', 'auth_gen'], ip: ipOf(req) });
@@ -2246,6 +2304,23 @@ async function revertPending(req, url, env) {
   return json({ ok: true, cancelled: was });
 }
 
+/* The renew link is not a signed capability, so a generation change alone would leave the shop
+   holding a dead URL while the closed page told it the current one was on the plan card. Here the
+   record moves: the old key is deleted, a fresh one is minted under the new generation, and the
+   store's own copy of the URL follows. Every site that bumps `auth_gen` calls this, so no lever
+   can half-revoke. Two writes on a rare action; the origin is kept by string, because these sites
+   do not all have the request URL to hand and the link must stay on the host it was issued on. */
+async function rotateRenewLink(env, st) {
+  if (!st || !st.renew_url || !env || !env.STORES) return;
+  const head = String(st.renew_url).split('/renew/')[0];
+  const old = String(st.renew_url).split('/renew/')[1] || '';
+  const tok = alnumToken(14);
+  if (old) await env.STORES.delete('renew:' + old);
+  await env.STORES.put('renew:' + tok,
+    JSON.stringify({ handle: st.handle, made: Date.now(), g: String(st.auth_gen || '0') }));
+  st.renew_url = head + '/renew/' + tok;
+}
+
 /** One write that kills every outstanding link, key and cookie for a store. */
 async function revokeKeys(req, url, env) {
   const b = await readBody(req);
@@ -2257,11 +2332,12 @@ async function revokeKeys(req, url, env) {
   st.auth_gen = Date.now().toString(36);
   st.admin_token = randomKey(16);
   delete st.pending;
+  await rotateRenewLink(env, st);
   await writeStore(env, st);
   await pushAudit(env, st, { act: 'revoke', via: who.via, ip: ipOf(req) });
   const res = json({
     ok: true, api_key: st.admin_token,
-    note: 'Every session and API key for this store is dead, and so is any payment-code link or confirm link a buyer was holding — the new key is above. Your PIN still signs you in; change it inside the dashboard if you think somebody knows it.',
+    note: 'Every session and API key for this store is dead, and so is any payment-code link or confirm link a buyer was holding, and the renew link in your welcome email — the new key is above. Your PIN still signs you in; change it inside the dashboard if you think somebody knows it.',
   });
   return withCookie(res, ...KILL_COOKIES);
 }
@@ -2453,7 +2529,12 @@ async function opsAuthed(req, env) {
    lever, and the message that comforts one alarms or confuses the others.
    Anything that catches and reshapes an error (opsGate below) has to consult
    this too, or the whole point is lost one layer down. */
-const QUOTA_RE = /put\(\) limit|write.*limit|CPU time exceeded|Memory limit/i;
+const QUOTA_RE = /put\(\) limit|write.*limit/i;
+/* A CPU ceiling and a spent write budget need different fixes: one is a code problem, the other
+   is a date on the calendar. They used to be answered by one regex, so a Worker that ran out of
+   compute reported that the account had none left today. Why a check is blocked is a fact about
+   the account, and a fact about the account has to be the right one. */
+const LIMIT_RE = /CPU time exceeded|Memory limit/i;
 function quotaAnswer(msg, pathname, req) {
   if (!QUOTA_RE.test(msg)) return null;
   const secs = secsToMidnightUTC();
@@ -2775,6 +2856,7 @@ async function opsStoreAction(req, env) {
     st.pin = await pinRecord(pin);
     st.auth_gen = Date.now().toString(36);          // every session it had is dead from now on
     delete st.pending;
+    await rotateRenewLink(env, st);
     await writeStore(env, st);
     await pinClear(env, handle); await authClear(env, handle);
     await pushOpsLog(env, { act: 'reset_pin', handle, note: 'PIN reset; all sessions signed out', ip: ipOf(req) });   // best-effort
@@ -2793,7 +2875,7 @@ async function opsStoreAction(req, env) {
   else if (act === 'reset_free') { st.paid_until = Date.now() + FREE_DAYS * 864e5; st.plan = 'free60'; st.suspended = false; }
   else if (act === 'clear_pending') { delete st.pending; done = 'reverted a queued settings change'; }
   else if (act === 'clear_refs') { await env.STORES.delete('ref:' + handle); delete st.pending_ref_note; done = 'cleared the payment references the merchant filed'; }
-  else if (act === 'revoke') { st.auth_gen = Date.now().toString(36); st.admin_token = randomKey(16); delete st.pending; done = 'revoked every link, key and cookie'; }
+  else if (act === 'revoke') { st.auth_gen = Date.now().toString(36); st.admin_token = randomKey(16); delete st.pending; await rotateRenewLink(env, st); done = 'revoked every link, key and cookie, including the renew link'; }
   else return json({ ok: false, error: 'unknown action', actions: ['suspend', 'reinstate', 'extend7', 'extend30', 'grant_year', 'reset_free', 'clear_pending', 'clear_refs', 'revoke', 'notify', 'reset_pin'] }, 422);
 
   await writeStore(env, st);

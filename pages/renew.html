@@ -243,6 +243,18 @@ function esc(x) { return String(x == null ? '' : x).replace(/[&<>"]/g, function 
 function stat(b, s, cls) { return '<div class="stat ' + (cls || '') + '"><b>' + b + '</b><span>' + s + '</span></div>'; }
 
 (function boot() {
+  if (R.state === 'closed') {
+    /* The shop pressed Revoke. The token in this URL is still a token, and before 0.8.7 it still
+       opened a payment intent and the reference box, so the card that offers them has to go, not
+       just the sentence on it. Nothing here pretends the store is broken: the plan, the orders and
+       the days left are untouched, and the link that works is in the dashboard. */
+    q('#head').textContent = 'This shop has closed its links';
+    q('#status').textContent = 'Link closed';
+    q('#facts').innerHTML = stat('—', 'days left');
+    q('#extra').innerHTML = '<p class="notice warn" style="margin-top:.6rem">' + esc(R.why || 'This shop has closed its payment links, so this one opens nothing.') + '</p>';
+    q('#buy').classList.add('hide');
+    return;
+  }
   if (!R.known) {
     q('#head').textContent = 'That renew link is old';
     q('#facts').innerHTML = stat('0', 'days left');

@@ -221,9 +221,15 @@ ST=$(curl -s -m 60 "$ORIGIN/__selftest")
 # genuinely needs a write, say so once, and check every read-side claim anyway.
 NOWRITE=0
 if printf '%s' "$ST" | grep -q 'kv_write_blocked'; then NOWRITE=1; fi
+# The 0.8.7 block below is the generation binding, and it is in this list rather than behind a
+# write-gated check on purpose: these seven lines cost no KV writes at all, so they answer on the
+# day the account has none left, when everything that has to touch an order goes quiet.
 SK="cap_roundtrip cap_rejects_tamper cap_rejects_other_secret cap_rejects_expired
     settings_rejects_bad money_change_is_held money_change_lands_late masking_hides_values
-    secret_leak_check kv_stores"
+    secret_leak_check kv_stores
+    cap_bound_roundtrip cap_stale_generation_refused cap_current_generation_honoured
+    cap_mint_refuses_unbound cap_legacy_judged_by_time cap_legacy_refused_when_older
+    renew_link_revocable"
 if printf '%s' "$ST" | grep -q 'kv_write_blocked'; then
   printf '  \033[33m!\033[0m selftest: this account has no KV writes left today (%s) — kv_roundtrip cannot pass; everything else is still checked\n' \
     "$(printf '%s' "$ST" | jq -r '"clears in " + ((.kv_write_blocked.retry_in_sec / 3600) | floor | tostring) + " h"')"
