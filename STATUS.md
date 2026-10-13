@@ -2027,11 +2027,13 @@ marker and the scan fails; rename one marker and the scan fails. 257/257 after e
 live 109, pages 49, limits 10). Two more zero-write `__selftest` keys carry the claim to production on
 a day the account has no KV writes left: `code_link_rule_shared` and `ops_cap_needs_platform_gen`.
 
-One correction to a claim in this file's previous section: it said `confirmPage` had been given the
-skin-capability sniff "the same treatment as the API". It had not, only the renew door had it; the
-confirm sniff is in as of this release (`/revoked/` in the KV template, floor page otherwise), which is
-what that paragraph described. A second correction: the selftest key `confirm_link_signed` named while
-planning 0.8.7 does not exist in the source; the deployed keys are the ones listed here.
+Two things recorded here because they were said wrong earlier and the record is the point. The
+`__selftest` key `confirm_link_signed`, named while 0.8.7 was being planned, does not exist: `grep
+confirm_link worker/worker.js` returns nothing, and the deployed keys are the ten in the previous
+paragraph. And 0.8.7's note that the confirm page "got the same treatment as the API" for the
+template sniff was, as written at the time, ahead of the code — the sniff landed later in the same
+release (`linkClosed(o)`, one builder for both branches, `/revoked/` required of the skin), so the
+sentence describes the shipped 0.8.7 only of its second commit onward.
 
 One correction recorded here rather than left implicit: the free-plan reset in the quota note is
 midnight UTC (`secsToMidnightUTC`), and the `retry_in_sec` the endpoint reported today (42,765 s)
