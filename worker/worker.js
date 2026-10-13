@@ -31,13 +31,14 @@ import {
   // month on a day its write budget is gone.
   vatPlan, vatReturn, booksSummary, booksCsv, booksPeriods, vatBuckets, realPhoto, sampleArtUrl, mergeMenuPatch,
   receiptText, receiptHtml, sampleArtSvg, meshPack, meshJson, meshMark, meshWitness,
+  meshAutoPlan, meshGrant, meshGrowth, meshIsPitch, meshValueBeats, MESH_AUTONOMY,
   MESH_RAILS, MESH_BUDGET,
   orderRow, packRow, unpackRow, mergeRows, MAX_ORDERS_KEPT,   // the ledger row, and the cap on it
   EDITABLE_FIELDS, SOFT_FIELDS, sign, adminStore, normaliseRail, resolveRail,
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '0.9.1';
+const VERSION = '0.9.2';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
@@ -236,7 +237,11 @@ async function route(req, url, env, ctx) {
     const st = await getStore(env, m[1]);
     if (!st) return json({ ok: false, error: 'no_store' }, 404);
     const products = await loadProducts(st, env);
-    return json({ ok: true, ...meshJson(st, products, meshFacts(st, url.origin), url.origin) },
+    // and the half that publishes itself: value only, and only because the shop said once that it may
+    const mst = env.ORDERS ? await env.ORDERS.get('mesh:' + m[1], 'json').catch(() => null) : null;
+    const mf = meshFacts(st, url.origin);
+    return json({ ok: true, ...meshJson(st, products, mf, url.origin),
+      auto: meshAutoPlan(st, products, mf, { state: mst || {}, now: Date.now() }) },
       200, { 'Cache-Control': 'public, max-age=600', 'X-Robots-Tag': 'noindex' });
   }
   // Fallback art for a row with no picture. No KV read, no KV write, cached for a year: the URL
@@ -298,6 +303,7 @@ async function route(req, url, env, ctx) {
   if (p === '/api/receipt') return receiptView(req, url, env);
   if (p === '/api/mesh') return meshView(req, url, env);
   if (p === '/api/mesh/seen' && req.method === 'POST') return meshSeen(req, env);
+  if (p === '/api/mesh/auto' && req.method === 'POST') return meshAuto(req, env);
 
   // The one-tap confirm link: GET renders an inert page, the browser posts.
   if ((m = p.match(/^\/c\/([A-Za-z0-9._-]{20,400})$/))) return confirmPage(env, m[1]);
@@ -1739,6 +1745,20 @@ async function selftest(env) {
     const rlIp = '198.51.100.7:' + Date.now();   // its own bucket, so a probe never spends a buyer's allowance
     for (let i = 0; i < 9; i++) if (await rateLimited(rlEnv, rlIp, 'selftest:', RL)) rlRefused++;
     t.rate_limit_local_first = { requests: 9, ceiling: RL.max, writes: rlPuts, refused: rlRefused };
+    // The autonomous half of the mesh is only safe because a filter stands between a merchant's words
+    // and a public feed, so the filter is checked here too — on the same fake shop the pricing checks
+    // use, and with a description written as an advertisement, which is the case that must drop.
+    // Two single-item shops, deliberately: one generator picks a row by day, so a shop holding both a
+    // clean line and an advertisement would report a different truth on Wednesday than on Thursday. A
+    // selftest key that varies with the date is a key nobody can grep for a cause.
+    const clean = meshValueBeats({ handle: 'selftest', shop_name: 'Selftest', hours: 'Mon 08:00-16:00' },
+      [{ id: 'x', name: 'Test item', desc: 'Slow-cooked overnight, so the meat gives up on its own', category: 'Mains', price: 12.5 }], {}, {});
+    const advert = meshValueBeats({ handle: 'selftest' },
+      [{ id: 'y', name: 'Truffle risotto', desc: 'Order now, 20% off, US$40 - click the link in bio', category: 'Mains', price: 40 }], {}, {});
+    t.mesh_no_pitch_in_feed = clean.beats.length > 0 && clean.beats.every((x) => !meshIsPitch(x.text).pitch)
+      && !/US\$|https?:|wa\.me|order now|discount|\$[0-9]/i.test(JSON.stringify(clean.beats));
+    t.mesh_pitch_filter_drops = advert.beats.length === 0 && advert.blocked.length === 1
+      && /pitch word|price|link/.test(JSON.stringify(advert.blocked));
     t.pages_inlined = Object.keys(INLINED_PAGES).filter((n) => (INLINED_PAGES[n] || '').length > 200).length;
     t.pages_bytes = Object.values(INLINED_PAGES).reduce((a, v) => a + v.length, 0);
     // Zero writes, like every other key here: `from` is the label the read already answered with,
@@ -2381,9 +2401,37 @@ async function meshView(req, url, env) {
   return json({
     ok: true, handle, plan: pack, rails: MESH_RAILS, budget: MESH_BUDGET,
     state_saved: !!state, posted: state ? (state.sent || {}) : {},
+    auto: { on: !!(state && state.auto && state.auto.on), at: (state && state.auto && state.auto.at) || null,
+      flips: (state && state.auto && state.auto.flips) || 0, policy: MESH_AUTONOMY },
+    growth: meshGrowth(st, await ledgerRows(env, handle, 200)),
     card_url: (url.origin || '') + '/s/' + handle + '/mesh.json',
     note: 'Nothing here is sent anywhere. Tap Copy, then post it yourself — the pack is rebuilt from your menu each morning, so a price that moved today is not in a post you make tomorrow.',
   }, 200, { 'Cache-Control': 'no-store' });
+}
+
+/** The grant. A merchant turning the mesh on is one save, and turning it off is the same save the
+ *  other way — which is what makes it safe to stop asking for approval per post: the thing being
+ *  authorised is a policy with a ceiling, not an inbox. */
+async function meshAuto(req, env) {
+  const b = await readBody(req);
+  const who = await identify(req, env, b.handle || urlHandle(req));
+  if (!who || !who.st) return json({ ok: false, error: 'no store' }, 404);
+  if (who.anonymous || who.bad) return json({ ok: false, need_login: true, error: 'sign in first' }, 401);
+  if (who.via === 'sess' && (reqHeader(req, 'x-tapstall-confirm') || '') !== '1') {
+    return json({ ok: false, error: 'missing x-tapstall-confirm header' }, 403);
+  }
+  const prev = await env.ORDERS.get('mesh:' + who.st.handle, 'json').catch(() => null);
+  const next = meshGrant(prev, b.on === true, Date.now());
+  try {
+    await env.ORDERS.put('mesh:' + who.st.handle, JSON.stringify(next));
+  } catch (e) {
+    return json({ ok: false, error: 'no_writes_left', on: next.auto.on,
+      note: 'The grant could not be saved today: the write budget is spent. Nothing started or stopped — '
+        + 'a mesh that cannot persist its own switch has not moved it.' }, 503);
+  }
+  return json({ ok: true, auto: next.auto, policy: MESH_AUTONOMY,
+    note: next.auto.on ? 'Publishing value lines within the cap. No price, no link, no offer, ever — and '
+      + 'the cap is two a day.' : 'Stopped. The plan reverts to copy-and-tap, and nothing else changes.' });
 }
 
 async function meshSeen(req, env) {

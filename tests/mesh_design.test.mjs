@@ -74,3 +74,59 @@ test('provenance is a function, not an adjective', () => {
     'the things the mesh refuses are written down where a reader will find them, not implied');
   assert.match(doc, /not wired/, 'a node that does not exist yet is labelled, not described in the present tense');
 });
+
+/* The autonomous half. These exist because the ask changed on purpose: a person who is cooking is not
+   a copy desk, so the gate moved from every post to one standing grant — which means the *content*
+   rules have to be enforced by code that is tested, not by an approval habit that will lapse in month
+   three when the shop has forty of these lines a week. */
+test('a value beat may not sell anything, and the filter is the reason', async () => {
+  const core = await import('file://' + join(root, 'worker', 'core.js'));
+  const clean = core.meshIsPitch('Goat curry: fierce, and we mean it plenty');
+  assert.equal(clean.pitch, false, 'a plain description passes: ' + clean.why);
+  for (const [bad, why] of [['Order now and save', 'offer words'], ['Two for US$6 today', 'money'],
+                            ['see https://x/s/mamatoe', 'a link'], ['message us on wa.me/263', 'a channel handle'],
+                            ['free delivery this week', 'a promo promise'], ['@mamatoe on instagram', 'a handle']]) {
+    const r = core.meshIsPitch(bad);
+    assert.equal(r.pitch, true, why + ' must be refused, and was not: ' + bad);
+  }
+  assert.equal(core.MESH_AUTONOMY.kinds.includes('promo'), false, 'the autonomous plan has no promo kind at all');
+  assert.equal(core.MESH_AUTONOMY.revoke_writes, 1, 'and switching it off must be cheaper than a support ticket');
+});
+
+test('the value generator draws only on what a row says, and quotes no price', async () => {
+  const core = await import('file://' + join(root, 'worker', 'core.js'));
+  const st = { handle: 'mamatoe', shop_name: 'Mama Too', hours: 'Mon-Fri 08:00-16:00', whatsapp: '263781234567' };
+  const rows = [{ id: 'p1', name: 'Beef & rice', desc: 'Slow-cooked six hours, mahewu on the side', category: 'Mains', price: 6 },
+                { id: 'p2', name: 'Goat curry', desc: 'Fierce, and we mean it plenty', category: 'Mains', price: 7 },
+                { id: 'p3', name: 'Pumpkin fritters', category: 'Snacks', price: 2, available: false }];
+  const out = core.meshValueBeats(st, rows, { hours_text: 'Mon-Fri 08:00-16:00' }, { now: Date.parse('2026-10-13T06:00:00Z') });
+  assert.ok(out.beats.length >= 1, 'a shop with real descriptions has something worth saying: ' + JSON.stringify(out));
+  const all = JSON.stringify(out.beats);
+  assert.doesNotMatch(all, /US\$|\$[0-9]|http|wa\.me|Order now/i, 'no price, no link, no pitch in anything emitted');
+  assert.ok(out.beats.every((b) => b.kind !== 'promo'), 'and nothing here is a promotion');
+  const sold = out.beats.find((b) => b.kind === 'status');
+  if (sold) assert.match(sold.text, /Pumpkin fritters/, 'a sold-out line names the item that is actually gone');
+  const lied = core.meshValueBeats(st, [{ id: 'x', name: 'Truffle risotto', desc: 'Order now, 20% off, US$40', category: 'Mains' }], {}, {});
+  assert.equal(lied.beats.length, 0, 'a merchant who writes an advertisement into a description gets a dropped beat, not a softened one');
+  assert.match(JSON.stringify(lied.blocked), /pitch word/, 'and the drop says why');
+});
+
+test('the growth queue is conversations, read from the ledger, and says so', async () => {
+  const core = await import('file://' + join(root, 'worker', 'core.js'));
+  const now = Date.parse('2026-10-13T09:00:00Z');
+  const rows = [
+    { id: 'a', at: new Date(now - 864e5).toISOString(), status: 'pending', phone: '0781234567', total: 12, items: [{ name: 'Beef & rice' }] },
+    { id: 'b', at: new Date(now - 2 * 864e5).toISOString(), status: 'pending', phone: '0779998888', total: 7, items: [] },
+    { id: 'c', at: new Date(now - 40 * 864e5).toISOString(), status: 'pending', phone: '0780000000', total: 9, items: [] },
+    { id: 'd', at: new Date(now - 3 * 864e5).toISOString(), status: 'paid', phone: '0781234567', total: 5, items: [] },
+    { id: 'e', at: new Date(now - 60 * 864e5).toISOString(), status: 'paid', phone: '0781234567', total: 5, items: [] },
+  ];
+  const g = core.meshGrowth({ handle: 'mamatoe' }, rows, { now });
+  assert.equal(g.read, 5, 'it counted what it was given, including the row too old to chase');
+  assert.equal(g.unpaid.length, 2, 'two unpaid inside three days, and the paid ones are not in it');
+  assert.match(g.unpaid[0].line, /Beef & rice/, 'the line names the order, so a reply is possible');
+  assert.ok(!/http|%\s*off|discount/i.test(JSON.stringify(g.unpaid)), 'a follow-up about money owed is not an advertisement');
+  assert.equal(g.regulars.length, 1, 'one person crossed three orders');
+  assert.equal(g.regulars[0].orders, 3, 'and the count is the real count, not a flattering one');
+  assert.match(g.note, /Nothing in this list is automated/, 'and the queue tells the truth about who sends it');
+});

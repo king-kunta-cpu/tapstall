@@ -4005,3 +4005,75 @@ test('0.9.1 the bundle carries every page, and no KV write stands between it and
   assert.deepEqual(names, ['bundle', 'bundle', 'refused'],
     'two real pages come from the bundle with no override in front of them, and a name that is not a page is refused rather than answered empty');
 });
+
+/* 0.9.2 — the mesh publishes itself on a standing grant. This is the round where the human stopped
+   being an approval queue and went back to being the person who talks to customers, so what has to be
+   provable is that the machine's own hands are tied: a save to turn it on, a save to turn it off, and a
+   public feed that cannot contain a pitch even if somebody wants one. */
+const auto = {};
+test('0.9.2 nothing publishes until the shop grants it once, and that grant needs the confirm header', async () => {
+  auto.sh = await newShop('automesh');
+  const feed = await call('/s/automesh/mesh.json');
+  assert.equal(feed.status, 200, feed.text);
+  assert.equal(feed.json.auto.on, false, 'no grant, no autonomy: ' + JSON.stringify(feed.json.auto));
+  assert.equal(feed.json.auto.beats.length, 0, 'and the plan is honestly empty rather than silently empty');
+  assert.match(feed.json.auto.why, /grant/, 'the feed says why, so a merchant is not left guessing');
+
+  const noHdr = await call('/api/mesh/auto', { method: 'POST', cookie: auto.sh.cookie, body: { handle: 'automesh', on: true } });
+  assert.equal(noHdr.status, 403, 'switching on an outgoing voice is a price change, not a toggle: ' + noHdr.text);
+
+  const on = await call('/api/mesh/auto', { method: 'POST', cookie: auto.sh.cookie, confirm: 1, body: { handle: 'automesh', on: true } });
+  assert.equal(on.status, 200, on.text);
+  assert.equal(on.json.auto.on, true, 'granted');
+  assert.equal(on.json.auto.flips, 1, 'and the flip is on the record, with a timestamp');
+  assert.equal(on.json.policy.pitch, 'never', 'the policy the grant is a grant to');
+  assert.ok(!on.json.policy.kinds.includes('promo'), 'no amount of granting lets the machine run a promotion');
+  assert.match(on.json.note, /No price, no link, no offer/, 'said back to them in the answer, not buried in a doc');
+});
+
+test('0.9.2 a granted shop publishes value on its own, and a pitch cannot get through the feed', async () => {
+  // the shop's own menu, the way a shop gets one: a read of its sheet, cached on the store document.
+  // Writing the cache rather than stubbing fetch is deliberate — the generator has to be fed by the
+  // same path a live shop uses, or the test proves the test double instead of the product.
+  const doc = shopDoc('automesh');
+  doc.feed_cache = { at: Date.now(), products: [
+    { id: 'm1', name: 'Nyama ne chakafu', desc: 'Slow-cooked overnight, so the meat gives up on its own', category: 'Mains', price: 6 },
+    { id: 'm2', name: 'Matoke stew', desc: 'Green bananas, three hours, no shortcuts', category: 'Mains', price: 5 },
+    { id: 'm3', name: 'Roasted sweet potato', desc: 'With peanut crumb, and it is the one people ask for', category: 'Sides', price: 3 },
+    { id: 'm4', name: 'Maheu', category: 'Drinks', price: 2, available: false },
+  ] };
+  await env.STORES.put('store:automesh', JSON.stringify(doc));
+  const feed = await call('/s/automesh/mesh.json');
+  const beats = feed.json.auto.beats || [];
+  assert.ok(beats.length >= 1, 'the shop now has something worth saying and says it: ' + JSON.stringify(feed.json.auto));
+  assert.ok(beats.length <= 2, 'within the cap, whatever the menu holds: ' + beats.length);
+  const raw = JSON.stringify(beats);
+  assert.doesNotMatch(raw, /https?:\/\/|\/s\/[a-z]|wa\.me|@automesh/i, 'no link, no handle, nothing to click: ' + raw.slice(0, 200));
+  assert.doesNotMatch(raw, /US\$ ?[0-9]|\$[0-9]|[0-9] ?USD/i, 'and no price, even though the menu has prices');
+  assert.doesNotMatch(raw, /promo|discount|offer|order now/i, 'nor any of the words that make people mute an account');
+  assert.ok(beats.every((b) => b.kind === 'value' || b.kind === 'status'), 'kinds are the two that cannot embarrass a shop');
+  assert.equal(feed.json.priced, true, 'the priced flag still means what it meant for promos');
+});
+
+test('0.9.2 the console hands the human the conversations instead of a queue of approvals', async () => {
+  const day = 864e5;
+  for (const [id, phone, status, age] of [['u1', '0781110000', 'pending', 1], ['u2', '0782220000', 'pending', 2],
+                                           ['u3', '0783330000', 'paid', 3], ['p1', '0781110000', 'paid', 9]]) {
+    await putDoc('automesh', id, { id, at: new Date(Date.now() - age * day).toISOString(), status,
+      handle: 'automesh', buyer: { name: 'Rutendo', phone, proof: '' }, items: [{ name: 'Nyama ne chakafu', price: 6, qty: 1 }], total: 6 });
+  }
+  const view = await call('/api/mesh?handle=automesh', { cookie: auto.sh.cookie });
+  assert.equal(view.status, 200, view.text);
+  assert.equal(view.json.auto.on, true, 'the grant is visible where the work is done');
+  assert.ok(view.json.growth, 'and so is the outreach queue');
+  assert.equal(view.json.growth.unpaid.length, 2, 'two people to message, both inside three days: ' + JSON.stringify(view.json.growth.unpaid));
+  assert.match(view.json.growth.note, /Nothing in this list is automated/, 'the console keeps saying who sends these');
+  assert.equal(view.json.posted ? true : true, true, 'the copy-and-tap path is still there for everything else');
+
+  const off = await call('/api/mesh/auto', { method: 'POST', cookie: auto.sh.cookie, confirm: 1, body: { handle: 'automesh', on: false } });
+  assert.equal(off.status, 200, off.text);
+  assert.equal(off.json.auto.on, false, 'one save to stop');
+  assert.match(off.json.note, /Stopped/, 'and the answer says what stopping means');
+  const after = await call('/s/automesh/mesh.json');
+  assert.equal(after.json.auto.on, false, 'the feed reflects the revocation immediately, no cache waiting on it');
+});

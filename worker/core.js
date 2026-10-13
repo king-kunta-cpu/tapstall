@@ -2729,3 +2729,143 @@ export function mergeRows(fromDocs, fromIndex, cap) {
   out.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
   return out.slice(0, cap || MAX_ORDERS_KEPT);
 }
+
+/* ── the autonomous half of the mesh (v0.9.2) ────────────────────────────────────────────────
+ * The merchant is not an editor. Asking a person who is cooking, serving and chasing payments to
+ * approve a paragraph about their own Tuesday is how a distribution system quietly dies at 40 shops —
+ * and it is the wrong use of the only irreplaceable thing in the business, a human willing to talk to
+ * another human. So the gate moves: not one approval per post, but ONE standing grant per shop,
+ * revocable in a single save, with the machine confined to what cannot embarrass anybody — the shop's
+ * own words, real availability, no price, no link, no pitch.
+ */
+/** Anything on this list turns a value beat into an advertisement, and an advertisement is the one
+ *  thing this half of the mesh is not allowed to be: the whole strategy is that people follow a shop
+ *  that is useful and ignore a shop that is selling. */
+export const MESH_PITCH_TOKENS = ['order now', 'buy now', 'discount', 'voucher', 'promo', 'special offer',
+  'free delivery', 'wa.me', 'whatsapp', 'delivery fee', 'shop now', 'click', 'link in bio', 'checkout',
+  'reserve', 'book now', 'call to order', 'price list', 'menuprice', 'order'];
+/** A value beat may not carry money either, so a digit-with-currency is refused rather than clipped. */
+const PITCH_MONEY = /(\b[Z$£€][0-9]|[0-9](\.[0-9]{1,2})?\s?(usd|zar|bwp|gel|kwd|eur|gbp)\b)/i;
+const PITCH_LINK = /(https?:\/\/|www\.|\/s\/[a-z0-9]|@)/i;
+
+/** True when a sentence is selling something. Deliberately over-strict: a beat dropped for a false
+ *  positive costs a post, a beat published with a false negative costs the shop its audience. */
+export function meshIsPitch(text, extra) {
+  const t = String(text || '').toLowerCase();
+  const words = (extra && Array.isArray(extra.tokens) ? extra.tokens : MESH_PITCH_TOKENS)
+    .map((w) => String(w).toLowerCase());
+  const hit = words.find((w) => w && t.includes(w));
+  if (hit) return { pitch: true, why: 'pitch word: ' + hit };
+  if (PITCH_MONEY.test(t)) return { pitch: true, why: 'a price in a value post' };
+  if (PITCH_LINK.test(t)) return { pitch: true, why: 'a link or handle in a value post' };
+  return { pitch: false, why: '' };
+}
+
+export const MESH_AUTONOMY = {
+  kinds: ['value', 'status'],           // promo never appears here: that one stays a human's tap
+  pitch: 'never',                     // the ban is a field, so a test can read it and a UI can show it
+  per_day: 2, window_utc: '08:15',      // one morning beat and one lunch beat, in the audience's window
+  max_chars: 300, revoke_writes: 1,     // switching it off costs one save, which is the point
+};
+
+const meshClip = (t, n) => { const x = String(t || '').replace(/\s+/g, ' ').trim(); return x.length <= n ? x : x.slice(0, Math.max(0, n - 1)).trimEnd() + '…'; };
+
+/**
+ * What the shop can say today with no offering in it, built only from fields a row already carries:
+ * its own item descriptions, its categories, what is sold out, and its opening line. The witness rule
+ * is unchanged — no number, no claim, nothing that is not on the data read this minute — but the
+ * target of the rule moved: a promo beat must be right about money, a value beat must be right about
+ * the shop's own words, and the second one is the kind a stranger will follow.
+ */
+export function meshValueBeats(st, products, facts, opt) {
+  const o = opt || {}, s = st || {}, f = facts || {};
+  const list = (Array.isArray(products) ? products : []).filter((p) => p && p.name);
+  const day = Math.floor((o.now || Date.now()) / DAY_MS);
+  const open = f.closed ? 'closed today' : meshClip(f.hours_text || s.hours || '', 60);
+  const beats = [];
+  const push = (kind, body, key) => {
+    const text = meshClip(body, MESH_AUTONOMY.max_chars);
+    const v = meshIsPitch(text, o);
+    if (v.pitch) { beats.push({ kind, item_key: key, text, blocked: v.why }); return; }
+    beats.push({ kind, item_key: key, text, rail: 'whatsapp_status' });
+  };
+  const withWords = list.filter((p) => meshClip(p.desc || p.description || p.note || '', 20).length > 12);
+  if (withWords.length) {
+    const p = withWords[day % withWords.length];
+    push('value', meshClip(p.name, 60) + ': ' + meshClip(p.desc || p.description || p.note, 200),
+      'words:' + String(p.id || p.name).slice(0, 40));
+  }
+  const gone = list.filter((p) => p.available === false);
+  if (gone.length && open) {
+    push('status', 'Not making ' + meshClip(gone[0].name, 40) + ' today — back with the next '
+      + (open === 'closed today' ? 'service' : 'service after ' + meshClip(open.replace(/^[^.]*[.:]\s*/i, ''), 24)) + '.',
+      'gone:' + String(gone[0].id || gone[0].name).slice(0, 40));
+  } else if (list.length > 2) {
+    const cats = [...new Set(list.map((p) => String(p.category || '').trim()).filter(Boolean))];
+    if (cats.length) {
+      const c = cats[day % cats.length];
+      push('value', c + ' is the one we make the most of here — '
+        + list.filter((p) => String(p.category || '').trim() === c).slice(0, 3).map((p) => meshClip(p.name, 28)).join(', ') + '.',
+        'cat:' + c.slice(0, 40));
+    }
+  }
+  const out = beats.filter((b) => !b.blocked);
+  return { beats: out.slice(0, MESH_AUTONOMY.per_day), blocked: beats.filter((b) => b.blocked),
+    witness: { sources: out.map((b) => b.item_key), rows: list.length } };
+}
+
+/** The standing grant. One save to turn it on, one to turn it off, and the timestamp is what makes an
+ *  audit possible later — "who authorised this and when" is a question a shop will ask in month three. */
+export function meshGrant(prev, on, nowMs) {
+  const t = nowMs || Date.now();
+  const iso = new Date(t).toISOString();
+  const p = prev && typeof prev === 'object' ? prev : {};
+  const was = p.auto || {};
+  return { ...p, auto: { on: !!on, at: was.on === !!on ? (was.at || iso) : iso, flips: (Number(was.flips) || 0) + (was.on === !!on ? 0 : 1) } };
+}
+
+/** Everything the autonomous publisher is allowed to put out, or nothing. An empty list is a correct
+ *  answer, and saying it beats publishing a shop's Tuesday into a void. */
+export function meshAutoPlan(st, products, facts, opt) {
+  const o = opt || {}, s = st || {};
+  const state = o.state || {};
+  if (!state.auto || state.auto.on !== true) return { on: false, beats: [], blocked: [], why: 'no standing grant for this shop' };
+  const v = meshValueBeats(s, products, facts, o);
+  const wit = meshWitness(s, products, facts);
+  const seen = (state.items && typeof state.items === 'object') ? state.items : {};
+  const day = Math.floor((o.now || Date.now()) / DAY_MS);
+  const fresh = (k) => { const d = seen[k]; return !d || (day - Math.floor(Date.parse(String(d)) / DAY_MS)) >= MESH_BUDGET.item_cooldown_days; };
+  const beats = v.beats.filter((b) => fresh(b.item_key));
+  return { on: true, beats, blocked: v.beats.length === 0 ? v.blocked : [], witness: v.witness,
+    priced: wit.price_ok, note: 'value only: no price, no link, no offer in any of these lines',
+    sent_if: beats.length ? 'a beat that would sell something is dropped, not softened' : '' };
+}
+
+/**
+ * The outreach half, which is the part a person is for. A growth machine that writes to strangers
+ * from a queue burns the number it is calling from; a shop messaging four people who left an order
+ * unpaid, and thanking the nine who keep coming back, is the same motion at a scale that stays
+ * believed. Nothing here composes a promise, an offer or a discount: it reads today's ledger, picks
+ * the conversations worth having, and hands over a first line to send as yourself.
+ */
+export function meshGrowth(st, rows, opt) {
+  const o = opt || {}, now = o.now || Date.now(), day = 864e5;
+  const list = (Array.isArray(rows) ? rows : []).filter((r) => r && r.at);
+  const paid = (r) => /paid|done|complete|collected|deliver/i.test(String(r.status || ''));
+  const first = (r) => String((r.items && r.items[0] && r.items[0].name) || r.note || 'your order').slice(0, 40);
+  const unpaid = list.filter((r) => !paid(r) && r.phone && (now - Date.parse(String(r.at)) || 0) < 3 * day)
+    .slice(0, 12)
+    .map((r) => ({ phone: String(r.phone).replace(/\D/g, '').slice(0, 15), when: String(r.at).slice(0, 10),
+      line: 'Hi — the ' + first(r) + ' from ' + new Date(String(r.at)).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+        + ' is still with us. Want it for the next run, or shall I let it go?',
+      why: 'left unpaid, still inside three days' }));
+  const byPhone = new Map();
+  for (const r of list) { const p = r.phone ? String(r.phone).replace(/\D/g, '') : ''; if (p) byPhone.set(p, (byPhone.get(p) || 0) + 1); }
+  const regulars = [...byPhone.entries()].filter(([, n]) => n >= 3).sort((a, b) => b[1] - a[1]).slice(0, 12)
+    .map(([phone, n]) => ({ phone, orders: n,
+      line: 'You have had us ' + n + ' times — that means something to us. If a colleague has not tried us yet, tell them.',
+      why: n + ' orders on the ledger' }));
+  return { unpaid, regulars, read: list.length,
+    note: 'Read from the ledger, sent by a human. Nothing in this list is automated, because a person who '
+      + 'replies to a machine stops replying to you.' };
+}

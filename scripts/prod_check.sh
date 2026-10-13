@@ -236,7 +236,8 @@ SK="cap_roundtrip cap_rejects_tamper cap_rejects_other_secret cap_rejects_expire
     mesh_budget_held mesh_prices_are_the_menu mesh_cools_a_used_item mesh_no_invented_price
     mesh_public_doc_refuses_broken mesh_mark_bounds_state art_drawn_not_photographed
     menu_art_never_overrides_a_clear ops_menu_shares_the_foreign_ref_rule
-    pages_inlined pages_served pages_no_longer_from_kv rate_limit_local_first"
+    pages_inlined pages_served pages_no_longer_from_kv rate_limit_local_first\
+    mesh_no_pitch_in_feed mesh_pitch_filter_drops"
 if printf '%s' "$ST" | grep -q 'kv_write_blocked'; then
   printf '  \033[33m!\033[0m selftest: this account has no KV writes left today (%s) — kv_roundtrip cannot pass; everything else is still checked\n' \
     "$(printf '%s' "$ST" | jq -r '"clears in " + ((.kv_write_blocked.retry_in_sec / 3600) | floor | tostring) + " h"')"

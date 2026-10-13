@@ -8,10 +8,14 @@ substrate (the `store` repo's static Pages mesh — `products.json`, `posts/`, `
 `meshJson`, `meshMark`, `meshWitness`, `MESH_BUDGET`, `GET /s/<handle>/mesh.json`, `GET /api/mesh`,
 `POST /api/mesh/seen`, and the `menu`/art rules around them.
 
-The claim, stated small: **a shop's own facts, published on a rhythm, through nodes that cost nothing,
-with a human on every trigger and provenance on every sentence.** Not "growth hacking". The hunta essay
-is blunt about what the alternative is — "a reputation destroyer with good marketing" — and this design
-takes that as its boundary condition.
+The claim, stated small: **a shop's own facts and the niche its customers care about — content they
+find value from, with no mention of the offering — published on a rhythm, through nodes that cost
+nothing, with provenance on every sentence.** This is growth work, and the point of it is that more
+people know the shop exists; revenue tracks attention, and attention is bought with usefulness or not
+at all. What the design refuses is not ambition but the one failure mode that ends an account: a
+machine that talks *as* a seller without constraint. The hunta essay names it — "a reputation destroyer
+with good marketing" — and the fix taken from it is structural rather than moral: caps the software
+holds, provenance a function enforces, a yield log that lets a useless channel be dropped.
 
 ## The two sentences that decide everything else
 
@@ -76,8 +80,18 @@ lets a zero-yield night retarget the aim rather than blame the parser.
 1. **Provenance or nothing.** A beat may cite only witnessed facts (a row read today, a real photo, an
    approved price). `meshWitness` and `realPhoto` are the enforcement; the art never overrides a real or
    explicitly-cleared photo.
-2. **A human on the trigger.** No node auto-publishes for a merchant. Approval is a state, and the state
-   lives in `mesh:<handle>`.
+2. **A standing grant, not an approval queue.** The human is not a copy desk: a person cooking, serving
+   and chasing payments does not approve a paragraph about their own Tuesday, and a mesh that needs them
+   to dies at forty shops. So the gate is one save that turns autonomy on and one save that turns it
+   off (`POST /api/mesh/auto`, `mesh:<handle>.auto`, timestamped and counted), and the machine's hands
+   are tied by what it is allowed to say rather than by who reads it first. This is a deliberate move
+   away from the pipeline hunta runs — where *nothing sends without a yes*, because there a sentence is
+   a person's name in front of one employer and one bad line costs an interview. Here the autonomous
+   half is confined to value beats drawn from the shop's own words, with no price, no link and no offer
+   in any of them (`MESH_AUTONOMY.pitch = 'never'`, refused by `meshIsPitch`), which is the class of
+   sentence that cannot embarrass a shop; the promo half stays exactly where it was, a tap in ops. The
+   two kinds of statement get two different gates, and the difference is written down instead of
+   pretending one rule fits both.
 3. **Caps are software.** `MESH_BUDGET = { per_day: 3, value: 2, promo: 1, item_cooldown_days: 7 }`, plus
    the account's own write budget. "Runaway is not representable" is the standard, so a bug cannot make us
    a spammer.
@@ -95,7 +109,58 @@ lets a zero-yield night retarget the aim rather than blame the parser.
    captured an email must let the merchant export it, and a node we shut down must not strand a shop's
    audience. Same reason the receipt lives on the buyer's device.
 
+## The growth mechanics, borrowed from the pipeline rather than invented
+
+The hunta machine is worth reading as a distribution system, not a job tool, and these are the parts
+that carry over with a shop in place of a CV:
+
+- **Walk a configured set of sources, and log each one's yield.** Zero on a channel is market data. The
+  mesh keeps per-node counts in `mesh:<handle>` and a node that produces nothing across two windows
+  gets demoted by rank, not by feeling.
+- **Fixed windows beat the feed.** Publish when the audience is on it — `MESH_AUTONOMY.window_utc`,
+  two beats a day, morning and lunch — so a follower's alert catches the rhythm. Boards and groups run
+  on a cadence; a shop that appears on that cadence is remembered, a shop that appears often is muted.
+- **Freshness beats polish.** A line about what is cooking today outranks a beautiful line about the
+  brand, and both outrank a repost.
+- **Warm the contact before you need anything.** The ledger already knows who bought three times;
+  `meshGrowth` puts those names in front of the merchant with a thank-you and a referral ask, and puts
+  the two people who left an order unpaid inside three days there too, with one line each. The human
+  sends it from their own number. That is the highest-yield outreach in this whole system, it costs
+  nothing, and no software should do it — a person who replies to a bot stops replying to you.
+- **One line of proof per bullet.** A claim in a beat carries the row it came from; `meshWitness` is the
+  function that decides whether the shop is allowed to say it today.
+- **Give the useful thing, capture the interest separately.** `bsky-audit` is the model: a free result a
+  stranger can take in ten seconds, no signup, with the shop's own link as the only call to action.
+  Tapstall's version is the guide shelf and the shop's value feed at `/s/<handle>/mesh.json` — the
+  thing worth following *is* the content, and the pitch never has to appear in it.
+
+## Scale: seller accounts, not one company account
+
+Forty sellers, each with their own voice, their own audience and their own risk — which is a different
+problem from one brand posting for itself, and the differences are the design:
+
+- **Policy per shop.** The grant, the cap and the cooldown are stored on `mesh:<handle>`; one seller
+  switching off or over-tuning changes nobody else's queue. `MESH_AUTONOMY` is the ceiling, not a
+  shared schedule.
+- **No cross-shop amplification, ever.** Sellers must not be arranged into each other's engagement — no
+  mutual upvoting, no seeded replies, no "network" of accounts inflating one another. It is the one
+  growth move that converts a platform ban into forty customers losing their income, and it is why the
+  mesh publishes *outward to audiences a shop already has* rather than inward to each other.
+- **No shared lead pool.** A buyer's number belongs to the shop they ordered from; `meshGrowth` reads
+  one shop's ledger and nothing else. There is no cross-shop list to build, sell or leak, and the code
+  has no path that would let it read across handles.
+- **Cost must stay flat per shop.** Content costs 0 KV writes a day (the feed is derived), state costs
+  at most 1, reads are unmetered at this volume — so a seller with 300 followers and one with 30,000
+  cost the same to run, and the plan's budget is not what caps growth. That is the whole reason the mesh
+  is derived-from-rows instead of stored.
+
 ## What to build, in the order that pays
+
+**Shipped in v0.9.2** (this is the part that made the rest worth writing): `MESH_PITCH_TOKENS` +
+`meshIsPitch`, `meshValueBeats`, `MESH_AUTONOMY`, `meshGrant` and `meshAutoPlan` in the shared core;
+`POST /api/mesh/auto` as the one save that grants or revokes; the public `/s/<handle>/mesh.json`
+carrying an `auto` section so the state of a shop's voice is visible to the world that reads it; and
+`meshGrowth` in the ops view, which is the outreach queue with nothing automated in it.
 
 **Now, cheap, and mostly wiring.** (a) A `mirror` step: take one approved beat and emit the three shapes
 it needs — 280-character, a board post with the price line, and a WhatsApp paragraph with the deep link —
