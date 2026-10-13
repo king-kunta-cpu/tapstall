@@ -32,14 +32,14 @@ import {
   vatPlan, vatReturn, booksSummary, booksCsv, booksPeriods, vatBuckets, realPhoto, sampleArtUrl, mergeMenuPatch,
   receiptText, receiptHtml, sampleArtSvg, meshPack, meshJson, meshMark, meshWitness,
   meshAutoPlan, meshGrant, meshGrowth, meshIsPitch, meshValueBeats, meshSchedule, meshFirstTouch,
-  MESH_AUTONOMY, MESH_AUTONOMY_V3, MESH_CHANNELS,
+  MESH_AUTONOMY, MESH_AUTONOMY_V3, MESH_CHANNELS, MESH_OUTREACH, meshAccount, meshOutreachPlan,
   MESH_RAILS, MESH_BUDGET,
   orderRow, packRow, unpackRow, mergeRows, MAX_ORDERS_KEPT,   // the ledger row, and the cap on it
   EDITABLE_FIELDS, SOFT_FIELDS, sign, adminStore, normaliseRail, resolveRail,
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '0.9.3';
+const VERSION = '0.9.4';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
@@ -2411,6 +2411,8 @@ async function meshView(req, url, env) {
     schedule: meshSchedule(st, products, mf || meshFacts(st, url.origin), { origin: url.origin, state: state || {}, now: Date.now() }),
     touch: meshFirstTouch(st, await ledgerRows(env, handle, 200)),
     channels: MESH_CHANNELS, policy_v3: MESH_AUTONOMY_V3,
+    account: meshAccount(st), rails: Object.keys(MESH_CHANNELS),
+    outreach: meshOutreachPlan(st, { leads: st.outreach_list || [], state: state || {} }),
     card_url: (url.origin || '') + '/s/' + handle + '/mesh.json',
     note: 'Nothing here is sent anywhere. Tap Copy, then post it yourself — the pack is rebuilt from your menu each morning, so a price that moved today is not in a post you make tomorrow.',
   }, 200, { 'Cache-Control': 'no-store' });

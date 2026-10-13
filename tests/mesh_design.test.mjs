@@ -158,8 +158,10 @@ test('the plan posts itself where a channel can be posted to, and never pretends
   const assist = core.meshSchedule({ handle: 'x', mesh_channels: { whatsapp: { on: true } } }, rows, {}, { state: { auto: { on: true } }, now: Date.now() });
   assert.ok(assist.beats.every((b) => b.auto_send === false), 'a channel with no API is never claimed to have been posted to');
   assert.match(assist.beats[0].to.join(','), /whatsapp/, 'it is queued for the person instead, which is honest and still costs them a tap');
-  const ungranted = core.meshSchedule(st, rows, {}, { state: {}, now: Date.now() });
-  assert.equal(ungranted.on, false, 'and with no grant, nothing goes out anywhere');
+  const trial = core.meshSchedule({ handle: 't', plan: 'trial', mesh_channels: { x: { on: true } } }, rows, {}, { state: {}, now: Date.now() });
+  assert.equal(trial.on, false, 'a trial account with nothing delegated has nothing to post with, so it stays off');
+  const switched = core.meshSchedule(st, rows, {}, { state: { auto: { on: false } }, now: Date.now() });
+  assert.equal(switched.on, false, 'and one save off stops an account that was running by default');
   const sold = JSON.stringify(plan.beats);
   assert.ok(!(/is back on the menu[\s\S]*listed sold out/.test(sold) && /is back on the menu[\s\S]*is 2\.00 USD and listed sold out/.test(sold)),
     'one row cannot be sold out and back in the same day\'s plan');

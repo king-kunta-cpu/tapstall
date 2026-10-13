@@ -122,13 +122,37 @@ lets a zero-yield night retarget the aim rather than blame the parser.
    captured an email must let the merchant export it, and a node we shut down must not strand a shop's
    audience. Same reason the receipt lives on the buyer's device.
 
+## Who is on the other end of the switch
+
+Two kinds of account, and they do not start the same way:
+
+- **the owner's company accounts** (`meshAccount → owner`) are autonomous from the day they are
+  configured: the person who wrote the policy is the person who turns it on, so a grant would be him
+  asking himself for permission;
+- **a seller's account** (`seller`) is *delegated*: the seller hands over the credential — a Bluesky app
+  password, a Telegram bot token, a Mastodon token, a free X app bearer, or the nsec we generate for
+  them — and the owner's machine posts to their account with it. They stop it by changing the password at
+  the provider or tapping revoke in ops; `schedule.beats[].on_behalf_of` says out loud whose account said
+  it, because that is the thing a platform asks you to be able to answer;
+- **a trial shop** (`trial`) has nothing connected, so it has nothing to post with and stays off until it
+  grants. That is the only class the old grant flow was ever really for, and the 0.9.2 tests now say so.
+
+The cadence is the pipeline's, not a mood: X ≥3 a day, LinkedIn ≥3, dev.to 3, daily pins, daily Bluesky and
+Nostr, ratio two value to one shop facts, weekends included. Replies are a human's, at a human pace —
+four a day, questions first. Cold outreach is composed at 08:21 on weekdays into one batch that a single
+owner tap sends, mailbox ramped 20 → 100 over five working days: the machine writes, one action fires the
+set, nobody approves eighty messages.
+
 ## What the machine can send by itself, and what it physically cannot
 
 `MESH_CHANNELS` declares the capability per channel, because pretending otherwise is how a shop loses an
 account. That is not governance, it is what the platforms accept:
 
 ```
-posts itself by API    bluesky (atproto) · telegram (bot) · mastodon (rest) · x (v2, paid app keys) · our own Pages mirror
+posts itself by API    x (write-only free tier, 1,500 posts a month) · linkedin · dev.to (free key, the long-form
+                        home of the value beats) · pinterest (the photo rails are the ones that sell food) ·
+                        bluesky · nostr (an nsec we generate per shop: no signup, no cost, nobody to approve it) ·
+                        mastodon · telegram · our own Pages mirror
 queued for one tap     WhatsApp status and groups · Facebook groups · Instagram personal · the paper by the till
 first touch, per shop   a DM or an email to a number already on that shop's ledger — warm only, capped at eight a
                         day, and sent from the shop's own credentials: there is no legitimate API for a personal

@@ -2829,7 +2829,8 @@ export function meshGrant(prev, on, nowMs) {
 export function meshAutoPlan(st, products, facts, opt) {
   const o = opt || {}, s = st || {};
   const state = o.state || {};
-  if (!state.auto || state.auto.on !== true) return { on: false, beats: [], blocked: [], why: 'no standing grant for this shop' };
+  const acct = meshAccount(st);
+  if (!(state.auto ? state.auto.on === true : acct.auto_default)) return { on: false, beats: [], blocked: [], why: state.auto ? 'the grant was switched off for this shop' : 'no standing grant for this shop' };
   const v = meshValueBeats(s, products, facts, o);
   const wit = meshWitness(s, products, facts);
   const seen = (state.items && typeof state.items === 'object') ? state.items : {};
@@ -2883,17 +2884,85 @@ export function meshGrowth(st, rows, opt) {
  *  personal WhatsApp status, a Facebook group) and the pack hands a person the text and the link. A
  *  publisher that pretends otherwise is how an account gets restricted, so the capability is declared
  *  per channel and the schedule refuses to claim a send it cannot make. */
+/* ── v0.9.4: the rails and the accounts, read off the pipeline that already runs this ─────────
+ * The rail list and the cadence are the hunta bible's own machine section: X >=3 posts a day per
+ * persona, LinkedIn >=3, dev.to 3, daily pins, daily Bluesky and Nostr ("niche value, low
+ * competition"), planner ratio two value to one promo, replies capped at four a day at human pace,
+ * and cold outreach composed at 08:21 on weekdays with one owner tap sending the whole batch to a
+ * ramped mailbox. The line I had wrong was the price of X: the write-only free tier is 1,500 posts
+ * a month, so a shop's three beats a day is nothing against it and no seller needs a paid app.
+ */
+const MESH_RAIL_ALIAS = { whatsapp_status: 'whatsapp', fb_group: 'facebook', ig: 'instagram', x_thread: 'x', paper: 'counter' };
+const MESH_FALLBACK = { mode: 'assist', max: 300, cadence: 1, api: null, needs: 'not a channel we know: it is queued for a person, never claimed as posted', pitch: true };
+
 export const MESH_CHANNELS = {
-  bluesky:   { mode: 'auto', max: 300, api: 'atproto', needs: 'handle + app password' },
-  telegram:  { mode: 'auto', max: 1024, api: 'bot', needs: 'bot token + channel id' },
-  mastodon:  { mode: 'auto', max: 500, api: 'rest', needs: 'instance + access token' },
-  x:         { mode: 'auto', max: 280, api: 'v2', needs: 'app keys (paid tier)' },
-  gpages:    { mode: 'auto', max: 5000, api: 'static', needs: 'nothing: we host it' },
-  whatsapp:  { mode: 'assist', max: 130, api: null, needs: 'the merchant taps send — no personal-account API exists' },
-  facebook:  { mode: 'assist', max: 500, api: null, needs: 'group posting has no API for this; a person posts' },
-  instagram: { mode: 'assist', max: 900, api: null, needs: 'business account + token if they have one' },
-  counter:   { mode: 'assist', max: 150, api: null, needs: 'the paper by the till' },
+  x:         { mode: 'auto', max: 280, cadence: 3, api: "v2 write-only free tier (1,500 posts a month)", needs: "a bearer token from the seller's own free app", pitch: true },
+  linkedin:  { mode: 'auto', max: 3000, cadence: 3, api: "share / community management", needs: "access token", pitch: true },
+  devto:     { mode: 'auto', max: 100000, cadence: 3, api: "articles", needs: "free api key; the long-form home of the value beats", pitch: false },
+  bluesky:   { mode: 'auto', max: 300, cadence: 1, api: "atproto", needs: "handle + app password", pitch: true },
+  nostr:     { mode: 'auto', max: 1000, cadence: 1, api: "relay, kind 1", needs: "an nsec we generate for the shop: no signup, no cost, nobody to approve it", pitch: true },
+  mastodon:  { mode: 'auto', max: 500, cadence: 1, api: "rest", needs: "instance + token", pitch: true },
+  telegram:  { mode: 'auto', max: 1024, cadence: 1, api: "bot", needs: "bot token + channel id", pitch: true },
+  pinterest: { mode: 'auto', max: 500, cadence: 1, api: "pins", needs: "business account; the photo rails are the ones that sell food", pitch: true },
+  gpages:    { mode: 'auto', max: 5000, cadence: 3, api: "static", needs: "nothing: we host it", pitch: true },
+  whatsapp:  { mode: 'assist', max: 130, cadence: 2, api: null, needs: "the seller taps send from their own number", pitch: true },
+  facebook:  { mode: 'assist', max: 500, cadence: 1, api: null, needs: "groups have no API for this; a person posts", pitch: true },
+  instagram: { mode: 'assist', max: 900, cadence: 1, api: null, needs: "business account + token if they have one", pitch: true },
+  counter:   { mode: 'assist', max: 150, cadence: 1, api: null, needs: "the paper by the till", pitch: true },
 };
+
+export const MESH_RAIL_SOURCE = "the rails and the cadence are the pipeline's own, not invented here; and the ratio 2 value : 1 promo is the planner rule the bible states, weekends included";
+
+/* Whose account is it, and does anyone have to switch it on? A company account the owner runs is
+ * autonomous by default: he wrote the policy, so a grant would be him asking himself for permission.
+ * A seller's account is delegated to the same machine — their key, their number, one tap of theirs
+ * to stop — and a trial account has nothing connected, so it has nothing to post with. */
+export const MESH_ACCOUNT_CLASSES = {
+  owner:  { auto_default: true,  credentials: "the owner's own company accounts", revoke: "flip the default off in ops" },
+  seller: { auto_default: true,  credentials: "delegated: the seller hands over their app password, bot token or nsec, and the owner's machine posts to it", revoke: "they change the password at the provider, or tap revoke in ops" },
+  trial:  { auto_default: false, credentials: "none until they connect their own", revoke: "nothing to revoke: it never posts" },
+};
+
+export function meshAccount(st) {
+  const s = st || {};
+  const cls = s.mesh_class || (s.owner === true || s.type === 'company' ? 'owner'
+    : (s.plan === 'trial' || /trial/i.test(String(s.status || '')) ? 'trial' : 'seller'));
+  const c = MESH_ACCOUNT_CLASSES[cls] || MESH_ACCOUNT_CLASSES.seller;
+  const ch = (s.mesh_channels && typeof s.mesh_channels === 'object') ? s.mesh_channels : {};
+  return { class: cls, auto_default: c.auto_default, credentials: c.credentials, revoke: c.revoke,
+    rails: Object.keys(ch).filter((k) => ch[k] && ch[k].on), delegated: cls === 'seller',
+    on_behalf_of: cls === 'seller' ? "a seller's account, posted to by the owner's machine on credentials the seller gave" : "the owner's own account" };
+}
+
+/* Outreach the way the pipeline does it: the machine composes, one tap sends the batch, the mailbox
+ * ramps, and the reply stays at a human pace. What is deliberately absent is a per-message
+ * approval, which is how a growth machine becomes a to-do list nobody gets to. */
+export const MESH_OUTREACH = {
+  compose: 'auto', send: 'one owner tap sends the whole batch', at_utc: '08:21', weekdays_only: true,
+  ramp_per_day: [20, 40, 60, 80, 100], batch_max: 80,
+  replies: { per_day: 4, mode: 'human', order: 'questions first' },
+  basis: ['ledger', 'uploaded list', 'follower who engaged'],
+};
+
+export function meshOutreachPlan(st, opt) {
+  const o = opt || {}, now = o.now || Date.now(), d = new Date(now);
+  const weekday = d.getUTCDay() >= 1 && d.getUTCDay() <= 5;
+  const state = o.state || {}, ramp = MESH_OUTREACH.ramp_per_day;
+  const sent = Number((state.outreach && state.outreach.sent) || 0);
+  const total = Number((state.outreach && state.outreach.total) || 0);
+  const cap = ramp[Math.min(ramp.length - 1, Math.floor(total / 100))];
+  const list = Array.isArray(o.leads) ? o.leads : [];
+  const batch = list.slice(0, Math.max(0, Math.min(MESH_OUTREACH.batch_max, cap - sent))).map((l, i) => {
+    const to = String((l && (l.phone || l.email || l.handle)) || l || '').slice(0, 60);
+    return { to, kind: /@/.test(to) ? 'email' : 'dm_whatsapp', i: i + 1, sends: false, tap_sends_batch: true,
+      text: meshClip((l && l.note) ? String(l.note) : String(l), 220) };
+  });
+  return { composed: batch.length, send_at_utc: MESH_OUTREACH.at_utc, on: weekday || !MESH_OUTREACH.weekdays_only,
+    skip_reason: (!weekday && MESH_OUTREACH.weekdays_only) ? 'weekend: the pipeline composes on weekdays only' : '',
+    cap_today: cap, sent_today: sent, ramp_day: Math.floor(total / 100) + 1, batch,
+    replies: MESH_OUTREACH.replies, basis: MESH_OUTREACH.basis,
+    note: 'The batch is ready as one action. No message waits for its own yes, and no reply is ever sent from this code.' };
+}
 
 export const MESH_AUTONOMY_V3 = {
   kinds: ['value', 'promo'], ratio: { value: 2, promo: 1 }, per_day: 3,
@@ -2928,8 +2997,12 @@ export function meshPromoBeats(st, products, facts, opt) {
     const text = meshClip(body, 300);
     const bad = meshUnsupportedOffer(text, row);
     if (bad) { blocked.push({ item_key: String(row.id || row.name).slice(0, 40), text, why: bad }); return; }
-    out.push({ kind: kind || 'promo', item_key: String(row.id || row.name).slice(0, 40), item: meshClip(row.name, 60),
-      price: Number(row.price) || 0, text: text + ' ' + link, sends: true });
+    const full = text + ' ' + link;
+    // the rail is chosen by length, because the limit is the platform's, not ours: a line that does
+    // not fit a status update is not trimmed into nonsense, it goes where the sentence fits
+    const rail = ['whatsapp_status', 'x', 'facebook_group', 'instagram'].find((r) => full.length <= (MESH_RAILS[r] || { max: 1e9 }).max) || 'counter';
+    out.push({ kind: kind || 'promo', rail, item_key: String(row.id || row.name).slice(0, 40), item: meshClip(row.name, 60),
+      price: Number(row.price) || 0, text: full, sends: true });
   };
   const a = pool[day % pool.length];
   add(a, meshClip(a.name, 60) + ' is ' + money(a.price, a.cur) + (a.available === false ? ' and listed sold out — write to ask about the next batch' : ', available now')
@@ -2951,7 +3024,7 @@ export function meshPromoBeats(st, products, facts, opt) {
 export function meshSchedule(st, products, facts, opt) {
   const o = opt || {}, now = o.now || Date.now(), day = Math.floor(now / DAY_MS);
   const state = o.state || {};
-  const auto = !!(state.auto && state.auto.on);
+  const auto = state.auto ? state.auto.on === true : meshAccount(st).auto_default;   // owner and seller accounts run by default
   const seen = (state.items && typeof state.items === 'object') ? state.items : {};
   const fresh = (k) => { const d = seen[k]; return !d || (day - Math.floor(Date.parse(String(d)) / DAY_MS)) >= MESH_BUDGET.item_cooldown_days; };
   const v = meshValueBeats(st, products, facts, o);
@@ -2965,10 +3038,10 @@ export function meshSchedule(st, products, facts, opt) {
   const chans = (st && st.mesh_channels && typeof st.mesh_channels === 'object') ? st.mesh_channels : {};
   const open = Object.keys(MESH_CHANNELS).filter((c) => chans[c] && chans[c].on);
   const beats = chosen.map((b, i) => {
-    const autoCh = open.filter((c) => MESH_CHANNELS[c].mode === 'auto');
+    const autoCh = open.filter((c) => (MESH_CHANNELS[MESH_RAIL_ALIAS[c] || c] || MESH_FALLBACK).mode === 'auto');
     return { ...b, slot: MESH_AUTONOMY_V3.windows_utc[i % MESH_AUTONOMY_V3.windows_utc.length],
       to: open.length ? open : (b.kind === 'promo' ? ['whatsapp', 'counter'] : ['whatsapp']),
-      posted_by: (b.kind === 'promo' ? 'shop facts' : 'shop words'),
+      posted_by: (b.kind === 'promo' ? 'shop facts' : 'shop words'), on_behalf_of: meshAccount(st).on_behalf_of, delegate: meshAccount(st).delegated,
       auto_send: auto && autoCh.length > 0, channels_auto: autoCh };
   });
   return { on: auto, beats, blocked: [].concat(v.blocked || [], p.blocked || []),

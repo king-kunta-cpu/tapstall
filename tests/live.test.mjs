@@ -4013,6 +4013,9 @@ test('0.9.1 the bundle carries every page, and no KV write stands between it and
 const auto = {};
 test('0.9.2 nothing publishes until the shop grants it once, and that grant needs the confirm header', async () => {
   auto.sh = await newShop('automesh');
+  // v0.9.4: a seller account runs by default, so what this block tests is the class that must
+  // grant for itself — a trial shop with nothing delegated to the owner's machine
+  { const raw = await env.STORES.get('store:automesh'); if (raw) { const d = JSON.parse(raw); d.mesh_class = 'trial'; await env.STORES.put('store:automesh', JSON.stringify(d)); } }
   const feed = await call('/s/automesh/mesh.json');
   assert.equal(feed.status, 200, feed.text);
   assert.equal(feed.json.auto.on, false, 'no grant, no autonomy: ' + JSON.stringify(feed.json.auto));
