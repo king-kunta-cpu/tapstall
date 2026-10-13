@@ -50,6 +50,17 @@ mentioned none of them — so `mergeMenuPatch` keeps everything the payload does
 false }` is how one override is lifted, a payload that changes nothing returns `changed:false` and
 spends no write, and `menu_revert` is still the only way to clear the layer.
 
+**The residual, and why it cannot bite tonight.** `deploy.sh --templates` ran and could not write:
+the account's 1,000 daily KV writes are gone (selftest says `kv_roundtrip:false`), so `tpl:store`,
+`tpl:admin` and `tpl:ops` still serve the pre-0.9.0 pages until the 00:20 UTC template run. That
+leaves the *preview* on the storefront computing VAT the old one-way rule — which matters only for a
+shop in inclusive mode, and a shop cannot get into inclusive mode in this window: `vat_mode` is a
+settings write, and every settings write needs the same spent budget. The Worker's pricing, which is
+the authority the order is actually priced from, is deployed and verified: `__ping` says 0.9.0 and
+all 19 new selftest keys are true. Where a page lags the engine, the engine wins and the page catches
+up at the top of the UTC day; where the engine and a page could disagree, the field that would make
+them disagree is unwritable in the same breath.
+
 **The numbers.** 290 tests: core 101, live 124, pages 55, limits 10 — 33 of them written for this
 release, including six pages tests that read the shipped HTML and one live test that takes the write
 budget away (`env.STORES.put` throws) and asks for the books, the CSV and a receipt anyway, because a
