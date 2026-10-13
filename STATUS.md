@@ -110,6 +110,19 @@ is honestly seen as a first one, so the tally can move twice. `Math.max(0, …)`
 no money moves twice — status, amount and the ledger row are all idempotent — so this stays a
 documented edge of KV-at-$0 rather than a lock invented to dress it up.
 
+It ran in CI on 2026-10-13 at 11:16:24Z-11:31:25Z (`workflow_dispatch`, run #86, commit `4c62313`,
+15m01s against the live Worker):
+
+    passed: 179   blocked by the day's KV budget: 98   failed: 0      prod_check exit=0
+
+so the 98 write-gated lines are named daily instead of silently skipped, and nothing on the product
+failed. The step that prints that was itself broken when it first went in: `the day's` closed a quote
+early, bash died on the line, and no summary printed at all — caught by executing the step body here,
+not in CI, because the suite only read the YAML. So the checker now checks the checker: every `run:`
+block in every workflow is handed to `bash -n` by `tests/pages.test.mjs` (red on that apostrophe, green
+on the fix), and the step prints each failing line with the pattern it wanted and the body it got,
+instead of a `tail` that scrolls them out of the log.
+
 ## One rule, four places (2026-10-12, v0.8.4)
 
 A deferred line in this file — *"unify `ask_payer` behind `railWantsPayer(rail)`"* — was not
