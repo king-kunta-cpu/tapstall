@@ -6,7 +6,13 @@ on:
     branches: [main]
     paths-ignore: ['ci-deploy.log']
   schedule:
-    - cron: '20 0 * * *'      # 00:20 UTC, twenty minutes after the KV write budget resets
+    # Four slots, not one. Measured on this repo: GitHub delivered ONE scheduled run
+    # (#56) in the workflow's first 83 runs, six hours late, and skipped the 00:20 slot
+    # entirely on the night two pages were waiting for it — so a stuck page stayed stuck
+    # for nine hours while a log line promised a nightly retry. A dropped slot is now a
+    # quarter of the mechanism; a quiet run spends no KV write at all, because
+    # `deploy.sh --templates` skips any page whose bytes already match git.
+    - cron: '20 0,6,12,18 * * *'
   workflow_dispatch: {}
 
 permissions:
@@ -22,9 +28,10 @@ jobs:
   # The one failure at $0 hosting that looks like success: the Worker deploys, a page
   # does not, because the account's 1,000 free KV writes a day were spent before the
   # template step ran. deploy.sh says so and carries on — and then nothing retries it,
-  # because a retry needs a push. This is the retry. 00:20 UTC is after the reset; on a
-  # day with nothing missing it spends no write at all, reads every page back against
-  # git, and goes green in seconds.
+  # because a retry needs a push. This is the retry. Every slot is after the 00:00 UTC
+  # reset; on a day with nothing missing it spends no write at all, reads every page
+  # back against git, and goes green in seconds. Four slots because one is not a
+  # mechanism (see the cron comment above).
   pages-are-current:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest

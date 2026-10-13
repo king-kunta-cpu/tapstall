@@ -30,7 +30,7 @@ import {
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '0.8.4';
+const VERSION = '0.8.5';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 const MAX_ORDERS_KEPT = 200;
@@ -542,12 +542,42 @@ async function placeOrder(req, url, env, ctx) {
     mark_url: `/c/${markCap}`,
     confirm_url: order.confirm_url,
     cancel_url: `/c/${cancelCap}`,
-    // the receipt's second half: they have the code on screen right now
+    // the receipt's second half: they have the code on screen right now.
+    // `left` is the door's own word for the budget, and the storefront gates its
+    // keep-this-link-on-your-device decision on it, so it has to be here and not only in
+    // a POST the buyer has not made yet: minting a 72-hour door and then letting the page
+    // drop it because the number went by another name is how the link died in the tab it
+    // was handed to.
     proof_url: `/p/${proofCap}`,
+    left: PROOF_WRITES_MAX,
     proof_writes: PROOF_WRITES_MAX,
   }, 201);
 }
 
+
+/**
+ * Put a patch on the merchant's ledger row for this order, and keep trying for a moment if
+ * the row is not there yet. `list:<handle>` is written just after the order document, so a
+ * read served by another edge can still be holding the snapshot from before the order
+ * existed — and skipping the mirror then is permanent: the code sits on the order while the
+ * ledger keeps saying "no proof yet" (or "awaiting payment" after a mark) until something
+ * else touches that row. Reads are free at $0 hosting and the row is there on the first try
+ * in the normal case, so the cost of the loop is paid only by the race.
+ */
+async function mirrorRow(env, handle, id, patch) {
+  const key = 'list:' + handle;
+  for (let i = 0; i < 4; i++) {
+    const list = (await env.ORDERS.get(key, 'json')) || [];
+    const row = list.find((x) => x && x.id === id);
+    if (row) {
+      Object.assign(row, patch);
+      await env.ORDERS.put(key, JSON.stringify(list));
+      return true;
+    }
+    if (i < 3) await new Promise((r) => setTimeout(r, 150));
+  }
+  return false;
+}
 
 async function persistOrder(env, st, order) {
   if (!env.ORDERS) return;
@@ -677,9 +707,7 @@ async function markPaid(req, url, env) {
     await env.STORES.put(hk, JSON.stringify(rec), { expirationTtl: 180 * 86400 });
   }
   await env.ORDERS.put(key, JSON.stringify(o));
-  const list = (await env.ORDERS.get('list:' + handle, 'json')) || [];
-  const row = list.find(x => x.id === o.id);
-  if (row) { row.status = o.status; await env.ORDERS.put('list:' + handle, JSON.stringify(list)); }
+  await mirrorRow(env, handle, o.id, { status: o.status });   // the ledger keeps pace, or tries to
   const logged = await pushAudit(env, st, { act: 'mark', via: viaCap ? 'link' : 'session', fields: [o.code + ' → ' + want], ip: ipOf(req) });
   // an undo link for 15 minutes, same shape, opposite action
   // undo returns the order to whatever it was before this tap
@@ -936,14 +964,9 @@ async function proofAdd(req, url, env) {
     await env.ORDERS.put(key, JSON.stringify(o));
     // and onto the row the merchant reads, so the chase sentence disappears from the
     // place it was written: the same two writes a mark spends, no more
-    const listKey = `list:${st.handle}`;
-    const list = (await env.ORDERS.get(listKey, "json")) || [];
-    const row = list.find((x) => x && x.id === o.id);
-    if (row) {
-      row.payer = o.buyer.payer; row.proof = o.buyer.proof; row.proof_by = "buyer"; row.proof_at = when;
-      row.pcap = nextNonce;
-      await env.ORDERS.put(listKey, JSON.stringify(list));
-    }
+    await mirrorRow(env, st.handle, o.id, {
+      payer: o.buyer.payer, proof: o.buyer.proof, proof_by: "buyer", proof_at: when, pcap: nextNonce,
+    });
     await pushAudit(env, st, { act: "proof", via: "buyer",
       fields: [`${o.code || o.id} ← ${[o.buyer.proof, o.buyer.payer].filter(Boolean).join(' · ')}`], ip });
   }
@@ -2906,7 +2929,13 @@ async function proofFile(req, url, env) {
   // door builds its input from `proof` and `payer` alone and calls `proofAccept`, which only
   // ever writes; nothing but a signed-in shop can reach this branch, and it clears rather than
   // sets, so the power it adds is the power the ledger row already has.
-  if (b.void === true || b.void === '1' || b.void === 'true') {
+  const VOID_ON = [true, 1, '1', 'true'];
+  // One list, read strictly, and it has to hold every shape a client naturally has. The
+  // dashboard's button sends the number 1 while this line knew only `true`, '1' and 'true'
+  // — so for a release "Hand it back" was answered "Nothing to file", every merchant press
+  // did nothing, and the suite stayed green because every test sent the one spelling the
+  // button does not. A truthy word read as a blank box is the bug; the page is fine.
+  if (VOID_ON.includes(b.void)) {
     const v = proofVoid(o);
     if (!v.changed) return json({ ok: true, changed: false, void: false, code: o.code, proof: '', note: v.msg });
     const when = new Date().toISOString();
@@ -2916,13 +2945,9 @@ async function proofFile(req, url, env) {
     // the code just cleared is dead, spent or not, and `withAsk` mints the next one from here
     o.pcap = randomKey(8);
     await env.ORDERS.put(key, JSON.stringify(o));
-    const listKey = `list:${st.handle}`;
-    const list = (await env.ORDERS.get(listKey, 'json')) || [];
-    const row = list.find((x) => x && x.id === o.id);
-    if (row) {
-      row.payer = ''; row.proof = ''; row.proof_by = ''; row.proof_at = ''; row.pcap = o.pcap;
-      await env.ORDERS.put(listKey, JSON.stringify(list));
-    }
+    await mirrorRow(env, st.handle, o.id, {
+      payer: '', proof: '', proof_by: '', proof_at: '', pcap: o.pcap,
+    });
     const logged = await pushAudit(env, st, { act: 'proof', via: 'merchant',
       fields: [`${o.code || o.id} ↩ ${v.cleared.join(' · ')} cleared, field handed back`], ip: ipOf(req) });
     return json({ ok: true, changed: true, void: true, code: o.code, proof: '', status: o.status, logged,
@@ -2941,14 +2966,9 @@ async function proofFile(req, url, env) {
   // open on the order for the next 72 hours.
   o.pcap = randomKey(8);
   await env.ORDERS.put(key, JSON.stringify(o));
-  const listKey = `list:${st.handle}`;
-  const list = (await env.ORDERS.get(listKey, 'json')) || [];
-  const row = list.find((x) => x && x.id === o.id);
-  if (row) {
-    row.payer = o.buyer.payer; row.proof = o.buyer.proof; row.proof_by = 'merchant'; row.proof_at = when;
-    row.pcap = o.pcap;
-    await env.ORDERS.put(listKey, JSON.stringify(list));
-  }
+  await mirrorRow(env, st.handle, o.id, {
+    payer: o.buyer.payer, proof: o.buyer.proof, proof_by: 'merchant', proof_at: when, pcap: o.pcap,
+  });
   // the response says whether the log held, in the same words a mark uses: a gap in
   // the paper trail is not a failed tap, and the merchant must not retype to be sure
   const logged = await pushAudit(env, st, { act: 'proof', via: 'merchant',

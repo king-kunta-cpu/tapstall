@@ -1,5 +1,67 @@
 # Tapstall — status
 
+## Three bugs the checks could not see (2026-10-13, v0.8.5)
+
+For two days `prod_check.sh` ran on accounts whose 1,000 free KV writes were gone, so every
+line that needs an order — 96 of them — printed `! blocked` and the run said `0 failed`. That
+number was never evidence. Today the budget was open, the lines ran for the first time, and the
+run came back `265 passed / 33 failed`. Three of those failures were the product.
+
+**The merchant's `Hand it back` button did nothing.** `pages/src/admin.html` posts
+`{handle, id, void: 1}`; the route accepted `void === true`, `'1'` or `'true'`. A number is not
+a string in JavaScript, so the verb fell through to the filing branch and production answered
+every press with `{"ok":false,"error":"Nothing to file — type the code they sent you."}`. The
+live test for the feature sent `void: true`, and `prod_check` asserted `'void: 1'` against the
+*page source* — so both suites watched the two halves of the seam and neither watched the seam.
+Now `const VOID_ON = [true, 1, '1', 'true']` is one named list, read strictly, and a new live
+test walks four truthy shapes and four falsy ones (`0`, `'0'`, `'false'`, `''` must stay a
+filing, because a caller who means to write a code must not find the field cleared by a value
+that only looked like the verb), with a pages test that canonicalises the literal the button
+sends and demands it be in the list.
+
+**The receipt threw away the door it was handed.** `POST /api/order` answered
+`proof_url` and `proof_writes: 3`; the storefront asks `if (j.proof_url && j.left > 0)`, and
+`left` — the word every door response uses — was not there. `undefined > 0` is false, so the
+success branch took `else pfDone(order)`: it *deleted* the entry it was meant to keep. Three
+days of valid link, discarded on the screen that minted it, and the `Correct it — this field
+takes N more` line under the box never rendered. The create response now carries
+`left: PROOF_WRITES_MAX` beside the document's own name for the count, and the two gates in the
+page are pinned by pattern, not by hope.
+
+**A code could land on the order and never reach the ledger.** Four writers (`markPaid`,
+`/api/proof`, the shop's filing, the shop's hand-back) each mirrored onto `list:<handle>` with
+the same three lines: read the list, `const row = list.find(…)`, `if (row) { patch; put }`.
+The list is written just after the order document, so a read served by a colder edge can still
+hold the snapshot from before the order existed — and the `if` made that a *permanent* wrong
+answer: a reference on the order, `no proof yet` in the merchant's list, nothing left to fix it
+until the shop happened to touch the row. One helper now, `mirrorRow(env, handle, id, patch)`,
+reading again for ~450 ms before it gives up; the four writers call it and none of them owns
+the policy any more.
+
+The other thirty failures were the checker, and they are worth recording because they were
+worse than noise — they were the reason `0 failed` had meant nothing. A proof section that
+borrowed the order another section had marked paid and undone; four ledger assertions read from
+one snapshot grabbed before the row existed; a card assertion aimed at the *offer* page (which
+must not prune a live link) instead of the card that closes it; a `week` restore whose response
+went to `/dev/null` unasserted; a placeholder written inside single quotes so the string
+`AGAIN-$(date +%s | tail -c 6)` was filed as a payment reference. And two states the product
+declines on purpose, now reported as states: the minute's 8 mutations (`the minute was spent:
+this got a rate limit, not an answer`) and the KV REST mirror lagging the Worker by minutes
+(`had not caught up in ~100s; the Worker answered this line itself`). Yesterday's `0 failed` and
+today's `0 failed` are different claims; only one of them was worth anything.
+
+**The dead promise.** Both stale pages stayed stale overnight twice running, and the sentence
+in `deploy.sh` that explained it — *it publishes itself at 00:20 UTC (the scheduled run)* — was
+checked: `.github/workflows/deploy.yml` declares `schedule: cron: '20 0 * * *'` and across 83
+runs GitHub delivered **one** scheduled run (#56, six hours late). A retry nobody can prove fires
+is a wish, so `pages-are-current` now runs at `20 0,6,12,18 * * *`, the wording in `deploy.sh`
+and `lib.sh` names both real routes (any push, or one of four scheduled runs), and
+`publish_watch.sh` carries the correction on its first line: the process left to finish this at
+midnight was killed by the sandbox mid-sleep, printing nothing, because **a sleep in a sandbox is
+not a scheduler**. The pages themselves shipped at 01:14 UTC, verified the only way that means
+anything — `all shipped pages are what git holds`, `/a` served at 94,163 bytes exactly as git
+holds it with `data-pfv` present, `/s/mamatoe` serving `id="pff"`.
+
 ## One rule, four places (2026-10-12, v0.8.4)
 
 A deferred line in this file — *"unify `ask_payer` behind `railWantsPayer(rail)`"* — was not

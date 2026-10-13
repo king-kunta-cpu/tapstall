@@ -295,6 +295,20 @@ verified ZW/SA tariffs) but it is now a **default, not the whole answer**:
   and the spent card says *if this phone has a newer link*, which is the only form of that
   sentence that is ever false-free (v0.8.3).
 
+- **One rule, four places.** Whether a rail needs the payer's number was answered four times, in
+  four copies of the same condition, and two of them disagreed: a ZIPIT shop whose storefront had
+  a cached config from before the rule asked for nothing on the one rail shape where the sender
+  number *is* the reconciliation. `PAYER_SPECS` and `railWantsPayer(rail)` in the core now decide
+  it once, both writers call it, and a test counts the copies in the shipped page so a fifth
+  opinion has to be deliberate (v0.8.4).
+- **The checks grew teeth.** 96 verification lines had been running as `blocked` while the free
+  KV budget was spent, and `0 failed` had been read as health for two days. On the first day the
+  budget was open they found three real defects — a merchant button whose verb the route did not
+  read, a receipt that threw away the buyer's 72-hour link because the count arrived under a
+  different name, and a ledger row that could skip a code forever if it was written one read too
+  early — and the run that came back clean at 205 also came back clean for the wrong reason.
+  Rate limits and the KV mirror's lag are now reported as the states they are (v0.8.5).
+
 An invalid description at sign-up becomes `cash` rather than a rejected
 registration: a merchant who never opens the shop is worse than one whose slip
 says "pay on collection" until they fix it.

@@ -1912,6 +1912,12 @@ test('the code a buyer has not typed yet gets a link of its own, not the shop’
   const ord = late = Object.assign(late, await lateOrder('196.31.0.1'));
   late.cap = proofCapOf(ord);
   assert.equal(ord.json.proof_writes, 3, 'and the page says how many goes in it, so nobody has to guess if a second try is allowed');
+  // and it says it in the word the storefront reads. `proof_writes` is the field on the
+  // order document; the receipt's script asks for `left`, and for six releases the create
+  // response carried only the first name — so the door was minted, shown, and then thrown
+  // away by `else pfDone(...)` on its way to localStorage. Two names for one number is how
+  // that stayed invisible: this line is the seam.
+  assert.equal(ord.json.left, ord.json.proof_writes, 'the receipt counts the budget under the word the page reads');
 
   // the promise that made this acceptable at all: a URL a stranger could read is
   // handed to the buyer, and it is kept nowhere the merchant can pick it up
@@ -3012,3 +3018,85 @@ test('a code the shop cannot read is handed back, not argued about', async () =>
     headers: { 'x-tapstall-admin': skey }, body: { handle: h, id, proof: 'FROM THE CHAT' } });
   assert.equal(shopRefiles.status, 200, 'the shop can file what arrives in the chat afterwards, as it always could: ' + shopRefiles.text.slice(0, 120));
 });
+
+/* The spelling sweep that should have existed the day the button was written. Each row is the
+   same act seen from a different client: the dashboard, a hand-typed call, a form. And each
+   falsy row has to stay a *filing* attempt, because a caller who means to write a code must
+   not find the field cleared by a value that only looked like the verb. */
+test('the hand-back verb answers to every shape a client sends it', async () => {
+  const h = 'zzspell' + String(Date.now()).slice(-5);
+  const reg = await call('/api/register', { method: 'POST', body: {
+    handle: h, shop_name: 'Shapes', whatsapp: '263771234567', rail: 'zipit', pay_account: '1234567890', currency: 'USD',
+  } });
+  assert.equal(reg.status, 201, reg.text);
+  const skey = JSON.parse(env.STORES._map.get('store:' + h).value).admin_token;
+  const ord = await call('/api/order', { method: 'POST', ip: '196.45.0.1', body: { handle: h, service: 'pickup',
+    buyer: { name: 'Rudo T', phone: '0780006611' }, items: [{ name: 'Box', price: 12 }] } });
+  assert.equal(ord.status, 201, ord.text);
+  const id = ord.json.order.id, key = 'order:' + h + ':' + id;
+  const doc = () => JSON.parse(env.ORDERS._map.get(key).value);
+  const file = (body) => call('/api/order/proof', { method: 'POST', ip: '196.45.0.2',
+    headers: { 'x-tapstall-admin': skey }, body: Object.assign({ handle: h, id }, body) });
+
+  const on = [true, 1, '1', 'true'];
+  let n = 0;
+  for (const shape of on) {
+    await file({ proof: 'CODE-' + ++n });                      // fill it, then ask for it back
+    const back = await file({ void: shape });
+    assert.equal(back.status, 200, 'void as ' + JSON.stringify(shape) + ' was refused: ' + back.text.slice(0, 140));
+    assert.equal(back.json.void, true, 'and the answer claims the verb it performed: ' + back.text.slice(0, 140));
+    assert.equal(back.json.changed, true, 'the field really moved for ' + JSON.stringify(shape));
+    assert.equal(doc().buyer.proof, '', 'nothing left on file after void=' + JSON.stringify(shape));
+  }
+
+  // the shapes that are not the verb: `void: 0` is somebody saying "do not", and it must
+  // read as an empty box, not as a clearing. Both halves of that answer are the same message,
+  // which is why the proof field, not the status, is what this asserts on.
+  for (const shape of [0, '0', 'false', '']) {
+    await file({ proof: 'KEPT-' + ++n });
+    const nope = await file({ void: shape });
+    // a no-op, not a clearing: `changed:false` is this API's word for "I wrote nothing", and
+    // the note is the one the route gives to a box holding what the order already holds
+    assert.equal(nope.json.changed, false, 'void=' + JSON.stringify(shape) + ' must not be a hand-back: ' + nope.text.slice(0, 140));
+    assert.ok(!nope.json.void, 'and it must not claim the verb either: ' + nope.text.slice(0, 140));
+    assert.equal(doc().buyer.proof, 'KEPT-' + n, 'the code they were filing is still there after void=' + JSON.stringify(shape));
+  }
+});
+
+/* The ledger row is a second document, written just after the order, and a read served from
+   another edge can still hold the snapshot from before the order existed. The mirror used to
+   be `if (row) { … }` — one skipped read, one permanent wrong answer: a code on the order and
+   "no proof yet" in the merchant's list, with nothing left to correct it. `mirrorRow` reads
+   again. This test is the only thing standing between that bug and a customer. */
+test('a code that lands while the ledger is catching up still reaches the ledger', async () => {
+  const h = 'zzlag' + String(Date.now()).slice(-5);
+  const reg = await call('/api/register', { method: 'POST', body: {
+    handle: h, shop_name: 'Lag', whatsapp: '263771234567', rail: 'zipit', pay_account: '1234567890', currency: 'USD',
+  } });
+  assert.equal(reg.status, 201, reg.text);
+  const ord = await call('/api/order', { method: 'POST', ip: '196.46.0.1', body: { handle: h, service: 'pickup',
+    buyer: { name: 'Rudo T', phone: '0780006611' }, items: [{ name: 'Box', price: 22 }] } });
+  assert.equal(ord.status, 201, ord.text);
+  const id = ord.json.order.id, key = 'list:' + h;
+  const rowOf = () => JSON.parse(env.ORDERS._map.get(key).value).find((x) => x.id === id);
+  assert.equal(rowOf().proof, '', 'nothing filed yet — the row carries the field, blank — and it is in the list');
+  const snapshot = JSON.parse(env.ORDERS._map.get(key).value).filter((x) => x.id !== id);
+
+  const realGet = env.ORDERS.get.bind(env.ORDERS);
+  let staleServed = 0;
+  env.ORDERS.get = (k, opt) => (k === key && staleServed++ < 2)
+    ? Promise.resolve(snapshot)                                   // what a colder edge still holds
+    : realGet(k, opt);
+  const w = await call('/api/proof', { method: 'POST', ip: '196.46.0.2',
+    body: { cap: ord.json.proof_url.slice(3), proof: 'AFTER THE LAG' } });
+  env.ORDERS.get = realGet;
+
+  assert.equal(w.status, 200, w.text.slice(0, 140));
+  assert.ok(w.json.changed, 'the write itself landed: ' + w.text.slice(0, 140));
+  assert.ok(staleServed >= 2, 'the test really answered it stale reads first: ' + staleServed);
+  const row = rowOf();
+  assert.equal(row.proof, 'AFTER THE LAG', 'and the ledger caught up instead of shrugging');
+  assert.equal(row.proof_by, 'buyer', 'with the same attribution the order document carries');
+  assert.ok(row.pcap, 'and the rotated nonce, so the next read mints the buyer a live link');
+});
+

@@ -194,8 +194,9 @@ else:
             print("  ! %-14s NOT PUBLISHED — the KV upstream refused us (5xx) three times over 15 seconds, and git and KV still differ (%d bytes vs %d). This is Cloudflare, not this build: the next deploy repeats the put, and CI's 00:20 UTC job is that retry. The Worker is deployed regardless." % (name, len(body), len(cur or b"")))
         elif quota(txt):
             print("  ! %-14s NOT PUBLISHED — this account\'s KV write budget is spent (HTTP 429/10048). "
-                  "The old copy stays live (%d bytes in git, %d in KV); this goes out on the next deploy "
-                  "after 00:00 UTC, and the Worker is deployed regardless." % (name, len(body), len(cur or b"")))
+                  "The old copy stays live (%d bytes in git, %d in KV); the next deploy after 00:00 UTC "
+                  "puts it right — that is CI\'s scheduled run or your next push, either of which, "
+                  "and the Worker is deployed regardless." % (name, len(body), len(cur or b"")))
         else:
             raise SystemExit("  ! %-14s could not be published and KV differs from git: %s" % (name, txt[:160]))
 PYEOF

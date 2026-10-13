@@ -108,7 +108,8 @@ kv_put_tpl "$STORES_ID" $TPL_NAMES sample-menu.csv
 if verify_templates "$STORES_ID" $TPL_NAMES sample-menu.csv; then :
 else
   warn "a page above is not what customers are being served — the Worker is current, the page is not"
-  warn "it publishes itself at 00:20 UTC (the scheduled run), or now: ./scripts/deploy.sh --templates"
+  warn "four scheduled runs a day (00:20/06:20/12:20/18:20 UTC) retry it, and so does any push;"
+  warn "to finish now: ./scripts/deploy.sh --templates  (GitHub drops schedules — do not trust the night)"
 fi
 
 say "building bundle"

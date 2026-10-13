@@ -17,6 +17,13 @@
 # quiet day costs nothing and proves the same fact every time.
 #
 # Nothing here prints a secret: `load_secrets` reads the files and keeps them in the environment.
+#
+# WHAT IT IS NOT: a scheduler. It was written to close a stuck publish with nobody at a keyboard,
+# and on its first night the sandbox it ran in was recycled while it slept — killed at ~23:09 on
+# the way to a 00:02 wake-up, leaving both pages stale for another nine hours. A process that
+# must outlive an idle gap is not a mechanism; `pages-are-current` in .github/workflows/deploy.yml
+# is, which is why that job now fires four times a day instead of once. Run this from a terminal
+# you control (`nohup ... &`, or `at 00:05`) when you want the pages fixed before the next push.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 LIVE="${LIVE:-https://tapstall.simalidudu.workers.dev}"

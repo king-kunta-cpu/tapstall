@@ -620,10 +620,14 @@ test('a buyer’s door has no verb that clears, and no way to borrow one', () =>
   assert.match(proofAdd, /proofAccept\(o, \{ proof: b\.proof == null \? null : String\(b\.proof\), payer: b\.payer == null \? null : String\(b\.payer\) \}, 'buyer'\)/,
     'its input is named, not forwarded — a whole body passed through would be a body full of fields');
   assert.ok(!proofAdd.includes('proofVoid('), 'and nothing on that path clears anything');
-  assert.equal((worker.match(/b\.void/g) || []).length, 3, 'and read in one condition, spelled three times so a form tick and a json boolean both mean it');
+  assert.equal((worker.match(/b\.void/g) || []).length, 1,
+    'read exactly once, in the shop route — a second read is a second place for the shape rule to drift');
+  assert.match(worker, /const VOID_ON = \[true, 1, '1', 'true'\];/,
+    'the shapes that mean “clear it” are one named list, so the button and the route cannot disagree in private');
+  assert.match(worker, /if \(VOID_ON\.includes\(b\.void\)\) \{/,
+    'and read in one condition, strict about what is not the verb');
   assert.equal(worker.split('proofVoid(').length - 1, 1, 'and the clearing helper is called from exactly one handler');
-  assert.match(worker, /if \(b\.void === true \|\| b\.void === '1' \|\| b\.void === 'true'\)/,
-    'from the shop route only, spelled so a form tick and a json boolean both mean it');
+
   assert.ok(/act: 'proof', via: 'merchant'/.test(worker.slice(worker.indexOf('const v = proofVoid(o)'), worker.indexOf('const v = proofVoid(o)') + 2400)),
     'and it is written down as an act, in the trail the merchant can read back');
 });
@@ -696,5 +700,57 @@ test('who is asked for a sender number is one rule, said in two files', () => {
   for (const sp of ['phone', 'shapid', 'wallet', 'bank'])
     assert.ok(fb.includes("R.spec === '" + sp + "'"), 'and its fallback knows ' + sp + ' because the list is the same one');
   assert.match(fb, /R\.type !== 'auto' && R\.type !== 'cod'/, 'and excludes the two types with nothing to match, as core does');
+});
+
+/* A retry you cannot prove fires is a wish. The single 00:20 UTC scheduled run was the whole
+   answer to a stale page for two days, and GitHub delivered it once (#56, six hours late) out of
+   83 runs — so two pages served yesterday's bytes for nine hours while a log line promised a
+   nightly fix. This test is the difference between that and a mechanism: it fails if the retry
+   collapses back to one slot, or if the job starts depending on an event that has to be pushed. */
+test('a stuck page has a retry that does not need a human or a push', () => {
+  const wf = readFileSync(join(root, '.github', 'workflows', 'deploy.yml'), 'utf8');
+  const cron = (wf.match(/- cron: '([^']+)'/g) || []);
+  assert.ok(cron.length >= 1, 'the workflow declares a schedule at all');
+  const sched = wf.slice(wf.indexOf('schedule:'), wf.indexOf('jobs:'));
+  const fields = (sched.match(/- cron: '([0-9]+) ([^']+)'/) || []).slice(1);
+  assert.equal(fields.length, 2, 'a schedule line with exactly two fields: ' + JSON.stringify(fields));
+  const hours = fields[1].split(',');
+  assert.ok(hours.length >= 3, 'at least three slots a day, because GitHub drops them: got ' + hours.join(','));
+  assert.match(wf, /pages-are-current:\n\s+if: github\.event_name == 'schedule'/,
+    'the retry runs on the schedule and is not waiting for a push that may not come');
+  const job = wf.slice(wf.indexOf('pages-are-current:'), wf.indexOf('\n  worker:'));
+  assert.match(job, /deploy\.sh --templates > \/tmp\/templates\.log/, 'it does the one thing: put what differs, then verify');
+  assert.match(job, /exit \$code/, 'and it fails the run on a residual difference — a warning with exit 0 is how a stale page looked green');
+});
+
+/* The receipt keeps the door on the device only when the response says the budget, under
+   the word `left`. For six releases it said `proof_writes` instead, the branch read
+   `undefined > 0`, and the page threw away a link valid for three days — while every test
+   stayed green, because the test asserted the field that existed. */
+test('the receipt counts its corrections under one word, not two', () => {
+  const store = readFileSync(join(root, 'pages', 'store.html'), 'utf8');
+  const ok = store.slice(store.indexOf('j.proof_url'), store.indexOf('j.final'));
+  assert.equal([...ok.matchAll(/j\.proof_writes/g)].length, 0,
+    'the page must not read the document field name off a response; that name belongs to the order document');
+  assert.match(ok, /j\.proof_url && j\.left > 0\) pfAdd/,
+    'the door is stored only while the response says the field still has changes on it');
+  assert.match(ok, /j\.proof_url && j\.left > 0 \? '<p class="hint">/,
+    'and the sentence under the box is gated on the same number, so the two can never disagree');
+});
+
+/* The two files that speak this verb must speak the same one. A page sending a shape the
+   route does not list is invisible to both suites on its own: the page test sees the button,
+   the live test sends `true`, and production answers a merchant with "Nothing to file". */
+test('the button’s verb is a verb the route honours', () => {
+  const admin = readFileSync(join(root, 'pages', 'src', 'admin.html'), 'utf8');
+  const worker = readFileSync(join(root, 'worker', 'worker.js'), 'utf8');
+  const list = (worker.match(/const VOID_ON = \[([^\]]*)\]/) || [])[1];
+  assert.ok(list, 'the accepted spellings of `void` are one named list, not a chain of === in an if');
+  const accepted = list.split(',').map((s) => s.trim().replace(/^'|'$/g, '')).filter(Boolean);
+  assert.deepEqual(accepted, ['true', '1', '1', 'true'], 'the list is true, 1 and their strings — in that order, so a reader can scan it: ' + accepted.join(','));
+  const sent = (admin.match(/void:\s*([A-Za-z0-9'"]+)/) || [])[1];
+  assert.ok(sent, 'the dashboard still offers a hand-back at all');
+  assert.ok(accepted.includes(String(sent).replace(/^'|'$/g, '')),
+    'the dashboard sends void: ' + sent + ', which the route would read as a blank box — fix the page or the list, not this test');
 });
 
