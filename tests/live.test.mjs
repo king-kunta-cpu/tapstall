@@ -3365,6 +3365,36 @@ test('0.8.7 the reissued link works at once, so this is a revocation and not a f
   assert.equal(refsFor('renewgen').length, 2, 'and the shop can file against its own store again in the same minute');
 });
 
+test('0.8.7 a confirm skin that cannot draw the closure is not handed it', async () => {
+  // Production's `tpl:confirm` is published from KV and can lag the code by a day. The 0.8.5 copy
+  // has no branch for a revoked link, so on that bundle a closed link would be told it expired
+  // while the API was saying something else. The page is asked whether it can draw the fact, and
+  // the floor answers when it cannot — the same rule the renew door got, one line each.
+  gen.sh = gen.sh || await newShop('genbind');
+  const o = await shopOrder(gen.sh, '196.7.9.9');
+  const cap = capOf(o.mark_url);
+  // The revoke has to land between the mint and the read, or there is no closed link to draw and
+  // the page is right to offer the button — the trap this whole section keeps falling into.
+  const rv = await call('/api/revoke', {
+    method: 'POST', cookie: (await loginWithPin('genbind', gen.sh.pin)).cookie, body: { handle: 'genbind' },
+  });
+  assert.equal(rv.status, 200, rv.text.slice(0, 120));
+  const before = await call('/c/' + cap);
+  assert.equal(before.status, 200, 'the current skin draws it, in its own panel: ' + before.text.slice(0, 120));
+  assert.match(before.text, /"revoked":\s*true/);
+
+  const tpl = env.STORES._map.get('tpl:confirm');
+  env.STORES._map.set('tpl:confirm', {
+    value: String(tpl.value).replace(/S\.revoked[^}]*\}/g, '').replace(/revoked/g, 'unused'),
+  });
+  const stale = await call('/c/' + cap);
+  assert.equal(stale.status, 410, 'an out-of-date skin gets no chance to lie: ' + stale.text.slice(0, 140));
+  assert.match(stale.text, /closed its payment links/);
+  assert.ok(!/"revoked":/.test(stale.text), 'and the answer is the floor page, not the payload with nothing to draw it');
+  env.STORES._map.set('tpl:confirm', tpl);
+  assert.match((await call('/c/' + cap)).text, /"revoked":\s*true/, 'put the template back, and the skin is trusted again');
+});
+
 test('0.8.7 a link minted by the previous release is judged by its date, like a cap', async () => {
   // There is no `g` on a record written before this release, and deleting every merchant's renew
   // link under their feet is not safety. So the date decides: made before the last revoke means

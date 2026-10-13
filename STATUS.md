@@ -1960,11 +1960,14 @@ new generation and moves the URL — called at every one of the four sites that 
 generation check still governs the legacy records that rotation cannot reach. Erasure plus distrust,
 each covering what the other cannot.
 
-**A page that cannot draw a fact is not handed the fact.** `confirmPage` got the same treatment as
-the API: the refusal sets `revoked: true` inside the shape the template already knows, and the floor
-path renders "Link closed" with no form in it. For renew, the skin is used only if it actually
-carries a `state === 'closed'` branch; the KV copy is still the 0.8.5 page until `--templates` runs,
-and an out-of-date template would have answered a revocation with the generic "link is old" panel.
+**A page that cannot draw a fact is not handed the fact.** Both doors now ask the skin before they
+use it. The confirm page sets `revoked: true` inside the shape a template already knows, and reuses
+one `linkClosed(o)` builder for the refusal in either branch, so a screenshot of the page cannot
+contradict the JSON from the API; the renew page switches on `state === 'closed'`. And the sniff in
+front of each (`/revoked/`, `/state === ['"]closed['"]/`) means an out-of-date copy in KV — which is
+the situation *right now*, because templates publish on the nightly slot and the KV copies are still
+0.8.5 — gets the floor page instead of a panel that blames the buyer for being slow or points the
+shop at a welcome email whose link the revoke just killed.
 The sniff means the floor takes that traffic instead, in the right words, today.
 
 Left alone on purpose. An attempt on a closed link is not audit-logged: the cap is validly signed, so

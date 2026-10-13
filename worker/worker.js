@@ -2385,9 +2385,19 @@ function shell(title, body) {
  * money context, then the browser POSTs. A crawler that fetches and never runs
  * the script leaves the order exactly as it was.
  */
+/* The refusal, once. Two doors render it — the KV skin, when it can say so, and this floor —
+   and a screenshot of one must not contradict the other, which is why the sentence is not typed
+   twice. No form, no button: 0.8.3 was about a refusal that promised an action, and a closed link
+   has none left. */
+function linkClosed(o) {
+  return html(shell('Link closed', '<h2>This shop has closed its payment links</h2>'
+    + '<p class=t>Your order <b>' + esc(o.code) + '</b> is still ' + esc(o.status) + ' and nothing about it changed. '
+    + 'Send the shop that code and they can confirm it in one tap from their dashboard.</p>'), 410);
+}
+
 async function confirmPage(env, cap) {
   const p = await verifyCap(env.ADMIN_SECRET || 'dev-secret', cap);
-  const custom = env.STORES ? await env.STORES.get('tpl:confirm') : null;
+  let custom = env.STORES ? await env.STORES.get('tpl:confirm') : null;
   if (custom && custom.length > 200) {
     // same state machine, markup from KV so the page can be re-skinned without
     // a redeploy; the inline builder below is the floor if the template is gone
@@ -2398,8 +2408,11 @@ async function confirmPage(env, cap) {
       const o = st ? await env.ORDERS.get('order:' + p.h + ':' + p.id, 'json') : null;
       if (!st || !o) state = data.state = 'missing';
       else if (p.a === 'mark' && !capGenOk(p, st, o)) {
-        // 'expired' is the state every shipped template already renders sanely; `revoked` is
-        // what a re-skinned one can say better. A dead link never reaches a button.
+        if (!/revoked/.test(custom)) return linkClosed(o);
+        // A skin that carries the branch gets the fact: 'expired' is the state it already renders
+        // sanely, and `revoked` is what a re-skinned page can say better. The check matters
+        // because the copy in KV is published separately from the code: the 0.8.5 page has no
+        // branch for this, and its expired panel would tell the buyer they were too slow.
         state = data.state = 'expired';
         data = { cap, state: 'expired', revoked: true, code: o.code, status: o.status,
                  shop: st.shop_name, handle: st.handle, store_url: '/s/' + st.handle };
@@ -2423,11 +2436,7 @@ async function confirmPage(env, cap) {
   const st = await getStore(env, p.h);
   const o = st ? await env.ORDERS.get('order:' + p.h + ':' + p.id, 'json') : null;
   if (!o) return html(shell('Order not found', '<h2>Order not found</h2><p class=t>It may have been archived.</p>'), 404);
-  if (!capGenOk(p, st, o)) {
-    return html(shell('Link closed', '<h2>This shop has closed its payment links</h2>'
-      + '<p class=t>Your order <b>' + esc(o.code) + '</b> is still ' + esc(o.status) + ' and nothing about it changed. '
-      + 'Send the shop that code and they can confirm it in one tap from their dashboard.</p>'), 410);
-  }
+  if (!capGenOk(p, st, o)) return linkClosed(o);
   const want = markTarget(p.s);
   if (o.status === want) {
     return html(shell('Already confirmed', '<h2>Already ' + esc(want) + '</h2><p class=t>' + esc(o.code) + ' was confirmed on ' + esc(String(o.marked_at || '').slice(0, 16).replace('T', ' ')) + ' UTC. Nothing changed.</p>'));
