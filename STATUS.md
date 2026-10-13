@@ -81,6 +81,20 @@ Still owed, and not fixable from here: the API token for the new account is inva
 this release goes out through `scripts/cf_publish.py`. And the credentials under `uploads/` are still
 live and still need rotating.
 
+**And one thing this release did not achieve, measured live at 14:35 UTC after the deploy.** The
+origin answers `version: 0.9.1` and `rate_limit_local_first: {requests:9, ceiling:8, writes:1,
+refused:1}` — the limiter change is real in production — but `pages_inlined: 0`, `pages_bytes: 0` and
+`pages_store_from: "kv"`, while `.build/worker.js`, the file that was supposed to go up, contains 11
+pages and 308,858 bytes. The publisher is the reason: `scripts/cf_publish.py` uploads `worker/worker.js`
+(with `core.js` beside it) rather than the built bundle, and in the source `INLINED_PAGES` is still the
+empty literal. Nothing merchant-visible broke, because the legacy `tpl:` keys are still there and
+`tplPage` falls back to them, which is precisely why the rollback copy was kept — but the write saving
+is not live until the publisher uploads `.build/worker.js`, and it cannot be fixed by hand today
+because `kv_roundtrip: false`: the account's 1,000 writes are spent, so even the old page-publish path
+is closed until 00:00 UTC. Recorded here rather than smoothed over: a deploy log that says "pages
+inlined: 11 files" while the Worker reports 0 is the same class of bug as a green log and a stale
+storefront, and the selftest key is what caught it.
+
 ## What we do about receipts, and the four bugs that answered it (2026-10-13, v0.9.0)
 
 The question asked was narrow — *are we issuing receipts?* — and the answer, read off the send
