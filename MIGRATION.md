@@ -73,9 +73,30 @@ green against the new origin — a rollback after the copy is simply repointing 
 ## What is owed before any of this can run
 
 A token for `6527547015468a5ec705a1071010822d` with `Workers Scripts:Edit`, `Workers KV Storage:Edit`
-and `Members:Read`, scoped to that account only. The one supplied on 2026-10-13 answers
-`Authentication error` / code 10000 `Invalid API Token` on every endpoint from two networks, so the
-destination has no resources in it and there is nothing to migrate into yet.
+and `Members:Read`, scoped to that account only. Two were supplied on 2026-10-13, and both measure
+identically:
+
+```
+GET /user/tokens/verify            -> 200, success:false, code 1000  "Invalid API Token"
+GET /accounts/{id}/workers/scripts -> 200, code 10000 "Authentication error"   (same for /storage/kv/namespaces and /workers/subdomain)
+the second token as pasted         -> 53 chars, 48 after the `cfut_` prefix; Cloudflare does not issue 48
+that minus its trailing 8 chars    -> 1000        (so it is not a paste that ate a checksum)
+those 40 without the prefix        -> 1000
+the trailing 8 alone               -> 6003 "Invalid request headers"
+```
+
+That is neither an IP restriction nor a scope problem, and the difference is worth writing down because
+it is the guess that costs a round trip: an IP-pinned token answers `9106 "Could not authenticate you
+from L3"`, which is precisely what the OLD account's token said from this sandbox at 14:20 UTC and what
+neither of these says now. A 1000/10000 pair means Cloudflare does not know the credential at all: it
+was never created, or was created and deleted, or was copied out of a field that is not the token. The
+new account therefore still has no namespaces, no Worker and nothing to migrate into, and the import
+half of `kv_migrate.py` stays unrun — while everything that needs only reads is already proven (156
+keys exported, byte-compared, metadata compared, `missing: 0 mismatch: 0`).
+
+Nothing needs the dashboard: paste a token into `~/.secrets/cf_token-new`, then run the "Running it"
+sequence above. If it still answers 1000 there, the token is not the account's — check it was created
+under `652754…10822d` and not the personal one.
 
 While that is outstanding: `uploads/` still ships live credentials in the repo (the WhatsApp bot token,
 OpenRail and GAS keys, 13 wallet addresses) and those need rotating whatever account they point at.
