@@ -14,7 +14,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, existsSync, readdirSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync, writeFileSync, unlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as CORE from '../worker/core.js';
@@ -756,3 +757,44 @@ test('the button’s verb is a verb the route honours', () => {
     'the dashboard sends void: ' + sent + ', which the route would read as a blank box — fix the page or the list, not this test');
 });
 
+
+/* A `run:` block is shell that nothing executes until the job runs at 00:20 against production.
+   That gap cost a night: an unescaped apostrophe inside an awk program in the nightly check step
+   made the step die with a syntax error, so a *healthy* build went red and a broken one said
+   nothing. YAML quoting and shell quoting disagree in ways no linter here can see, so the check
+   is to hand every block to bash and listen. */
+test('every shell block in every workflow parses as shell', () => {
+  const dir = join(root, '.github', 'workflows');
+  const files = readdirSync(dir).filter((f) => /\.ya?ml$/.test(f));
+  assert.ok(files.length, 'the workflow files are where they are supposed to be');
+  let checked = 0;
+  for (const f of files) {
+    const lines = readFileSync(join(dir, f), 'utf8').split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const head = lines[i].match(/^(\s*)run:\s*\|\s*$/);
+      if (!head) continue;
+      const pad = head[1].length;
+      const body = [];
+      let dedent = null;
+      for (let j = i + 1; j < lines.length; j++) {
+        if (lines[j].trim() === '') { body.push(''); continue; }
+        const indent = lines[j].match(/^\s+/)[0].length;
+        if (indent <= pad) break;
+        if (dedent === null) dedent = indent;
+        body.push(lines[j].slice(dedent));
+      }
+      const path = join(tmpdir(), 'wf-' + f + '-' + i + '.sh');
+      writeFileSync(path, '#!/bin/bash\nset -e\n' + body.join('\n') + '\n');
+      try {
+        execFileSync('bash', ['-n', path], { stdio: 'pipe' });
+      } catch (e) {
+        const why = String(e.stderr || e.message).trim().split('\n').slice(0, 2).join(' ');
+        assert.fail(f + ' line ' + (i + 1) + ': a run: block in this workflow is not valid shell (' + why
+          + ')\n' + body.map((l, k) => '  ' + (k + 1) + ' | ' + l).join('\n'));
+      }
+      unlinkSync(path);
+      checked++;
+    }
+  }
+  assert.ok(checked >= 4, 'there are run: blocks to check at all — found ' + checked);
+});

@@ -71,8 +71,17 @@ jobs:
           set +e
           bash ./scripts/prod_check.sh > /tmp/prodcheck.log 2>&1
           code=$?
-          tail -70 /tmp/prodcheck.log
-          echo "prod_check exit=$code  $(grep -a 'passed:' /tmp/prodcheck.log | tail -1)"
+          set -e
+          # ~600 lines of output, and the tail would hide the one line that matters. Colour is
+          # stripped so the log reads the same here as in a terminal; failures print in full with
+          # what they wanted and got; blocked lines are counted, not itemised. `|| true` because a
+          # run with no failures makes grep exit 1, and that is not a red build.
+          sed -i 's/\x1b\[[0-9;]*m//g' /tmp/prodcheck.log
+          grep -c '^  + ' /tmp/prodcheck.log | sed 's/^/lines that ran against production and passed: /' || true
+          grep -A2 '^  - ' /tmp/prodcheck.log | head -80 || true
+          awk "/^  ! /{b++} END { if (b) print \"not verifiable in this run (rate limit, KV mirror lag, or a spent KV write budget): \" b \" lines\" }" /tmp/prodcheck.log || true
+          tail -3 /tmp/prodcheck.log || true
+          echo "prod_check exit=$code  $(grep -a 'passed:' /tmp/prodcheck.log | tail -1)" || true
           exit $code
 
   worker:
