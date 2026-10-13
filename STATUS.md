@@ -81,19 +81,25 @@ Still owed, and not fixable from here: the API token for the new account is inva
 this release goes out through `scripts/cf_publish.py`. And the credentials under `uploads/` are still
 live and still need rotating.
 
-**And one thing this release did not achieve, measured live at 14:35 UTC after the deploy.** The
-origin answers `version: 0.9.1` and `rate_limit_local_first: {requests:9, ceiling:8, writes:1,
-refused:1}` — the limiter change is real in production — but `pages_inlined: 0`, `pages_bytes: 0` and
-`pages_store_from: "kv"`, while `.build/worker.js`, the file that was supposed to go up, contains 11
-pages and 308,858 bytes. The publisher is the reason: `scripts/cf_publish.py` uploads `worker/worker.js`
-(with `core.js` beside it) rather than the built bundle, and in the source `INLINED_PAGES` is still the
-empty literal. Nothing merchant-visible broke, because the legacy `tpl:` keys are still there and
-`tplPage` falls back to them, which is precisely why the rollback copy was kept — but the write saving
-is not live until the publisher uploads `.build/worker.js`, and it cannot be fixed by hand today
-because `kv_roundtrip: false`: the account's 1,000 writes are spent, so even the old page-publish path
-is closed until 00:00 UTC. Recorded here rather than smoothed over: a deploy log that says "pages
-inlined: 11 files" while the Worker reports 0 is the same class of bug as a green log and a stale
-storefront, and the selftest key is what caught it.
+**One number this release missed, found in production and closed the same day.** The first deploy
+left `pages_inlined: 0`, `pages_bytes: 0`, `pages_store_from: "kv"` while the build log cheerfully
+reported eleven pages inlined. The cause was not the bundle and not the Worker: `scripts/gen_wrangler_toml.py`
+wrote `main = "worker/worker.js"`, so wrangler deployed the *source*, in which `INLINED_PAGES` is still
+the empty literal, and `scripts/cf_publish.py` — which does upload `.build/worker.js` — never ran
+because wrangler succeeded. Merchant-visible nothing changed, because `tplPage` fell back to the legacy
+`tpl:` keys, which is the only reason this was a bug and not an outage. The fix is one line in the
+generator plus the guard test that makes it structural: `tests/pages.test.mjs` now asserts that the
+config's `main` is the artifact the suites open. Re-deployed and read back live at 14:46 UTC:
+`pages_inlined: 11, pages_bytes: 308858, pages_store_from: "bundle", pages_served: true`,
+`rate_limit_local_first: {requests: 9, ceiling: 8, writes: 1, refused: 1}`, both Workers at 0.9.1, and
+the deploy spent **zero** KV writes on pages. What that re-deploy also proved is the reason for the
+whole change: the deploy log's "pages inlined: 11 files" line had been describing the build, not the
+release, and only a check that reads production could tell them apart — so the check is now the source
+of truth and the log is decoration.
+
+The account-wide budget was spent by the time of that second read (`kv_roundtrip: false`), so the
+ledger-row path — one write per order, the row as list metadata — is deployed and unit-proven but its
+production tally is measured after 00:00 UTC by `scripts/quota.sh`, which reads and never writes.
 
 ## What we do about receipts, and the four bugs that answered it (2026-10-13, v0.9.0)
 

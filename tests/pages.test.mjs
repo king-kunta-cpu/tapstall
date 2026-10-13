@@ -703,11 +703,28 @@ test('who is asked for a sender number is one rule, said in two files', () => {
   assert.match(fb, /R\.type !== 'auto' && R\.type !== 'cod'/, 'and excludes the two types with nothing to match, as core does');
 });
 
+test('the config deploys the artifact the tests read', () => {
+  // The whole point of compiling the pages into the Worker was that git's bytes become the served
+  // bytes. That promise is only true if the deploy uploads the file the suites opened — and it wasn't:
+  // wrangler.toml said worker/worker.js, so production ran the source with INLINED_PAGES empty while
+  // .build/worker.js, the tested bundle, sat beside it and every test stayed green.
+  const gen = readFileSync(join(root, 'scripts', 'gen_wrangler_toml.py'), 'utf8');
+  assert.match(gen, /MAIN = "worker\/worker\.js" if os\.environ\.get\("BUILD", "1"\) == "0" else "\.build\/worker\.js"/,
+    'main defaults to the built bundle, and the source is the typed exception');
+  assert.match(gen, /main = "\{MAIN\}"/, 'the template reads it from that variable, so no second copy can drift');
+  const tom = readFileSync(join(root, 'wrangler.toml'), 'utf8');
+  assert.match(tom, /^main = "\.build\/worker\.js"$/m,
+    'and the checked-in wrangler.toml agrees with it — a deploy that skips the build fails loudly instead of quietly shipping the other file');
+});
+
+
 /* A retry you cannot prove fires is a wish. The single 00:20 UTC scheduled run was the whole
    answer to a stale page for two days, and GitHub delivered it once (#56, six hours late) out of
    83 runs — so two pages served yesterday's bytes for nine hours while a log line promised a
    nightly fix. This test is the difference between that and a mechanism: it fails if the retry
    collapses back to one slot, or if the job starts depending on an event that has to be pushed. */
+
+
 test('a page cannot stick, so the night is a check and not a retry', () => {
   // This test used to demand four cron slots a day, because pages were KV keys: a release whose
   // eight template writes fell off the end of the day's 1,000 left a merchant served git's *older*
