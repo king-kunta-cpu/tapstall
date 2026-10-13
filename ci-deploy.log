@@ -1,1 +1,98 @@
-worker job started 2026-10-13T12:06:43Z run=38394902734 sha=8c220df
+  CI workflow YAML validates
+[36m*[0m KV namespaces
+[36m*[0m stores=b5c1c89d95114092ae91bbafc5a2d76c  orders=4f4ac94a66db4b859b61668a3c160819
+ui kit: 5 page(s) in sync with pages/kit.css
+[36m*[0m templates → KV (hot-swappable: HTML edits need no redeploy)
+  = store          already current in KV (39650 bytes), no write spent
+  = onboard        already current in KV (40282 bytes), no write spent
+  = admin          already current in KV (94163 bytes), no write spent
+  = fees           already current in KV (11119 bytes), no write spent
+  = index          already current in KV (3236 bytes), no write spent
+  ! confirm        NOT PUBLISHED — this account's KV write budget is spent (HTTP 429/10048). The old copy stays live (18343 bytes in git, 17119 in KV); the next deploy after 00:00 UTC puts it right — that is CI's scheduled run or your next push, either of which, and the Worker is deployed regardless.
+  = renew          already current in KV (17626 bytes), no write spent
+  = ops            already current in KV (44675 bytes), no write spent
+  = guide-payment-reference-matching already current in KV (9369 bytes), no write spent
+  = guide-whatsapp-shop-payments already current in KV (10619 bytes), no write spent
+  = sample-menu.csv already current in KV (372 bytes), no write spent
+  + store          39650 bytes in git, same bytes in KV
+  + onboard        40282 bytes in git, same bytes in KV
+  + admin          94163 bytes in git, same bytes in KV
+  + fees           11119 bytes in git, same bytes in KV
+  + index          3236 bytes in git, same bytes in KV
+  ! confirm        git has 18343 bytes, KV has 17119 — customers are served the older page
+  + renew          17626 bytes in git, same bytes in KV
+  + ops            44675 bytes in git, same bytes in KV
+  + guide-payment-reference-matching 9369 bytes in git, same bytes in KV
+  + guide-whatsapp-shop-payments 10619 bytes in git, same bytes in KV
+  + sample-menu.csv 372 bytes in git, same bytes in KV
+  ! not current: confirm
+    the fix is one command once the account can write again: ./scripts/deploy.sh --templates
+[33m![0m a page above is not what customers are being served — the Worker is current, the page is not
+[33m![0m four scheduled runs a day (00:20/06:20/12:20/18:20 UTC) retry it, and so does any push;
+[33m![0m to finish now: ./scripts/deploy.sh --templates  (GitHub drops schedules — do not trust the night)
+[36m*[0m building bundle
+bundle: worker.js + core.js inlined (4931 lines, 289899 bytes)
+assets: _headers admin.html confirm.html data onboard.html ops.html renew.html store.html 
+bundle size: 528K
+wrangler.toml regenerated for tapstall
+[36m*[0m publishing worker to Cloudflare
+Uploaded tapstall (2.42 sec)
+Deployed tapstall triggers (0.42 sec)
+  https://tapstall.simalidudu.workers.dev
+  schedule: 15 6,12,18,0 * * *
+Current Version ID: b466ed09-c6af-4ce2-9dc7-fe92647d25b8
+Cloudflare collects anonymous telemetry about your usage of Wrangler. Learn more at https://github.com/cloudflare/workers-sdk/tree/main/packages/wrangler/telemetry.md
+[32m+[0m wrangler deploy
+[36m*[0m writing bindings/ids so nothing else has to be guessed
+[32m+[0m .deploy/state.json
+[32m+[0m ADMIN_SECRET from environment
+  secret ADMIN_SECRET set
+  cron ok: 15 6,12,18,0 * * *
+  workers_dev: on
+[32m+[0m worker live: https://tapstall.simalidudu.workers.dev (0.8.6)
+--- /__selftest ---
+{
+  "version": "0.8.6",
+  "kv_stores": true,
+  "kv_roundtrip": false,
+  "templates": {
+    "store": true,
+    "onboard": true,
+    "admin": true,
+    "fees": true,
+    "index": true,
+    "confirm": true,
+    "renew": true,
+    "ops": true
+  },
+  "pricing_absorb": 1.53,
+  "products": 1,
+  "feed_url_ok": true,
+  "secret_leak_check": true
+}
+--- routes ---
+  /         200
+  /onboard  200
+  /fees     200
+  /rails    200
+  /ops      200
+  /data/sample-menu.csv 200
+[36m*[0m alias worker zimlink -> redirects to https://tapstall.simalidudu.workers.dev
+wrangler.toml regenerated for zimlink (alias, redirects)
+Deployed zimlink triggers (0.13 sec)
+  https://zimlink.simalidudu.workers.dev
+Current Version ID: 64b2b1dd-d965-4dd0-8f5f-7f59834a9895
+  secret ADMIN_SECRET set
+[36m*[0m alias answers https://zimlink.simalidudu.workers.dev/__ping -> 200
+[36m*[0m alias redirects a saved store link: 301 -> https://tapstall.simalidudu.workers.dev/s/mamatoe
+[36m*[0m alias cron is inert: {"cron_owner":false,"version":"0.8.6"}
+  cron ok: 15 6,12,18,0 * * *
+  workers_dev: on
+
+[32m+[0m done. Give merchants this one link: https://tapstall.simalidudu.workers.dev/onboard
+    stores appear with no action from you; each edits its own Google Sheet.
+==== exit=0 2026-10-13T12:07:18Z ====
+==== tools ====
+node=/opt/hostedtoolcache/node/20.20.2/x64/bin/node npm=/opt/hostedtoolcache/node/20.20.2/x64/bin/npm jq=/usr/bin/jq curl=/usr/bin/curl openssl=/usr/bin/openssl python3=/usr/bin/python3 
+==== inputs visible to this step ====
+CF_TOKEN=set(len 53) CF_ACCOUNT=set(len 32) ADMIN_SECRET=set(len 48) WORKER_NAME=set(len 8) 
