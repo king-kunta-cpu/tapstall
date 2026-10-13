@@ -33,7 +33,7 @@ jobs:
   # back against git, and goes green in seconds. Four slots because one is not a
   # mechanism (see the cron comment above).
   pages-are-current:
-    if: github.event_name == 'schedule'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,6 +49,30 @@ jobs:
           bash ./scripts/deploy.sh --templates > /tmp/templates.log 2>&1
           code=$?
           tail -20 /tmp/templates.log
+          exit $code
+
+      # The other half of an unattended night: a stale page is fixed by this job, and a
+      # broken product is *seen* by this step. `prod_check.sh` is the 300-line check against
+      # the live Worker that only runs when a human types it, which is why 96 write-gated
+      # assertions sat unexecuted for two days and reported health. Here it needs no PIN:
+      # the login-door lines self-skip with a note, and everything else runs. `blocked` is
+      # not `failed` — a day with no KV writes left exits 0 with the count, so the alarm
+      # only rings on a real defect.
+      - name: run the production check against the live Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          hr=$(date -u +%H)
+          if [ "$GITHUB_EVENT_NAME" = schedule ] && [ "$hr" != 00 ] && [ "$hr" != 01 ]; then
+            echo "production check runs on the first slot of the UTC day (00:20; 01:20 if GitHub delivers it late) — skipping this one"
+            exit 0
+          fi
+          set +e
+          bash ./scripts/prod_check.sh > /tmp/prodcheck.log 2>&1
+          code=$?
+          tail -70 /tmp/prodcheck.log
+          echo "prod_check exit=$code  $(grep -a 'passed:' /tmp/prodcheck.log | tail -1)"
           exit $code
 
   worker:

@@ -716,9 +716,11 @@ test('a stuck page has a retry that does not need a human or a push', () => {
   assert.equal(fields.length, 2, 'a schedule line with exactly two fields: ' + JSON.stringify(fields));
   const hours = fields[1].split(',');
   assert.ok(hours.length >= 3, 'at least three slots a day, because GitHub drops them: got ' + hours.join(','));
-  assert.match(wf, /pages-are-current:\n\s+if: github\.event_name == 'schedule'/,
-    'the retry runs on the schedule and is not waiting for a push that may not come');
   const job = wf.slice(wf.indexOf('pages-are-current:'), wf.indexOf('\n  worker:'));
+  assert.match(wf, /pages-are-current:\n\s+if: github\.event_name == 'schedule' \|\| github\.event_name == 'workflow_dispatch'/,
+    'the retry runs on the schedule, and a human can also pull it — it is never waiting for a push that may not come');
+  assert.match(job, /prod_check\.sh > \/tmp\/prodcheck\.log/, 'and the same job runs the live check, so a broken product is seen at night without anybody typing');
+  assert.match(job, /GITHUB_EVENT_NAME" = schedule \] && \[ "\$hr" != 00/, 'once a UTC day, not four times — the probes are cancelled, but they are still somebody\'s ledger');
   assert.match(job, /deploy\.sh --templates > \/tmp\/templates\.log/, 'it does the one thing: put what differs, then verify');
   assert.match(job, /exit \$code/, 'and it fails the run on a residual difference — a warning with exit 0 is how a stale page looked green');
 });
