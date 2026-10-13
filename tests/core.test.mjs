@@ -1127,14 +1127,17 @@ test('an authority-bearing capability cannot be minted without the generation', 
   assert.deepEqual(C.BOUND_CAP_ACTIONS, ['mark', 'proof', 'sess', 'ops'],
     'every capability kind this product mints that can change something');
   for (const a of C.BOUND_CAP_ACTIONS) {
+    // the field named by the map, not by the habit of typing `g`: `ops` answers to the platform
+    // generation, and a test that minted it with `g` would be asserting the wrong contract
+    const field = C.capBindingField(a);
     await assert.rejects(() => C.issueCap(SEC, { a, h: 'shop', id: 'o1' }, 600), /cap_unbound/,
       a + ': an unbound mint must fail loudly, not ship a link outliving its revocation');
-    for (const g of [undefined, null, '']) {
-      await assert.rejects(() => C.issueCap(SEC, { a, h: 'shop', id: 'o1', g }, 600), /cap_unbound/,
-        a + ': ' + JSON.stringify(g) + ' is not a generation');
+    for (const empty of [undefined, null, '']) {
+      await assert.rejects(() => C.issueCap(SEC, { a, h: 'shop', id: 'o1', [field]: empty }, 600), /cap_unbound/,
+        a + ': ' + JSON.stringify(empty) + ' is not a generation');
     }
-    const cap = await C.issueCap(SEC, { a, h: 'shop', id: 'o1', g: 'g7' }, 600);
-    assert.equal((await C.verifyCap(SEC, cap)).g, 'g7', a + ': with the field the mint is normal');
+    const cap = await C.issueCap(SEC, { a, h: 'shop', id: 'o1', [field]: 'g7' }, 600);
+    assert.equal((await C.verifyCap(SEC, cap))[field], 'g7', a + ': with its own field the mint is normal');
   }
   // A whitelist, so the rule cannot quietly become "every cap must carry a generation": a
   // credential that changes nothing has no authority to bind.
@@ -1143,6 +1146,23 @@ test('an authority-bearing capability cannot be minted without the generation', 
   assert.equal(C.capNeedsGen(undefined), false);
   const free = await C.issueCap(SEC, { a: 'renew', h: 'shop', id: 'o1' }, 600);
   assert.ok(await C.verifyCap(SEC, free), 'an unbound non-authority cap still mints and verifies');
+});
+
+test('the binding is the field the door actually consults, not whichever letter is easiest', async () => {
+  // `ops` caps carry `g: VERSION` and are revoked by the platform's own generation, `n`. If the
+  // guard asked for `g` of everything, an ops cap could be minted with any `g` and be called bound
+  // while nothing at the door ever read it — a check that passes is not a check that means it.
+  assert.equal(C.capBindingField('mark'), 'g');
+  assert.equal(C.capBindingField('proof'), 'g');
+  assert.equal(C.capBindingField('sess'), 'g');
+  assert.equal(C.capBindingField('ops'), 'n');
+  assert.equal(C.capBindingField('renew'), null, 'a credential that is not a cap has no binding to demand');
+  await assert.rejects(() => C.issueCap(SEC, { a: 'ops', g: 'v1' }, 600), /cap_unbound.*\(n\)/,
+    'an ops cap with a version and no platform generation is refused');
+  await assert.rejects(() => C.issueCap(SEC, { a: 'mark', n: '1' }, 600), /cap_unbound.*\(g\)/,
+    'and the reverse: the right letter is not interchangeable');
+  const ok = await C.issueCap(SEC, { a: 'ops', g: 'v1', n: '7' }, 600);
+  assert.equal((await C.verifyCap(SEC, ok)).n, '7', 'with both fields it mints normally');
 });
 
 test('the renew link answers to the same rule as a signed capability', () => {

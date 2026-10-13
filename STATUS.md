@@ -1985,6 +1985,54 @@ fail. Replace one renew door's check with `if (false)`: live fails. Delete the r
 cost no KV writes, so `prod_check.sh` reads them off the deployed Worker on a day the account is
 silent — which is the only way to verify a revocation fix at 20:00 UTC on the day the budget ran out.
 
+## The rule was copied, and the copies accused a shop that had done nothing (2026-10-13, v0.8.8)
+
+The instruction went out a ninth time, so the audit went one layer further: 0.8.7 guarded the *mint*
+side of the generation rule, and this round is the *reader* side. Measured in the shipped file before
+anything was changed, three functions read a capability and hand-rolled the comparison instead of
+calling `capGenOk`: `proofPage`, `proofAdd` (the two halves of the buyer's code link, `/p/`) and
+`identify` (the session cookie).
+
+The two proof doors had no time branch, so "a capability with no `g`" meant "closed" to them, while
+to the core it means "judge it by its date". For a shop that has never revoked anything, whose
+`auth_gen` is `0`, that produced a sentence that could not be true: `/p/<link>` rendered *The shop
+closed its code links* and handed the phone a `tp_pf_<handle>` script pruning a link nobody had
+closed. A buyer forwarded such a link would find the door shut, the shop would hear nothing, and the
+one action that would have fixed it, Revoke, had never been taken. The fix is not a new rule: it is
+`capGenOk` in those two handlers, which is the same line `markPaid` and `confirmPage` already call, so
+a link with no generation on a shop that never revoked opens, and the same link on a shop that did
+revoke is closed with the prune and the true sentence.
+
+`proofPage` also had a second fact welded to the first: `if (!st || genMismatch)`. A store row that
+is not there — deleted, archived, or a KV read that came back empty — was reported to the buyer as a
+revocation. It is now its own card, 404, "there is no shop behind this link", and it deliberately
+emits no script: a page may not rewrite someone's storage on the strength of a guess about which of
+the two situations it is looking at. The credential is still answered before the order row's absence
+is, which is the shipped contract and is what an existing test about pruning order-of-refusals
+insists on; that ordering was kept deliberately, and the comment in the handler says why.
+
+`identify` is *not* unified, and says so in the source: `gen-rule: strict`. A cookie has a
+self-service replacement one tap away, so there is no stranger to protect from a cliff, and the time
+branch would let a pre-0.6.0 cookie back in on every shop that has never revoked. The ops door is
+bound to `ops_gen` rather than a store's `auth_gen`, and its cap's `g` is a version string; so the
+`issueCap` guard now asks each action for the field its own door consults (`CAP_BINDING`: `g` for
+`mark`/`proof`/`sess`, `n` for `ops`). A guard that looked only for `g` would have called any ops cap
+bound while nothing ever read that `g` — the shape of a check that passes for the wrong reason.
+
+Two permanent guards, both mutation-proven: a scan over every top-level function that calls
+`verifyCap`, requiring the shared rule or a `gen-rule:` marker, with the *set* of markers asserted
+(`identify=strict`, `opsAuthed=platform`) so an exemption cannot be added quietly; and the 0.8.7 mint
+scan, unchanged. Put the hand-rolled comparison back and the scan fails plus two live tests; strip one
+marker and the scan fails; rename one marker and the scan fails. 257/257 after each restore (core 89,
+live 109, pages 49, limits 10). Two more zero-write `__selftest` keys carry the claim to production on
+a day the account has no KV writes left: `code_link_rule_shared` and `ops_cap_needs_platform_gen`.
+
+One correction to a claim in this file's previous section: it said `confirmPage` had been given the
+skin-capability sniff "the same treatment as the API". It had not, only the renew door had it; the
+confirm sniff is in as of this release (`/revoked/` in the KV template, floor page otherwise), which is
+what that paragraph described. A second correction: the selftest key `confirm_link_signed` named while
+planning 0.8.7 does not exist in the source; the deployed keys are the ones listed here.
+
 One correction recorded here rather than left implicit: the free-plan reset in the quota note is
 midnight UTC (`secsToMidnightUTC`), and the `retry_in_sec` the endpoint reported today (42,765 s)
 matches a call made at 12:07 UTC, not the 19:27 I first converted it against. The code was right and

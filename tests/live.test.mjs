@@ -3125,7 +3125,7 @@ test('a code that lands while the ledger is catching up still reaches the ledger
  * holding links minted by the previous release, so a link with no generation is judged by
  * whether the order it points at moved after the revoke.
  */
-const { verifyCap } = await import('../worker/core.js');
+const { verifyCap, issueCap } = await import('../worker/core.js');
 
 /* The pre-0.8.6 wire shape: the same signature over a payload with no `g`. It has to be built by
    hand now, because the mint refuses to produce it — that refusal is 0.8.7 — and the migration
@@ -3449,3 +3449,79 @@ test('0.8.7 a closed link on the floor has no button on it, and no sentence that
   assert.match(gone.text, /no longer on the books/);
   assert.match(gone.text, /dashboard/);
 });
+
+
+/* ---------------------------------------------------------------------------------------------
+ * v0.8.8 — one rule, all four doors.
+ *
+ * 0.8.6 put the generation rule in the core so the two readers of a `/c/` link could not disagree,
+ * and 0.8.7 made a mint that forgets the field impossible. What was left is the reader side of the
+ * other buyer door: `/p/`, the code link, compared `p.g` to `st.auth_gen` by hand — twice, in two
+ * handlers — with no time branch. Measured in the shipped file, three functions hand-rolled that
+ * comparison. The copies were not academic: each had to answer "and what does a link with no
+ * generation mean on a shop that revoked nothing", and both answered "closed" — a shop that never
+ * touched Revoke was told its links were closed, and the phone was told to put the link down. And
+ * `proofPage` folded "there is no shop behind this link" into the same sentence as "the shop closed
+ * its links", which is the exact defect 0.8.6 fixed one page over.
+ */
+test('0.8.8 a code link with no generation is judged by the shared rule, so a shop that never revoked is not accused of it', async () => {
+  rg.sh2 = await newShop('proofgen');
+  rg.o = await shopOrder(rg.sh2, '196.7.11.1');
+  rg.id = rg.o.order.id;
+  const od = orderDoc('proofgen', rg.id);
+  assert.ok(od.pcap, 'the order has a filing nonce, which is what makes the link single-use');
+  const legacy = await legacyCap('test-secret', { a: 'proof', h: 'proofgen', id: rg.id, n: od.pcap });
+  assert.ok(await verifyCap('test-secret', legacy), 'a real capability, minted the way the release that shipped this door minted it');
+  assert.equal(bodyOf(legacy).g, undefined, 'and with no generation in it, which is the whole question');
+  assert.equal(String(shopDoc('proofgen').auth_gen || '0'), '0', 'this shop has never revoked anything');
+
+  const page = await call('/p/' + legacy);
+  assert.equal(page.status, 200, 'the door opens instead of blaming a revocation that did not happen: ' + page.text.slice(0, 160));
+  assert.ok(!/closed its code links/.test(page.text), 'no invented revocation on the page');
+  const add = await call('/api/proof', { method: 'POST', ip: '196.7.11.2',
+    body: { cap: legacy, proof: 'GENPROOF1', payer: '0771234567' } });
+  assert.equal(add.status, 200, add.text.slice(0, 200));
+  assert.equal(orderDoc('proofgen', rg.id).buyer.proof, 'GENPROOF1', 'and it filed, because nothing about this shop is stale');
+});
+
+test('0.8.8 the code page says the fact it actually knows, and does not touch the device when it does not know the shop', async () => {
+  // Two refusals that used to share one sentence. The prune script is the reason it matters: a
+  // page that has mistaken a missing store for a revocation would also delete a link the shop
+  // never closed, from a buyer who did nothing wrong.
+  const ghost = await legacyCap('test-secret', { a: 'proof', h: 'nosuchshop9', id: 'o1', n: 'x' });
+  const r = await call('/p/' + ghost);
+  assert.equal(r.status, 404, 'a shop that is not on the books: ' + r.text.slice(0, 140));
+  assert.match(r.text, /not on the books|no shop/i, 'and it is said plainly');
+  assert.ok(!/closed its code links/.test(r.text), 'not blamed on a revoke');
+  assert.ok(!/tp_pf_/.test(r.text), 'and no script rewriting the buyer’s storage on the strength of a guess');
+});
+
+test('0.8.8 a stale code link on a shop that did revoke is still closed, with the prune, by the same rule', async () => {
+  const before = String(shopDoc('proofgen').auth_gen);
+  const rv = await call('/api/revoke', { method: 'POST', cookie: rg.sh2.cookie, body: { handle: 'proofgen' } });
+  assert.equal(rv.status, 200, rv.text.slice(0, 120));
+  assert.notEqual(String(shopDoc('proofgen').auth_gen), before, 'the generation moved, so the link from before it is a link the shop has closed');
+
+  const stale = await legacyCap('test-secret', { a: 'proof', h: 'proofgen', id: rg.id, n: orderDoc('proofgen', rg.id).pcap });
+  const page = await call('/p/' + stale);
+  assert.equal(page.status, 410, 'the order was last touched before the revoke, so the time branch closes it too: ' + page.text.slice(0, 160));
+  assert.match(page.text, /closed its code links/);
+  assert.match(page.text, /tp_pf_/, 'and here, where the shop really did close the link, the phone is asked to put it down');
+  const add = await call('/api/proof', { method: 'POST', ip: '196.7.11.3',
+    body: { cap: stale, proof: 'TOO-LATE-1', payer: '0778889999' } });
+  assert.equal(add.status, 410, add.text.slice(0, 160));
+  assert.equal(add.json.why, 'revoked', 'the JSON keeps the same word it used to, because clients fold on it');
+  assert.equal(orderDoc('proofgen', rg.id).buyer.proof, 'GENPROOF1', 'and nothing was overwritten');
+
+  // A link minted under the live generation opens the door and files: the fix is a revocation and
+  // not a freeze, which is exactly as true of the code link as it is of the confirm link.
+  const nd = orderDoc('proofgen', rg.id);
+  const live = await issueCap('test-secret',
+    { a: 'proof', h: 'proofgen', id: rg.id, n: nd.pcap, g: String(shopDoc('proofgen').auth_gen) }, 3600);
+  assert.equal((await call('/p/' + live)).status, 200, 'the page offers the field again');
+  const ok = await call('/api/proof', { method: 'POST', ip: '196.7.11.4',
+    body: { cap: live, proof: 'AFTER-REVOKE-1', payer: '0771234567' } });
+  assert.equal(ok.status, 200, ok.text.slice(0, 200));
+  assert.equal(orderDoc('proofgen', rg.id).buyer.proof, 'AFTER-REVOKE-1', 'so the buyer who was handed a new link can still use it');
+});
+

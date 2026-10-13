@@ -322,6 +322,14 @@ verified ZW/SA tariffs) but it is now a **default, not the whole answer**:
   page, minted a checkout intent against the shop and filed a payment reference into the list the
   owner reconciles by. It is judged by the same rule, Revoke reissues it, and the three doors answer
   404 or 410 with a sentence pointing at the dashboard, where the working link genuinely is (v0.8.7).
+- **Every door judges a credential with the same rule.** The `/p/` code-link door had its own copy of
+  the generation comparison, in two handlers, and a copy has to decide what a link with no generation
+  means: both copies answered "closed", so a shop that had never touched *Revoke* was told its links
+  were closed, and the buyer's phone was handed a script deleting a link nobody revoked. The rule now
+  runs through `capGenOk` at all four readers, `proofPage` says "there is no shop behind this link"
+  when that is the fact (and prunes nothing on a guess), `issueCap` binds each action to the field its
+  own door consults (`n`, not `g`, for the operator's lever), and a scan over the source fails if a
+  reader invents a third opinion or drops the marker that declares an exemption (v0.8.8).
 
 An invalid description at sign-up becomes `cash` rather than a rejected
 registration: a merchant who never opens the shop is worse than one whose slip

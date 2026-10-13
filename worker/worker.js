@@ -30,7 +30,7 @@ import {
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '0.8.7';
+const VERSION = '0.8.8';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 const MAX_ORDERS_KEPT = 200;
@@ -752,16 +752,28 @@ async function proofPage(env, cap) {
       ["A code link lasts 72 hours after the order, and all it can ever do is add a reference to that one order. If it has closed, send the code in the chat with the shop — they can find the order by its amount."], 401);
   }
   const st = await getStore(env, p.h);
-  if (!st || String(p.g) !== String(st.auth_gen || "0")) {
-    // A link this page can no longer honour is a link the phone should not keep offering.
-    // A *refused* link (no store to name, no shop to key by) still emits no script: the
-    // storefront's own 72-hour prune is the one that clears those, at the same instant the
-    // token would have died anyway.
-    return card("The shop closed its code links",
-      ["Nothing is wrong with your order. Revoking access on the shop closes these links too, so send the code to the shop directly."], 410,
-      st ? pfForgetScript(st.handle, "", cap) : "");
+  // Two facts that used to share one sentence. A shop that is not on the books has not closed
+  // anything, and the difference is not politeness: the branch below hands the phone a script that
+  // deletes the buyer's link, and a page may not rewrite someone's storage on the strength of a
+  // guess about which of the two it is looking at.
+  if (!st) {
+    return card("There is no shop behind this link",
+      ["The store this link was written for is not on the books any more, so there is no field here to answer. Nothing you did changed that. If the shop is still trading, send the code in your chat with it."], 404);
   }
   const o = await env.ORDERS.get(`order:${st.handle}:${p.id}`, "json");
+  // The credential first, then what it points at: a link the shop has closed is dead whatever is
+  // behind it, and answering "order not found" instead would leave the buyer looking for an order
+  // they were never meant to find. The row is read first only because the rule needs it to judge a
+  // link with no generation, and a missing row is judged as one that has not moved.
+  if (!capGenOk(p, st, o || {})) {
+    // The same rule the confirm link and the renew record answer to, in the core, with its one
+    // branch for a link minted before the rule existed. A copy of this comparison here would be a
+    // third opinion on what a stale credential means, which is how a shop that never pressed
+    // Revoke came to be told it had closed its links.
+    return card("The shop closed its code links",
+      ["Nothing is wrong with your order. Revoking access on the shop closes these links too, so send the code to the shop directly."], 410,
+      pfForgetScript(st.handle, "", cap));
+  }
   if (!o) return card("Order not found", ["It is not on this shop's list any more."], 404, pfForgetScript(st.handle, "", cap));
   if (proofUsed(o, p.n) && proofOpen(o)) {
     // Spent link, open order: the one refusal that closes the link and not the field. the order has moved
@@ -935,9 +947,13 @@ async function proofAdd(req, url, env) {
   if (!p || p.a !== "proof") return no("that link does not open this field any more", 401, "", false, "cap");
   const st = await getStore(env, p.h);
   if (!st) return no("no such shop", 404, "", false, "shop");
-  if (String(p.g) !== String(st.auth_gen || "0")) return no("this shop has closed its code links", 410, st.handle, true, "revoked");
   const key = `order:${st.handle}:${p.id}`;
   const o = await env.ORDERS.get(key, "json");
+  // Read the row first, because the rule needs it: a link with no generation is judged by whether
+  // the order moved after the shop last revoked, and that is a question about the order. The
+  // credential is still answered before the row's absence is, so a closed link is never reported
+  // as a missing order — that ordering is the shipped contract, and it is kept on purpose.
+  if (!capGenOk(p, st, o || {})) return no("this shop has closed its code links", 410, st.handle, true, "revoked");
   if (!o) return no("no such order", 404, st.handle, true, "gone");
   const r = proofAccept(o, { proof: b.proof == null ? null : String(b.proof), payer: b.payer == null ? null : String(b.payer) }, 'buyer');
   /* One link, one *change*. A spent link may still submit the value the order already holds,
@@ -1583,6 +1599,12 @@ async function selftest(env) {
   t.renew_link_revocable = renewOk({ made: Date.now(), g: 'gen-now' }, { auth_gen: 'gen-now' }) === true
     && renewOk({ made: Date.now(), g: 'gen-then' }, { auth_gen: 'gen-now' }) === false
     && renewOk({ made: Date.now() - 864e5 }, { auth_gen: '0' }) === true;
+  /* 0.8.8: the rule is one function, and the doors call it. These two lines are the version of
+     "the shipped bundle agrees" that costs no writes — a page-level check needs an order, and an
+     order needs a write, and on a spent day there is no such thing. */
+  t.code_link_rule_shared = capGenOk({ a: 'proof' }, { auth_gen: '0' }, { at: new Date(Date.now() - 864e5).toISOString() }) === true
+    && capGenOk({ a: 'proof', g: 'gen-then' }, { auth_gen: 'gen-now' }, {}) === false;
+  t.ops_cap_needs_platform_gen = await issueCap(k, { a: 'ops', g: VERSION }, 600).then(() => false, () => true);
   const v = validateSettings({ rail: 'nope', tax_pct: 999, hours: '8-5' }, Date.now(), { rails: await railsCatalog(env) });
   const cat = Object.assign(await railsCatalog(env), { test_momo: normaliseRail({ label: 'Test MoMo', pct: 0.01 }, 'test_momo') });
   // A rail the operator added this morning has to be selectable, resolvable and
@@ -1816,6 +1838,13 @@ async function identify(req, env, handle) {
   const raw = cookieVal(req, 'tp_sess');
   if (raw) {
     const p = await verifyCap(env.ADMIN_SECRET || 'dev-secret', raw);
+    // gen-rule: strict — deliberately not `capGenOk`. A cookie has a self-service replacement one
+    // tap away (sign in again), so there is no buyer to strand and no cliff to soften; the time
+    // branch exists to keep a *stranger* holding a dead link from being punished for a release
+    // they never installed, and a session is not that. The store's `auth_gen` is a base36 timestamp
+    // while a session minted before 0.6.0 had no `g` at all, so widening this would let an old
+    // cookie back in on every shop that has never revoked. Strict, and named, so the next reader
+    // does not "unify" it by mistake.
     if (p && p.a === 'sess' && p.h === handle && String(p.g) === String(st.auth_gen || '0')) {
       await authClear(env, handle);
       return { via: 'sess', st, handle };
@@ -2522,6 +2551,9 @@ async function opsIssue(env) {
 }
 
 async function opsAuthed(req, env) {
+  // gen-rule: platform — this door is bound to `ops_gen`, not to a store's `auth_gen`, and
+  // `issueCap` demands `n` of an `ops` cap for exactly that reason: `g` here is a version string,
+  // so a guard that only looked for `g` would have called any ops cap bound.
   const raw = cookieVal(req, OPS_COOKIE);
   if (!raw) return { anon: true };
   const p = await verifyCap(env.ADMIN_SECRET || 'dev-secret', raw);

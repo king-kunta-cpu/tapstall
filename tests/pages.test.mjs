@@ -821,6 +821,39 @@ test('a closed confirm link is drawn as closed, in both halves', () => {
 });
 
 /* ---------------------------------------------------------------------------------------------
+ * 0.8.8 — the same audit, on the reader side. 0.8.6 put the generation rule in one function so the
+ * doors could not disagree; 0.8.7 stopped a mint from forgetting the field; and the /p/ door went
+ * on comparing `p.g` to `auth_gen` by hand in two handlers, each of which had to decide for itself
+ * what a link with no generation means. Both decided "closed", so a shop that had never pressed
+ * Revoke was told its links were closed. This scan is that audit made permanent: every function that
+ * verifies a capability must either call the shared rule or carry a `gen-rule:` marker naming the
+ * exemption, and the set of markers is asserted, so an exemption cannot be added quietly.
+ */
+test('every door that reads a capability judges it with the shared rule, or declares that it does not', () => {
+  const lines = worker.split('\n');
+  const bodies = [];
+  let open = null;
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^(?:async )?function ([A-Za-z0-9_]+)/);
+    if (m && !open) { open = { name: m[1], from: i }; continue; }
+    if (open && /^\}/.test(lines[i])) { bodies.push({ name: open.name, text: lines.slice(open.from, i + 1).join('\n') }); open = null; }
+  }
+  assert.ok(bodies.length > 60, 'the scan found ' + bodies.length + ' top-level functions; if the file stopped looking like this, fix the scan before trusting it');
+  const readers = bodies.filter((b) => /verifyCap\(/.test(b.text));
+  assert.ok(readers.length >= 4, 'the doors that verify a capability: ' + readers.map((r) => r.name).join(', '));
+  const exempt = [];
+  for (const r of readers) {
+    if (r.name === 'selftest') continue;                       // the probe file, which mints and refuses on purpose
+    const marker = r.text.match(/gen-rule: ([a-z]+)/);
+    if (marker) { exempt.push(r.name + '=' + marker[1]); continue; }
+    assert.ok(/capGenOk\(|renewOk\(/.test(r.text),
+      r.name + ' verifies a capability without the shared rule — a second copy of the rule is what made a shop that never revoked look like it had');
+  }
+  assert.deepEqual(exempt.sort(), ['identify=strict', 'opsAuthed=platform'],
+    'exactly two doors judge a credential their own way, and both say why: ' + exempt.join(', '));
+});
+
+/* ---------------------------------------------------------------------------------------------
  * 0.8.7 — three scans over the source, for the one rule that has to hold everywhere: a credential
  * that carries authority belongs to the generation that minted it. Each is a scan rather than a
  * behaviour test because the failure being guarded is the absence of a field. A behaviour test

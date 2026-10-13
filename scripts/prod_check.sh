@@ -229,7 +229,7 @@ SK="cap_roundtrip cap_rejects_tamper cap_rejects_other_secret cap_rejects_expire
     secret_leak_check kv_stores
     cap_bound_roundtrip cap_stale_generation_refused cap_current_generation_honoured
     cap_mint_refuses_unbound cap_legacy_judged_by_time cap_legacy_refused_when_older
-    renew_link_revocable"
+    renew_link_revocable code_link_rule_shared ops_cap_needs_platform_gen"
 if printf '%s' "$ST" | grep -q 'kv_write_blocked'; then
   printf '  \033[33m!\033[0m selftest: this account has no KV writes left today (%s) — kv_roundtrip cannot pass; everything else is still checked\n' \
     "$(printf '%s' "$ST" | jq -r '"clears in " + ((.kv_write_blocked.retry_in_sec / 3600) | floor | tostring) + " h"')"

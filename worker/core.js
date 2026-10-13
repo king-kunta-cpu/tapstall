@@ -1055,15 +1055,25 @@ export function randomKey(bytes = 16) {
  * invisible to any test that only asks the door to work. So the mint refuses instead.
  */
 export const BOUND_CAP_ACTIONS = ['mark', 'proof', 'sess', 'ops'];
+/* Which field carries the binding, per action, because the name is not the meaning: `mark`,
+   `proof` and `sess` answer to a store's `auth_gen`, while `ops` answers to the platform's
+   `ops_gen` and its `g` is a version string. A guard that only asked for `g` would have let an ops
+   cap be minted with any `g` at all and called that bound, so the check is on the field that is
+   actually consulted at the door. */
+export const CAP_BINDING = { mark: 'g', proof: 'g', sess: 'g', ops: 'n' };
+export function capBindingField(action) {
+  return CAP_BINDING[String(action || '')] || null;
+}
 export function capNeedsGen(action) {
   return BOUND_CAP_ACTIONS.indexOf(String(action || '')) !== -1;
 }
 
 /** Signed, stateless capability: `v1.<expiry>.<payload>.<tag>`. */
 export async function issueCap(secret, payload, ttlSec) {
-  if (payload && typeof payload === 'object' && capNeedsGen(payload.a)
-    && (payload.g === undefined || payload.g === null || payload.g === ''))
-    throw new Error('cap_unbound: a ' + payload.a + ' capability must carry the store generation (g)');
+  const field = payload && typeof payload === 'object' ? capBindingField(payload.a) : null;
+  if (field && (payload[field] === undefined || payload[field] === null || payload[field] === ''))
+    throw new Error('cap_unbound: ' + (/^[aeiou]/i.test(payload.a) ? 'an ' : 'a ') + payload.a
+      + ' capability must carry the generation it is bound to (' + field + ')');
   const exp = Math.floor(Date.now() / 1000) + Math.max(300, Math.floor(ttlSec || 3600));
   const body = b64u(new TextEncoder().encode(JSON.stringify(payload)));
   return `v1.${exp}.${body}.${await hmacSig(secret, exp + '.' + body)}`;
