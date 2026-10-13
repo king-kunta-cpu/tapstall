@@ -1,1 +1,84 @@
-worker job started 2026-10-13T14:47:30Z run=38416386699 sha=9eb741e
+  CI workflow YAML validates
+[36m*[0m KV namespaces
+[36m*[0m stores=b5c1c89d95114092ae91bbafc5a2d76c  orders=4f4ac94a66db4b859b61668a3c160819
+ui kit: 5 page(s) in sync with pages/kit.css
+[36m*[0m building bundle
+pages inlined: 11 files, 308858 bytes
+bundle: worker.js + core.js inlined (6366 lines, 701674 bytes)
+bundle gzipped: 216921 of 3145728 bytes
+assets: _headers admin.html confirm.html data onboard.html ops.html renew.html store.html 
+bundle size: 956K
+  = store is in the bundle, all 41841 bytes of it
+  = onboard is in the bundle, all 40123 bytes of it
+  = admin is in the bundle, all 106056 bytes of it
+  = fees is in the bundle, all 11105 bytes of it
+  = index is in the bundle, all 3217 bytes of it
+  = confirm is in the bundle, all 18309 bytes of it
+  = renew is in the bundle, all 18375 bytes of it
+  = ops is in the bundle, all 49560 bytes of it
+  = guide-payment-reference-matching is in the bundle, all 9302 bytes of it
+  = guide-whatsapp-shop-payments is in the bundle, all 10598 bytes of it
+[32m+[0m bundle carries 11 pages, byte-checked against git
+wrangler.toml regenerated for tapstall
+[36m*[0m publishing worker to Cloudflare
+Uploaded tapstall (2.54 sec)
+Deployed tapstall triggers (0.20 sec)
+  https://tapstall.simalidudu.workers.dev
+  schedule: 15 6,12,18,0 * * *
+Current Version ID: 22c37812-30a6-4dd4-8023-08dfd3f9fc10
+Cloudflare collects anonymous telemetry about your usage of Wrangler. Learn more at https://github.com/cloudflare/workers-sdk/tree/main/packages/wrangler/telemetry.md
+[32m+[0m wrangler deploy
+[36m*[0m writing bindings/ids so nothing else has to be guessed
+[32m+[0m .deploy/state.json
+[32m+[0m ADMIN_SECRET from environment
+  secret ADMIN_SECRET set
+  cron ok: 15 6,12,18,0 * * *
+  workers_dev: on
+[32m+[0m worker live: https://tapstall.simalidudu.workers.dev (0.9.1)
+--- /__selftest ---
+{
+  "version": "0.9.1",
+  "kv_stores": true,
+  "kv_roundtrip": false,
+  "templates": {
+    "store": true,
+    "onboard": true,
+    "admin": true,
+    "fees": true,
+    "index": true,
+    "confirm": true,
+    "renew": true,
+    "ops": true
+  },
+  "pricing_absorb": 1.53,
+  "products": 1,
+  "feed_url_ok": true,
+  "secret_leak_check": true
+}
+--- routes ---
+  /         200
+  /onboard  200
+  /fees     200
+  /rails    200
+  /ops      200
+  /data/sample-menu.csv 200
+[36m*[0m alias worker zimlink -> redirects to https://tapstall.simalidudu.workers.dev
+wrangler.toml regenerated for zimlink (alias, redirects)
+  After installation, run Wrangler with `npx wrangler`.
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mThe entry-point file at ".build/worker.js" was not found.[0m
+🪵  Logs were written to "/home/runner/.config/.wrangler/logs/wrangler-2026-10-13_14-47-59_919.log"
+[33m![0m alias deploy failed
+  secret ADMIN_SECRET set
+[36m*[0m alias answers https://zimlink.simalidudu.workers.dev/__ping -> 200
+[36m*[0m alias redirects a saved store link: 301 -> https://tapstall.simalidudu.workers.dev/s/mamatoe
+[36m*[0m alias cron is inert: {"cron_owner":false,"version":"0.9.1"}
+  cron ok: 15 6,12,18,0 * * *
+  workers_dev: on
+
+[32m+[0m done. Give merchants this one link: https://tapstall.simalidudu.workers.dev/onboard
+    stores appear with no action from you; each edits its own Google Sheet.
+==== exit=0 2026-10-13T14:48:02Z ====
+==== tools ====
+node=/opt/hostedtoolcache/node/20.20.2/x64/bin/node npm=/opt/hostedtoolcache/node/20.20.2/x64/bin/npm jq=/usr/bin/jq curl=/usr/bin/curl openssl=/usr/bin/openssl python3=/usr/bin/python3 
+==== inputs visible to this step ====
+CF_TOKEN=set(len 53) CF_ACCOUNT=set(len 32) ADMIN_SECRET=set(len 48) WORKER_NAME=set(len 8) 
