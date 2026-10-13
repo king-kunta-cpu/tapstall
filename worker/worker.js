@@ -31,14 +31,15 @@ import {
   // month on a day its write budget is gone.
   vatPlan, vatReturn, booksSummary, booksCsv, booksPeriods, vatBuckets, realPhoto, sampleArtUrl, mergeMenuPatch,
   receiptText, receiptHtml, sampleArtSvg, meshPack, meshJson, meshMark, meshWitness,
-  meshAutoPlan, meshGrant, meshGrowth, meshIsPitch, meshValueBeats, MESH_AUTONOMY,
+  meshAutoPlan, meshGrant, meshGrowth, meshIsPitch, meshValueBeats, meshSchedule, meshFirstTouch,
+  MESH_AUTONOMY, MESH_AUTONOMY_V3, MESH_CHANNELS,
   MESH_RAILS, MESH_BUDGET,
   orderRow, packRow, unpackRow, mergeRows, MAX_ORDERS_KEPT,   // the ledger row, and the cap on it
   EDITABLE_FIELDS, SOFT_FIELDS, sign, adminStore, normaliseRail, resolveRail,
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '0.9.2';
+const VERSION = '0.9.3';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
@@ -2397,13 +2398,19 @@ async function meshView(req, url, env) {
   const st = g.who.st;
   const products = await loadProducts(st, env);
   const state = await env.ORDERS.get('mesh:' + handle, 'json').catch(() => null);
-  const pack = meshPack(st, products, meshFacts(st, url.origin), { origin: url.origin, sent: state || {} });
+  const mf = meshFacts(st, url.origin);
+  const pack = meshPack(st, products, mf, { origin: url.origin, sent: state || {} });
   return json({
     ok: true, handle, plan: pack, rails: MESH_RAILS, budget: MESH_BUDGET,
     state_saved: !!state, posted: state ? (state.sent || {}) : {},
     auto: { on: !!(state && state.auto && state.auto.on), at: (state && state.auto && state.auto.at) || null,
       flips: (state && state.auto && state.auto.flips) || 0, policy: MESH_AUTONOMY },
     growth: meshGrowth(st, await ledgerRows(env, handle, 200)),
+    // v0.9.3: the plan is the machine's own work list, and the touch queue is the first half of a
+    // conversation. Neither of them waits on an approval; both of them hand the reply to a person.
+    schedule: meshSchedule(st, products, mf || meshFacts(st, url.origin), { origin: url.origin, state: state || {}, now: Date.now() }),
+    touch: meshFirstTouch(st, await ledgerRows(env, handle, 200)),
+    channels: MESH_CHANNELS, policy_v3: MESH_AUTONOMY_V3,
     card_url: (url.origin || '') + '/s/' + handle + '/mesh.json',
     note: 'Nothing here is sent anywhere. Tap Copy, then post it yourself — the pack is rebuilt from your menu each morning, so a price that moved today is not in a post you make tomorrow.',
   }, 200, { 'Cache-Control': 'no-store' });

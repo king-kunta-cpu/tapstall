@@ -2869,3 +2869,137 @@ export function meshGrowth(st, rows, opt) {
     note: 'Read from the ledger, sent by a human. Nothing in this list is automated, because a person who '
       + 'replies to a machine stops replying to you.' };
 }
+
+/* ── v0.9.3: the whole loop autonomous, and the human on the part only a human can do ─────────
+ * The correction that made this: a shop's promo posts are not advertisements in the sense the pitch
+ * filter fears — they are facts about the shop (what it costs, what is out, when it is back), and a
+ * seller who has to approve each of those twice a day is not being protected, they are being worked.
+ * So both kinds are created, scheduled and posted here, on a rhythm; what stays with the person is
+ * the reply — the conversation that follows a first touch, which is where a sale is actually won or
+ * lost and which no template should own.
+ */
+/** Where a beat can physically go by itself. `auto` means an API exists that a shop can authorise
+ *  with a token of their own; `assist` means the platform has no legitimate API for what we do (a
+ *  personal WhatsApp status, a Facebook group) and the pack hands a person the text and the link. A
+ *  publisher that pretends otherwise is how an account gets restricted, so the capability is declared
+ *  per channel and the schedule refuses to claim a send it cannot make. */
+export const MESH_CHANNELS = {
+  bluesky:   { mode: 'auto', max: 300, api: 'atproto', needs: 'handle + app password' },
+  telegram:  { mode: 'auto', max: 1024, api: 'bot', needs: 'bot token + channel id' },
+  mastodon:  { mode: 'auto', max: 500, api: 'rest', needs: 'instance + access token' },
+  x:         { mode: 'auto', max: 280, api: 'v2', needs: 'app keys (paid tier)' },
+  gpages:    { mode: 'auto', max: 5000, api: 'static', needs: 'nothing: we host it' },
+  whatsapp:  { mode: 'assist', max: 130, api: null, needs: 'the merchant taps send — no personal-account API exists' },
+  facebook:  { mode: 'assist', max: 500, api: null, needs: 'group posting has no API for this; a person posts' },
+  instagram: { mode: 'assist', max: 900, api: null, needs: 'business account + token if they have one' },
+  counter:   { mode: 'assist', max: 150, api: null, needs: 'the paper by the till' },
+};
+
+export const MESH_AUTONOMY_V3 = {
+  kinds: ['value', 'promo'], ratio: { value: 2, promo: 1 }, per_day: 3,
+  windows_utc: ['06:30', '11:30', '17:30'],            // breakfast, lunch, home-time: the audience's rhythm
+  human: 'replies_only', revoke_writes: 1,
+  touch: { per_day: 8, warm_only: true, kinds: ['dm_whatsapp', 'email', 'comment_reply'], reply_window_days: 3 },
+};
+
+/** A promo beat states a fact with money in it. Money may not be improvised: a discount, a free
+ *  something or a "was/now" only exists if the row carries it, so an invented offer is dropped here
+ *  rather than caught downstream, and the reason is kept for the shop to read. */
+const OFFER_WORDS = /(\d+\s?%\s?off|discount|voucher|free\s|bogo|was\s[0-9])/i;
+export function meshUnsupportedOffer(text, row) {
+  if (!OFFER_WORDS.test(String(text || ''))) return '';
+  const p = row || {};
+  if (p.promo || p.discount || p.voucher || p.was || p.bogo || p.free_with) return '';
+  return 'an offer nobody configured: the menu row carries no promo, discount or was/now field';
+}
+
+export function meshPromoBeats(st, products, facts, opt) {
+  const o = opt || {}, s = st || {}, f = facts || {};
+  const list = (Array.isArray(products) ? products : []).filter((p) => p && p.name);
+  const wit = meshWitness(st, list, f);
+  const day = Math.floor((o.now || Date.now()) / DAY_MS);
+  const base = String(o.origin || '').replace(/\/+$/, '');
+  const link = base + '/s/' + (s.handle || '');
+  const money = (n, cur) => (Number(n) || 0).toFixed(2) + ' ' + (cur || s.currency || (f && f.currency) || 'USD');
+  if (!wit.price_ok || !list.length) return { beats: [], blocked: [{ why: wit.fails.length ? String(wit.fails[0].note) : 'no items to price' }] };
+  const pool = list.slice().sort((a, b) => (Number(!!b.popular) - Number(!!a.popular)) || String(a.name).localeCompare(String(b.name)));
+  const out = [], blocked = [];
+  const add = (row, body, kind) => {
+    const text = meshClip(body, 300);
+    const bad = meshUnsupportedOffer(text, row);
+    if (bad) { blocked.push({ item_key: String(row.id || row.name).slice(0, 40), text, why: bad }); return; }
+    out.push({ kind: kind || 'promo', item_key: String(row.id || row.name).slice(0, 40), item: meshClip(row.name, 60),
+      price: Number(row.price) || 0, text: text + ' ' + link, sends: true });
+  };
+  const a = pool[day % pool.length];
+  add(a, meshClip(a.name, 60) + ' is ' + money(a.price, a.cur) + (a.available === false ? ' and listed sold out — write to ask about the next batch' : ', available now')
+    + (f.hours_text ? ', while we are open: ' + meshClip(f.hours_text, 40) : ''), 'promo');
+  const gone = list.filter((p) => p.available === false);
+  // and the good news only when it is not contradicting the line above: the same row cannot be sold
+  // out in one beat and back in the next, which is the kind of thing a person notices in a shop's
+  // posts long before they notice a clever one
+  if (gone.length) {
+    const already = new Set(out.map((b) => b.item_key));
+    const g = gone.find((p) => !already.has(String(p.id || p.name).slice(0, 40)));
+    if (g) add(g, g.name + ' is back on the ' + (Number(g.price) ? 'menu at ' + money(g.price, g.cur) : 'menu'), 'promo');
+  }
+  return { beats: out.slice(0, MESH_AUTONOMY_V3.ratio.promo + 1), blocked, witness: { rows: list.length, priced: wit.price_ok } };
+}
+
+/** Today's plan, one number: the ratio applied, the windows assigned, and each beat marked with the
+ *  channels it can actually reach. Deterministic on the date, so a shop can predict what went out. */
+export function meshSchedule(st, products, facts, opt) {
+  const o = opt || {}, now = o.now || Date.now(), day = Math.floor(now / DAY_MS);
+  const state = o.state || {};
+  const auto = !!(state.auto && state.auto.on);
+  const seen = (state.items && typeof state.items === 'object') ? state.items : {};
+  const fresh = (k) => { const d = seen[k]; return !d || (day - Math.floor(Date.parse(String(d)) / DAY_MS)) >= MESH_BUDGET.item_cooldown_days; };
+  const v = meshValueBeats(st, products, facts, o);
+  const p = meshPromoBeats(st, products, facts, o);
+  const ratio = MESH_AUTONOMY_V3.ratio, cap = MESH_AUTONOMY_V3.per_day;
+  const chosen = [];
+  const allowPromo = (chosen.filter((b) => b.kind === 'promo').length < Math.max(1, Math.floor(cap * ratio.promo / (ratio.value + ratio.promo))));
+  const promos = allowPromo ? p.beats.slice(0, 1) : [];
+  for (const b of v.beats.slice(0, cap - promos.length)) if (fresh(b.item_key)) chosen.push(b);
+  for (const b of promos) if (fresh(b.item_key)) chosen.push(b);
+  const chans = (st && st.mesh_channels && typeof st.mesh_channels === 'object') ? st.mesh_channels : {};
+  const open = Object.keys(MESH_CHANNELS).filter((c) => chans[c] && chans[c].on);
+  const beats = chosen.map((b, i) => {
+    const autoCh = open.filter((c) => MESH_CHANNELS[c].mode === 'auto');
+    return { ...b, slot: MESH_AUTONOMY_V3.windows_utc[i % MESH_AUTONOMY_V3.windows_utc.length],
+      to: open.length ? open : (b.kind === 'promo' ? ['whatsapp', 'counter'] : ['whatsapp']),
+      posted_by: (b.kind === 'promo' ? 'shop facts' : 'shop words'),
+      auto_send: auto && autoCh.length > 0, channels_auto: autoCh };
+  });
+  return { on: auto, beats, blocked: [].concat(v.blocked || [], p.blocked || []),
+    human: MESH_AUTONOMY_V3.human, note: auto
+      ? 'Scheduled and posted by itself where a channel can be posted to by API; the rest is queued for a tap. Replies are never sent from here.'
+      : 'No standing grant: nothing goes out on its own, and everything here is still copy-and-tap ready.' };
+}
+
+/** First touch to people who already exist in the shop's own history — a left order, a return, a
+ *  question asked in a comment. Cold lists are refused by shape, not by sermon: there is no path that
+ *  takes a number from anywhere but a row on this shop's ledger, and a mass DM from a shop's own
+ *  WhatsApp number is the fastest way documented to lose that number. */
+export function meshFirstTouch(st, rows, opt) {
+  const o = opt || {}, now = o.now || Date.now(), day = 864e5, cap = MESH_AUTONOMY_V3.touch.per_day;
+  const list = (Array.isArray(rows) ? rows : []).filter((r) => r && r.at && r.phone);
+  const unpaid = list.filter((r) => !/paid|done|complete|collected|deliver/i.test(String(r.status || '')) && (now - (Date.parse(String(r.at)) || 0)) < 3 * day);
+  const counts = new Map();
+  for (const r of list) { const p = String(r.phone).replace(/\D/g, ''); if (p) counts.set(p, (counts.get(p) || 0) + 1); }
+  const queue = [];
+  for (const r of unpaid.slice(0, cap)) {
+    queue.push({ to: String(r.phone).replace(/\D/g, '').slice(0, 15), kind: 'dm_whatsapp', row: r.id,
+      first: true, human_after: true,
+      text: 'Hi — your ' + meshClip((r.items && r.items[0] && r.items[0].name) || 'order', 40) + ' from '
+        + new Date(String(r.at)).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) + ' is still here. Want it on the next run?' });
+  }
+  for (const [p, n] of [...counts.entries()].filter(([, c]) => c >= 3).sort((a, b) => b[1] - a[1]).slice(0, Math.max(0, cap - queue.length))) {
+    queue.push({ to: p, kind: 'dm_whatsapp', orders: n, first: true, human_after: true,
+      text: 'You have had us ' + n + ' times — thank you. If someone at work has not tried us, tell them and we will look after them too.' });
+  }
+  return { queue, sent_if: queue.length ? 'queued for the shop’s own number, capped at ' + cap + ' a day' : '',
+    refused: list.length - (unpaid.length + counts.size), touch: MESH_AUTONOMY_V3.touch,
+    note: 'Warm contacts only, read off this shop’s ledger. A reply lands in the inbox, and a person answers it — '
+      + 'that half is not automated because a template in a conversation is how a customer leaves.' };
+}

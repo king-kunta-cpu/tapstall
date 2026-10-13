@@ -26,11 +26,24 @@ From the hunta pipeline, the two controls that are worth stealing whole, quoted 
 
 > Nothing sends without a yes. That rule is not a disclaimer, it is the design.
 
-In Tapstall those already have mechanisms, which is why the mesh was cheap to build: `meshWitness` is the
-negative constraint (a beat can only assert what a row read today supports — no number may be rendered
-that is not on a row, and a feed error returns `priced:false` instead of a plausible figure), and the ops
-confirm path is the human gate. `MESH_BUDGET` is the third: **caps enforced in software, not promises** —
-three beats a day, two of them value, one promo at most, a seven-day cooldown per item.
+That one is **rejected here**, and an earlier draft of this file quoted it as though it applied, which
+was a description of a safety habit that does not survive contact with the actual user. A person running
+a kitchen, a till and a delivery bike is not a copy desk; a mesh that depends on them clicking through an
+approval queue does not reach forty shops, it reaches four. So both kinds of post — value and shop facts —
+are created, scheduled and posted by the machine, along with the first touch to a shop's own warm contacts
+and the replies to nothing. **What is human-gated is the reply**: the DM answer, the email answer, the
+comment under the post — where a sale is won or lost, and where a template is how a customer leaves.
+`MESH_AUTONOMY_V3.human = 'replies_only'` is the whole policy, in the code that reads it.
+
+What replaces the approval gate is provenance, applied hardest to the half allowed to mention money.
+`meshWitness` is the negative rule: a beat may assert only what a row read *today* supports, and a broken
+feed returns `priced: false` so no price appears anywhere. `meshUnsupportedOffer` is its promo-specific
+form — a discount, a voucher, a "free …" or a was/now exists only if the merchant put that field on the
+row, so an offer is never improvised: the beat is dropped and the reason kept for the shop to read.
+`MESH_BUDGET` is the cap: three beats a day, **two value to one shop-facts promo**
+(`MESH_AUTONOMY_V3.ratio = { value: 2, promo: 1 }`), on three fixed windows, with a seven-day cooldown per
+item so the same dish is not sold at twice in a week. A promo beat states price, availability and hours
+with the store link, because those are facts the shop owns; it may not state an offer nobody configured.
 
 ## Nodes, and what each is for
 
@@ -80,7 +93,7 @@ lets a zero-yield night retarget the aim rather than blame the parser.
 1. **Provenance or nothing.** A beat may cite only witnessed facts (a row read today, a real photo, an
    approved price). `meshWitness` and `realPhoto` are the enforcement; the art never overrides a real or
    explicitly-cleared photo.
-2. **A standing grant, not an approval queue.** The human is not a copy desk: a person cooking, serving
+2. **A standing grant, and no gate on the send.** The human is not a copy desk: a person cooking, serving
    and chasing payments does not approve a paragraph about their own Tuesday, and a mesh that needs them
    to dies at forty shops. So the gate is one save that turns autonomy on and one save that turns it
    off (`POST /api/mesh/auto`, `mesh:<handle>.auto`, timestamped and counted), and the machine's hands
@@ -108,6 +121,24 @@ lets a zero-yield night retarget the aim rather than blame the parser.
 7. **Delete the mechanism, not the promise.** Nothing in the mesh may hold a lead hostage: a page that
    captured an email must let the merchant export it, and a node we shut down must not strand a shop's
    audience. Same reason the receipt lives on the buyer's device.
+
+## What the machine can send by itself, and what it physically cannot
+
+`MESH_CHANNELS` declares the capability per channel, because pretending otherwise is how a shop loses an
+account. That is not governance, it is what the platforms accept:
+
+```
+posts itself by API    bluesky (atproto) · telegram (bot) · mastodon (rest) · x (v2, paid app keys) · our own Pages mirror
+queued for one tap     WhatsApp status and groups · Facebook groups · Instagram personal · the paper by the till
+first touch, per shop   a DM or an email to a number already on that shop's ledger — warm only, capped at eight a
+                        day, and sent from the shop's own credentials: there is no legitimate API for a personal
+                        WhatsApp account, and a bulk send from that number gets the number restricted
+replies                 never sent by the machine: the console shows them and waits for a person
+```
+
+A shop with no authorised API channel still gets the whole pack, and `schedule.beats[].auto_send` is
+`false` for it — the plan says out loud that a tap is owed, rather than reporting a post that never
+happened. Credentials stay the merchant's, on their own store document, revocable at their provider.
 
 ## The growth mechanics, borrowed from the pipeline rather than invented
 

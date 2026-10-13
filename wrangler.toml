@@ -11,16 +11,16 @@ workers_dev = true
 # self-contained and needs no module rules, and git's bytes are the deployed bytes.
 [[kv_namespaces]]
 binding = "STORES"
-id = "b5c1c89d95114092ae91bbafc5a2d76c"
+id = "a9016473abef4a66bcba6f200d7d4af3"
 
 [[kv_namespaces]]
 binding = "ORDERS"
-id = "4f4ac94a66db4b859b61668a3c160819"
+id = "7dd531983a814ff5bb693598b93714d6"
 
 # The previous brand's hostname. It answers redirects for pages and keeps serving
 # anything with a body, so a browser mid-order is never told "go somewhere else".
 [vars]
-REDIRECT_TO = "https://tapstall.simalidudu.workers.dev"
+REDIRECT_TO = "https://tapstall.zlnew.workers.dev"
 
 [observability]
 enabled = true

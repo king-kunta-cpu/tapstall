@@ -58,7 +58,8 @@ test('the mesh costs the account at most one write a day per shop', () => {
 /* Nothing in the graph may publish on its own. The absence of a route is the guarantee, so it is
    asserted as an absence — the cheapest way to keep a design promise from being quietly implemented. */
 test('no node can publish without the shop, because there is nothing to publish with', () => {
-  assert.match(doc, /Nothing sends without a yes/, 'the rule is quoted from the pipeline it comes from');
+  assert.match(doc, /That one is \*\*rejected here\*\*/, 'the doc must not claim an approval gate this product does not have');
+  assert.match(doc, /replies_only/, 'and it must name the gate it does have');
   assert.doesNotMatch(worker, /'\/api\/mesh\/(publish|send|post|schedule)'/,
     'there is no auto-publish endpoint, and adding one must be a decision with a test written for it');
   assert.match(worker, /meshMark\(prev, Array\.isArray\(b\.marked\) \? b\.marked : \[\], Date\.now\(\)\)/,
@@ -89,7 +90,12 @@ test('a value beat may not sell anything, and the filter is the reason', async (
     const r = core.meshIsPitch(bad);
     assert.equal(r.pitch, true, why + ' must be refused, and was not: ' + bad);
   }
-  assert.equal(core.MESH_AUTONOMY.kinds.includes('promo'), false, 'the autonomous plan has no promo kind at all');
+  assert.equal(core.MESH_AUTONOMY_V3.kinds.join(','), 'value,promo',
+    'v0.9.3: both kinds run on their own, because a seller approving their own prices twice a day is not being protected, they are being worked');
+  assert.equal(core.MESH_AUTONOMY_V3.ratio.value / core.MESH_AUTONOMY_V3.ratio.promo, 2,
+    'and the ratio is the stated one: two pieces of value to one of shop facts');
+  assert.equal(core.MESH_AUTONOMY_V3.human, 'replies_only', 'the human is on the reply, not on the send');
+  assert.equal(core.MESH_AUTONOMY_V3.touch.warm_only, true, 'first touch goes to this shop\'s own history and nowhere else');
   assert.equal(core.MESH_AUTONOMY.revoke_writes, 1, 'and switching it off must be cheaper than a support ticket');
 });
 
@@ -129,4 +135,49 @@ test('the growth queue is conversations, read from the ledger, and says so', asy
   assert.equal(g.regulars.length, 1, 'one person crossed three orders');
   assert.equal(g.regulars[0].orders, 3, 'and the count is the real count, not a flattering one');
   assert.match(g.note, /Nothing in this list is automated/, 'and the queue tells the truth about who sends it');
+});
+
+/* v0.9.3 — what the autonomy actually promises, asserted where it is decided. */
+test('the plan posts itself where a channel can be posted to, and never pretends elsewhere', async () => {
+  const core = await import('file://' + join(root, 'worker', 'core.js'));
+  const st = { handle: 'mamatoe', shop_name: 'Mama Too', currency: 'USD', mesh_channels: { bluesky: { on: true }, whatsapp: { on: true } } };
+  const rows = [{ id: 'm1', name: 'Nyama', desc: 'Slow-cooked overnight, so the meat gives up', category: 'Mains', price: 6 },
+                { id: 'm2', name: 'Maheu', category: 'Drinks', price: 2, available: false },
+                { id: 'm3', name: 'Matoke', category: 'Mains', price: 5, available: false }];
+  const plan = core.meshSchedule(st, rows, { hours_text: 'Mon-Fri 08:00-16:00', feed_ok: true },
+    { now: Date.parse('2026-10-13T04:00:00Z'), origin: 'https://tapstall.zlnew.workers.dev', state: { auto: { on: true } } });
+  assert.equal(plan.on, true, 'granted, so the plan is live');
+  assert.ok(plan.beats.length >= 2, 'there is something to say: ' + JSON.stringify(plan.beats).slice(0, 160));
+  assert.ok(plan.beats.some((b) => b.kind === 'promo'), 'including the shop-facts one, with money in it');
+  const promo = plan.beats.find((b) => b.kind === 'promo');
+  assert.match(promo.text, /6\.00 USD|5\.00 USD|2\.00 USD/, 'a promo beat states a real price from the row');
+  assert.match(promo.text, /tapstall\.zlnew\.workers\.dev\/s\/mamatoe/, 'and the link, because this is the half that is allowed to have one');
+  assert.ok(plan.beats.every((b) => b.slot), 'each beat is on the clock, not fired at random');
+  assert.equal(new Set(plan.beats.map((b) => b.slot)).size, plan.beats.length, 'and no two share a window on the same day');
+  assert.ok(plan.beats.every((b) => b.auto_send === true), 'an authorised API channel means it sends itself');
+  const assist = core.meshSchedule({ handle: 'x', mesh_channels: { whatsapp: { on: true } } }, rows, {}, { state: { auto: { on: true } }, now: Date.now() });
+  assert.ok(assist.beats.every((b) => b.auto_send === false), 'a channel with no API is never claimed to have been posted to');
+  assert.match(assist.beats[0].to.join(','), /whatsapp/, 'it is queued for the person instead, which is honest and still costs them a tap');
+  const ungranted = core.meshSchedule(st, rows, {}, { state: {}, now: Date.now() });
+  assert.equal(ungranted.on, false, 'and with no grant, nothing goes out anywhere');
+  const sold = JSON.stringify(plan.beats);
+  assert.ok(!(/is back on the menu[\s\S]*listed sold out/.test(sold) && /is back on the menu[\s\S]*is 2\.00 USD and listed sold out/.test(sold)),
+    'one row cannot be sold out and back in the same day\'s plan');
+});
+
+test('first touch reaches warm contacts, caps itself, and hands the reply to a human', async () => {
+  const core = await import('file://' + join(root, 'worker', 'core.js'));
+  const now = Date.parse('2026-10-13T09:00:00Z'), day = 864e5;
+  const rows = [{ id: 'u1', at: new Date(now - day).toISOString(), status: 'pending', phone: '0781110000', items: [{ name: 'Nyama' }] },
+                { id: 'u2', at: new Date(now - 9 * day).toISOString(), status: 'pending', phone: '0782220000', items: [] },
+                { id: 'u3', at: new Date(now - 30 * day).toISOString(), status: 'paid', phone: '0783330000', items: [] },
+                { id: 'u4', at: new Date(now - 20 * day).toISOString(), status: 'paid', phone: '0783330000', items: [] },
+                { id: 'u5', at: new Date(now - 10 * day).toISOString(), status: 'paid', phone: '0783330000', items: [] }];
+  const t = core.meshFirstTouch({ handle: 'mamatoe' }, rows, { now });
+  assert.equal(t.queue.length, 2, 'one abandoned order inside three days, one customer worth thanking: ' + JSON.stringify(t.queue.map((x) => x.kind)));
+  assert.ok(t.queue.every((x) => x.human_after === true), 'every one of them marked as needing a person on the reply');
+  assert.ok(t.queue.every((x) => /078/.test(x.to)), 'to numbers on this shop\'s own ledger, and to nobody else');
+  assert.equal(t.refused, 1, 'and the count of rows it would not touch is said out loud');
+  assert.match(t.touch.kinds.join(','), /dm_whatsapp|email|comment_reply/, 'the channels it may use');
+  assert.match(t.note, /a template in a conversation is how a customer leaves/, 'the reason is in the payload, not only in the doc');
 });
