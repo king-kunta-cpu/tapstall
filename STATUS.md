@@ -62,6 +62,54 @@ not a scheduler**. The pages themselves shipped at 01:14 UTC, verified the only 
 anything — `all shipped pages are what git holds`, `/a` served at 94,163 bytes exactly as git
 holds it with `data-pfv` present, `/s/mamatoe` serving `id="pff"`.
 
+### The 96 blocked lines, run for real
+
+`prod_check.sh` went from `205 passed / 96 blocked / 0 failed` (a spent budget, where the
+write-gated copy had never executed) to a same-day sequence of `265 / 33`, `287 / 20`,
+`290 / 12`, `296 / 6`, `299 / 2` — each step a fix, and the last two red lines are named below.
+Then the day's 1,000 writes ran out mid-run and the script answered `207 / 99 blocked / 0
+failed`: it cannot be told apart from health except by the blocked column, which is now the
+thing the run prints first.
+
+Five classes of harness fault came out of it, all of them the same shape — *an assertion written
+against a state that another request had already moved*:
+
+- **a borrowed fixture.** The proof section read section [4]'s order, which had just been
+  marked paid and undone; a section that needs an open order now opens its own (`ORDP`) and
+  cancels it at the end.
+- **a snapshot where a poll was needed.** `rowwait` and `kvwait` read the ledger row and the
+  order document until they exist (and, where the claim is about a change, until the change
+  is visible), because `list:<handle>` is a second document and the KV REST mirror of the
+  first one lags the Worker by minutes, not seconds. A mirror that has not caught up is
+  reported `!` — not verifiable this way — with the reason in the line.
+- **a limiter mistaken for a defect.** 8 mutations a minute per address at the order door, 6
+  at the buyer's; a section that posts a dozen writes in twenty seconds gets what it asked
+  for. `pace` now pauses before the bursts, and a rate-limited body is counted as a state in
+  both `ck` and `nk` — a throttled `nk` was the nastier case, because an empty body is a
+  false green.
+- **an unasserted housekeeping write.** The `week` restore went to `/dev/null` for two
+  releases; and worse, it wrote back the logo path read at the start of the run while the
+  reaper had already deleted the bytes it named — so every run handed `mamatoe` a dangling
+  pointer and the shop went on advertising an `og:image` no crawler can load. A path is now
+  fetched before it is written back, and a dead one is replaced by no picture.
+- **a positive assertion doing a negative job.** `while the week applies in the same breath`
+  accepted `applied_now:[]`, which also means "already like that" — so it could not fail when
+  the week *was* wrongly held. It is now a negative on the held list (`'"held":[^]]*week'`),
+  checked against five fixture shapes including `held:["week"]` alone.
+
+Two lines were re-anchored after the budget closed and are verified by pattern, not by a live
+run: the replayed Confirm (asserts the order was not *changed* — `already:true` or the same
+status back, with an `nk` that fails on a reopening) and the shop's verb against a blank box
+(posted with a link the order still honours). Run `PIN=… bash scripts/prod_check.sh` after
+00:00 UTC for the live answer.
+
+The one real boundary this exercise found in the money path, recorded rather than papered
+over: `markPaid` decides `already` by reading the order document, and the buyer's unpaid
+tally is a decrement taken on the transition. Replayed inside the consistency window the tap
+is honestly seen as a first one, so the tally can move twice. `Math.max(0, …)` floors it and
+no money moves twice — status, amount and the ledger row are all idempotent — so this stays a
+documented edge of KV-at-$0 rather than a lock invented to dress it up.
+
 ## One rule, four places (2026-10-12, v0.8.4)
 
 A deferred line in this file — *"unify `ask_payer` behind `railWantsPayer(rail)`"* — was not

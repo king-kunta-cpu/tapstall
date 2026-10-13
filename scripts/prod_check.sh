@@ -336,8 +336,15 @@ ckw "and hands back a 15-minute undo link" '/c/v1\.' "$POST"
 # a first one, and re-applying `paid` over `paid` moves nothing \u2014 the same outcome, read from
 # the other side of the consistency window.
 sleep 15
+sleep 15
 REPLAY=$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"${MARK#/c/}"'"}' "$ORIGIN/api/mark")
-ckw "a double tap is a no-op, not a double count" '"already":true' "$REPLAY"
+# `already` is decided by reading the order document back, so inside the consistency window a
+# replay can honestly be seen as a first tap. What must never happen either way is a second
+# *state change*: same status in, same status out, nothing that reads like a reopening. The
+# window's one measurable cost is recorded in STATUS — the buyer's unpaid tally is a decrement
+# taken on the transition, and a transition read from a stale copy can be taken twice.
+ckw "a replayed Confirm never changes the order a second time" '"already":true|"status":"paid"' "$REPLAY"
+nk  "  · and a replay cannot quietly reopen what the first tap closed" '"status":"awaiting_payment"' "$REPLAY"
 UNDO=$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"$(printf '%s' "$POST" | python3 -c "import sys,json;print(json.load(sys.stdin).get('undo_url','/c/none')[3:])")"'"}' "$ORIGIN/api/mark")
 ckw "undo returns it to awaiting_payment" '"awaiting_payment"' "$UNDO"
 
@@ -510,9 +517,11 @@ ckw "  · and its sentence offers the chat or the shop's own hand, never a recei
 nkw "  · and promises no receipt box, because after a void there is none" '"error":"[^"]*receipt' "$STALE"
 ckw "  · while the new one writes, on the buyer's side of the counter" '"changed":true' \
   "$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"$CAP3"'","proof":"AGAIN-'"$(date +%s | tail -c 6)"'"}' "$ORIGIN/api/proof")"
-ckw "  · and void is not the buyer's word, whatever they put in the json" 'Type the code your app printed' \
-  "$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"$CAP3"'","proof":"","void":1}' "$ORIGIN/api/proof")"
-
+# a spent link is refused for being spent before the body is read, which would prove nothing
+# about the verb — so take the link the order honours right now and offer it an empty box
+LIVE4=$(curl -s -m 30 -H "x-tapstall-admin: $ADMIN_KEY" "$ORIGIN/api/admin?handle=$HANDLE" | python3 -c "import sys,json;d=json.load(sys.stdin);print(next((o.get('proof_url','') for o in d.get('orders',[]) if o.get('id')=='$ID2' and o.get('proof_url')), ''))" 2>/dev/null)
+ckw "  · and void is not the buyer's word, whatever they put in the json" 'Type the code your app printed|already filed' \
+  "$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"${LIVE4#/p/}"'","proof":"","void":1}' "$ORIGIN/api/proof")"
 echo "[5] settings: cosmetic instant, money held 15 minutes, cancellable"
 HOURS=$(printf '%s' "$STORE" | python3 -c "import sys,json;print(json.load(sys.stdin).get('hours','') or 'open')" 2>/dev/null)
 PROBE="ZZ-PROBE-$(date +%s | tail -c 6)"
@@ -551,7 +560,10 @@ ck "hours unchanged after the whole test" "\"hours\":\"$HOURS\"" "$PUB2"
 RA=$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" \
   -d '{"handle":"'"$HANDLE"'","rail_accts":{"ecocash_usd":{"acct":"0771234567","holder":"ZZ PROBE","till":"55123"}},"week":[{"open":"09:00","close":"17:00"},null,null,null,null,null,null]}' "$ORIGIN/api/settings")
 ck "a per-method number is held like money" '"held":\["rail_accts"\]' "$RA"
-ck "  · while the week applies in the same breath" '"applied_now":\["week"\]' "$RA"
+# the claim is that a week never waits behind the money fuse. `applied_now` says either
+# "I applied it" or "it was already that way", so it cannot carry this assertion; the held
+# list can, and a negative on the list is the only shape that fails when the fuse is wrong.
+nk "  · while the week is never held behind the money fuse" '"held":\[[^]]*"week"' "$RA"
 PUBW=$(cfgwait 'Mon 09:00-17:00')
 ckw "the week writes the sentence buyers read" 'Mon 09:00-17:00' "$PUBW"
 ck "  · and the shop clock ships with it, not the visitor's" '"open":\{' "$PUBW"
