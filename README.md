@@ -308,6 +308,13 @@ verified ZW/SA tariffs) but it is now a **default, not the whole answer**:
   different name, and a ledger row that could skip a code forever if it was written one read too
   early — and the run that came back clean at 205 also came back clean for the wrong reason.
   Rate limits and the KV mirror's lag are now reported as the states they are (v0.8.5).
+- **Revoke now ends the confirm link.** `a:'mark'` caps — the 72-hour one-tap confirm link on the
+  receipt, the cancel link, and the 15-minute undo — were minted without the store's `auth_gen` and
+  verified without it, so *Revoke* killed sessions, API keys and payment-code links and left a
+  stranger holding a write. They carry the generation now and a refusal is a 410 with a sentence.
+  No cliff for the links already in buyers' hands: a cap with no generation is honoured if the order
+  it points at moved after the revoke, refused if it predates it, and anything it cannot date is
+  refused (v0.8.6).
 
 An invalid description at sign-up becomes `cash` rather than a rejected
 registration: a merchant who never opens the shop is worse than one whose slip

@@ -1886,3 +1886,38 @@ both when you are done building. The `ADMIN_SECRET` that briefly landed in a
 public commit (`d9c6721`) was rotated in the same session; the repo was deleted
 and recreated so the tree no longer contains it — the old blob may stay
 reachable by its raw SHA until GitHub garbage-collects it, but the value is inert.
+
+## The confirm link that outlived its own revocation (2026-10-13, v0.8.6)
+
+`Revoke` in the dashboard is the product's answer to "somebody has my links". It bumped
+`auth_gen`, which every session and every payment-code link is bound to — and the one-tap confirm
+link did not care. `{ a: 'mark', h, id, s }` carried no generation, `markPaid` checked no
+generation, so a leaked receipt link stayed a 72-hour write for three days after the merchant
+revoked, and the undo link for 15 minutes after it too.
+
+Fixed at both ends. Every mark cap is minted with `g: String(st.auth_gen || '0')` (order
+confirm, order cancel, undo) and `markPaid` refuses a cap whose generation is gone: 410,
+`{ error: 'link_revoked', final: true, code, why }`, checked *before* the `already`
+short-circuit, because "already paid" is a true sentence about the order and a false one about
+the link's authority. `confirmPage` refuses the same way, and its floor page renders no form —
+a button that will be refused is the 0.8.3 defect again. The rule is one function,
+`capGenOk` in the core, so the write path and the page cannot drift.
+
+There is no cliff, because the last release left links in buyers' hands. A cap with no `g` is
+judged by time: honoured if the order it points at (`at`, or `marked_at` for an undo link) moved
+after the revoke, refused if it predates it, and refused if the generation cannot be read as a
+date — the round-trip check exists because `parseInt('zz!not36', 36)` is 1295, and 1295 is
+September 1969, which would have made every legacy link look fresh.
+
+The revoke note that already promised "…and so is any payment-code link a buyer was holding" now
+says *confirm link* too, and the sentence is finally true.
+
+**Verification.** `npm test` → **241/241** (core 86 · live 100 · pages 44 · limits 10 + the
+sidecars' 11+14 in their own folders): 5 new core tests on the rule, 8 new live tests on the
+whole sequence (bind → honour → revoke → 410 with nothing written → fresh link works → legacy
+link honoured → same legacy link dies on the next revoke → undo link dead → page draws it closed
+in both the template branch and the floor branch), 1 pages test pinning the seam between the two
+files. `scripts/prod_check.sh` gained two lines that the binding has to permit, so the nightly CI
+run proves it on production; today's KV budget is spent, so those two report `blocked` until the
+00:20 UTC slot and the target is two consecutive 0-failed runs.
+

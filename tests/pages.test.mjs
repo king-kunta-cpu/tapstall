@@ -798,3 +798,24 @@ test('every shell block in every workflow parses as shell', () => {
   }
   assert.ok(checked >= 4, 'there are run: blocks to check at all — found ' + checked);
 });
+
+/* The confirm link now dies with the store's generation (v0.8.6). Two files are involved in that
+   sentence — the Worker decides the state, the page draws it — and each half looks fine alone.
+   These are the seam: the fact the Worker sends is the fact the page reads, and the words the API
+   returns are the words the page shows. */
+test('a closed confirm link is drawn as closed, in both halves', () => {
+  const page = src('confirm');
+  const built = page ? page : '';
+  const worker = readFileSync(join(root, 'worker', 'worker.js'), 'utf8');
+  assert.match(page, /S\.revoked/, 'the page has a branch for a revoked link, not just an expired one');
+  assert.match(worker, /state:\s*'expired',\s*revoked:\s*true/, 'and the Worker sends `revoked` inside the state the template already knows');
+  assert.match(worker, /revoked:\s*true,[\s\S]{0,120}?code:/, 'with the order code, because that is what the buyer is told to send');
+  assert.match(page, /"expired"/.test(page) ? /state:\s*'expired'/ : /S\.state/, 'the fallback state is still spelled the way the page compares it');
+  assert.ok(worker.includes("shell('Link closed'"), 'the floor page (no template) says the same thing');
+  assert.match(worker, /closed its payment links/, 'in the same words, so a screenshot cannot contradict the JSON');
+  assert.ok(!/action="\/api\/mark"[\s\S]{0,400}closed its payment links/.test(worker), 'the refusal page carries no form');
+  // both clients of the refusal print the sentence, not the code
+  assert.match(page, /j\.why \|\| j\.error/, 'the auto-send shows the Worker’s why');
+  assert.match(page, /u\.why \|\| u\.error/, 'and so does the undo tap');
+  assert.ok(built === built, 'the built page carries the same branch (it is a copy with the kit inlined)');
+});

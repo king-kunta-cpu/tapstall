@@ -247,7 +247,7 @@ function post(mark) {
   }).then(function (r) { return r.text().then(function (t) { var j = null; try { j = JSON.parse(t); } catch (e) {} return { s: r.status, j: j }; }); })
     .then(function (res) {
       var j = res.j || {};
-      if (!j.ok) { q('#post').innerHTML = '<span style="color:var(--bad)">' + esc(j.error || 'could not reach the server') + '</span>' + (mark ? ' — <a href="' + mark + '">open the dashboard instead</a>' : ''); return; }
+      if (!j.ok) { q('#post').innerHTML = '<span style="color:var(--bad)">' + esc(j.why || j.error || 'could not reach the server') + '</span>' + (mark ? ' — <a href="' + mark + '">open the dashboard instead</a>' : ''); return; }
       q('#amt').classList.add('hide'); q('#who').classList.add('hide');
       done('ok', j.label || (j.status === 'paid' ? 'Marked paid' : 'Done'),
         esc(S.code || '') + ' is now <b>' + esc(j.status || S.want) + '</b>. The buyer keeps the payment details printed on their slip, so nothing you just did can change what they were told to pay.',
@@ -260,7 +260,9 @@ function post(mark) {
           fetch('/api/mark', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ cap: j.undo_url.split('/c/')[1] }) })
             .then(function (r) { return r.json(); }).then(function (u) {
               if (u.ok) done('wait', 'Reopened', 'The order is back to <b>' + esc(u.status) + '</b>, and you have 15 minutes to change your mind again.', 'Undone');
-              else { alert(u.error || 'could not undo'); }
+              // The undo link is a mark link too, so a Revoke between the two taps ends it. Say
+              // what happened rather than raising a code, and leave the dashboard link standing.
+              else { q('#acts').innerHTML = '<p class="muted">' + esc(u.why || u.error || 'the undo link no longer works') + '</p><a class="sm" href="/a" style="text-align:center;text-decoration:none;padding:.6rem;border:1px solid var(--line-2);border-radius:10px;display:block">Open my dashboard</a>'; }
               q('#acts').classList.add('hide');
             });
         };
@@ -274,6 +276,14 @@ function post(mark) {
   var ns = q('#nscap'); if (ns) ns.value = S.cap || '';
   if (S.shop) q('#brand').textContent = S.shop;
   if (S.state === 'expired') {
+    // An expired link and a closed one are different facts. One means "you left it too long, so
+    // mint a new one"; the other means the shop stopped every link it had issued, and only the
+    // second is fixed by the store opening new links, not by trying again sooner.
+    if (S.revoked) {
+      done('bad', 'This shop has closed its payment links', 'Confirm and cancel links were ended by the same Revoke that ended its sessions and code keys. Your order <span class="mono">' + esc(S.code || '') + '</span> is still <b>' + esc(S.status || 'unchanged') + '</b> — the shop can confirm it from <a href="/a">the dashboard</a>, and a link minted after the revoke will work.', 'Nothing to do');
+      q('#post').textContent = 'Nothing was changed.';
+      return;
+    }
     done('bad', 'This link has expired', 'Confirm links live for 72 hours and each state can only be confirmed once. Open <a href="/a">your dashboard</a> and tap Confirm on the order — it does exactly the same thing, and it never expires.', 'Nothing to do');
     q('#post').textContent = 'Nothing was changed.';
     return;

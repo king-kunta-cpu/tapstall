@@ -259,6 +259,34 @@ export function proofSuperseded(order, nonce) {
   return !cleanProof(b.proof) && !cleanPayer(b.payer, 'loose');
 }
 
+/* A credential that outlives the authority which minted it is not a credential.
+   `auth_gen` is the generation every session and every payment-code link is bound to;
+   the one-tap confirm link was the last thing in the product that ignored it, which is
+   how a merchant's *Revoke* could end sessions and code links and still leave a buyer
+   holding a 72-hour write.
+
+   A cap minted before this rule exists carries no `g`, and refusing those would strand
+   every buyer who was handed a link in the last three days — that is not safety, it is a
+   cliff. So a legacy cap is judged by time instead: it survives only if the order it
+   points at moved *after* the revocation. `auth_gen` is '0' until a store first revokes,
+   and there is no revocation for a link to be too old for. A generation we cannot read as
+   a timestamp counts as one that moved: fail closed, because the alternative is guessing. */
+export function capGenOk(payload, store, order) {
+  const want = String((store && store.auth_gen) || '0');
+  const got = payload ? payload.g : undefined;
+  if (got !== undefined && got !== null && got !== '') return String(got) === want;
+  const revoked = Number.parseInt(want, 36);
+  // Round-trip the parse, because parseInt reads as far as it can and stops: 'zz!not36' parses
+  // as 1295, and 1295 is September 1969, which would make every legacy link look fresh. A
+  // generation that is not a date we can read is one that moved, and the honest answer is no.
+  if (!Number.isFinite(revoked) || revoked.toString(36) !== want.toLowerCase()) return false;
+  if (revoked <= 0) return true;                     // '0' means nothing has ever been revoked here
+  if (revoked < 1577836800000 || revoked > 4102444800000) return false;   // 2020..2100, or it is not a date
+  const stamp = (v) => { const t = Date.parse(String(v || '')); return Number.isFinite(t) ? t : 0; };
+  const moved = Math.max(stamp(order && order.at), stamp(order && order.marked_at));
+  return moved > revoked && moved > 0;
+}
+
 export function proofOpen(order) {
   const s = (order && typeof order === 'object' ? order : {}).status;
   return !s || PROOF_OPEN.indexOf(s) >= 0;

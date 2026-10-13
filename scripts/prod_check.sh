@@ -319,6 +319,12 @@ nk "the confirm link carries no store credential" 'token=|admin_token|/api/mark'
 PAGE=$(curl -s -m 30 -A 'Mozilla/5.0 (compatible; Slackbot/1.0; +https://slack.com/faq)' -L "$ORIGIN$MARK")
 ckw "the bot gets a page, not a mutation" 'Mark .* paid' "$PAGE"
 ckw "the page posts itself when a browser runs it" 'method="post" action="/api/mark"' "$PAGE"
+# v0.8.6 binds a confirm link to the store's auth generation, so a link minted now is only ever
+# honoured while that generation lives. The page is the cheapest proof of both halves: a cap the
+# verify step refused would render a refusal instead of state:confirm, and a sweep that broke the
+# binding would tell a buyer the shop closed its links on a link minted seconds ago.
+ckw "  · as a live confirm state, which the binding has to permit" '"state":"confirm"' "$PAGE"
+nkw "and a seconds-old link is never told the shop closed its links" 'closed its payment links' "$PAGE"
 ck "and says what it will do" 'from ' "$PAGE"
 # Ground truth is the order document itself. The dashboard list is a separate KV
 # key and is eventually consistent, so it can lag a write by up to a minute.

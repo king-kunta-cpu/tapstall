@@ -1065,3 +1065,51 @@ test('railWantsPayer: the four surfaces that ask this question ask the same one'
   }
 });
 
+/* ---- v0.8.6 — capGenOk: the rule that decides whether a link still belongs to its store ---- */
+const DAY = 86400000;
+const genStore = (g) => ({ auth_gen: g });
+const iso = (ms) => new Date(ms).toISOString();
+const nowish = (base36) => Number.parseInt(base36, 36).toString(36);   // what a lowercase generation round-trips to
+
+test('capGenOk: a cap that names a generation is compared to it, exactly', () => {
+  assert.equal(C.capGenOk({ g: 'abc' }, genStore('abc'), {}), true);
+  assert.equal(C.capGenOk({ g: 'abc' }, genStore('abd'), {}), false, 'one character off is a different generation');
+  assert.equal(C.capGenOk({ g: 'abc' }, genStore('0'), {}), false, 'a revoked store does not honour a pre-revoke cap');
+  assert.equal(C.capGenOk({ g: '0' }, genStore('0'), {}), true, 'the untouched store and the untouched cap agree on 0');
+});
+
+test('capGenOk: a store that has never revoked has nothing for a legacy link to be too old for', () => {
+  assert.equal(C.capGenOk({}, genStore('0'), { at: iso(1) }), true);
+  assert.equal(C.capGenOk({}, genStore(undefined), { at: iso(1) }), true, 'a store with no field at all is the same case');
+  assert.equal(C.capGenOk({}, genStore(''), { at: iso(1) }), true);
+});
+
+test('capGenOk: a legacy link is judged by whether the order moved after the revoke', () => {
+  const revoked = Date.now() - DAY;
+  const st = genStore(revoked.toString(36));
+  assert.equal(C.capGenOk({}, st, { at: iso(revoked + 1000) }), true, 'newer than the revoke');
+  assert.equal(C.capGenOk({}, st, { at: iso(revoked - 1000) }), false, 'older than it');
+  assert.equal(C.capGenOk({}, st, { at: iso(revoked - 1000), marked_at: iso(revoked + 1000) }), true,
+    'a link minted by a later state change is a later link — marked_at counts as the move');
+  assert.equal(C.capGenOk({}, st, { at: iso(revoked) }), false, 'to the millisecond, equal is not after');
+});
+
+test('capGenOk: anything it cannot date is refused, not waved through', () => {
+  const now = Date.now();
+  assert.equal(C.capGenOk({}, genStore('0'), {}), true, 'no order timestamps on a never-revoked store is fine');
+  assert.equal(C.capGenOk({}, genStore(now.toString(36)), {}), false, 'a revoke with no order to date is a refusal');
+  assert.equal(C.capGenOk({}, genStore(now.toString(36)), null), false, 'and with no order at all');
+  assert.equal(C.capGenOk({}, genStore('zz!not36'), { at: iso(now) }), false, 'parseInt would read 1295 and call it 1969; the round-trip says otherwise');
+  assert.equal(C.capGenOk({}, genStore((123).toString(36)), { at: iso(now) }), false, 'a number that is not a date in the ms range is not a revoke time');
+  assert.equal(C.capGenOk({}, genStore('Z'.repeat(30)), { at: iso(now) }), false, 'absurd input is a closed door, not an exception');
+});
+
+test('capGenOk: only whole generations, in either spelling', () => {
+  const g = Date.now().toString(36);
+  assert.equal(C.capGenOk({ g }, genStore(g.toUpperCase()), {}), false,
+    'the exact compare is exact: a store doc with a differently spelled generation is a different generation, and the door closes');
+  assert.equal(C.capGenOk({}, genStore(nowish(g)), { at: iso(Date.now() + 1000) }), true,
+    'the legacy path is case-tolerant, because it only has to read a number');
+  assert.equal(C.capGenOk({ g: '' }, genStore('0'), { at: iso(Date.now()) }), true, 'an empty g is the legacy case, not the empty-generation case');
+  assert.equal(C.capGenOk({}, genStore('0'), { at: 'not a date' }), true, 'a never-revoked store never needs the date at all');
+});

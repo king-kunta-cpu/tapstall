@@ -3100,3 +3100,154 @@ test('a code that lands while the ledger is catching up still reaches the ledger
   assert.ok(row.pcap, 'and the rotated nonce, so the next read mints the buyer a live link');
 });
 
+
+/* ---------------------------------------------------------------------------------------------
+ * v0.8.6 — the one-tap confirm link belongs to a generation, so Revoke ends it too.
+ *
+ * The bug this section exists for: `a:'mark'` caps were minted without the store's `auth_gen`
+ * and verified without it, so *Revoke* — which is the product's answer to "someone has my links"
+ * — killed sessions, API keys and payment-code links and left every outstanding confirm link
+ * holding a 72-hour write. The fix has to be a closed door, not a fresh cliff: buyers were
+ * holding links minted by the previous release, so a link with no generation is judged by
+ * whether the order it points at moved after the revoke.
+ */
+const { issueCap } = await import('../worker/core.js');
+
+async function newShop(handle) {
+  const r = await call('/api/register', {
+    method: 'POST',
+    body: { shop_name: 'Generation Test Shop', owner_name: 'Tino', owner_email: 'gen@example.com',
+      market: 'zw', city: 'Harare', whatsapp: '263770000001', handle, currency: 'USD',
+      rail: 'ecocash_usd', pay_account: '0770002222' },
+  });
+  assert.equal(r.status, 201, r.text);
+  const s = await loginWithPin(handle, r.json.pin);
+  assert.ok(s.cookie, 'the new shop can sign in: ' + s.r.text.slice(0, 120));
+  return { handle, pin: r.json.pin, cookie: s.cookie };
+}
+async function shopOrder(sh, ip) {
+  const r = await call('/api/order', {
+    method: 'POST', ip,
+    body: { handle: sh.handle, items: [{ name: 'Plate', price: 5, qty: 1 }],
+      buyer: { name: 'Gen Buyer', phone: '771110000' }, rail: 'ecocash_usd', when: 'asap' },
+  });
+  assert.equal(r.status, 201, r.text.slice(0, 200));
+  return r.json;
+}
+const capOf = (path) => String(path || '').split('/c/')[1];
+const bodyOf = (cap) => JSON.parse(Buffer.from(String(cap).split('.')[2], 'base64url').toString());
+const shopDoc = (handle) => JSON.parse(env.STORES._map.get('store:' + handle).value);
+const orderDoc = (handle, id) => JSON.parse(env.ORDERS._map.get('order:' + handle + ':' + id).value);
+
+const gen = {};
+
+test('0.8.6 a minted confirm link carries the store’s generation', async () => {
+  gen.sh = await newShop('genbind');
+  gen.o = await shopOrder(gen.sh, '196.7.0.1');
+  const st = shopDoc('genbind');
+  const p = bodyOf(capOf(gen.o.mark_url));
+  assert.equal(p.a, 'mark', 'the link is still the same capability kind, not a new power');
+  assert.equal(p.g, String(st.auth_gen || '0'), 'and it names the generation it was minted under');
+  const c = bodyOf(capOf(gen.o.cancel_url));
+  assert.equal(c.g, p.g, 'the cancel link is bound the same way — one rule, not one per link');
+  assert.equal(c.s, 'cancelled');
+});
+
+test('0.8.6 the bound link still works, because the fix must not eat the happy path', async () => {
+  const m = await call('/api/mark', { method: 'POST', body: { cap: capOf(gen.o.mark_url) } });
+  assert.equal(m.status, 200, m.text.slice(0, 200));
+  assert.equal(m.json.status, 'paid');
+  assert.ok(m.json.undo_url, 'and the undo link came back');
+  assert.equal(bodyOf(capOf(m.json.undo_url)).g, String(shopDoc('genbind').auth_gen || '0'),
+    'the 15-minute undo is a mark cap too, so it is bound like one');
+  gen.undo = m.json.undo_url;
+});
+
+test('0.8.6 Revoke ends an outstanding confirm link, and the order is left alone', async () => {
+  gen.open = await shopOrder(gen.sh, '196.7.0.2');
+  const before = shopDoc('genbind').auth_gen;
+  const rv = await call('/api/revoke', { method: 'POST', cookie: gen.sh.cookie, body: { handle: 'genbind' } });
+  assert.equal(rv.status, 200, rv.text);
+  assert.match(rv.json.note, /confirm link/, 'the note now claims what the code does: ' + rv.json.note.slice(0, 90));
+  assert.notEqual(shopDoc('genbind').auth_gen, before, 'the generation actually moved');
+
+  const dead = await call('/api/mark', { method: 'POST', body: { cap: capOf(gen.open.mark_url) } });
+  assert.equal(dead.status, 410, dead.text.slice(0, 200));
+  assert.equal(dead.json.error, 'link_revoked');
+  assert.equal(dead.json.final, true, 'a client that folds on `final` closes the door without special-casing this');
+  assert.match(dead.json.why, /closed its payment links/, 'and it says so in words the person holding the link can read: ' + dead.json.why.slice(0, 80));
+  assert.equal(dead.json.code, gen.open.order.code, 'the order code is in the answer, because that is what to send the shop');
+  assert.equal(orderDoc('genbind', gen.open.order.id).status, 'awaiting_payment', 'and nothing was written');
+});
+
+test('0.8.6 a link minted after the revoke works, so this is a revocation and not a freeze', async () => {
+  const fresh = await shopOrder(gen.sh, '196.7.0.3');
+  const m = await call('/api/mark', { method: 'POST', body: { cap: capOf(fresh.mark_url) } });
+  assert.equal(m.status, 200, m.text.slice(0, 200));
+  assert.equal(m.json.status, 'paid');
+});
+
+test('0.8.6 no cliff: a pre-release link with no generation is judged by time', async () => {
+  // A buyer is holding this link right now: minted by the previous release, so there is no `g` to
+  // compare. The order it points at is newer than the last revoke, so nothing about it is stale —
+  // refusing it would make the fix hurt exactly the person it was never about.
+  gen.afterRevoke = await shopOrder(gen.sh, '196.7.0.3');
+  assert.ok(Date.parse(gen.afterRevoke.order.at) > Number.parseInt(shopDoc('genbind').auth_gen, 36),
+    'the order is newer than the last revoke — that is the whole reason a link with no generation is honourable here');
+  const legacy = await issueCap('test-secret', { a: 'mark', h: 'genbind', id: gen.afterRevoke.order.id, s: 'paid' }, 3600);
+  assert.equal(bodyOf(legacy).g, undefined, 'the hand-minted cap really is a pre-release shape');
+  const r = await call('/api/mark', { method: 'POST', body: { cap: legacy } });
+  assert.equal(r.status, 200, r.text.slice(0, 200));
+  assert.equal(r.json.status, 'paid');
+  assert.equal(orderDoc('genbind', gen.afterRevoke.order.id).status, 'paid', 'and the write happened, not just the short-circuit');
+});
+
+test('0.8.6 …and that same link dies the moment the shop revokes again', async () => {
+  const older = await shopOrder(gen.sh, '196.7.0.4');
+  const legacy = await issueCap('test-secret', { a: 'mark', h: 'genbind', id: older.order.id, s: 'paid' }, 3600);
+  const again = await call('/api/revoke', {
+    method: 'POST', cookie: (await loginWithPin('genbind', gen.sh.pin)).cookie, body: { handle: 'genbind' },
+  });
+  assert.equal(again.status, 200, again.text.slice(0, 160));
+  const r = await call('/api/mark', { method: 'POST', body: { cap: legacy } });
+  assert.equal(r.status, 410, 'older than the revoke, so it goes: ' + r.text.slice(0, 140));
+  assert.equal(r.json.error, 'link_revoked');
+  assert.equal(orderDoc('genbind', older.order.id).status, 'awaiting_payment');
+});
+
+test('0.8.6 a revoked undo link answers in words and changes nothing', async () => {
+  const before = orderDoc('genbind', gen.o.order.id).status;
+  assert.equal(before, 'paid', 'the order under test is a paid one, or this proves nothing');
+  const r = await call('/api/mark', { method: 'POST', body: { cap: capOf(gen.undo) } });
+  assert.equal(r.status, 410, r.text.slice(0, 200));
+  assert.equal(r.json.error, 'link_revoked');
+  assert.equal(orderDoc('genbind', gen.o.order.id).status, 'paid', 'still paid: a dead link is a dead link');
+});
+
+test('0.8.6 the page does not offer a button the API has already refused', async () => {
+  const o = await shopOrder(gen.sh, '196.7.0.5');
+  const cap = capOf(o.mark_url);
+  // The link has to be closed for the page to be wrong about it, so revoke between minting and
+  // opening — the same order of events a merchant who suspects a leak produces.
+  const rv = await call('/api/revoke', {
+    method: 'POST', cookie: (await loginWithPin('genbind', gen.sh.pin)).cookie, body: { handle: 'genbind' },
+  });
+  assert.equal(rv.status, 200, rv.text.slice(0, 160));
+  // The template branch: the injected state is what the page draws from, so the contract is that
+  // a closed link arrives as `revoked` and the pre-existing `expired` shape — not a new state an
+  // un-updated template would render as a blank card.
+  const page = await call('/c/' + cap);
+  assert.equal(page.status, 200, 'the door answers with a page, always: ' + page.text.slice(0, 120));
+  assert.match(page.text, /"state":\s*"expired"/, 'the KV template path still gets a state it knows');
+  assert.match(page.text, /"revoked":\s*true/, 'plus the fact that lets a re-skinned page say why');
+  // The floor branch: same refusal, with no form in it — a button that 410s is the defect 0.8.3
+  // was about, and this page is built by the Worker when the template is gone.
+  const tpl = env.STORES._map.get('tpl:confirm');
+  env.STORES._map.delete('tpl:confirm');
+  const floor = await call('/c/' + cap);
+  env.STORES._map.set('tpl:confirm', tpl);
+  assert.equal(floor.status, 410);
+  assert.match(floor.text, /closed its payment links/);
+  assert.ok(!/action="\/api\/mark"/.test(floor.text), 'a closed link must not render a form that cannot work');
+  assert.ok(!/fetch\("\/api\/mark"/.test(floor.text), 'nor an auto-send that will be refused');
+});

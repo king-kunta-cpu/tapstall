@@ -22,7 +22,7 @@ import {
   IMG_TARGET_BYTES,
   cleanProof, cleanPayer, proofNoun, proofAsk, PROOF_MODES, notifyText,
   proofAccept, proofOpen, proofUsed, proofSuperseded, proofVoid, PROOF_WINDOW_SEC, PROOF_WRITES_MAX,
-  issueCap, verifyCap, randomKey, validateSettings, stageSettings, applyPending, maskField,
+  issueCap, verifyCap, capGenOk, randomKey, validateSettings, stageSettings, applyPending, maskField,
   newTxRef, TX_WINDOW_SEC, payfastSignedOk, txMatches,
   seoFacts, seoHead, seoJsonLdTag, ROBOTS_TXT, sitemapXml, GUIDES, guideOf,
   shareCopy, hookAuditKey, hookHourStamp,
@@ -30,7 +30,7 @@ import {
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '0.8.5';
+const VERSION = '0.8.6';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 const MAX_ORDERS_KEPT = 200;
@@ -501,8 +501,12 @@ async function placeOrder(req, url, env, ctx) {
    * signed, 72-hour capability for THIS order and THIS action. Stored on the
    * order so the merchant can also reach it from the dashboard later. */
   const secret = env.ADMIN_SECRET || 'dev-secret';
-  const markCap = await issueCap(secret, { a: 'mark', h: st.handle, id, s: 'paid' }, MARK_TTL);
-  const cancelCap = await issueCap(secret, { a: 'mark', h: st.handle, id, s: 'cancelled' }, MARK_TTL);
+  // Both links carry the store's auth generation, so a Revoke ends them the way it ends
+  // sessions and code links. A confirm link is a write, and it was the last credential in the
+  // product that did not know who it belonged to.
+  const gen = String(st.auth_gen || '0');
+  const markCap = await issueCap(secret, { a: 'mark', h: st.handle, id, s: 'paid', g: gen }, MARK_TTL);
+  const cancelCap = await issueCap(secret, { a: 'mark', h: st.handle, id, s: 'cancelled', g: gen }, MARK_TTL);
   order.confirm_url = `${url.origin}/c/${markCap}`;
   order.cancel_url = `${url.origin}/c/${cancelCap}`;
   /* The buyer's link to add their own code later. Deliberately NOT stored on the
@@ -693,6 +697,16 @@ async function markPaid(req, url, env) {
   const key = `order:${handle}:${id}`;
   const o = await env.ORDERS.get(key, 'json');
   if (!o) return json({ ok: false, error: 'no such order' }, 404);
+  // Checked before the `already` short-circuit on purpose. A link that no longer holds authority
+  // must not be answered as though it does: "already paid" would be a true statement about the
+  // order and a false one about the link, and the person holding it would keep it.
+  if (viaCap && !capGenOk(p, st, o)) {
+    return json({
+      ok: false, error: 'link_revoked', revoked: true, final: true,
+      handle, code: o.code, status: o.status,
+      why: 'This shop has closed its payment links, so this link writes nothing. The order itself is unchanged — the shop can still confirm it from the dashboard in one tap.',
+    }, 410);
+  }
   if (o.status === want) {
     // replay (double click, retry) is a no-op, not a second state change
     return json({ ok: true, id: o.id, status: o.status, already: true });
@@ -711,7 +725,7 @@ async function markPaid(req, url, env) {
   const logged = await pushAudit(env, st, { act: 'mark', via: viaCap ? 'link' : 'session', fields: [o.code + ' → ' + want], ip: ipOf(req) });
   // an undo link for 15 minutes, same shape, opposite action
   // undo returns the order to whatever it was before this tap
-  const undo = await issueCap(secret, { a: 'mark', h: handle, id, s: prev }, UNDO_TTL);
+  const undo = await issueCap(secret, { a: 'mark', h: handle, id, s: prev, g: String(st.auth_gen || '0') }, UNDO_TTL);
   const label = { paid: 'Marked paid', cancelled: 'Cancelled', awaiting_payment: 'Reopened' }[o.status];
   // `logged:false` is a gap in the paper trail, not a failed tap: the order row
   // above is already written, and saying so beats a 500 that leaves the merchant
@@ -2247,7 +2261,7 @@ async function revokeKeys(req, url, env) {
   await pushAudit(env, st, { act: 'revoke', via: who.via, ip: ipOf(req) });
   const res = json({
     ok: true, api_key: st.admin_token,
-    note: 'Every session and API key for this store is dead, and so is any payment-code link a buyer was holding — the new key is above. Your PIN still signs you in; change it inside the dashboard if you think somebody knows it.',
+    note: 'Every session and API key for this store is dead, and so is any payment-code link or confirm link a buyer was holding — the new key is above. Your PIN still signs you in; change it inside the dashboard if you think somebody knows it.',
   });
   return withCookie(res, ...KILL_COOKIES);
 }
@@ -2307,6 +2321,13 @@ async function confirmPage(env, cap) {
       const st = await getStore(env, p.h);
       const o = st ? await env.ORDERS.get('order:' + p.h + ':' + p.id, 'json') : null;
       if (!st || !o) state = data.state = 'missing';
+      else if (p.a === 'mark' && !capGenOk(p, st, o)) {
+        // 'expired' is the state every shipped template already renders sanely; `revoked` is
+        // what a re-skinned one can say better. A dead link never reaches a button.
+        state = data.state = 'expired';
+        data = { cap, state: 'expired', revoked: true, code: o.code, status: o.status,
+                 shop: st.shop_name, handle: st.handle, store_url: '/s/' + st.handle };
+      }
       else {
         const want = markTarget(p.s);
         data = {
@@ -2326,6 +2347,11 @@ async function confirmPage(env, cap) {
   const st = await getStore(env, p.h);
   const o = st ? await env.ORDERS.get('order:' + p.h + ':' + p.id, 'json') : null;
   if (!o) return html(shell('Order not found', '<h2>Order not found</h2><p class=t>It may have been archived.</p>'), 404);
+  if (!capGenOk(p, st, o)) {
+    return html(shell('Link closed', '<h2>This shop has closed its payment links</h2>'
+      + '<p class=t>Your order <b>' + esc(o.code) + '</b> is still ' + esc(o.status) + ' and nothing about it changed. '
+      + 'Send the shop that code and they can confirm it in one tap from their dashboard.</p>'), 410);
+  }
   const want = markTarget(p.s);
   if (o.status === want) {
     return html(shell('Already confirmed', '<h2>Already ' + esc(want) + '</h2><p class=t>' + esc(o.code) + ' was confirmed on ' + esc(String(o.marked_at || '').slice(0, 16).replace('T', ' ')) + ' UTC. Nothing changed.</p>'));
