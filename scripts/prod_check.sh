@@ -229,7 +229,13 @@ SK="cap_roundtrip cap_rejects_tamper cap_rejects_other_secret cap_rejects_expire
     secret_leak_check kv_stores
     cap_bound_roundtrip cap_stale_generation_refused cap_current_generation_honoured
     cap_mint_refuses_unbound cap_legacy_judged_by_time cap_legacy_refused_when_older
-    renew_link_revocable code_link_rule_shared ops_cap_needs_platform_gen"
+    renew_link_revocable code_link_rule_shared ops_cap_needs_platform_gen
+    vat_excl_adds_incl_takes vat_zero_line_off_base vat_rate_override_reads vat_return_basis_split
+    vat_return_buckets_rates books_summary_agrees_with_return books_csv_is_csv
+    receipt_shows_vat_when_registered receipt_says_unregistered receipt_total_matches_pricing
+    mesh_budget_held mesh_prices_are_the_menu mesh_cools_a_used_item mesh_no_invented_price
+    mesh_public_doc_refuses_broken mesh_mark_bounds_state art_drawn_not_photographed
+    menu_art_never_overrides_a_clear ops_menu_shares_the_foreign_ref_rule"
 if printf '%s' "$ST" | grep -q 'kv_write_blocked'; then
   printf '  \033[33m!\033[0m selftest: this account has no KV writes left today (%s) — kv_roundtrip cannot pass; everything else is still checked\n' \
     "$(printf '%s' "$ST" | jq -r '"clears in " + ((.kv_write_blocked.retry_in_sec / 3600) | floor | tostring) + " h"')"
@@ -1034,7 +1040,46 @@ GH=$(curl -s -m 30 -o /dev/null -D - "$ORIGIN/guide/there-is-no-such-guide" | tr
 ck "a guide nobody wrote is a 404, not an indexable page" 'x-robots-tag: noindex' "$GH"
 ck "  · and the landing page links the guides, so they are not orphans" '/guide/whatsapp-shop-payments' "$(curl -s -m 30 "$ORIGIN/?probe=$(date +%s)")"
 
-echo "[14] tidy up"
+echo "[14] the money side: VAT, a receipt, the books, the mesh, and art for a bare row"
+# Nothing in this block writes except the marked-posted line, and that one is `ckw`: the day a
+# shop most needs its books is the day the write budget is gone, so the reads have to answer then.
+ck "  · no session, no ledger" '^401$' "$(curl -s -m 30 -o /dev/null -w '%{http_code}' \"$ORIGIN/api/books?handle=$HANDLE\")"
+BOOKS=$(curl -s -m 30 -b "$JAR" "$ORIGIN/api/books?handle=$HANDLE&basis=cash")
+ck "the books answer for the shop's own session" '\"ok\": ?true' "$BOOKS"
+ck "  · on a basis, in a window, with the VAT in buckets" '"basis":"cash"' "$BOOKS"
+ck "  · and the report says what it could not count" 'Sales side only' "$BOOKS"
+ck "  · a signed-in shop reading someone else's books is refused" '^403$|^404$' "$(curl -s -m 30 -b \"$JAR\" -o /dev/null -w '%{http_code}' \"$ORIGIN/api/books?handle=coremerch-not-a-shop\")"
+CSVD=$(curl -s -m 30 -b "$JAR" -D - -o /dev/null \"$ORIGIN/api/books?handle=$HANDLE&fmt=csv\" | tr -d '\r')
+ck "the CSV comes back as a named file" 'attachment; filename=\"' "$CSVD"
+ck "  · text/csv, not a page to look at" 'text/csv' "$CSVD"
+ck "  · and the pack starts with its own notes" '^# tapstall books pack' "$(curl -s -m 30 -b "$JAR" \"$ORIGIN/api/books?handle=$HANDLE&fmt=csv\")"
+RC=$(curl -s -m 30 -b "$JAR" \"$ORIGIN/api/receipt?handle=$HANDLE&order=$ID&fmt=txt\")
+ck "a receipt can be printed for the probe order" 'Receipt|TAX INVOICE' "$RC"
+ck "  · it names the order it is for" '\"code\"' "$(printf '%s' "$ORD" | head -c 200)"
+ck "  · and the VAT profile is frozen on the order, not read off the shop today" '"vat"' "$ORD"
+RH=$(curl -s -m 30 -b "$JAR" -D - \"$ORIGIN/api/receipt?handle=$HANDLE&order=$ID\" | tr -d '\r')
+ck "  · the printable one is noindex and uncached" 'noindex' "$RH"
+ck "  · and it is well-formed where it names the shop" '^0$' "$(printf '%s' "$RH" | grep -c '<h1>[^<]*</h2>')"
+ck "nobody else's receipt, on no session" '^401$' "$(curl -s -m 30 -o /dev/null -w '%{http_code}' \"$ORIGIN/api/receipt?handle=$HANDLE&order=$ID\")"
+ART=$(curl -s -m 30 -D - -o /dev/null \"$ORIGIN/art/$HANDLE/7.svg?n=Test%20item\" | tr -d '\r')
+ck "a row with no photo gets art, and the URL is cacheable forever" 'max-age=31536000, immutable' "$ART"
+ck "  · served as an image, not as markup to run" 'image/svg' "$ART"
+ck "  · and it says what it is on the way out" 'sample, not a photo' "$ART"
+ck "  · the art is drawn inline, with nothing to fetch" '^<svg xmlns' "$(curl -s -m 30 \"$ORIGIN/art/$HANDLE/7.svg?n=Test%20item\")"
+ck "  · a row that has a real photo is not overwritten by it" '^0$' "$(curl -s -m 30 \"$ORIGIN/s/$HANDLE/feed.json\" | python3 -c 'import sys,json;p=json.load(sys.stdin)[\"products\"];print(sum(1 for x in p if x.get(\"art\") and x.get(\"edited\")))' 2>/dev/null || echo 1)"
+MESH=$(curl -s -m 30 \"$ORIGIN/s/$HANDLE/mesh.json\")
+ck "the shop publishes its own facts, priced or not" '"priced"' "$MESH"
+ck "  · with the terms a re-user has to see" "not as a promise" "$MESH"
+ck "  · and no account number, PIN or buyer in it" '^0$' "$(printf '%s' \"$MESH\" | grep -cE 'pay_account|\"pin\"|admin_token|buyer')"
+MP=$(curl -s -m 30 -b "$JAR" \"$ORIGIN/api/mesh?handle=$HANDLE\")
+ck "today's pack builds for the shop, behind its own door" '"beats"' "$MP"
+ck "  · the pinned budget is the pinned budget" '"per_day": ?3' "$MP"
+ck "  · no line is over its rail's own limit" '^0$' "$(printf '%s' \"$MP\" | python3 -c 'import sys,json;d=json.load(sys.stdin);r=d[\"rails\"];print(sum(1 for b in d[\"plan\"][\"beats\"] if len(b[\"text\"])>r[b[\"rail\"]][\"max\"]))' 2>/dev/null || echo 1)"
+ck "  · a promo is at most one of them" '^1$|^0$' "$(printf '%s' \"$MP\" | python3 -c 'import sys,json;print(sum(1 for b in json.load(sys.stdin)[\"plan\"][\"beats\"] if b[\"kind\"]==\"promo\"))' 2>/dev/null || echo x)"
+ck "an operator's own lever list offers the menu, so a script can find it" 'menu' "$(curl -s -m 30 -b \"tp_ops=$OC\" -H 'x-tapstall-confirm: 1' -X POST -H 'content-type: application/json' -d '{\"handle\":\"'\"$HANDLE'\"\",\"action\":\"no_such_lever\"}' \"$ORIGIN/ops/api/store\")"
+ckw "marking a line posted is the one write the mesh makes" '"ok": ?true' "$(curl -s -m 30 -b "$JAR" -H 'x-tapstall-confirm: 1' -X POST -H 'content-type: application/json' -d '{"handle":"'"$HANDLE"'","marked":["prod-check"]}' "$ORIGIN/api/mesh/seen")"
+
+echo "[15] tidy up"
 CK2=$(curl -s -m 30 -X POST -H 'content-type: application/json' -H "x-tapstall-admin: $ADMIN_KEY" \
   -d '{"handle":"'"$HANDLE"'","id":"'"$ID"'","status":"cancelled"}' "$ORIGIN/api/mark")
 ckw "probe order cancelled" '"status":"cancelled"' "$CK2"

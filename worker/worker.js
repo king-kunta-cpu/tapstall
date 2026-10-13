@@ -26,11 +26,17 @@ import {
   newTxRef, TX_WINDOW_SEC, payfastSignedOk, txMatches,
   seoFacts, seoHead, seoJsonLdTag, ROBOTS_TXT, sitemapXml, GUIDES, guideOf,
   shareCopy, hookAuditKey, hookHourStamp,
+  // v0.9.0: the money side. VAT profile, the books pack, the receipt, the art, the mesh — all of
+  // it read-time arithmetic over rows that already exist, because a shop has to be able to close a
+  // month on a day its write budget is gone.
+  vatPlan, vatReturn, booksSummary, booksCsv, booksPeriods, vatBuckets, realPhoto, sampleArtUrl, mergeMenuPatch,
+  receiptText, receiptHtml, sampleArtSvg, meshPack, meshJson, meshMark, meshWitness,
+  MESH_RAILS, MESH_BUDGET,
   EDITABLE_FIELDS, SOFT_FIELDS, sign, adminStore, normaliseRail, resolveRail,
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '0.8.8';
+const VERSION = '0.9.0';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 const MAX_ORDERS_KEPT = 200;
@@ -222,6 +228,24 @@ async function route(req, url, env, ctx) {
       + 'The link on its own, if you would rather write the rest yourself:\n' + c.url + '\n',
       200, 'text/plain; charset=utf-8');
   }
+  // Today's posting pack, public and read-only, in the same family as share.txt: everything on it
+  // is already public on the storefront, so a bot that wants to repeat this shop's prices can, and
+  // it can also see that the shop's prices are the shop's own and move.
+  if ((m = p.match(/^\/s\/([a-z0-9][a-z0-9-]{1,30})\/mesh\.json$/))) {
+    const st = await getStore(env, m[1]);
+    if (!st) return json({ ok: false, error: 'no_store' }, 404);
+    const products = await loadProducts(st, env);
+    return json({ ok: true, ...meshJson(st, products, meshFacts(st, url.origin), url.origin) },
+      200, { 'Cache-Control': 'public, max-age=600', 'X-Robots-Tag': 'noindex' });
+  }
+  // Fallback art for a row with no picture. No KV read, no KV write, cached for a year: the URL
+  // carries the name it draws from, so there is nothing to look up and nothing to invalidate.
+  if ((m = p.match(/^\/art\/([a-z0-9][a-z0-9-]{1,30})\/(\d{1,6})\.svg$/))) {
+    const nm = String(url.searchParams.get('n') || 'item').slice(0, 60);
+    return new Response(sampleArtSvg(nm), { headers: {
+      'content-type': 'image/svg+xml; charset=utf-8', 'cache-control': 'public, max-age=31536000, immutable',
+      'vary': 'Accept-Encoding', 'x-tapstall-art': 'sample, not a photo' } });
+  }
   if ((m = p.match(/^\/s\/([a-z0-9][a-z0-9-]{1,30})\/feed\.json$/))) {
     const st = await getStore(env, m[1]);
     if (!st) return json({ ok: false, error: 'no_store' }, 404);
@@ -233,7 +257,7 @@ async function route(req, url, env, ctx) {
   }
 
   // ---- merchant authority: a code becomes a cookie, and only POSTs act ----
-  const MUT = /^\/api\/(mark|proof|order\/proof|settings|settings\/revert|menu|revoke|auth|pin\/change|pin\/reset|login|logout|recover|image)$/;
+  const MUT = /^\/api\/(mark|proof|order\/proof|settings|settings\/revert|menu|mesh\/seen|revoke|auth|pin\/change|pin\/reset|login|logout|recover|image)$/;
   // /api/mark answers its own 405, because it also has to recognise a v0.2
   // ?token= link and trade it for a session rather than dead-end the merchant.
   const selfHandled = p === '/api/mark';
@@ -266,6 +290,13 @@ async function route(req, url, env, ctx) {
   if (p === '/api/menu' && req.method === 'POST') return menuEdit(req, env);
   if (p === '/api/image' && req.method === 'POST') return imageUpload(req, env);
   if (p === '/api/revoke' && req.method === 'POST') return revokeKeys(req, url, env);
+  // The books and the receipt, on the shop's own authority: no new credential, no new surface for
+  // a buyer to meet, and nothing written. A month is a read of the row list; a receipt is a read
+  // of one order.
+  if (p === '/api/books') return booksView(req, url, env);
+  if (p === '/api/receipt') return receiptView(req, url, env);
+  if (p === '/api/mesh') return meshView(req, url, env);
+  if (p === '/api/mesh/seen' && req.method === 'POST') return meshSeen(req, env);
 
   // The one-tap confirm link: GET renders an inert page, the browser posts.
   if ((m = p.match(/^\/c\/([A-Za-z0-9._-]{20,400})$/))) return confirmPage(env, m[1]);
@@ -389,7 +420,7 @@ async function writeStore(env, st) {
  */
 async function loadProducts(st, env, force) {
   const ms = (st.cache_seconds || 120) * 1000;
-  if (!force && st.feed_cache && st.feed_cache.at && Date.now() - st.feed_cache.at < ms) return applyMenu(st.feed_cache.products, st.menu);
+  if (!force && st.feed_cache && st.feed_cache.at && Date.now() - st.feed_cache.at < ms) return applyMenu(st.feed_cache.products, st.menu, st.handle);
   let products = [], error = null;
   try {
     const feed = normalizeFeedUrl(st.feed_url);
@@ -406,7 +437,7 @@ async function loadProducts(st, env, force) {
   // A quota day leaves the storefront re-fetching per hit instead of 503-ing at
   // every buyer who only wanted to see what is on offer.
   try { await writeStore(env, st); } catch (e) { /* uncached today, correct today */ }
-  return applyMenu(products, st.menu);
+  return applyMenu(products, st.menu, st.handle);
 }
 
 
@@ -595,6 +626,17 @@ async function persistOrder(env, st, order) {
     // on the row list so the ledger does not need the order document to answer
     payer: order.buyer.payer || '', proof: order.buyer.proof || '',
     prior_unpaid: order.prior_unpaid,
+    // the money split, frozen at order time rather than recomputed from the shop's settings today:
+    // four numbers on the row, and a whole month can be reported and downloaded without reading a
+    // single order document. `unique_change` is here because it is not income and an accountant asks.
+    tax: order.pricing.tax || 0, net: (order.pricing.vat && order.pricing.vat.net) != null ? order.pricing.vat.net : 0,
+    vat_pct: (order.pricing.vat && order.pricing.vat.pct) || 0, vat_mode: (order.pricing.vat && order.pricing.vat.mode) || 'excl',
+    // and the split itself, one entry per rate, so a shop that sells zero-rated staples alongside
+    // taxed meals can file from the row list rather than from a phone call to an accountant
+    vat_by: vatBuckets(order.pricing) || undefined,
+    pay_now: order.pricing.pay_now, rounding: order.pricing.unique_change || 0,
+    fee: order.pricing.fee || 0, fee_absorbed: order.pricing.fee_absorbed_by_merchant || 0,
+    rail: order.pricing.rail && order.pricing.rail.key,
     // the row is what the dashboard mints from, so the row has to know the current nonce
     // or a shop's link to the buyer's field would be an unbound one
     pcap: order.pcap || '',
@@ -721,7 +763,10 @@ async function markPaid(req, url, env) {
     await env.STORES.put(hk, JSON.stringify(rec), { expirationTtl: 180 * 86400 });
   }
   await env.ORDERS.put(key, JSON.stringify(o));
-  await mirrorRow(env, handle, o.id, { status: o.status });   // the ledger keeps pace, or tries to
+  // `marked_at` rides with the status: the cash basis is "the day the money arrived", and the row
+  // is the only thing the ledger reads, so a date that lives only on the order document would
+  // leave a shop unable to say which week a payment belonged to without pulling every document.
+  await mirrorRow(env, handle, o.id, { status: o.status, marked_at: o.marked_at });   // the ledger keeps pace, or tries to
   const logged = await pushAudit(env, st, { act: 'mark', via: viaCap ? 'link' : 'session', fields: [o.code + ' → ' + want], ip: ipOf(req) });
   // an undo link for 15 minutes, same shape, opposite action
   // undo returns the order to whatever it was before this tap
@@ -1160,13 +1205,29 @@ async function lookup(url, env) {
     },
   });
 }
+/**
+ * The merchant-only door, in one place: identify, then the four answers in the order they matter —
+ * no store, then the lockout (a lockout must be honoured before anything else spends effort on a
+ * credential that is right-but-cooled), then an anonymous request, then a bad key, which is the
+ * only answer that costs the shop a failed-attempt record.
+ *
+ * Four routes used to re-type this block, and a fifth (the books) was about to become a fifth copy.
+ * The order of those lines is the whole security property; a copy is where the order goes wrong.
+ */
+async function adminGate(req, env, handle) {
+  const who = await identify(req, env, handle);
+  if (!who || !who.st) return { res: json({ ok: false, error: 'no store' }, 404) };
+  const lr = lockRes(who); if (lr) return { res: lr };
+  if (who.anonymous) return { res: json({ ok: false, error: 'unauthorised', need_login: true }, 401) };
+  if (who.bad) { await authFail(env, handle); return { res: json({ ok: false, error: 'bad key or revoked session' }, 403) }; }
+  return { who };
+}
+
 async function adminView(req, url, env) {
   const handle = slug(url.searchParams.get('handle') || '');
-  const who = await identify(req, env, handle);
-  if (!who || !who.st) return json({ ok: false, error: 'no store' }, 404);
-  const lr = lockRes(who); if (lr) return lr;
-    if (who.anonymous) return json({ ok: false, error: 'unauthorised', need_login: true }, 401);
-  if (who.bad) { await authFail(env, handle); return json({ ok: false, error: 'bad key or revoked session' }, 403); }
+  const g = await adminGate(req, env, handle);
+  if (g.res) return g.res;
+  const who = g.who;
   const st = who.st;
   const rows = (await env.ORDERS.get('list:' + handle, 'json')) || [];
   const orders = [];
@@ -1574,6 +1635,88 @@ async function selftest(env) {
   t.pricing_pass_mode = priceOrder({ ...fake, surcharge_mode: 'pass' }, [{ name: 'Test', price: 100, qty: 1 }], 'pickup', 'ecocash_usd');
   t.csv = parseProducts('id,name,category,price,options,addons\np1,Chicken,Main,5.50,Size:S,L|Spice:hot,Cheese:1.5\nHELP,,,,,,,,\n', { currency: 'USD' });
   t.feed_url_sheet = normalizeFeedUrl('https://docs.google.com/spreadsheets/d/abc123DEF456ghi789JKL012mno345PQR/edit#gid=123');
+  // ---- v0.9.0: the money side, asserted on the same fake store as the pricing block, on rows
+  // built here rather than in KV. A selftest that reads the shop's ledger would answer a different
+  // question on a different day; this one answers the same one at midnight UTC and on a spent day.
+  {
+    const st15 = { ...fake, tax_pct: 15, unique_change: false, surcharge_mode: 'pass' };
+    const ex = priceOrder(st15, [{ name: 'x', price: 100, qty: 1 }], 'pickup', 'ecocash_usd');
+    const inx = priceOrder({ ...st15, vat_mode: 'incl' }, [{ name: 'x', price: 115, qty: 1 }], 'pickup', 'ecocash_usd');
+    t.vat_excl_adds_incl_takes = Math.abs(ex.total - inx.total) < 0.011
+      && ex.vat.included === false && inx.vat.included === true
+      && Math.abs(ex.tax - 15) < 0.011 && Math.abs(inx.tax - 15) < 0.011;
+    const zero = priceOrder(st15, [{ name: 'Mealie meal', price: 100, qty: 1, vat_rate: '0' }, { name: 'Stew', price: 20, qty: 1 }], 'pickup', 'ecocash_usd');
+    t.vat_zero_line_off_base = Math.abs(zero.tax - 3) < 0.011 && zero.lines[0].vat_pct === 0 && zero.lines[1].vat_pct === 15;
+    const old = priceOrder({ ...fake, vat_rate_pct: 21, tax_pct: 15, unique_change: false }, [{ name: 'x', price: 100, qty: 1 }], 'pickup', 'ecocash_usd');
+    t.vat_rate_override_reads = Math.abs(old.tax - 21) < 0.011;
+    const rows = [
+      { id: 'a', code: 'A', at: '2026-10-01T09:00:00Z', marked_at: '2026-10-02T09:00:00Z', status: 'paid', total: 115, tax: 15, vat_pct: 15, pay_now: 115.07, rounding: 0.07 },
+      { id: 'b', code: 'B', at: '2026-10-03T09:00:00Z', status: 'awaiting_payment', total: 230, tax: 30, vat_pct: 15 },
+      { id: 'c', code: 'C', at: '2026-10-04T09:00:00Z', marked_at: '2026-10-04T10:00:00Z', status: 'paid', total: 60, tax: 0, vat_pct: 0 },
+    ];
+    const rc = vatReturn(rows, { tax_pct: 15 }, { basis: 'cash', from: '2026-10-01', to: '2026-10-31' });
+    const ra = vatReturn(rows, { tax_pct: 15 }, { basis: 'accrual', from: '2026-10-01', to: '2026-10-31' });
+    t.vat_return_basis_split = rc.count === 2 && ra.count === 3 && rc.vat === 15 && ra.vat === 45 && rc.net === 160;
+    t.vat_return_buckets_rates = rc.rates.length === 2 && rc.rates.some((b) => b.rate_pct === 0) && rc.registered === false;
+    t.books_summary_agrees_with_return = (() => {
+      const bs = booksSummary(rows, { handle: 'selftest', tax_pct: 15, currency: 'USD' }, { period: '2026-10', basis: 'cash' });
+      return bs.vat.gross === rc.gross && bs.vat.vat === rc.vat && bs.rounding_identifiers === 0.07
+        && bs.outstanding_balance === 230 && /Sales side only/.test(bs.note);
+    })();
+    t.books_csv_is_csv = (() => {
+      const c = booksCsv(rows, { handle: 'selftest', shop_name: 'S', tax_pct: 15, currency: 'USD' }, { period: '2026-10' });
+      return c.startsWith('# tapstall books pack') && c.includes('date,ref,status,buyer,phone') && c.includes('A,paid') && c.includes('# totals');
+    })();
+    const ord = { id: 'a', code: 'SELF-1', at: '2026-10-01T09:00:00Z', marked_at: '2026-10-02T09:00:00Z',
+      buyer: { name: 'Tino', phone: '+263771234567' }, items: [{ name: 'x', qty: 1, unit: 100, total: 100 }], pricing: ex };
+    // The shop's VAT identity is frozen on the order (see pricing.vat), so an order placed before a
+    // registration prints a receipt — and an order placed after it prints a tax invoice. The store's
+    // settings today only fill in what the order did not carry.
+    const reg = { ...fake, shop_name: 'Selftest', vat_registered: true, vat_number: '4012345', vat_address: '12 Road, Harare', tax_pct: 15, unique_change: false };
+    const exReg = priceOrder(reg, [{ name: 'x', price: 100, qty: 1 }], 'pickup', 'ecocash_usd');
+    const ordReg = { ...ord, pricing: exReg };
+    t.receipt_shows_vat_when_registered = /VAT @ 15%/.test(receiptText(reg, ordReg))
+      && /4012345/.test(receiptHtml(reg, ordReg)) && /Tax invoice/i.test(receiptHtml(reg, ordReg))
+      && /4012345/.test(receiptText(reg, ordReg));
+    t.receipt_says_unregistered = /not VAT-registered/.test(receiptText({ ...fake, tax_pct: 15 }, ord))
+      && /Receipt/.test(receiptHtml({ ...fake, tax_pct: 15 }, ord));
+    t.receipt_total_matches_pricing = new RegExp(ex.total.toFixed(2)).test(receiptText({ ...fake, tax_pct: 15 }, ord));
+    const shop = { ...fake, shop_name: 'Selftest Shop', handle: 'selftest', whatsapp: '+263771234567', hours: 'Mon-Fri 08:00-17:00', tax_pct: 15 };
+    const prods = Array.from({ length: 9 }, (_, k) => ({ id: 'p' + k, name: 'Item ' + (k + 1), price: 5 + k, cur: 'USD' }));
+    const pk = meshPack(shop, prods, meshFacts(shop, 'https://x'), { origin: 'https://x' });
+    t.mesh_budget_held = pk.beats.length === MESH_BUDGET.per_day && MESH_BUDGET.promo === 1
+      && pk.beats.filter((b) => b.kind === 'promo').length <= 1 && pk.beats.every((b) => b.text.length <= (MESH_RAILS[b.rail] || { max: 1e6 }).max);
+    t.mesh_prices_are_the_menu = pk.beats.every((b) => !b.price || prods.some((pp) => Math.abs(pp.price - b.price) < 0.005));
+    t.mesh_cools_a_used_item = (() => {
+      const used = {}; used[pk.beats[0].item_key] = new Date().toISOString().slice(0, 10);
+      const again = meshPack(shop, prods, meshFacts(shop, 'https://x'), { origin: 'https://x', sent: { items: used } });
+      return again.beats.every((b) => b.item_key !== pk.beats[0].item_key);
+    })();
+    // A shop whose sheet is unreadable is the case the mesh has to get right: it may still say the
+    // shop exists, but no number may leave this function that is not on a row read today.
+    const broken = { ...shop, feed_error: 'feed_http_502' };
+    t.mesh_no_invented_price = (() => {
+      const p2 = meshPack(broken, [], meshFacts(broken, 'https://x'), { origin: 'https://x' });
+      return !/\d+\.\d{2} USD/.test(p2.beats.map((b) => b.text).join(' ')) && /feed/.test(p2.beats.map((b) => b.why || '').join(' ') + p2.fails.map((f) => f.key).join(','));
+    })();
+    t.mesh_public_doc_refuses_broken = meshJson(broken, [], meshFacts(broken, 'https://x'), 'https://x').priced === false
+      && meshJson(shop, prods, meshFacts(shop, 'https://x'), 'https://x').items.length === 9;
+    t.mesh_mark_bounds_state = (() => {
+      const ids = Array.from({ length: 500 }, (_, k) => 'item:p' + k + ':v1');
+      const st2 = meshMark(meshMark(null, ids.slice(0, 250), Date.now()), ids, Date.now());
+      return Object.keys(st2.items).length <= 400 && !!st2.at;
+    })();
+    t.art_drawn_not_photographed = /^<svg xmlns/.test(sampleArtSvg('2L Coke'))
+      && sampleArtUrl('h', { name: '2L Coke' }) === sampleArtUrl('h', { name: '2L Coke' })
+      && realPhoto({ img: '/art/h/1.svg', art: true }) === '' && realPhoto({ img: '/i/h/1' }) === '/i/h/1';
+    t.menu_art_never_overrides_a_clear = (() => {
+      const withSheet = applyMenu([{ id: 'p1', name: 'X' }], { handle: 'shop' });
+      const cleared = applyMenu([{ id: 'p1', name: 'X' }], { handle: 'shop', over: { p1: { img: '' } } });
+      return withSheet[0].art === true && cleared[0].img === '' && cleared[0].art === undefined;
+    })();
+    t.ops_menu_shares_the_foreign_ref_rule = sanitizeMenu({ extra: [{ name: 'X', price: 1, img: '/i/other-shop/abcd' }], handle: 'shop' }).extra[0].img === ''
+      && sanitizeMenu({ extra: [{ name: 'X', price: 1, img: '/i/shop/abcd' }], handle: 'shop' }).extra[0].img === '/i/shop/abcd';
+  }
   t.slug = slug('Mama Too Catering!');
   t.secret_leak_check = !JSON.stringify(publicStore({ ...fake, admin_token: 'x', notify_email: 'a@b.c', owner_email: 'a@b.c', notify_webhook: 'https://x', feed_cache: {}, feed_url: 'https://y' })).includes('admin_token');
   const k = 'selftest-secret';
@@ -1996,6 +2139,127 @@ async function pinLogin(req, env) {
  * to move today's money somewhere else, and a buyer who pays a stale number is
  * refused at the till by menuPrice, not quietly underpaid.
  */
+/* ------------------------------------------------------------------- the books and the receipt
+ *
+ * Both answer from rows the platform already wrote. That is the design constraint and the reason
+ * they exist at all: an operator-facing report that needs a place to put its answer is a report an
+ * operator cannot run on the 31st at 23:00, when the day's writes are gone.
+ */
+function booksOpts(url) {
+  return {
+    period: String(url.searchParams.get('period') || '').slice(0, 7),
+    from: String(url.searchParams.get('from') || '').slice(0, 10),
+    to: String(url.searchParams.get('to') || '').slice(0, 10),
+    basis: String(url.searchParams.get('basis') || '') === 'accrual' ? 'accrual' : 'cash',
+  };
+}
+
+async function booksView(req, url, env) {
+  const handle = slug(url.searchParams.get('handle') || '');
+  const g = await adminGate(req, env, handle);
+  if (g.res) return g.res;
+  const st = g.who.st;
+  const rows = (await env.ORDERS.get('list:' + handle, 'json')) || [];
+  const opt = booksOpts(url);
+  if (String(url.searchParams.get('fmt') || '').toLowerCase() === 'csv') {
+    // A file, not a page: the point is that the number in the panel and the number in the
+    // accountant's spreadsheet come from the same call, so nobody re-keys anything.
+    return new Response(booksCsv(rows, st, opt), { headers: {
+      'content-type': 'text/csv; charset=utf-8', 'cache-control': 'no-store',
+      'content-disposition': 'attachment; filename="' + handle + '-books-' + (opt.period || 'all') + '.csv"',
+    } });
+  }
+  return json({
+    ok: true, handle, opts: opt, periods: booksPeriods(rows),
+    summary: booksSummary(rows, st, opt), vat: vatReturn(rows, st, opt),
+    store: { shop_name: st.shop_name, currency: st.currency || 'USD', vat: vatPlan(st) },
+    rows: rows.slice(0, 200),
+    note: 'Cash basis counts the day a payment was marked; accrual counts the day the order arrived. Rows written before this release carry no tax figure and are computed at the shop’s current rate, counted separately below.',
+  }, 200, { 'Cache-Control': 'no-store' });
+}
+
+async function receiptView(req, url, env) {
+  const handle = slug(url.searchParams.get('handle') || '');
+  const g = await adminGate(req, env, handle);
+  if (g.res) return g.res;
+  const st = g.who.st;
+  const want = String(url.searchParams.get('order') || url.searchParams.get('id') || '').trim().slice(0, 60);
+  if (!want) return json({ ok: false, error: 'order_required', note: 'Pass ?order=<order id or code>.' }, 422);
+  const rows = (await env.ORDERS.get('list:' + handle, 'json')) || [];
+  const row = rows.find((r) => r && (String(r.id) === want || String(r.code || '').toLowerCase() === want.toLowerCase()));
+  if (!row) return json({ ok: false, error: 'no_such_order', note: 'Only this shop’s own orders can be printed, and the order list holds ' + rows.length + '.' }, 404);
+  const o = await env.ORDERS.get('order:' + handle + ':' + row.id, 'json');
+  if (!o) return json({ ok: false, error: 'no_order_document', note: 'The row exists but its order document does not, so the line items cannot be printed truthfully. Nothing was invented to fill the gap.' }, 404);
+  const fmt = String(url.searchParams.get('fmt') || 'html').toLowerCase();
+  if (fmt === 'txt') return text(receiptText(st, o), 200, 'text/plain; charset=utf-8');
+  if (fmt === 'wa') {
+    // One tap, straight to the buyer's own chat, with the receipt already in the box. No send
+    // happens here and no credential is needed: the shop's WhatsApp is the delivery method, and
+    // pretending otherwise would mean an SMTP password nobody on this plan has.
+    const digits = String((o.buyer && o.buyer.phone) || '').replace(/\D/g, '').slice(0, 15);
+    const body = receiptText(st, o);
+    if (!digits) return json({ ok: true, sent: false, need_number: true, text: body,
+      note: 'This order has no buyer number on it, so there is nothing to tap. The text is here for copying.' });
+    return redirect('https://wa.me/' + digits + '?text=' + encodeURIComponent(body));
+  }
+  return html(receiptHtml(st, o), 200, { 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow' });
+}
+
+/** What the mesh is allowed to know about a shop: read-time facts, never a stored claim. */
+function meshFacts(st, origin) {
+  const f = {
+    currency: st.currency || 'USD',
+    closed_today: !!st.closed,
+    hours_text: st.hours || cleanWeekHours(st.week),
+    origin: origin || '',
+    photo: '',
+  };
+  const on = openNow(st, Date.now());
+  if (on && typeof on === 'object') { f.open_now = !!on.open; f.open_label = on.label || ''; }
+  else if (typeof on === 'boolean') f.open_now = on;
+  return f;
+}
+function cleanWeekHours(w) { try { return w && w !== false ? (hoursText(w) || '') : ''; } catch (e) { return ''; } }
+
+async function meshView(req, url, env) {
+  const handle = slug(url.searchParams.get('handle') || '');
+  const g = await adminGate(req, env, handle);
+  if (g.res) return g.res;
+  const st = g.who.st;
+  const products = await loadProducts(st, env);
+  const state = await env.ORDERS.get('mesh:' + handle, 'json').catch(() => null);
+  const pack = meshPack(st, products, meshFacts(st, url.origin), { origin: url.origin, sent: state || {} });
+  return json({
+    ok: true, handle, plan: pack, rails: MESH_RAILS, budget: MESH_BUDGET,
+    state_saved: !!state, posted: state ? (state.sent || {}) : {},
+    card_url: (url.origin || '') + '/s/' + handle + '/mesh.json',
+    note: 'Nothing here is sent anywhere. Tap Copy, then post it yourself — the pack is rebuilt from your menu each morning, so a price that moved today is not in a post you make tomorrow.',
+  }, 200, { 'Cache-Control': 'no-store' });
+}
+
+async function meshSeen(req, env) {
+  const b = await readBody(req);
+  const who = await identify(req, env, b.handle || urlHandle(req));
+  if (!who || !who.st) return json({ ok: false, error: 'no store' }, 404);
+  if (who.anonymous || who.bad) return json({ ok: false, need_login: true, error: 'sign in first' }, 401);
+  if (who.via === 'sess' && (reqHeader(req, 'x-tapstall-confirm') || '') !== '1') {
+    return json({ ok: false, error: 'missing x-tapstall-confirm header' }, 403);
+  }
+  const st = who.st;
+  const prev = await env.ORDERS.get('mesh:' + st.handle, 'json').catch(() => null);
+  const next = meshMark(prev, Array.isArray(b.marked) ? b.marked : [], Date.now());
+  try {
+    await env.ORDERS.put('mesh:' + st.handle, JSON.stringify(next));
+  } catch (e) {
+    // The memory is a courtesy. A shop that has spent its write budget still gets the same pack
+    // tomorrow; it just cannot be told which lines it already posted.
+    return json({ ok: true, saved: false, count: next.count,
+      note: 'Nothing was saved — the storage write budget for today is spent. Today’s copy is unchanged by that: tomorrow’s plan simply will not know what you posted today.' });
+  }
+  return json({ ok: true, saved: true, count: next.count,
+    note: 'Marked. Those lines go quiet for a week, which is the whole point: a menu that is posted at every item every day is a menu nobody reads twice.' });
+}
+
 async function menuEdit(req, env) {
   const b = await readBody(req);
   const who = await identify(req, env, b.handle || urlHandle(req));
@@ -2906,6 +3170,63 @@ async function opsStoreAction(req, env) {
       note: 'Read the PIN out once; after that it exists nowhere but in their phone. They can change it themselves inside the dashboard.' });
   }
 
+  // An operator fixing a price or a sold-out tick must not be able to say anything the merchant
+  // cannot say about their own shop, so this lever does not have its own edit path: the payload
+  // goes through the merchant's sanitizer, the store's own merge, the same image sweep, and the
+  // merchant's own change log — with `via: 'ops'` on the line, so the shop can see who did it.
+  // `undo` is deliberately the merchant's Revert: they get the last word on their own menu.
+  if (act === 'menu' || act === 'menu_revert') {
+    if (act === 'menu_revert' || b.revert) {
+      const had = st.menu ? Object.keys(st.menu.over || {}).length + (st.menu.hide || []).length + (st.menu.extra || []).length : 0;
+      if (!had) return json({ ok: true, handle, action: 'menu_revert', edits: 0, note: 'Nothing was overridden here, so there was nothing to revert.' });
+      const refsBefore = referencedImages(st);
+      delete st.menu;
+      await writeStore(env, st);
+      await pruneImages(env, st, refsBefore);
+      await pushOpsLog(env, { act: 'menu_revert', handle, note: had + ' override(s) cleared back to the sheet', ip: ipOf(req) });
+      await pushAudit(env, st, { act: 'menu', via: 'ops', fields: ['revert'], before: { edits: had }, after: { edits: 0 }, ip: ipOf(req) });
+      return json({ ok: true, handle, action: 'menu_revert', edits: 0,
+        note: 'The store’s menu is back to the sheet. The merchant sees this in their own change log as an operator action.' });
+    }
+    if (!b.menu || typeof b.menu !== 'object') {
+      return json({ ok: false, error: 'menu_payload_required',
+        note: 'Send {action:"menu", menu:{over:{id:{price:8}}}} — one row per key, and anything you leave out stays as it is; {hide:[], extra:[], order:[], note:""} are replaced only when you send them. Action "menu_revert" drops every override at once.' }, 422);
+    }
+    const was = st.menu || {};
+    const refsBefore = referencedImages(st);
+    // Patch, not replace. An operator phoning in one price must not have to resend the shelf, and
+    // anything they leave out has to survive: `sanitizeMenu` on its own would drop the merchant's
+    // own rows the moment a payload named only one of them. `{ id: false }` is still how a single
+    // override is lifted, and `menu_revert` is still how all of them are.
+    const next = mergeMenuPatch(st.menu, b.menu, handle);
+    const touched = Object.keys(next.over).length + next.hide.length + next.extra.length + (next.order.length ? 1 : 0);
+    const stripAt = (m) => { const x = Object.assign({}, m || {}); delete x.set_at; return JSON.stringify(x); };
+    const keysOf = (m) => Object.keys((m && m.over) || {});
+    const changedRows = keysOf(next).filter((k) => JSON.stringify((st.menu && st.menu.over || {})[k]) !== JSON.stringify(next.over[k])).length;
+    if (!Object.keys(b.menu).length || stripAt(next) === stripAt(st.menu)) {
+      // Nothing named is nothing changed, and that is a successful no-op rather than a refusal —
+      // which is what patch semantics buy: a payload that forgets a row cannot destroy it, so there
+      // is nothing to be afraid of and nothing worth writing. No write, no log line, no churn.
+      return json({ ok: true, handle, action: 'menu', changed: false, edits: touched,
+        note: Object.keys(b.menu).length
+          ? 'Already exactly as sent — nothing changed, so nothing was written and no log line was made.'
+          : 'That payload named no field, so nothing was changed. Send {over:{id:{price:8}}} to fix one row; a row sent as {id:false} loses its override; "menu_revert" drops the whole layer.' });
+    }
+    st.menu = next;
+    await writeStore(env, st);
+    await pruneImages(env, st, refsBefore);
+    const eff = await loadProducts(st, env);
+    await pushOpsLog(env, { act: 'menu', handle, note: touched + ' override(s), ' + eff.length + ' rows live', ip: ipOf(req) });
+    const logged = await pushAudit(env, st, { act: 'menu', via: 'ops', fields: Object.keys(next.over).slice(0, 20),
+      before: { edits: Object.keys(was.over || {}).length + (was.hide || []).length + (was.extra || []).length }, after: { edits: touched }, ip: ipOf(req) });
+    return json({ ok: true, handle, action: 'menu', changed: true,
+    // `edits` is the store's whole override layer (the same figure the merchant's own save
+    // reports); `changed_rows` is what this one patch moved. An operator script that assumed the
+    // second number was the first would think a one-row fix had rewritten the shelf.
+    edits: touched, changed_rows: changedRows, items: eff.length, logged,
+      note: 'Live for buyers on their next load. Nothing in the sheet was touched, and the merchant can Revert everything in Shop → Edit items here — which is the right way to undo this too.' });
+  }
+
   const before = { plan: st.plan, paid_until: st.paid_until, suspended: !!st.suspended };
   let done = act;
   if (act === 'suspend') st.suspended = true;
@@ -2917,7 +3238,7 @@ async function opsStoreAction(req, env) {
   else if (act === 'clear_pending') { delete st.pending; done = 'reverted a queued settings change'; }
   else if (act === 'clear_refs') { await env.STORES.delete('ref:' + handle); delete st.pending_ref_note; done = 'cleared the payment references the merchant filed'; }
   else if (act === 'revoke') { st.auth_gen = Date.now().toString(36); st.admin_token = randomKey(16); delete st.pending; await rotateRenewLink(env, st); done = 'revoked every link, key and cookie, including the renew link'; }
-  else return json({ ok: false, error: 'unknown action', actions: ['suspend', 'reinstate', 'extend7', 'extend30', 'grant_year', 'reset_free', 'clear_pending', 'clear_refs', 'revoke', 'notify', 'reset_pin'] }, 422);
+  else return json({ ok: false, error: 'unknown action', actions: ['suspend', 'reinstate', 'extend7', 'extend30', 'grant_year', 'reset_free', 'clear_pending', 'clear_refs', 'revoke', 'notify', 'reset_pin', 'menu', 'menu_revert'] }, 422);
 
   await writeStore(env, st);
   const after = { plan: st.plan, paid_until: st.paid_until, suspended: !!st.suspended };

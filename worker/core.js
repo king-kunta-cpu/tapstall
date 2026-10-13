@@ -768,6 +768,9 @@ export function parseProducts(csv, st = {}) {
       opts: String(get('options') || '').split('|').map(parseOpt).filter(Boolean),
       addons: String(get('addons') || '').split('|').map(parseAddon).filter(Boolean),
       available: !outOf && avail !== 'no' && !st.closed,
+      // `vat` on the sheet is per-row on purpose: a tuckshop's mealie meal is zero-rated while its
+      // cooked food is standard-rated, and a shop-wide switch would force one to be wrong.
+      vat_rate: get('vat') || get('vat_rate') || '',
       prep: Number(get('prep_min')) || 0,
       popular: ['yes', 'y', 'true', '1', '*'].includes(get('popular').toLowerCase()),
     });
@@ -796,20 +799,43 @@ export function priceOrder(st = {}, items = [], service = 'pickup', railKey = 'c
     const qty = Math.max(1, Math.min(99, Number(it.qty) || 1));
     const total = round2(unit * qty);
     itemsTotal = round2(itemsTotal + total);
-    lines.push({ name: String(it.name || 'item').slice(0, 80), qty, unit, total });
+    lines.push({ name: String(it.name || 'item').slice(0, 80), qty, unit, total, vat_pct: vatLinePct(it, st) });
   }
   const delivery = service === 'delivery' ? round2(Number(st.delivery_fee) || 0) : 0;
   const freeOver = Number(st.free_over) || 0;
   const del = freeOver && itemsTotal >= freeOver ? 0 : delivery;
-  const taxPct = Number(st.tax_pct) || 0;
-  const tax = round2((itemsTotal + del) * taxPct / 100);
-  const subtotal = round2(itemsTotal + del + tax);
+  const vat = vatPlan(st);
+  const base = round2(itemsTotal + del);
+  // A shop that quotes inclusive prices (every shelf label in a ZW tuckshop) has its VAT taken
+  // OUT of the price it printed; a shop that quotes exclusive prices has it added. One number on
+  // the menu, one number the buyer pays, and the difference lives here rather than in a page.
+  const flat = lines.every((l) => l.vat_pct === vat.rate_pct);
+  let tax = 0;
+  if (vat.on) {
+    if (flat) tax = vat.mode === 'incl' ? round2(base - base / (1 + vat.rate_pct / 100)) : round2(base * vat.rate_pct / 100);
+    else {
+      for (const l of lines) {
+        if (l.vat_pct <= 0) continue;                       // zero-rated and out-of-scope lines carry no VAT
+        tax = round2(tax + (vat.mode === 'incl'
+          ? round2(l.total - l.total / (1 + l.vat_pct / 100))
+          : round2(l.total * l.vat_pct / 100)));
+      }
+      if (del && vat.rate_pct > 0)
+        tax = round2(tax + (vat.mode === 'incl' ? round2(del - del / (1 + vat.rate_pct / 100)) : round2(del * vat.rate_pct / 100)));
+    }
+  }
+  const subtotal = vat.mode === 'incl' ? base : round2(base + tax);
   const mode = st.surcharge_mode === 'pass' ? 'pass' : 'absorb';
   const fee = rail.type === 'cod' ? 0 : round2(subtotal * (rail.pct || 0) + (rail.fixed || 0) + subtotal * (rail.imtt || 0));
   const total = round2(subtotal + (mode === 'pass' ? fee : 0));
   const jitter = st.unique_change === false ? 0 : (Math.abs(Math.round(total * 100)) % 97) / 100;
   return {
-    lines, itemsTotal, delivery: del, tax, taxPct, subtotal,
+    lines, itemsTotal, delivery: del, tax, taxPct: vat.rate_pct, subtotal,
+    // The rate and the mode ride on the order, not just the number: a shop that changes its VAT
+    // registration in March must not silently re-write what January's invoice said.
+    vat: { pct: vat.rate_pct, mode: vat.mode, included: vat.mode === 'incl' && vat.on,
+           on: vat.on, registered: vat.registered, number: vat.number,
+           net: round2(subtotal - tax) },
     // The shape fields ride along because this object is what a slip is printed
     // from *later*, when the store may have changed its rail config: a frozen order
     // that lost "this is a phone number, ask who it came from" would stop asking.
@@ -913,10 +939,18 @@ export function waSummary(st = {}, o = {}) {
   const cur = st.currency || 'USD';
   const p = o.pricing || {};
   const lines = (o.items || []).map(it => `${it.qty || 1}x ${it.name}${(it.addons || []).length ? ' +' + it.addons.length + ' extra' : ''}`);
+  const prVat = (o.pricing || {}).vat || {};
   return [
     `*${o.code}* — ${(o.buyer || {}).name || ''}`,
     ...lines,
     `Total *${p.pay_now}* ${cur} (${(p.rail || {}).label || 'cash'})`,
+    // Printed on the slip the buyer already reads, so the receipt and the handoff message are
+    // the same sentence about the same money and never have to be reconciled by hand.
+    // One clause either way, worded the same in both modes: the amount of VAT *inside* the figure
+    // above it. A merchant who quotes inclusive and a merchant who quotes exclusive both owe the
+    // same number to the same authority, and a line that only appears in one mode is a line that
+    // goes missing from a query about a sale two days later.
+    prVat.on ? `of which VAT @ ${prVat.pct}%: ${(o.pricing.tax || 0).toFixed(2)}${prVat.included ? ' (already inside the price)' : ''}` : '',
     o.service === 'delivery' ? `Deliver to: ${(o.buyer || {}).address || ''}` : 'Pickup',
     o.when && o.when !== 'asap' ? `Time: ${o.when}` : '',
     // The same number the buyer was shown, from the same source: a handoff message
@@ -962,8 +996,13 @@ export function notifyText(st, order = {}) {
 export const PUBLIC_KEYS = [
   'handle', 'shop_name', 'tagline', 'logo', 'location', 'hours', 'closed',
   'currency', 'zig_rate', 'tax_pct', 'rail', 'surcharge_mode', 'delivery_fee', 'free_over',
+  // VAT fields ride in the public store on purpose: a buyer who is told a price includes VAT has
+  // to be able to see that claim on the page they are looking at, and a tax invoice that omits the
+  // seller's VAT number is not one. Nothing secret is here — a number a shop is registered under is
+  // a number a customer is entitled to ask for.
   'pay_account', 'whatsapp', 'require_optin', 'unique_change', 'order_prefix', 'reference_format',
   'rail_def',   // a merchant-described rail is buyer-facing by definition: label, dial string, fee
+  'vat_registered', 'vat_rate_pct', 'vat_mode', 'vat_number', 'vat_address',
 ];
 // `catalog` is optional and only ever widens what a store is allowed to mean;
 // a page rendered without it still prices correctly for the built-in tariffs.
@@ -1226,6 +1265,14 @@ const SET = {
   currency: (v) => { const s = String(v || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3); return s.length === 3 ? s : null; },
   zig_rate: (v) => { const n = Number(v); return n >= 0 && n < 1e7 ? n : null; },
   tax_pct: (v) => { const n = Number(v); return n >= 0 && n <= 40 ? round2(n) : null; },
+  // `vat_rate_pct` overrides the old `tax_pct` rather than replacing it: every store already on
+  // this platform has its rate in `tax_pct`, and a migration that writes to a hundred stores to
+  // change a name is a hundred chances to get a store wrong.
+  vat_rate_pct: (v) => { if (v === '' || v == null) return null; const n = Number(v); return n >= 0 && n <= VAT_RATE_MAX ? round2(n) : null; },
+  vat_mode: (v) => (String(v || '').toLowerCase() === 'incl' ? 'incl' : 'excl'),
+  vat_registered: (v) => (v === true || v === 'true' || v === 1 || v === '1' || v === 'on' || v === 'yes'),
+  vat_number: (v) => { const s = String(v || '').replace(/[^\w./-]/g, '').slice(0, 40); return s || null; },
+  vat_address: (v) => String(v || '').trim().slice(0, 120),
   delivery_fee: (v) => { const n = Number(v); return n >= 0 && n <= 10000 ? round2(n) : null; },
   free_over: (v) => { const n = Number(v); return n >= 0 && n <= 1e7 ? round2(n) : null; },
   max_order_value: (v) => { const n = Number(v || 0); return n >= 0 && n <= 1e7 ? round2(n) : null; },
@@ -1363,6 +1410,7 @@ const MENU_ITEM = (x, opts) => {
     img: cleanImg(o.img, opts && opts.handle),
     available: o.out === true ? false : o.available === false ? false : true,
     popular: !!o.popular,
+    vat_rate: cleanVatRate(o.vat_rate != null ? o.vat_rate : o.vat),
   };
   out.opts = (Array.isArray(o.opts) ? o.opts : []).slice(0, 4).map((g) => {
     const gg = g && typeof g === 'object' ? g : {};
@@ -1395,10 +1443,17 @@ export function sanitizeMenuEdit(input, handle) {
   // '' on a field that was present means "take the picture off", which is how a
   // merchant clears an upload without editing the row's other fields.
   if (o.img != null) c.img = cleanImg(o.img, handle);
-  const sold = o.out === true || o.out === 'true' || o.out === 1;
+  // `available: false` is the machine-shaped way to say sold out, and `out: true` is the way the
+  // dashboard's checkbox says it: both are read, because a field that only answers to one spelling
+  // is a field that silently does nothing for everyone else. (The ops console's own row editor sent
+  // the first spelling, and ticked nothing off, until a test caught it here.)
+  const sold = o.out === true || o.out === 'true' || o.out === 1 || o.available === false;
   const back = o.out === false || o.out === 'false' || o.out === 0 || o.available === true;
   if (sold) c.available = false; else if (back) c.available = true;
   if (o.popular != null) c.popular = !(o.popular === false || o.popular === 'false' || o.popular === 0);
+  // An empty box means "back to the shop's rate", which is why this is set rather than skipped:
+  // a merchant who zero-rated a row by mistake has to be able to undo it from the same box.
+  if (o.vat_rate != null && String(o.vat_rate).trim() !== '') c.vat_rate = cleanVatRate(o.vat_rate);
   if (Array.isArray(o.opts)) c.opts = MENU_ITEM({ name: 'x', opts: o.opts }, {}).opts;
   if (Array.isArray(o.addons)) c.addons = MENU_ITEM({ name: 'x', addons: o.addons }, {}).addons;
   return c;
@@ -1434,12 +1489,51 @@ export function sanitizeMenu(input) {
 
 /** The store's own edits, laid over whatever the sheet returned. Read-only with
  *  respect to both inputs, because the cached sheet rows are shared. */
-export function applyMenu(products, menu) {
+/**
+ * Patch a store's menu without replacing it. A caller who fixes one price must not have to resend
+ * every row it did not touch, or the row it forgot to resend is gone — which is how an override
+ * API becomes a data-loss API. A row named with `false` or `null` is the one deliberate exception:
+ * that is how a single override is taken back off.
+ */
+export function mergeMenuPatch(cur, patch, handle) {
+  const c = cur && typeof cur === 'object' ? cur : {};
+  const b = patch && typeof patch === 'object' ? patch : {};
+  const over = Object.assign({}, c.over && typeof c.over === 'object' ? c.over : {});
+  const src = b.over && typeof b.over === 'object' ? b.over : {};
+  for (const k of Object.keys(src)) {
+    const id = String(k).slice(0, 60);
+    if (src[k] === false || src[k] === null) { delete over[id]; continue; }
+    const clean = sanitizeMenuEdit(Object.assign({}, over[id] || {}, src[k]), handle);
+    if (Object.keys(clean).length) over[id] = clean; else delete over[id];
+  }
+  const pick = (k) => (b[k] !== undefined ? b[k] : c[k]);
+  return sanitizeMenu({
+    over, hide: pick('hide'), extra: pick('extra'), order: pick('order'), note: pick('note'), handle,
+  });
+}
+
+/** Is this row's picture one a person took or uploaded? Fallback art is decorative and must never
+ *  be quoted as a photo — not in a crawler tag, not in a share card, not in a promise. */
+export function realPhoto(p) { return p && !p.art && p.img ? String(p.img).trim() : ''; }
+
+/** A row's VAT cell: a percent, `zero`, `exempt`, or blank for "the shop's rate". */
+export function cleanVatRate(v) {
+  const t = String(v == null ? '' : v).trim().toLowerCase();
+  if (!t) return '';
+  if (t === 'zero' || t === 'nil' || t === '0' || t === '0%') return '0';
+  if (t === 'exempt' || t === 'out' || t === 'none' || t === '-') return 'exempt';
+  const n = Number(t.replace(/%$/, ''));
+  return Number.isFinite(n) && n >= 0 && n <= VAT_RATE_MAX ? String(round2(n)) : '';
+}
+
+/** `handle` names whose /art/ path a pictureless row draws from: the caller knows the store it
+ *  just read, and the stored menu is deliberately free of that kind of detail. */
+export function applyMenu(products, menu, handle) {
   const m = menu && typeof menu === 'object' ? menu : {};
   const over = m.over && typeof m.over === 'object' ? m.over : {};
   const hide = new Set(Array.isArray(m.hide) ? m.hide : []);
   const base = (Array.isArray(products) ? products : []).filter((p) => p && p.id && !hide.has(p.id));
-  const merged = base.map((p) => {
+  const applyOver = (p) => {
     const o = over[p.id];
     if (!o) return p;
     const next = { ...p };
@@ -1454,14 +1548,30 @@ export function applyMenu(products, menu) {
     if (typeof o.popular === 'boolean') next.popular = o.popular;
     next.edited = true;
     return next;
-  });
-  const extras = (Array.isArray(m.extra) ? m.extra : []).filter((x) => x && x.id && !hide.has(x.id));
-  let all = merged.concat(extras).slice(0, MENU_CAP);
+  };
+  // Sheet rows and dashboard rows take the same override map. Before this, an item added in the
+  // dashboard could be deleted and added again but never corrected — a price typed twice to change
+  // a price — because the merge only ever looked at the sheet's rows.
+  const extras = (Array.isArray(m.extra) ? m.extra : []).filter((x) => x && x.id && !hide.has(x.id)).map(applyOver);
+  let all = base.map(applyOver).concat(extras).slice(0, MENU_CAP);
   const order = Array.isArray(m.order) ? m.order : null;
   if (order && order.length) {
     const rank = new Map();
     order.forEach((id, i) => { if (!rank.has(id)) rank.set(id, i); });
     all = all.slice().sort((a, b) => (rank.has(a.id) ? rank.get(a.id) : 1e9) - (rank.has(b.id) ? rank.get(b.id) : 1e9));
+  }
+  // The fallback, drawn rather than photographed. It lands here because this is the one
+  // function every surface reads through — storefront, feed.json, the dashboard, the mesh card —
+  // so the alternative is four copies of a rule and four chances for a row to be bare in one of
+  // them. Nothing stored changes: a sheet row that gains a real picture wins it back instantly.
+  for (let i = 0; i < all.length; i++) {
+    const p = all[i];
+    if (!p || p.img) continue;
+    // A merchant who cleared the box on a row said something, and it was not "draw me a shape":
+    // the store's own answer about a picture always wins, in both directions.
+    const o = over[p.id];
+    if (o && o.img != null) continue;
+    all[i] = { ...p, img: sampleArtUrl(handle || m.handle || '', p), art: true };
   }
   return all;
 }
@@ -1520,6 +1630,9 @@ export function menuPrice(products, items) {
       id: p.id, name: p.name, price: menuPrice_, cur: p.cur,
       qty: Math.max(1, Math.min(99, Number(it.qty) || 1)),
       options: chosen, addons: picked,
+      // the row's own VAT cell rides through, or a shop that zero-rated a staple on its sheet
+      // would find it taxed at the till anyway: the menu is the authority on price *and* on rate
+      vat_rate: p.vat_rate,
     });
   }
   return { items: out, notes, unknown, authoritative, repriced: notes.some((n) => n.indexOf('repriced') === 0) };
@@ -1687,7 +1800,7 @@ const sentences = (parts) => {
  *  Google sheet that is slow must not be able to slow down a page's first byte. */
 function shelfRows(st) {
   const cached = st && st.feed_cache && Array.isArray(st.feed_cache.products) ? st.feed_cache.products : [];
-  return applyMenu(cached, st && st.menu);
+  return applyMenu(cached, st && st.menu, st && st.handle);
 }
 
 export function seoFacts(st, origin, nowMs) {
@@ -1710,7 +1823,9 @@ export function seoFacts(st, origin, nowMs) {
     const head = clip(joinBits([name, s.location ? clip(s.location, 22) : ''], ' — '), SEO_TITLE_MAX - brand.length);
     return head + (head.length + brand.length <= SEO_TITLE_MAX ? brand : '');
   })();
-  const pic = (s.logo || (rows.find((p) => p && p.img) || {}).img || '').trim();
+  // `realPhoto`, not `p.img`: fallback art is a picture of nothing in particular, and a social
+  // preview that shows it is a claim that somebody photographed this food.
+  const pic = (s.logo || realPhoto(rows.find(realPhoto)) || '').trim();
   const base = String(origin || '').replace(/\/+$/, '');
   const url = base + '/s/' + (s.handle || '');
   const prices = rows.map((p) => Number(p && p.price)).filter((n) => n > 0);
@@ -1923,3 +2038,562 @@ const taglineIsReal = (s) => String((s && s.tagline) || '').trim().length > 6;
 export const HOOK_AUDIT_STATUSES = ['refused', 'ignored', 'already', 'activated'];
 export const hookAuditKey = (hourStamp, status) => 'hooks:' + hourStamp + ':' + status;
 export const hookHourStamp = (ms) => new Date(ms || Date.now()).toISOString().slice(0, 13).replace(/[-:T]/g, '');
+
+/* =============================================================================================
+ * VAT, receipts, the books, and the mesh
+ *
+ * Why this section exists in one place: a tax figure, a receipt line and a ledger row are the
+ * same three numbers wearing different clothes, and every one of them has to agree with the
+ * others or the shop cannot hand anything to an accountant without a phone call. So the arithmetic
+ * is here, it is pure, and nothing in it writes to KV — a store can be reconciled on a day its
+ * write budget is spent, which is the day a shop most needs to know what it took.
+ * ---------------------------------------------------------------------------------------------
+ * The question this answers first ("are we issuing receipts?"): no. What existed was a message the
+ * BUYER taps to send the shop (`waSummary`) and a notice emailed to the merchant when an email
+ * binding is configured (it is not, on the free account this runs on). Nothing was handed to the
+ * buyer, nothing was numbered, and nothing showed a tax line. `receiptText`/`receiptHtml` are that
+ * artefact, derived from the order row, so a receipt exists without a single new write and without
+ * depending on a binding that may not be there.
+ */
+
+export const VAT_MODES = ['excl', 'incl'];
+export const VAT_RATE_MAX = 40;
+
+/** What a store's VAT settings mean, with the old `tax_pct` read as the rate it always was. */
+export function vatPlan(st) {
+  const s = st && typeof st === 'object' ? st : {};
+  const raw = s.vat_rate_pct != null ? s.vat_rate_pct : s.tax_pct;
+  const rate = round2(Math.min(VAT_RATE_MAX, Math.max(0, Number(raw) || 0)));
+  const registered = s.vat_registered === true || s.vat_registered === 'true';
+  const mode = String(s.vat_mode || 'excl').toLowerCase() === 'incl' ? 'incl' : 'excl';
+  return {
+    on: rate > 0, rate_pct: rate, mode, registered,
+    number: String(s.vat_number || '').replace(/[^\w./-]/g, '').slice(0, 40),
+    // The clause a buyer needs next to a price, in the shop's own words. It never claims a
+    // registration the shop has not ticked, and it never says "VAT zero-rated" for a rate of nil.
+    price_note: !rate ? ''
+      : mode === 'incl' ? 'Prices include VAT at ' + rate + '%.'
+      : 'VAT at ' + rate + '% is added at checkout.',
+  };
+}
+
+/** A line's rate: its own override when it has one, the shop's otherwise. -1 means out of scope. */
+export function vatLinePct(it, stOrPlan) {
+  const plan = stOrPlan && stOrPlan.rate_pct != null ? stOrPlan : vatPlan(stOrPlan);
+  const v = it && typeof it === 'object' ? (it.vat_rate != null ? it.vat_rate : it.vat) : null;
+  if (v == null || v === '') return plan.rate_pct;
+  const t = String(v).trim().toLowerCase().replace(/%$/, '');
+  if (t === 'zero' || t === 'nil' || t === '0') return 0;
+  if (t === 'exempt' || t === 'out' || t === 'none') return -1;
+  const n = Number(t);
+  return Number.isFinite(n) && n >= 0 && n <= VAT_RATE_MAX ? round2(n) : plan.rate_pct;
+}
+
+/* ------------------------------------------------------------- the books (derived, never stored) */
+const DAY_MS = 864e5;
+export const BOOKS_BASES = ['cash', 'accrual'];
+
+const dayOf = (v) => { const t = Date.parse(String(v || '')); return Number.isFinite(t) ? new Date(t).toISOString().slice(0, 10) : ''; };
+const periodOf = (v) => { const t = Date.parse(String(v || '')); return Number.isFinite(t) ? new Date(t).toISOString().slice(0, 7) : ''; };
+const inRange = (d, from, to) => !!d && (!from || d >= from) && (!to || d <= to);
+
+/**
+ * The date a row counts on, per basis: money in hand, or the day the order arrived.
+ *
+ * A paid row with no marked date falls back to the order date rather than dropping out of the
+ * period. Rows written before this release carry no `marked_at`, and a books pack that quietly
+ * omitted every one of them would tell a shop it had a good month — which is a worse error by far
+ * than a payment counted a day early. `vatReturn` counts those rows as estimated, so the report
+ * still says how much of itself is inferred.
+ */
+export function booksDate(row, basis) {
+  const r = row && typeof row === 'object' ? row : {};
+  if (basis === 'accrual') return dayOf(r.at);
+  const stt = String(r.status || '');
+  return dayOf(r.marked_at) || dayOf(r.paid_at) || (stt === 'paid' ? dayOf(r.at) : '');
+}
+
+/**
+ * Every month that has rows, newest first. A picker built from the data rather than a list of
+ * twelve, because a shop that started in August has nothing to file for January and showing it
+ * invites a figure that has no rows behind it.
+ */
+export function booksPeriods(rows) {
+  const seen = {};
+  for (const r of Array.isArray(rows) ? rows : []) {
+    const p = periodOf(r && (r.marked_at || r.at));
+    const q = periodOf(r && r.at);
+    if (p) seen[p] = (seen[p] || 0) + 1;
+    if (q && q !== p) seen[q] = (seen[q] || 0) + 1;
+  }
+  return Object.keys(seen).sort().reverse().map((period) => ({ period, rows: seen[period] }));
+}
+
+/**
+ * The figure a VAT vendor returns, from the ledger rows alone. Buckets by rate, because a shop
+ * that zero-rates staples and standard-rates a cooked meal files two lines off one sale list.
+ *
+ * `estimated` counts rows written before the row carried a tax figure — those are computed from
+ * the shop's *current* rate and the report says so out loud, because a return assembled from
+ * guesses has to be identifiable as one. `missing` rows are counted and excluded: a report that
+ * quietly ignored half of March would be worse than no report.
+ */
+export function vatReturn(rows, st, opt) {
+  const o = opt && typeof opt === 'object' ? opt : {};
+  const basis = o.basis === 'accrual' ? 'accrual' : 'cash';
+  const from = String(o.from || '').slice(0, 10);
+  const to = String(o.to || '').slice(0, 10);
+  const plan = st ? vatPlan(st) : vatPlan({});
+  const buckets = {};
+  let gross = 0, vat = 0, net = 0, count = 0, estimated = 0, missing = 0, skipped = 0;
+  for (const raw of Array.isArray(rows) ? rows : []) {
+    if (!raw || typeof raw !== 'object') continue;
+    const d = booksDate(raw, basis);
+    if (!inRange(d, from, to)) continue;
+    // Cash basis counts money that arrived; the accrual basis counts orders that were not called
+    // off. Anything cancelled is out of both, or the shop pays tax on a sale it refunded.
+    const stt = String(raw.status || '');
+    if (basis === 'cash' ? stt !== 'paid' : (stt === 'cancelled' || stt === 'void' || stt === 'refunded')) { skipped++; continue; }
+    count++;
+    // A row that mixes a zero-rated staple with a standard-rated meal has more than one rate on
+    // it, and a return filed from one figure per order would put the whole sale in the wrong
+    // column. Where the row carries its buckets, the buckets are the answer.
+    const by = raw.vat_by && typeof raw.vat_by === 'object' ? raw.vat_by : null;
+    if (by) {
+      let t = 0, g = 0;
+      for (const k of Object.keys(by)) {
+        const bb = by[k] || {};
+        const pct2 = round2(Math.max(0, Number(k) || 0));
+        const gross2 = Number(bb.gross) || 0, tax2 = Number(bb.tax) || 0;
+        const dst = buckets[String(pct2)] || (buckets[String(pct2)] = { rate_pct: pct2, gross: 0, vat: 0, net: 0, count: 0 });
+        dst.gross = round2(dst.gross + gross2); dst.vat = round2(dst.vat + tax2);
+        dst.net = round2(dst.net + (gross2 - tax2)); dst.count++;
+        t = round2(t + tax2); g = round2(g + gross2);
+      }
+      gross = round2(gross + g); vat = round2(vat + t); net = round2(net + (g - t));
+      continue;
+    }
+    let pct = Number(raw.vat_pct);
+    let tax = Number(raw.tax);
+    if (!Number.isFinite(tax) || !Number.isFinite(pct)) {
+      if (!Number.isFinite(Number(raw.total))) { missing++; continue; }
+      estimated++;
+      pct = plan.on ? plan.rate_pct : 0;
+      tax = plan.on ? (plan.mode === 'incl'
+        ? round2(Number(raw.total) - Number(raw.total) / (1 + pct / 100))
+        : round2(Number(raw.total) * pct / 100)) : 0;
+    }
+    const key = String(round2(Math.max(0, pct)));
+    const b = buckets[key] || (buckets[key] = { rate_pct: round2(Math.max(0, pct)), gross: 0, vat: 0, net: 0, count: 0 });
+    b.gross = round2(b.gross + Number(raw.total) || 0);
+    b.vat = round2(b.vat + tax);
+    b.net = round2(b.net + (Number(raw.total) - tax));
+    b.count++;
+    gross = round2(gross + Number(raw.total));
+    vat = round2(vat + tax);
+    net = round2(net + (Number(raw.total) - tax));
+  }
+  return {
+    basis, from: from || null, to: to || null,
+    gross, vat, net, count, estimated, missing, skipped,
+    rates: Object.keys(buckets).sort((x, y) => Number(y) - Number(x)).map((k) => buckets[k]),
+    // What the shop owes before its own input claims, which this product cannot see and will not
+    // invent: the sheet hands this figure over and the claim goes in against it.
+    due_before_inputs: vat,
+    registered: plan.registered, vat_number: plan.number, mode: plan.mode,
+  };
+}
+
+/** The whole month (or any window) as one object the dashboard prints and the CSV repeats. */
+/** The VAT buckets a priced order carries, as one small object per rate. Frozen with the order. */
+export function vatBuckets(pr) {
+  const p = pr || {};
+  const out = {};
+  const add = (pct, gross, tax) => {
+    const k = String(round2(Math.max(0, Number(pct) || 0)));
+    const b = out[k] || (out[k] = { gross: 0, tax: 0, count: 0 });
+    b.gross = round2(b.gross + (Number(gross) || 0));
+    b.tax = round2(b.tax + (Number(tax) || 0));
+    b.count++;
+  };
+  const lines = Array.isArray(p.lines) ? p.lines : [];
+  if (!lines.length) return null;
+  for (const ln of lines) {
+    const pct = Number(ln.vat_pct);
+    if (!Number.isFinite(pct) || pct <= 0) { add(0, ln.total, 0); continue; }
+    const incl = p.vat && p.vat.mode === 'incl';
+    const tax = incl ? round2(Number(ln.total) - Number(ln.total) / (1 + pct / 100)) : round2(Number(ln.total) * pct / 100);
+    add(pct, ln.total, incl ? tax : round2(Number(ln.total) - tax) === Number(ln.total) ? tax : tax);
+  }
+  if (p.delivery) {
+    const d = vatPlan(p.vat ? { vat_rate_pct: p.taxPct, vat_mode: (p.vat || {}).mode } : {});
+    add(d.rate_pct, p.delivery, d.on ? (d.mode === 'incl' ? round2(Number(p.delivery) - Number(p.delivery) / (1 + d.rate_pct / 100)) : round2(Number(p.delivery) * d.rate_pct / 100)) : 0);
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+export function booksSummary(rows, st, opt) {
+  const o = opt && typeof opt === 'object' ? opt : {};
+  const basis = o.basis === 'accrual' ? 'accrual' : 'cash';
+  const period = String(o.period || '').slice(0, 7);
+  const from = o.from || (period ? period + '-01' : '');
+  const to = o.to || (period ? new Date(Date.UTC(Number(period.slice(0, 4)), Number(period.slice(5, 7)), 0))
+    .toISOString().slice(0, 10) : '');
+  const win = { basis, from, to };
+  const vat_fig = vatReturn(rows, st, win);
+  const list = Array.isArray(rows) ? rows : [];
+  let awaiting = 0, cod = 0, cash_in = 0, rounding = 0, flagged = 0, proofs = 0, open = 0, paid = 0, cancelled = 0;
+  const by_rail = {};
+  for (const r of list) {
+    if (!r || typeof r !== 'object') continue;
+    const d = booksDate(r, basis);
+    const mine = inRange(d, from, to);
+    const stt = String(r.status || '');
+    if (stt === 'paid') paid++; else if (stt === 'cancelled' || stt === 'void') cancelled++; else open++;
+    // The balance is counted outside the window on purpose. An order that has not been paid has no
+    // cash-basis date at all, so a period filter would report "nothing outstanding" to the shop
+    // with the most money owed to it — and a balance is not a monthly figure in any case.
+    if (stt === 'awaiting_payment' || stt === 'new' || stt === 'preparing' || stt === 'cod') {
+      awaiting = round2(awaiting + (Number(r.total) || 0));
+      if (String(r.rail || '') === 'cod' || stt === 'cod' || stt === 'new') cod = round2(cod + (Number(r.total) || 0));
+    }
+    if (!mine) continue;
+    if (stt === 'paid') {
+      const rail = String(r.rail || 'other');
+      by_rail[rail] = round2((by_rail[rail] || 0) + Number(r.total || 0));
+      cash_in = round2(cash_in + Number(r.paid || r.total || 0));
+    }
+    rounding = round2(rounding + Math.max(0, (Number(r.pay_now) || 0) - (Number(r.total) || 0)));
+    if ((r.flags || []).length) flagged++;
+    if (r.proof || r.payer) proofs++;
+  }
+  return {
+    period: period || null, from: from || null, to: to || null, basis,
+    orders: list.length, paid, cancelled, open,
+    vat: vat_fig, collected: cash_in,
+    // named as balances, because that is what they are: money not yet in hand, from any month
+    outstanding_balance: awaiting, outstanding_cod: cod,
+    rounding_identifiers: rounding, flagged, with_proof: proofs,
+    money_in_by_rail: Object.keys(by_rail).sort().map((k) => ({ rail: k, amount: by_rail[k] })),
+    // The honest footer: what this page cannot know, said on the page rather than in a footnote.
+    note: 'Sales side only. Input VAT on what the shop bought is not in these rows and is not guessed here.',
+  };
+}
+
+const csvCell = (v) => {
+  const t = String(v == null ? '' : v);
+  return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+};
+
+/**
+ * The accountant pack: metadata as `#` lines, then one row per order, then the totals the report
+ * was built from. It is the same numbers as the panel, in the file an accountant opens, so nobody
+ * re-keys anything — which is the whole reason this exists.
+ */
+export function booksCsv(rows, st, opt) {
+  const s = booksSummary(rows, st, opt);
+  const shop = st || {};
+  const head = [
+    '# tapstall books pack',
+    '# shop: ' + String(shop.shop_name || shop.handle || '') + ' (' + (shop.handle || '') + ')',
+    '# period: ' + (s.from || 'start') + ' .. ' + (s.to || 'today') + '   basis: ' + s.basis,
+    '# currency: ' + (shop.currency || 'USD'),
+    '# vat: ' + (s.vat.registered ? 'registered, no. ' + (s.vat.vat_number || 'not on file') : 'not registered')
+      + ', mode ' + s.vat.mode + ', rate ' + s.vat.rates.map((b) => b.rate_pct + '%').join('/') + ' of nil',
+    '# ' + s.note,
+  ];
+  if (s.vat.estimated) head.push('# ' + s.vat.estimated + ' row(s) predate the tax fields and were computed at the current rate');
+  if (s.vat.missing) head.push('# ' + s.vat.missing + ' row(s) had no readable amount and are excluded');
+  const cols = ['date', 'ref', 'status', 'buyer', 'phone', 'service', 'rail', 'gross', 'vat', 'net',
+    'pay_now', 'rounding', 'payer_sent_from', 'proof', 'flags'];
+  const body = [cols.join(',')];
+  for (const r of (Array.isArray(rows) ? rows : []).slice().sort((x, y) => String(x && (x.marked_at || x.at) || '').localeCompare(String(y && (y.marked_at || y.at) || '')))) {
+    if (!r || typeof r !== 'object') continue;
+    const d = booksDate(r, s.basis);
+    if (!inRange(d, s.from || '', s.to || '')) continue;
+    const gross = Number(r.total) || 0;
+    const tax = Number.isFinite(Number(r.tax)) ? Number(r.tax) : '';
+    body.push([
+      d || dayOf(r.at), r.code || r.id || '', r.status || '', r.name || '', r.phone || '', r.service || '',
+      r.rail || '', gross.toFixed(2), tax === '' ? '' : tax.toFixed(2),
+      tax === '' ? '' : round2(gross - tax).toFixed(2),
+      Number(r.pay_now) ? Number(r.pay_now).toFixed(2) : '', r.rounding || '',
+      r.payer || '', r.proof || '', (r.flags || []).join('|'),
+    ].map(csvCell).join(','));
+  }
+  const tot = ['# totals',
+    '# gross,' + s.vat.gross.toFixed(2) + ',vat,' + s.vat.vat.toFixed(2) + ',net,' + s.vat.net.toFixed(2),
+    '# collected,' + s.collected.toFixed(2) + ',outstanding_balance,' + s.outstanding_balance.toFixed(2)
+      + ',of which cash on delivery,' + s.outstanding_cod.toFixed(2),
+    '# orders_in_window,' + s.vat.count + ',skipped_not_counted,' + s.vat.skipped].join('\n');
+  return head.join('\n') + '\n' + body.join('\n') + '\n' + tot + '\n';
+}
+
+/* --------------------------------------------------------------------- the receipt, at last */
+const money2 = (v, cur) => (Number.isFinite(Number(v)) ? Number(v).toFixed(2) : '0.00') + (cur ? ' ' + cur : '');
+
+/**
+ * The receipt as text, because in this market the paper is a WhatsApp message. Same numbers the
+ * ledger row holds, so the buyer's message and the shop's books cannot disagree; a VAT number
+ * appears only when the shop says it is registered, since printing one that was never issued is
+ * how a receipt becomes a problem.
+ */
+export function receiptText(st, o) {
+  const s = st || {}, ord = o || {}, pr = ord.pricing || {};
+  const cur = s.currency || pr.rail && pr.rail.cur || 'USD';
+  const v = pr.vat || { pct: pr.taxPct || 0, on: (pr.taxPct || 0) > 0, included: false, net: round2((pr.subtotal || 0) - (pr.tax || 0)) };
+  const paid = Number(pr.pay_now || pr.total || 0);
+  // `pricing.lines` is what the till computed; the order's own `items` are what the buyer asked
+  // for. The two agree on names and quantities, but only the first carries the unit and line
+  // totals, and a receipt drawn from the second prints 0.00 beside a total of 115.00 — which is
+  // exactly what this did the first time it was tested end to end against a real order row.
+  const shown = (pr.lines && pr.lines.length ? pr.lines : (ord.items || [])).map((it) => {
+    const unit = it.unit != null ? it.unit : it.price;
+    const tot = it.total != null ? it.total : round2((Number(unit) || 0) * (it.qty || 1));
+    return (it.qty || 1) + 'x ' + it.name
+      + (round2(Number(unit)) !== round2(Number(tot)) ? ' @ ' + money2(unit, '') : '') + '  ' + money2(tot, '');
+  });
+  const out = [
+    (v.registered && v.number ? '*TAX INVOICE* — ' : '*RECEIPT* — ') + (s.shop_name || s.handle || ''),
+    s.vat_address ? 'Address: ' + s.vat_address : (s.location ? s.location : ''),
+    'Receipt ' + (ord.code || '') + (ord.code ? '' : ' (unnumbered draft)'),
+    'Date: ' + dayOf(ord.marked_at || ord.at) + '  Time: ' + String(ord.marked_at || ord.at || '').slice(11, 16),
+    'For: ' + String((ord.buyer || {}).name || 'buyer') + ((ord.buyer || {}).phone ? ' (' + (ord.buyer || {}).phone + ')' : ''),
+    (ord.items || []).length ? 'Items:' : '',
+    ...shown,
+    (pr.vat && pr.vat.mode === 'incl')
+      ? 'Total (VAT at ' + (v.pct || 0) + '% included)  ' + money2(pr.total, cur)
+      : (v.on ? 'Net ' + money2(v.net, pr.cur || cur) + '\nVAT @ ' + (v.pct || 0) + '%  ' + money2(pr.tax, pr.cur || cur) + '\nTotal  ' + money2(pr.total, pr.cur || cur)
+              : 'Total  ' + money2(pr.total, pr.cur || cur)),
+    pr.delivery ? 'Of which delivery: ' + money2(pr.delivery, cur) : '',
+    paid && Math.abs(paid - Number(pr.total)) >= 0.005
+      ? 'Paid: ' + money2(paid, cur) + ' (the odd cents identify your transfer; change as usual)'
+      : (paid ? 'Paid: ' + money2(paid, cur) : ''),
+    pr.rail ? 'Method: ' + (pr.rail.label || pr.rail.key) : '',
+    (ord.buyer && ord.buyer.proof) ? 'Our reference: ' + ord.buyer.proof : '',
+    v.registered ? 'VAT No: ' + (v.number || 'on file') : 'This shop is not VAT-registered; no VAT is charged.',
+    'Kept by ' + (s.shop_name || s.handle || 'the shop') + ' · ' + (s.handle ? 'tapstall/s/' + s.handle : ''),
+  ];
+  return out.filter(Boolean).join('\n');
+}
+
+/** The same document, printable: an A5 block that becomes a clean PDF from the browser's own print. */
+export function receiptHtml(st, o) {
+  const s = st || {}, ord = o || {}, pr = ord.pricing || {};
+  const v = pr.vat || {};
+  const esc2 = (x) => String(x == null ? '' : x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  const cur = s.currency || 'USD';
+  const rowLines = (pr.lines && pr.lines.length ? pr.lines : (ord.items || []));
+  const rows = rowLines.map((it) => {
+    const unit = it.unit != null ? it.unit : it.price;
+    const tot = it.total != null ? it.total : round2((Number(unit) || 0) * (it.qty || 1));
+    return '<tr><td>' + esc2((it.qty || 1) + 'x ' + it.name
+      + ((it.addons || []).length ? ' +' + it.addons.length + ' extra' : '')) + '</td><td class=n>' + esc2(Number(unit || 0).toFixed(2))
+      + '</td><td class=n>' + esc2(Number(tot || 0).toFixed(2)) + '</td></tr>';
+  }).join('');
+  const taxline = v.on
+    ? '<tr><td>' + (v.included ? 'VAT @ ' + esc2(v.pct) + '% included' : 'VAT @ ' + esc2(v.pct) + '%') + '</td><td></td><td class=n>'
+      + esc2(Number(pr.tax || 0).toFixed(2)) + '</td></tr>' : '';
+  return '<!doctype html><html lang=en><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">'
+    + '<title>Receipt ' + esc2(ord.code || '') + ' · ' + esc2(s.shop_name || s.handle) + '</title><style>'
+    + 'body{font:14px/1.5 system-ui;margin:0;background:#f4f6f8;color:#16202b}'
+    + '.doc{max-width:38rem;margin:3vh auto;background:#fff;padding:1.4rem 1.5rem;border:1px solid #dde4ea;border-radius:8px}'
+    + 'h1{font-size:1.05rem;margin:.1rem 0 .1rem}h2{font-size:.78rem;letter-spacing:.06em;text-transform:uppercase;color:#65788b;margin:.1rem 0 .8rem;font-weight:600}'
+    + 'table{width:100%;border-collapse:collapse;margin:.4rem 0}td{padding:.24rem 0;border-bottom:1px solid #eef2f6;vertical-align:top}'
+    + '.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;padding-left:.8rem}'
+    + '.tot td{border:0;font-weight:700}.meta{color:#41525f;font-size:.85rem}.foot{margin-top:.9rem;color:#65788b;font-size:.8rem}'
+    + '@media print{body{background:#fff}.doc{border:0;border-radius:0;margin:0;padding:0}button{display:none}}</style>'
+    + '<div class=doc><h1>' + esc2(s.shop_name || s.handle) + '</h1>'
+    + '<h2>' + (v.registered && v.number ? 'Tax invoice' : 'Receipt') + '</h2>'
+    + '<p class=meta>' + esc2(s.vat_address || s.location || '') + (s.whatsapp ? ' · ' + esc2(s.whatsapp) : '')
+    + (v.registered && v.number ? '<br>VAT No ' + esc2(v.number) : '')
+    + '<br>Receipt <b>' + esc2(ord.code || '—') + '</b> · ' + esc2(dayOf(ord.marked_at || ord.at))
+    + ' · ' + esc2(String((ord.buyer || {}).name || '')) + '</p>'
+    + '<table><tr><td class=meta>Item</td><td class=n>Unit</td><td class=n>Amount</td></tr>' + rows
+    + (pr.delivery ? '<tr><td>Delivery</td><td></td><td class=n>' + esc2(Number(pr.delivery).toFixed(2)) + '</td></tr>' : '')
+    + taxline
+    + '<tr class=tot><td>Total</td><td></td><td class=n>' + esc2(Number(pr.total || 0).toFixed(2)) + ' ' + esc2(cur) + '</td></tr></table>'
+    + (pr.unique_change ? '<p class=meta>Paid ' + esc2(Number(pr.pay_now).toFixed(2)) + ' — the odd ' + esc2(Number(pr.unique_change).toFixed(2))
+      + ' identifies this transfer; change as usual.</p>' : '')
+    + (pr.fee_absorbed_by_merchant ? '<p class=meta>Payment fee carried by the shop: ' + esc2(Number(pr.fee_absorbed_by_merchant).toFixed(2)) + '.</p>' : '')
+    + '<p class=foot>' + (v.registered ? 'This is a tax invoice for the amount above.' : 'This shop is not VAT-registered, so no VAT is shown.')
+    + ' Figures come from the order as it was priced, not from the shop\'s settings today.</p>'
+    + '<button onclick="print()">Print or save as PDF</button></div>';
+}
+
+/* ----------------------------------------------------------------- sample art (zero storage) */
+/**
+ * A picture for a row that has none, drawn from the row. Served as a file rather than a data URI
+ * so a 60-item menu does not grow 20 KB of markup on every load, and cached forever because the
+ * URL carries everything that draws it. It is deliberately abstract: a photographic stand-in for a
+ * dish nobody has photographed would be a false claim about food, which is the one thing a menu
+ * must not do.
+ */
+export function sampleArtUrl(handle, item) {
+  const name = String((item && item.name) || 'item').slice(0, 60);
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  const cur = (item && item.cur) || '';
+  return '/art/' + encodeURIComponent(String(handle || 'shop').slice(0, 30)) + '/' + (h % 100000)
+    + '.svg?n=' + encodeURIComponent(name) + (cur ? '&c=' + encodeURIComponent(String(cur).slice(0, 8)) : '');
+}
+const ART_PALETTES = [['#F4EEE4', '#8A6B3F'], ['#E9F1EC', '#3E6B52'], ['#EDEDF6', '#4A4C86'], ['#F6EBE9', '#8C4A45'],
+  ['#EAF2F7', '#2F5D7C'], ['#F4F0E6', '#6B6142'], ['#F0EEE8', '#5C5548'], ['#ECF3F1', '#356B62']];
+/** The SVG itself: two initials, a tint, and a rule. No fonts, no network, no lie. */
+export function sampleArtSvg(name) {
+  const n = String(name || 'item').replace(/[<>]/g, '').slice(0, 60);
+  let h = 0;
+  for (let i = 0; i < n.length; i++) h = (h * 31 + n.charCodeAt(i)) >>> 0;
+  const pal = ART_PALETTES[h % ART_PALETTES.length];
+  const words = n.split(/[\s·,]+/).filter(Boolean);
+  const ini = ((words[0] || '').charAt(0) + (words.length > 1 ? (words[1] || '').charAt(0) : (words[0] || '').charAt(1) || '')).toUpperCase();
+  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="'
+    + n.replace(/"/g, '') + '">'
+    + '<rect width="96" height="96" rx="10" fill="' + pal[0] + '"/>'
+    + '<rect x="10" y="66" width="76" height="1" fill="' + pal[1] + '" opacity=".5"/>'
+    + '<text x="48" y="56" text-anchor="middle" font-family="system-ui,sans-serif" font-size="30" font-weight="600" fill="' + pal[1] + '">'
+    + (ini || '•') + '</text></svg>';
+}
+
+/* ============================================================ the content distribution mesh */
+/* Adapted from the mesh this house already runs for its other product (hunta-marketing,
+ * scripts/expand_bible.py, 2026-10-01): a registry of what there is to say, a planner that gates
+ * cadence and a value-to-promo ratio, one renderer per rail, witnesses that report only new
+ * failures, and hard budgets pinned in tests. Three things change on the way here, and each change
+ * is the point. (1) The registry is the shop's own live menu, so nothing has to be authored and
+ * nothing can be invented: no item name, no price and no claim appears that is not in the row today
+ * — Hunta's editor rejected "hype and fabricated stats"; ours has no author model at all, so a
+ * figure that cannot be sourced is dropped rather than smoothed. (2) There is no posting: the rails
+ * are surfaces a merchant already has, and the output is copy-paste text plus one tap, because the
+ * alternative is a token to guard and a ban to fear. (3) The state is optional: a plan derived from
+ * the date needs no write, so a shop whose day of KV writes is spent still gets a queue, and
+ * "already posted" is a memory the merchant chooses to record.
+ */
+export const MESH_RAILS = {
+  whatsapp_status: { label: 'WhatsApp status', max: 130, tap: 'link' },
+  whatsapp_group:  { label: 'a WhatsApp or Telegram group', max: 300, tap: 'link' },
+  facebook_group:  { label: 'a Facebook group', max: 500, tap: 'link' },
+  x:               { label: 'X', max: 240, tap: 'link' },
+  instagram:       { label: 'an Instagram caption', max: 900, tap: 'hashtag' },
+  counter:         { label: 'the notice by the till', max: 150, tap: 'none' },
+};
+export const MESH_BUDGET = { per_day: 3, value: 2, promo: 1, item_cooldown_days: 7 };
+export const MESH_KINDS = ['value', 'promo'];
+
+const clipText = (t, n) => { const x = String(t || '').trim(); return x.length <= n ? x : x.slice(0, Math.max(0, n - 1)).trimEnd() + '…'; };
+
+/** Does the shop have a right to say this today? A broken feed prices nothing. */
+export function meshWitness(st, products, facts) {
+  const f = facts || {}, s = st || {}, list = Array.isArray(products) ? products : [];
+  const fails = [];
+  if (s.feed_error && String(s.feed_error) !== 'no_feed') fails.push({ key: 'feed', note: 'the menu could not be read (' + s.feed_error + '), so no price is quoted' });
+  if (!list.length) fails.push({ key: 'empty', note: 'no items to publish, so nothing is drafted' });
+  if (!s.hours && !f.hours_text) fails.push({ key: 'hours', note: 'no opening line on file, so the queue says nothing about when you are open' });
+  if (!s.whatsapp) fails.push({ key: 'contact', note: 'no buyer number on file, so a post cannot say where to write' });
+  return { price_ok: list.length > 0 && !(s.feed_error && String(s.feed_error) !== 'no_feed'), fails };
+}
+
+/**
+ * Today's queue: at most `per_day` beats, the ratio gate applied (value first, one promo at most),
+ * each beat about one real thing, and an item that was used inside the cooldown never repeated.
+ * Deterministic on the date: two loads of the same day show the same plan, which is what makes it
+ * testable and what stops a shop from being shown a roulette wheel.
+ */
+export function meshPack(st, products, facts, opt) {
+  const o = opt || {}, now = o.now || Date.now();
+  const s = st || {}, list = (Array.isArray(products) ? products : []).filter((p) => p && p.name);
+  const base = String(o.origin || '').replace(/\/+$/, '');
+  const url = base + '/s/' + (s.handle || '');
+  const day = Math.floor(now / DAY_MS);
+  const iso = new Date(now).toISOString().slice(0, 10);
+  const seen = o.sent && o.sent.items && typeof o.sent.items === 'object' ? o.sent.items : {};
+  const wd = MESH_BUDGET.item_cooldown_days;
+  const keyOf = (x) => String((x && (x.id || x.name)) || '').slice(0, 80);
+  const fresh = (id) => { const d = seen[id]; return !d || (day - Math.floor(Date.parse(d) / DAY_MS)) >= wd; };
+  const wit = meshWitness(st, list, facts);
+  const openLine = (facts && (facts.open_label || facts.hours_text)) || (s.hours ? clipText(s.hours, 48) : '');
+  const beats = [];
+  const pool = list.slice().sort((a, b) => (Number(!!b.popular) - Number(!!a.popular)) || String(a.name).localeCompare(String(b.name)));
+  const pick = (dayOffset) => {
+    for (let i = 0; i < pool.length; i++) {
+      const p = pool[(day + dayOffset + i) % pool.length];
+      if (p && fresh(String(p.id || p.name))) return p;
+    }
+    return pool.length ? pool[(day + dayOffset) % pool.length] : null;
+  };
+  const money = (n, cur) => (Number(n) || 0).toFixed(2) + ' ' + (cur || (facts && facts.currency) || s.currency || 'USD');
+  if (wit.price_ok && pool.length) {
+    const a = pick(0);
+    beats.push({ id: 'item:' + (a.id || a.name) + ':v1', kind: 'value', rail: 'whatsapp_status',
+      item: String(a.name).slice(0, 60), item_key: keyOf(a), price: Number(a.price) || 0,
+      text: clipText((a.popular ? 'The one people keep ordering: ' : '') + a.name + ' — ' + money(a.price, a.cur)
+        + (openLine ? '. ' + openLine : '') + '. ' + url, MESH_RAILS.whatsapp_status.max) });
+    const b = pick(1);
+    beats.push({ id: 'item:' + (b.id || b.name) + ':v2', kind: 'value', rail: 'facebook_group',
+      item: String(b.name).slice(0, 60), item_key: keyOf(b), price: Number(b.price) || 0,
+      text: clipText((s.shop_name || 'Our shop') + ' has ' + b.name + ' at ' + money(b.price, b.cur)
+        + (s.location ? ', in ' + s.location : '') + (openLine ? '. Open: ' + openLine : '')
+        + (s.whatsapp ? '. Order on WhatsApp ' + s.whatsapp : '') + '. ' + url, MESH_RAILS.facebook_group.max) });
+    beats.push({ id: 'promo:' + (a.id || a.name), kind: 'promo', rail: 'x', item: String(a.name).slice(0, 60), item_key: keyOf(a),
+      price: Number(a.price) || 0,
+      text: clipText(a.name + ' ' + money(a.price, a.cur)
+        + (facts && facts.closed_today ? ' — closed today' : (openLine ? ' · ' + openLine : '')) + ' ' + url, MESH_RAILS.x.max) });
+  } else {
+    beats.push({ id: 'notice:no-prices', kind: 'value', rail: 'whatsapp_status',
+      text: clipText((s.shop_name || 'Our shop') + ' is taking orders — write to us on WhatsApp'
+        + (s.whatsapp ? ' ' + s.whatsapp : '') + ' and we will confirm the price with you.' + (url ? ' ' + url : ''), 160),
+      why: wit.fails.map((f) => f.key).join(',') });
+  }
+  const out = beats.filter((x) => x && x.text).slice(0, MESH_BUDGET.per_day);
+  const promos = out.filter((x) => x.kind === 'promo').length;
+  if (promos > MESH_BUDGET.promo) while (out.filter((x) => x.kind === 'promo').length > MESH_BUDGET.promo) {
+    const i = out.map((x) => x.kind).lastIndexOf('promo'); if (i < 0) break; out.splice(i, 1);
+  }
+  return { day: iso, url, beats: out, fails: wit.fails,
+    budget: { per_day: MESH_BUDGET.per_day, value: MESH_BUDGET.value, promo: MESH_BUDGET.promo, cooldown_days: wd } };
+}
+
+/** The public half: what a machine may repeat about this shop, and nothing it may not. */
+export function meshJson(st, products, facts, origin) {
+  const s = st || {}, f = facts || {};
+  const base = String(origin || '').replace(/\/+$/, '');
+  const wit = meshWitness(s, products, f);
+  return {
+    shop: String(s.shop_name || s.handle || '').slice(0, 60),
+    handle: String(s.handle || '').slice(0, 30),
+    url: base + '/s/' + (s.handle || ''),
+    tagline: clipText(s.tagline || '', 140),
+    location: clipText(s.location || '', 90),
+    hours: f.closed ? 'closed' : clipText(f.hours_text || s.hours || '', 90),
+    whatsapp: s.whatsapp ? String(s.whatsapp).replace(/\D/g, '').slice(0, 15) : '',
+    currency: s.currency || 'USD',
+    vat_registered: !!(f.vat && f.vat.registered),
+    prices_included: !!(f.vat && f.vat.included),
+    // The point of the flag: a reader can tell "this shop has no prices today" from "this feed is
+    // broken", and a publisher can refuse to quote the difference.
+    priced: wit.price_ok,
+    items: wit.price_ok ? (Array.isArray(products) ? products : []).filter((p) => p && p.name).slice(0, 60)
+      .map((p) => ({ name: String(p.name).slice(0, 60), price: round2(Number(p.price) || 0),
+                     currency: p.cur || s.currency || 'USD', sold_out: p.available === false,
+                     popular: !!p.popular, url: base + '/s/' + (s.handle || '') })) : [],
+    generated_at: new Date().toISOString(),
+    terms: 'Facts about a shop, generated from the shop. Prices are the shop\'s own and move; quote them with the store link, not as a promise.',
+  };
+}
+
+/** The one write the mesh can make: "the merchant says they posted these". */
+export function meshMark(prev, ids, nowMs) {
+  const t = nowMs || Date.now();
+  const iso = new Date(t).toISOString();
+  const day = iso.slice(0, 10);
+  const items = (prev && prev.items) || {};
+  const sent = (prev && prev.sent) || {};
+  for (const id of (Array.isArray(ids) ? ids : []).slice(0, 40)) {
+    if (!id) continue;
+    items[String(id).slice(0, 80)] = day;
+    sent[String(id).slice(0, 80)] = day;
+  }
+  const kept = {};
+  for (const k of Object.keys(items).sort().reverse().slice(0, 400)) kept[k] = items[k];
+  return { at: iso, items: kept, sent: kept, count: Object.keys(kept).length };
+}

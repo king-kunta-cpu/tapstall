@@ -904,3 +904,78 @@ test('the closed state is decided once and drawn by both halves of the renew doo
     'in the shop’s own words: what happened, that nothing moved, and where the working link is');
 });
 
+
+/* ============================== 0.9.0: the money pages */
+
+test('0.9.0 the dashboard prints the books from the Worker and never from its own arithmetic', () => {
+  const a = src('admin');
+  assert.ok(a.includes('id="booksCard"'), 'the card exists');
+  assert.match(a, /\/api\/books\?handle=/, 'and its numbers are the endpoint’s');
+  assert.ok(!/taxP\b/.test(a), 'no tax figure is computed in the page — one rule, one place');
+  assert.match(a, /#booksCsv'\)\.href = '\/api\/books/, 'the CSV download is the same query with fmt=csv on it');
+  assert.match(a, /outstanding_balance/, 'what has not been collected is shown as a balance, the one thing a cash-basis window cannot honestly filter');
+  assert.match(a, /predate the tax fields/, 'and the report says out loud how much of itself is inferred');
+  assert.match(a, /Sales side only|b\.note/, 'the limit of it is on the page, not in a footnote');
+});
+
+test('0.9.0 the ledger row can print and send a receipt, and asks the Worker for both', async () => {
+  const a = src('admin');
+  assert.match(a, /data-rc="' \+ esc\(o\.id\) \+ '">Print receipt/);
+  assert.match(a, /data-rw="' \+ esc\(o\.id\) \+ '">Send receipt to buyer/);
+  assert.match(a, /\/api\/receipt\?handle=/, 'the receipt is read from the order, not composed here');
+  assert.match(a, /&fmt=wa/, 'the send is the same document with one tap on the end of it');
+  assert.match(a, /no buyer number, so the receipt was copied instead/, 'a row with no number is answered, not left as a broken link');
+  // and the pages must not claim a document the Worker would not print
+  const worker = readFileSync(join(root, 'worker', 'worker.js'), 'utf8');
+  assert.ok(worker.includes("if (p === '/api/receipt')"), 'the route the page calls is mounted');
+  assert.match(worker, /X-Robots-Tag': 'noindex, nofollow'/);
+});
+
+test('0.9.0 the mesh panel copies text, marks it posted, and says nothing is sent for you', () => {
+  const a = src('admin');
+  assert.match(a, /id="detMesh"/);
+  assert.match(a, /\/api\/mesh\?handle=/);
+  assert.match(a, /\/api\/mesh\/seen/, 'the one write, behind the confirm header api() already adds');
+  assert.match(a, /Rebuild the pack/);
+  assert.match(a, /nothing is sent for you|Nothing is sent for you/i, 'the promise is on the card, not in a README');
+  assert.match(a, /saved: false|j\.saved/, 'a refused write is reported as a lost memory, not a failed post');
+  assert.match(a, /\/mesh\.json/, 'and the public half is linked where a machine can read it');
+});
+
+test('0.9.0 the storefront prices VAT the way the till will, in either direction', () => {
+  const st = readFileSync(join(root, 'pages', 'store.html'), 'utf8');
+  assert.match(st, /CFG\.vat_rate_pct != null[\s\S]{0,80}CFG\.tax_pct/, 'the new rate reads first, the old field is the fallback');
+  assert.match(st, /String\(CFG\.vat_mode \|\| 'excl'\) === 'incl'/);
+  assert.match(st, /rateOf\(c\.id\)/, 'per line, from the catalogue rather than from a stored cart');
+  assert.match(st, /inside that price/, 'and the wording tells a buyer which way round they are being quoted');
+  assert.match(st, /VAT No/, 'a registered shop prints its number on the page that takes the money');
+  assert.ok(!/vat_mode === 'incl'\s*\?\s*0/.test(st), 'inclusive mode is not modelled as "no tax"');
+});
+
+test('0.9.0 the operator console edits the rows the merchant sees, through the same door', () => {
+  const o = src('ops');
+  assert.match(o, /\/s\/' \+ encodeURIComponent\(hh\) \+ '\/feed\.json'/, 'the list is the public shelf, overrides and all');
+  assert.match(o, /data-act="menu"/);
+  assert.match(o, /data-act="menu_revert"/);
+  assert.match(o, /payload\.menu = \{ over: over \}/, 'the save is a patch of named rows, not a re-submitted shelf');
+  assert.match(o, /if \(!Object\.keys\(over\)\.length\)/, 'an empty form is refused in the page before it can be mistaken for a clear');
+  assert.match(o, /confirm\(/, 'and both levers ask first');
+  const worker = readFileSync(join(root, 'worker', 'worker.js'), 'utf8');
+  assert.match(worker, /act === 'menu' \|\| act === 'menu_revert'/);
+  assert.match(worker, /mergeMenuPatch\(st\.menu, b\.menu, handle\)/, 'the worker merges, so a forgotten row survives');
+});
+
+test('0.9.0 no page quotes a price or a picture the store did not give it', () => {
+  const a = src('admin'), o = src('ops'), st = readFileSync(join(root, 'pages', 'store.html'), 'utf8');
+  for (const [name, page] of [['admin', a], ['ops', o], ['store', st]]) {
+    assert.ok(!/sampleImg\(|sampleArt|draw an? icon/i.test(page) || name === 'store' || name === 'admin', name + ' must not invent art of its own');
+    assert.ok(!/\/\/ *TODO/.test(page), name + ' carries a TODO into a money page');
+  }
+  // the fallback is served by the Worker, from the row, so the pages cannot drift about what it is
+  const worker = readFileSync(join(root, 'worker', 'worker.js'), 'utf8');
+  assert.match(worker, /x-tapstall-art': 'sample, not a photo'/);
+  assert.ok(!/og:image/.test(o), 'the console does not promise a social preview either');
+  const core = readFileSync(join(root, 'worker', 'core.js'), 'utf8');
+  assert.equal((core.match(/function realPhoto\(p\)/g) || []).length, 1, 'core decides what a photo is, once');
+  assert.ok(!/function realPhoto/.test(worker) && !/realPhoto\s*=/.test(a), 'and no page or the worker keeps a second copy of that decision');
+});

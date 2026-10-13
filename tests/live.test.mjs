@@ -3525,3 +3525,352 @@ test('0.8.8 a stale code link on a shop that did revoke is still closed, with th
   assert.equal(orderDoc('proofgen', rg.id).buyer.proof, 'AFTER-REVOKE-1', 'so the buyer who was handed a new link can still use it');
 });
 
+
+/* ============================== 0.9.0: VAT, the receipt, the books, the mesh, the operator's rows
+ *
+ * The round this suite exists for: a shop's money side, asserted through the endpoints the
+ * dashboard actually calls, on a store document the test can see. Nothing here writes a new kind of
+ * state — that is the point of the design, and the last test proves it by taking the write budget
+ * away and asking for the books anyway.
+ */
+const vat = {};
+test('0.9.0 a shop declares its VAT, and the five fields are held like a price change', async () => {
+  vat.sh = await newShop('vatmode');
+  const r = await call('/api/settings', { method: 'POST', cookie: vat.sh.cookie, confirm: 1, body: {
+    handle: 'vatmode', tax_pct: 15, vat_registered: true, vat_number: '4010000001',
+    vat_address: '12 Mutare Rd, Harare', vat_mode: 'incl',
+  } });
+  assert.equal(r.status, 200, r.text);
+  const held = r.json.pending || r.json.staged || {};
+  assert.match(JSON.stringify(r.json), /vat_mode/, 'the answer names what it did with them');
+  const doc = shopDoc('vatmode');
+  assert.ok(doc.pending && doc.pending.fields, 'a rate and a registration number ride the 15-minute hold like the pay number does');
+  assert.equal(Object.keys(doc.pending.fields).sort().join(','), 'tax_pct,vat_address,vat_mode,vat_number,vat_registered');
+  assert.equal(doc.vat_number, undefined, 'and none of it is live this second');
+  assert.ok(!held.applied, 'no field was applied behind the hold');
+  doc.pending.apply_at = Date.now() - 1000;
+  await env.STORES.put('store:vatmode', JSON.stringify(doc));
+});
+
+test('0.9.0 an inclusive shop totals the same number on the shelf, the preview and the order', async () => {
+  const cfg = await call('/s/vatmode/config.json');
+  assert.equal(cfg.status, 200);
+  const st = cfg.json.store;
+  assert.equal(st.vat_mode, 'incl', 'the page has to know which way round the prices are quoted');
+  assert.equal(st.tax_pct, 15);
+  assert.equal(st.vat_registered, true);
+  assert.equal(st.vat_number, '4010000001', 'a tax invoice must print the number, so the number is public');
+  assert.ok(!('pin' in st) && !('admin_token' in st), 'and the public store is still only the public store');
+  const add = await call('/api/menu', { method: 'POST', cookie: vat.sh.cookie, confirm: 1, body: {
+    handle: 'vatmode', menu: { extra: [{ name: 'VAT plate', price: 115 }] } } });
+  assert.equal(add.status, 200, add.text);
+  const o = await call('/api/order', { method: 'POST', ip: '196.9.0.1', body: {
+    handle: 'vatmode', items: [{ name: 'VAT plate', price: 115, qty: 1 }],
+    buyer: { name: 'Rudo', phone: '263771234567' }, rail: 'ecocash_usd', when: 'asap' } });
+  assert.equal(o.status, 201, o.text.slice(0, 200));
+  // The order response is { order: {id, code, at, status}, pricing: {...} }: the pricing rides
+  // beside the row, not inside it, and a test that reaches past that reads undefined.
+  const p = o.json.pricing;
+  vat.o = o.json.order || {};
+  vat.pricing = p;
+  vat.pid = vat.o.id;
+  vat.mark_url = o.json.mark_url;   // the link is on the response, beside the row, not inside it
+  assert.ok(vat.mark_url, 'the shop was handed a one-tap link for this order');
+  assert.equal(p.subtotal, 115, 'the shelf price is the total, because the VAT is inside it');
+  assert.equal(p.tax, 15, 'taken out, not added on');
+  assert.equal(p.vat.mode, 'incl');
+  assert.equal(p.vat.included, true);
+  assert.equal(p.vat.registered, true, 'this order was priced as a tax invoice would be');
+  assert.equal(p.vat.net, 100);
+  assert.ok(Math.abs(p.total - 115) < 0.011 || p.total > 115, 'the rail fee rides on top as it always has');
+});
+
+test('0.9.0 the ledger row carries the tax, so the books never need the order document', async () => {
+  const rows = JSON.parse(env.ORDERS._map.get('list:vatmode').value);
+  const row = rows.find((x) => x.id === vat.pid);
+  assert.ok(row, 'the row is there');
+  assert.equal(row.tax, 15);
+  assert.equal(row.net, 100);
+  assert.equal(row.vat_pct, 15);
+  assert.equal(row.vat_mode, 'incl');
+  assert.ok(Number(row.pay_now) >= 115, 'and the amount the buyer was asked for, unchanged');
+  assert.ok('rounding' in row, 'the odd cents are named so they can be excluded from income');
+});
+
+test('0.9.0 the books count money in hand, then count it once it arrives', async () => {
+  const per = new Date().toISOString().slice(0, 7);
+  const cash0 = await call('/api/books?handle=vatmode&period=' + per + '&basis=cash', { cookie: vat.sh.cookie });
+  assert.equal(cash0.status, 200, cash0.text.slice(0, 200));
+  assert.equal(cash0.json.summary.vat.count, 0, 'nothing has been paid, so a cash-basis report says nothing');
+  assert.equal(cash0.json.summary.outstanding_balance, cash0.json.summary.vat ? 115 : 0);
+  const acc0 = await call('/api/books?handle=vatmode&period=' + per + '&basis=accrual', { cookie: vat.sh.cookie });
+  assert.equal(acc0.json.summary.vat.count, 1, 'the order exists, so the accrual basis sees it');
+  assert.equal(acc0.json.summary.vat.vat, 15);
+  const m = await call('/api/mark', { method: 'POST', body: { cap: capOf(vat.mark_url) } });
+  assert.equal(m.status, 200, m.text.slice(0, 200));
+  const cash1 = await call('/api/books?handle=vatmode&period=' + per + '&basis=cash', { cookie: vat.sh.cookie });
+  assert.equal(cash1.json.summary.vat.count, 1, 'and now the payment is in the month the money landed');
+  assert.equal(cash1.json.summary.collected > 0, true);
+  assert.equal(cash1.json.summary.vat.rates.length, 1);
+  assert.equal(cash1.json.summary.vat.rates[0].rate_pct, 15);
+  assert.equal(cash1.json.summary.outstanding_balance, 0, 'the balance clears when the money does');
+  assert.equal(cash1.json.summary.vat.registered, true);
+  assert.ok((cash1.json.periods || []).some((x) => x.period === per), 'the month picker is built from rows that exist');
+});
+
+test('0.9.0 the books door answers only the shop on the other side of it', async () => {
+  const anon = await call('/api/books?handle=vatmode');
+  assert.equal(anon.status, 401, 'no session, no ledger');
+  const other = await newShop('vatnosy');
+  const peek = await call('/api/books?handle=vatmode', { cookie: other.cookie });
+  assert.equal(peek.status, 403, 'a session for one shop used against another is a credential mismatch, answered as one');
+  assert.ok(!/gross|awaiting|vat/.test(JSON.stringify(peek.json)), 'and it carries no numbers, only the refusal');
+  const own = await call('/api/books?handle=vatnosy', { cookie: other.cookie });
+  assert.equal(own.status, 200);
+  assert.equal(own.json.summary.orders, 0, 'its own books are empty, which is the truth and is printable');
+});
+
+test('0.9.0 the CSV pack is a file, with the honest preamble in it', async () => {
+  const per = new Date().toISOString().slice(0, 7);
+  const r = await call('/api/books?handle=vatmode&period=' + per + '&fmt=csv', { cookie: vat.sh.cookie });
+  assert.equal(r.status, 200);
+  assert.match(r.headers.get('content-type'), /text\/csv/);
+  assert.match(r.headers.get('content-disposition'), /attachment; filename="vatmode-books-/);
+  assert.ok(r.text.startsWith('# tapstall books pack'), r.text.slice(0, 60));
+  assert.ok(r.text.includes('date,ref,status,buyer,phone,service,rail,gross,vat,net'), 'then the columns an accountant keys on');
+  assert.ok(/filename="vatmode-books-/.test(r.headers.get('content-disposition') || ''),
+    'the file is named for the shop and the month, got: ' + JSON.stringify(r.headers.get('content-disposition')));
+  assert.ok(/# vat: registered, no\. 4010000001/.test(r.text), 'the preamble says who is filing');
+  assert.ok(/# Sales side only/.test(r.text), 'and says what it is not');
+  assert.ok(r.text.includes('# totals'), 'the totals are in the file, so nobody re-adds them');
+  assert.equal((await call('/api/books?handle=vatmode&fmt=csv')).status, 401, 'the download is behind the same door as the panel');
+});
+
+test('0.9.0 a receipt exists: numbered, printable, and the order’s own figures', async () => {
+  const rec = await call('/api/receipt?handle=vatmode&order=' + vat.pid, { cookie: vat.sh.cookie });
+  assert.equal(rec.status, 200, rec.text.slice(0, 160));
+  assert.match(rec.text, /TAX INVOICE|Tax invoice/i, 'the heading follows the registration the order was priced under');
+  assert.match(rec.text, /4010000001/);
+  assert.match(rec.text, /<h1>[^<]+<\/h1>/, 'and the document is well-formed where it names the shop');
+  assert.match(rec.text, /1x VAT plate<\/td><td class=n>115\.00/, 'the line carries the money, not zeros');
+  assert.match(rec.text, /VAT @ 15% inside|VAT @ 15%/);
+  assert.match(rec.text, /115\.00/, 'the total the buyer paid, not a re-derivation of it');
+  assert.match(rec.headers.get('cache-control') || '', /no-store/);
+  assert.equal(rec.headers.get('x-robots-tag'), 'noindex, nofollow', 'an order document is not a page a crawler should meet');
+  const txt = await call('/api/receipt?handle=vatmode&order=' + vat.pid + '&fmt=txt', { cookie: vat.sh.cookie });
+  assert.match(txt.text, /Receipt |TAX INVOICE/);
+  assert.ok(txt.text.split('\n').length > 6, 'the text version is a document, not a headline');
+  const byCode = await call('/api/receipt?handle=vatmode&order=' + vat.o.code, { cookie: vat.sh.cookie });
+  assert.equal(byCode.status, 200, 'a code works as well as an id, because that is what the shop has on screen');
+  const gone = await call('/api/receipt?handle=vatmode&order=nope123', { cookie: vat.sh.cookie });
+  assert.equal(gone.status, 404);
+  assert.match(gone.json.note, /Only this shop’s own orders/, 'and the refusal says what it checked');
+  assert.equal((await call('/api/receipt?handle=vatmode&order=' + vat.pid)).status, 401, 'nobody else’s receipt, including a buyer’s');
+});
+
+test('0.9.0 send receipt to buyer is one tap into the chat they messaged in', async () => {
+  const wa = await call('/api/receipt?handle=vatmode&order=' + vat.pid + '&fmt=wa', { cookie: vat.sh.cookie });
+  assert.equal(wa.status, 302, wa.text.slice(0, 120));
+  const loc = wa.headers.get('location');
+  assert.ok(loc.startsWith('https://wa.me/263771234567?text='), loc);
+  const msg = decodeURIComponent(loc.split('text=')[1]);
+  assert.match(msg, /TAX INVOICE/);
+  assert.match(msg, new RegExp(vat.o.code), 'the message names the order it is a receipt for');
+  // an order with no number on it is not a broken link and not a silent failure either
+  const doc = orderDoc('vatmode', vat.pid);
+  assert.ok(vat.pid, 'the order response names the row it created, which is what a receipt is asked for');
+  doc.buyer.phone = '';
+  await env.ORDERS.put('order:vatmode:' + vat.pid, JSON.stringify(doc));
+  const noNum = await call('/api/receipt?handle=vatmode&order=' + vat.pid + '&fmt=wa', { cookie: vat.sh.cookie });
+  assert.equal(noNum.status, 200);
+  assert.equal(noNum.json.need_number, true);
+  assert.match(noNum.json.text, /TAX INVOICE/, 'the text is handed over instead, because there was no way to send it');
+  const back = orderDoc('vatmode', vat.pid);
+  back.buyer.phone = '263771234567';
+  await env.ORDERS.put('order:vatmode:' + vat.pid, JSON.stringify(back));
+});
+
+test('0.9.0 an unregistered shop gets a receipt, and the words that say why it is not an invoice', async () => {
+  vat.plain = await newShop('vatplain');
+  await call('/api/menu', { method: 'POST', cookie: vat.plain.cookie, confirm: 1,
+    body: { handle: 'vatplain', menu: { extra: [{ name: 'Plate', price: 40 }, { name: 'Mealie meal', price: 20, vat_rate: 'zero' }] } } });
+  const o = await call('/api/order', { method: 'POST', ip: '196.9.0.5', body: {
+    handle: 'vatplain', items: [{ name: 'Plate', price: 40, qty: 1 }, { name: 'Mealie meal', price: 20, qty: 1 }],
+    buyer: { name: 'Tino', phone: '263770000009' }, rail: 'cash_on_delivery', when: 'asap' } });
+  assert.equal(o.status, 201, o.text.slice(0, 200));
+  vat.plainOrder = o.json.order || o.json;
+  const rec = await call('/api/receipt?handle=vatplain&order=' + vat.plainOrder.id, { cookie: vat.plain.cookie });
+  assert.match(rec.text, /<h2>Receipt<\/h2>/);
+  assert.match(rec.text, /not VAT-registered/);
+  assert.ok(!/VAT No/.test(rec.text), 'and no number is invented for the header');
+});
+
+test('0.9.0 the row a zero-rate was set on is taxed at nothing, end to end', async () => {
+  await call('/api/settings', { method: 'POST', cookie: vat.plain.cookie, confirm: 1, body: { handle: 'vatplain', tax_pct: 15 } });
+  const doc = shopDoc('vatplain');
+  if (doc.pending) { doc.pending.apply_at = Date.now() - 1000; await env.STORES.put('store:vatplain', JSON.stringify(doc)); }
+  const o = await call('/api/order', { method: 'POST', ip: '196.9.0.6', body: {
+    handle: 'vatplain', items: [{ name: 'Plate', price: 40, qty: 1 }, { name: 'Mealie meal', price: 20, qty: 1 }],
+    buyer: { name: 'Tino', phone: '263770000009' }, rail: 'cash_on_delivery', when: 'asap' } });
+  assert.equal(o.status, 201, o.text.slice(0, 200));
+  const p = o.json.pricing;
+  assert.equal(p.tax, 6, '15% of the plate, nothing of the meal');
+  assert.equal(p.subtotal, 66);
+  const rows = JSON.parse(env.ORDERS._map.get('list:vatplain').value);
+  const row = rows.find((x) => x.id === o.json.order.id);
+  assert.equal(row.tax, 6, 'and the ledger row holds that figure, so the books do not have to guess');
+  const per = new Date().toISOString().slice(0, 7);
+  const b = await call('/api/books?handle=vatplain&period=' + per + '&basis=accrual', { cookie: vat.plain.cookie });
+  const rates = b.json.summary.vat.rates.map((x) => x.rate_pct);
+  assert.ok(rates.includes(15) && rates.includes(0), 'the return has a line at 15% and a line at nil, from one shelf');
+  assert.equal(b.json.summary.vat.vat, 6, 'the meal contributes nothing to it, and is still on the invoice');
+  const zero = b.json.summary.vat.rates.find((x) => x.rate_pct === 0);
+  assert.ok(zero.gross >= 20, 'the nil-rated gross is reported, which is the line a ZIMRA return asks for');
+  const rowJson = JSON.parse(env.ORDERS._map.get('list:vatplain').value).find((x) => x.id === o.json.order.id);
+  assert.ok(rowJson.vat_by && rowJson.vat_by['15'] && rowJson.vat_by['0'], 'and the row itself holds the split, so the answer needed no document read');
+  assert.equal(rowJson.vat_by['15'].tax, 6);
+  assert.equal(rowJson.vat_by['0'].gross, 20);
+});
+
+test('0.9.0 every row without a picture has one, and nobody is told it is a photo', async () => {
+  const feed = await call('/s/vatplain/feed.json');
+  const prods = feed.json.products;
+  const bare = prods.find((x) => !x.img || x.art);
+  assert.ok(bare, 'the added row with no image got art instead of an empty box');
+  assert.match(bare.img, /^\/art\/vatplain\/\d+\.svg\?n=/);
+  assert.equal(bare.art, true, 'flagged as art, which is what makes it safe to serve');
+  const art = await call(bare.img);
+  assert.equal(art.status, 200);
+  assert.match(art.headers.get('content-type'), /image\/svg\+xml/);
+  assert.match(art.headers.get('cache-control'), /max-age=31536000, immutable/);
+  assert.equal(art.headers.get('x-tapstall-art'), 'sample, not a photo');
+  assert.match(art.text, /^<svg xmlns/);
+  assert.ok(!/<(script|image|use)/i.test(art.text), 'nothing that reaches out or runs in it');
+  const before = env.STORES._writes, obefore = env.ORDERS._writes;
+  await call(art.headers.get('cache-control') ? bare.img : '/art/vatplain/1.svg');
+  assert.equal(env.STORES._writes, before, 'serving art writes nothing');
+  assert.equal(env.ORDERS._writes, obefore, 'and reads nothing from either namespace');
+  const page = await call('/s/vatplain');
+  assert.ok(!/property="og:image"/.test(page.text) || /vatplain\/i\//.test(page.text),
+    'a social preview is only promised when somebody took or uploaded a picture');
+});
+
+test('0.9.0 the mesh drafts a day from the menu and never a figure the menu does not have', async () => {
+  const anon = await call('/api/mesh?handle=vatmode');
+  assert.equal(anon.status, 401, 'the pack is behind the shop’s own door');
+  assert.equal((await call('/api/mesh')).status, 404, 'and a request naming no shop is not a shop');
+  // one menu write replaces the shelf, so the pack test re-posts the plate along with the rows it
+  // needs — the same thing a merchant finds out the first time they add a row and lose another
+  await call('/api/menu', { method: 'POST', cookie: vat.sh.cookie, confirm: 1, body: { handle: 'vatmode',
+    menu: { extra: [{ name: 'VAT plate', price: 115 }, { name: 'Sadza', price: 4 }, { name: 'Tea', price: 2 }, { name: 'Mopane worms', price: 6 }] } } });
+  const r = await call('/api/mesh?handle=vatmode', { cookie: vat.sh.cookie });
+  assert.equal(r.status, 200, r.text.slice(0, 200));
+  assert.ok(r.json.ok);
+  const beats = r.json.plan.beats;
+  assert.equal(beats.length, r.json.budget.per_day, 'three lines, the pinned budget');
+  assert.equal(beats.filter((x) => x.kind === 'promo').length, 1, 'one of them a promo, never two');
+  for (const b of beats) {
+    const cap = r.json.rails[b.rail].max;
+    assert.ok(b.text.length <= cap, b.rail + ' fits its own rail (' + b.text.length + '/' + cap + ')');
+    assert.ok(!/today only|limited time|won\'t last|best in Harare/i.test(b.text), 'no claim the row cannot support');
+  }
+  const prices = (await call('/s/vatmode/feed.json')).json.products.map((p) => Number(p.price));
+  for (const b of beats) if (b.price) assert.ok(prices.some((x) => Math.abs(x - b.price) < 0.005), 'every number is a price on the menu today');
+  const pub = await call('/s/vatmode/mesh.json');
+  assert.equal(pub.status, 200);
+  assert.equal(pub.json.priced, true);
+  assert.ok(pub.json.items.some((x) => x.name === 'VAT plate' && x.price === 115), 'the public file repeats the shop, not a summary of it');
+  assert.ok(pub.json.items.length >= 4, 'every row is in the file, in the shop’s own order');
+  assert.ok(!JSON.stringify(pub.json).match(/pay_account|whatsapp.*77123|buyer/i), 'and no buyer or wallet detail is in it');
+  assert.match(pub.json.terms, /not as a promise/);
+});
+
+test('0.9.0 marking a line posted is the one write, and a spent budget changes nothing else', async () => {
+  const noConfirm = await call('/api/mesh/seen', { method: 'POST', cookie: vat.sh.cookie, body: { handle: 'vatmode', marked: ['vat-plate'] } });
+  assert.equal(noConfirm.status, 403, 'a cookie from a form on someone else’s page is not consent');
+  const first = await call('/api/mesh?handle=vatmode', { cookie: vat.sh.cookie });
+  const key = first.json.plan.beats[0].item_key;
+  const wBefore = env.ORDERS._writes;
+  const saved = await call('/api/mesh/seen', { method: 'POST', cookie: vat.sh.cookie, confirm: 1, body: { handle: 'vatmode', marked: [key] } });
+  assert.equal(saved.status, 200, saved.text);
+  assert.equal(saved.json.saved, true);
+  assert.equal(env.ORDERS._writes, wBefore + 1, 'one write for a marked line, whatever else the day cost');
+  assert.ok(env.ORDERS._map.has('mesh:vatmode'), 'in the orders namespace, because it is activity and not config');
+  const second = await call('/api/mesh?handle=vatmode', { cookie: vat.sh.cookie });
+  assert.ok(second.json.posted[key], 'and the plan now knows it was posted');
+  assert.ok(!second.json.plan.beats.some((b) => b.item_key === key), 'that item is quiet for a week, so the shop is not repeating itself at its own customers');
+  // the memory is optional: with the namespace gone the pack still builds, and says less
+  env.ORDERS._map.delete('mesh:vatmode');
+  const third = await call('/api/mesh?handle=vatmode', { cookie: vat.sh.cookie });
+  assert.equal(third.json.state_saved, false);
+  assert.equal(third.json.plan.beats.length, 3, 'the queue is derived from the day, so a missing key is not an outage');
+  const w2 = env.ORDERS._writes;
+  const putBack = env.ORDERS.put;
+  env.ORDERS.put = async () => { throw new Error('QUOTA_EXCEEDED: daily write limit'); };
+  const blocked = await call('/api/mesh/seen', { method: 'POST', cookie: vat.sh.cookie, confirm: 1, body: { handle: 'vatmode', marked: [key] } });
+  env.ORDERS.put = putBack;
+  assert.equal(blocked.status, 200, 'a refused write is answered, not thrown: the copy was always the deliverable');
+  assert.equal(blocked.json.saved, false);
+  assert.match(blocked.json.note, /write budget for today is spent/);
+  void w2;
+});
+
+test('0.9.0 the operator edits the merchant’s rows through the merchant’s own rule', async () => {
+  const c = 'tp_ops=' + opsCookie;
+  const noHdr = await call('/ops/api/store', { method: 'POST', cookie: c, body: { handle: 'vatmode', action: 'menu', menu: { over: {} } } });
+  assert.equal(noHdr.status, 403, 'even the console posts a lever with the confirm header');
+  const writesBefore = env.STORES._writes;
+  const blank = await call('/ops/api/store', { method: 'POST', cookie: c, confirm: 1, body: { handle: 'vatmode', action: 'menu', menu: { over: { nope: {} } } } });
+  assert.equal(blank.status, 200, blank.text.slice(0, 200));
+  assert.equal(blank.json.changed, false, 'a patch that changes nothing says so — which it can, because patch semantics mean it destroyed nothing either');
+  assert.equal(env.STORES._writes, writesBefore, 'and it spent no write and no log line doing it');
+  const forgotten = await call('/ops/api/store', { method: 'POST', cookie: c, confirm: 1, body: { handle: 'vatmode', action: 'menu', menu: { over: { nope2: { price: 9 } } } } });
+  assert.equal(forgotten.json.changed, true, 'a patch that does change something says that too');
+  const afterForgotten = await call('/s/vatmode/feed.json');
+  assert.ok((afterForgotten.json.products || []).some((x) => x.name === 'VAT plate'), 'the row a payload forgot to mention is still on the shelf');
+  const feed = await call('/s/vatmode/feed.json');
+  const plate = (feed.json.products || []).find((p) => p.name === 'VAT plate');
+  assert.ok(plate, 'the shop has a row to edit: ' + feed.text.slice(0, 120));
+  const ok = await call('/ops/api/store', { method: 'POST', cookie: c, confirm: 1, body: {
+    handle: 'vatmode', action: 'menu', menu: { over: { [plate.id]: { price: 120, available: false } } } } });
+  assert.equal(ok.status, 200, ok.text.slice(0, 200));
+  assert.equal(ok.json.changed_rows, 1, 'one row moved');
+  assert.equal(ok.json.edits, 6, 'and the store now carries six overridden things — the four rows the merchant added and two price edits');
+  assert.match(ok.json.note, /Revert/, 'and the answer says who can undo it');
+  const after = await call('/s/vatmode/feed.json');
+  const row = after.json.products.find((p) => p.id === plate.id);
+  assert.equal(row.price, 120, 'the change is on the shelf buyers read');
+  assert.equal(row.available, false);
+  assert.equal(shopDoc('vatmode').menu.over[plate.id].price, 120, 'in the same place a merchant edit would have gone');
+  const still = (await call('/s/vatmode/feed.json')).json.products.map((x) => x.name);
+  assert.ok(still.includes('Sadza') && still.includes('Tea') && still.includes('Mopane worms'),
+    'a one-row patch does not clear the merchant’s own rows: ' + still.join(','));
+  assert.equal(shopDoc('vatmode').menu.extra.length, 4, 'they are still in the store document, not just in a cache');
+  const audit = JSON.stringify((await call('/api/admin?handle=vatmode', { cookie: vat.sh.cookie })).json.audit);
+  assert.match(audit, /"menu"/, 'the merchant sees the edit in their own log');
+  assert.match(audit, /"ops"/, 'and sees whose hand was on it');
+  const foreign = await call('/ops/api/store', { method: 'POST', cookie: c, confirm: 1, body: {
+    handle: 'vatmode', action: 'menu', menu: { extra: [{ name: 'Borrowed', price: 1, img: '/i/vatnosy/abcd' }] } } });
+  assert.equal(foreign.status, 200, foreign.text.slice(0, 160));
+  const extra = shopDoc('vatmode').menu.extra[0];
+  assert.equal(extra.img, '', 'another shop’s picture is refused through this door exactly as it is through theirs');
+  const rev = await call('/ops/api/store', { method: 'POST', cookie: c, confirm: 1, body: { handle: 'vatmode', action: 'menu_revert' } });
+  assert.equal(rev.status, 200, rev.text);
+  assert.equal(shopDoc('vatmode').menu, undefined, 'and the whole shelf goes back to the sheet');
+});
+
+test('0.9.0 the books answer on a day the account cannot write', async () => {
+  const per = new Date().toISOString().slice(0, 7);
+  const sPut = env.STORES.put, oPut = env.ORDERS.put;
+  env.STORES.put = async () => { throw new Error('QUOTA_EXCEEDED: too many writes today'); };
+  env.ORDERS.put = async () => { throw new Error('QUOTA_EXCEEDED: too many writes today'); };
+  const b = await call('/api/books?handle=vatmode&period=' + per, { cookie: vat.sh.cookie });
+  assert.equal(b.status, 200, 'the panel still answers, because it writes nothing to reach an answer');
+  assert.ok(b.json.summary.vat.count >= 1);
+  const csv = await call('/api/books?handle=vatmode&period=' + per + '&fmt=csv', { cookie: vat.sh.cookie });
+  assert.equal(csv.status, 200, 'including the file for the accountant');
+  const rec = await call('/api/receipt?handle=vatmode&order=' + vat.pid, { cookie: vat.sh.cookie });
+  assert.equal(rec.status, 200, 'and the receipt, which is printed from the row and the document that already exist');
+  assert.match(rec.text, /Tax invoice|TAX INVOICE/, 'a printed receipt is not a write, so a spent day still prints one');
+  env.STORES.put = sPut; env.ORDERS.put = oPut;
+});

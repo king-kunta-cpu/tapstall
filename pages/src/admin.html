@@ -211,10 +211,19 @@ details.box .in{padding:.5rem 0 .7rem}
         </div>
         <p class="hint" style="margin-top:.5rem">Anything marked <span class="n" style="font-size:.68rem;color:#8a5b00">· 15-min hold</span> goes live 15 minutes from now, and you can cancel it inside that window. Today’s orders keep the details printed on their slip either way.</p>
         <details style="margin-top:.4rem"><summary class="hint">Sheet columns, if you are building it now</summary>
-          <p class="mono" style="margin:.4rem 0">id,name,category,price,currency,options,addons,stock,popular</p>
-          <p class="hint">options <span class="mono">Size:Small,Large:2|Spice:mild,hot</span> · addons <span class="mono">Cheese:1.5|Fried egg:0.5</span> · stock <span class="mono">yes</span>/<span class="mono">no</span> · popular <span class="mono">1</span> · photo in an <span class="mono">image</span> column, full URL.</p>
+          <p class="mono" style="margin:.4rem 0">id,name,category,price,currency,options,addons,stock,popular,vat</p>
+          <p class="hint">options <span class="mono">Size:Small,Large:2|Spice:mild,hot</span> · addons <span class="mono">Cheese:1.5|Fried egg:0.5</span> · stock <span class="mono">yes</span>/<span class="mono">no</span> · popular <span class="mono">1</span> · photo in an <span class="mono">image</span> column, full URL · a zero-rated or out-of-scope row says <span class="mono">zero</span> (or <span class="mono">exempt</span>, or another rate) in <span class="mono">vat</span>.</p>
           <a class="sm" style="text-decoration:none;display:inline-block;margin-top:.3rem" href="/data/sample-menu.csv" download>Download a CSV to paste from</a>
         </details>
+      </div>
+    </details>
+
+    <details class="box" id="detMesh">
+      <summary>Post the shop today <span class="hint">a pack built from your menu, copy and paste</span></summary>
+      <div class="in">
+        <p class="hint" style="margin-top:0">Three lines a day at most, about one real thing each, and never a number that is not on your menu right now. Nothing is sent for you: tap Copy, paste it where you already post. A machine that wants to repeat your prices can read your <a href="#" id="meshJsonLn">public mesh file</a>.</p>
+        <div id="meshOut" class="hint">open this to build today&rsquo;s pack&hellip;</div>
+        <div class="row" style="gap:.4rem;margin-top:.5rem;flex-wrap:wrap"><button class="sm sec" id="meshGo">Rebuild the pack</button><span class="hint" id="meshMsg"></span></div>
       </div>
     </details>
 
@@ -222,6 +231,19 @@ details.box .in{padding:.5rem 0 .7rem}
       <summary>What a buyer sees right now</summary>
       <div class="in"><iframe id="shareFrame" title="your store" style="width:100%;height:22rem;border:1px solid var(--line);border-radius:var(--r);background:#fff"></iframe></div>
     </details>
+  </div>
+
+  <!-- ─────────────────────────── the books ─────────────────────────── -->
+  <div class="card" id="booksCard">
+    <h3>Books <span class="hint" id="booksTag">what came in, what of it is VAT, as a file</span></h3>
+    <div class="bar" style="margin-top:.2rem">
+      <select id="booksPeriod" aria-label="month"></select>
+      <select id="booksBasis" aria-label="basis"><option value="cash">money in hand (cash)</option><option value="accrual">when the order came (accrual)</option></select>
+      <button class="sm sec" id="booksAll">Whole shop</button>
+      <a class="sm" id="booksCsv" style="text-decoration:none" href="#" download>Download the CSV for an accountant</a>
+    </div>
+    <div id="booksOut"><p class="hint">open the ledger once and the figures are built from the rows it read.</p></div>
+    <p class="hint" style="margin-top:.4rem">Nothing here is a return filed on your behalf and nothing is stored: the figures are added up from your order rows each time you open this, which is why it still answers on a day the platform cannot write.</p>
   </div>
 
   <!-- ─────────────────────────── link & books ─────────────────────────── -->
@@ -408,7 +430,7 @@ function load() {
     // the menu is the shop's own public feed endpoint; read it once so the Shop
     // card is not lying about an empty menu before the first re-read
     api('/s/' + S.handle + '/feed.json').then(function (r) { S.feed = (r.j && r.j.products) || []; renderShop(); });
-    renderFields(); renderPending(); renderOrders(); renderShop(); renderPlan(); renderShare(); renderAudit();
+    renderFields(); renderPending(); renderOrders(); renderShop(); renderPlan(); renderShare(); renderAudit(); renderBooks();
   }).catch(function () { q('#login').classList.remove('hide'); });
 }
 function reFeed() {
@@ -577,13 +599,18 @@ var LABEL = {
   shop_name: 'Shop name', tagline: 'Tagline', logo: 'Logo (image URL)', location: 'Location / address', hours: 'Opening hours', closed: 'Closed right now',
   rail_def: 'Describe your own method',
   whatsapp: 'Your WhatsApp (buyers reach you)', pay_account: 'Default payment number (for methods with no number of their own)', rail: 'Payment rail', surcharge_mode: 'Who pays the payment cost',
-  currency: 'Currency', zig_rate: 'ZiG exchange rate', tax_pct: 'Tax %', delivery_fee: 'Delivery fee', free_over: 'Free delivery over',
+  currency: 'Currency', zig_rate: 'ZiG exchange rate', tax_pct: 'Tax / VAT rate %', delivery_fee: 'Delivery fee', free_over: 'Free delivery over',
+  // One group in the form, because a shop that is registered has to answer five questions at once
+  // and a shop that is not should see the whole group say so in one line.
+  vat_registered: 'I am VAT-registered', vat_mode: 'How my prices quote VAT', vat_rate_pct: 'VAT rate % (blank = the tax % above)',
+  vat_number: 'My VAT number', vat_address: 'Address printed on a receipt',
   max_order_value: 'Flag orders over', cod_review_above: 'Review cash orders over', cache_seconds: 'Menu cache (seconds)', feed_url: 'Menu sheet link',
   notify_webhook: 'Order webhook (URL)', notify_email: 'Notify this email of orders', owner_email: 'Owner email (also lets you reset your own PIN)',
   unique_change: 'Add unique odd cents to every amount', require_optin: 'Ask buyers before saving their number',
   reference_format: 'Payment reference', order_prefix: 'Order code prefix'
 };
-var ORDER = ['shop_name', 'tagline', 'logo', 'location', 'hours', 'closed', 'whatsapp', 'pay_account', 'rail', 'rail_def', 'currency', 'zig_rate', 'tax_pct', 'surcharge_mode',
+var ORDER = ['shop_name', 'tagline', 'logo', 'location', 'hours', 'closed', 'whatsapp', 'pay_account', 'rail', 'rail_def', 'currency', 'zig_rate', 'tax_pct',
+  'vat_registered', 'vat_mode', 'vat_rate_pct', 'vat_number', 'vat_address', 'surcharge_mode',
   'delivery_fee', 'free_over', 'unique_change', 'order_prefix', 'reference_format', 'feed_url', 'cache_seconds', 'max_order_value', 'cod_review_above',
   'require_optin', 'notify_email', 'notify_webhook', 'owner_email'];
 function renderFields() {
@@ -593,10 +620,16 @@ function renderFields() {
     if (typeof v === 'boolean') {
       f = '<div class="f"><label>' + esc(LABEL[k] || k) + (inst ? '' : ' <span class="n">· 15-min hold</span>') + '</label>'
         + '<select data-k="' + k + '"><option value="1"' + (v ? ' selected' : '') + '>yes</option><option value="0"' + (!v ? ' selected' : '') + '>no</option></select></div>';
-    } else if (k === 'rail' || k === 'surcharge_mode') {
-      var opts = k === 'rail' ? (Object.keys(S.rails || {}).length ? Object.keys(S.rails) : ['cash', 'ecocash_usd', 'ecocash_zig', 'payfast', 'payshap', 'yoco']) : ['absorb', 'pass'];
+    } else if (k === 'rail' || k === 'surcharge_mode' || k === 'vat_mode') {
+      var opts = k === 'rail' ? (Object.keys(S.rails || {}).length ? Object.keys(S.rails) : ['cash', 'ecocash_usd', 'ecocash_zig', 'payfast', 'payshap', 'yoco'])
+        : k === 'vat_mode' ? ['excl', 'incl'] : ['absorb', 'pass'];
+      // Which way round the price on the board is quoted, said in the shop's words rather than a
+      // tax acronym, because the two answers move the number a buyer pays in opposite directions.
+      var vhint = k === 'vat_mode'
+        ? (v === 'incl' ? ' <span class="tiny muted">your shelf prices already include VAT</span>' : ' <span class="tiny muted">VAT is added at checkout</span>')
+        : '';
       f = '<div class="f"><label>' + esc(LABEL[k]) + (inst ? '' : ' <span class="n">· 15-min hold</span>') + '</label><select data-k="' + k + '">'
-        + opts.map(function (o) { return '<option' + (o === v ? ' selected' : '') + '>' + o + '</option>'; }).join('') + '</select></div>';
+        + opts.map(function (o) { return '<option' + (o === v ? ' selected' : '') + '>' + o + '</option>'; }).join('') + '</select>' + vhint + '</div>';
     } else if (k === 'rail_def') {
       // Only shown as a form once “custom” is the chosen rail; otherwise it is one
       // quiet line saying where it came from. The description is what buyers are
@@ -1110,6 +1143,10 @@ function row(o) {
     + (o.status !== 'cancelled' ? '<button class="sm" data-cancel="' + esc(o.id) + '">Cancel</button>' : '')
     + '<button class="sm" data-wa="' + esc(o.id) + '">WhatsApp buyer</button>'
     + '<button class="sm" data-cp="' + esc(o.id) + '">Copy slip</button>'
+    // The document itself, which until now did not exist: printed from the row, with the VAT line
+    // the order was priced at, and a one-tap route into the buyer's own chat.
+    + '<button class="sm" data-rc="' + esc(o.id) + '">Print receipt</button>'
+    + '<button class="sm" data-rw="' + esc(o.id) + '">Send receipt to buyer</button>'
     + '</div></details></div>';
 }
 function bind(scope) {
@@ -1128,6 +1165,27 @@ function bind(scope) {
   qa('[data-cp]', root).forEach(function (b) { b.onclick = function () {
     var o = byId(b.getAttribute('data-cp')); if (!o) return;
     copyText(orderSlip(o)); b.textContent = 'Copied ✓';
+  }; });
+  qa('[data-rc]', root).forEach(function (b) { b.onclick = function () {
+    window.open('/api/receipt?handle=' + encodeURIComponent(S.handle) + '&order=' + encodeURIComponent(b.getAttribute('data-rc')), '_blank');
+  }; });
+  qa('[data-rw]', root).forEach(function (b) { b.onclick = function () {
+    var was = b.textContent, id = b.getAttribute('data-rw'); b.disabled = true; b.textContent = '…';
+    // The server decides whether there is a number to send to, because the server is the one that
+    // knows what is on the order; a page that guessed would open a blank chat or a broken link.
+    fetch('/api/receipt?handle=' + encodeURIComponent(S.handle) + '&order=' + encodeURIComponent(id) + '&fmt=wa', { credentials: 'same-origin' })
+      .then(function (r) { return (r.headers.get('content-type') || '').indexOf('json') >= 0 ? r.json() : { sent: true }; })
+      .then(function (j) {
+        b.disabled = false; b.textContent = was;
+        if (j && j.need_number) {
+          copyText(j.text || '');
+          q('#list').insertAdjacentHTML('afterbegin', '<div class="flags">This order has no buyer number, so the receipt was copied instead — paste it wherever they reached you.</div>');
+        }
+      })
+      .catch(function () {
+        b.disabled = false; b.textContent = was;
+        q('#list').insertAdjacentHTML('afterbegin', '<div class="flags">The receipt could not be read. Nothing was sent.</div>');
+      });
   }; });
   qa('[data-pfv]', root).forEach(function (b) { b.onclick = function () {
     var id = b.getAttribute('data-pfv'); var was = b.textContent; b.disabled = true; b.textContent = '…';
@@ -1210,6 +1268,111 @@ function renderPlan() {
   q('#planPaused').classList.toggle('hide', !S.store.suspended);
 }
 function storeUrl() { return location.origin + '/s/' + S.handle; }
+/* ------------------------------------------------------------------ the books
+ *
+ * Every figure comes from /api/books, which is booksSummary and nothing else, so the number in
+ * this card and the number in the downloaded file are the same computation in two clothes. The
+ * card is deliberately blunt about what it could not count: an operator who finds a report
+ * tidy beyond what the rows support stops trusting all of it, which is worse than a gap.
+ */
+function renderBooks() {
+  var out = q('#booksOut'), sel = q('#booksPeriod'), per = S.booksPeriod || '';
+  if (sel && per === '__none__') per = '';
+  api('/api/books?handle=' + encodeURIComponent(S.handle) + '&basis=' + (S.booksBasis || 'cash') + (per ? '&period=' + per : '')).then(function (r) {
+    var j = r.j || {};
+    if (!j.ok) { out.innerHTML = '<p class="hint">' + esc(j.error || 'the books did not answer') + '</p>'; return; }
+    S.booksPeriods = j.periods || [];
+    if (!per && S.booksPeriod !== '') { var p0 = (S.booksPeriods[0] || {}).period; if (p0) { S.booksPeriod = p0; return renderBooks(); } }
+    var b = j.summary || {}, v = b.vat || {}, cur = (j.store && j.store.currency) || S.store.currency || 'USD';
+    sel.innerHTML = ['<option value="">Whole shop</option>'].concat(S.booksPeriods.map(function (x) {
+      return '<option value="' + esc(x.period) + '"' + (x.period === per ? ' selected' : '') + '>' + esc(x.period) + ' · ' + x.rows + ' row' + (x.rows === 1 ? '' : 's') + '</option>';
+    })).join('');
+    sel.value = per || '';
+    q('#booksBasis').value = j.opts.basis || 'cash';
+    q('#booksCsv').href = '/api/books?handle=' + encodeURIComponent(S.handle) + '&basis=' + (j.opts.basis || 'cash')
+      + (per ? '&period=' + per : '') + '&fmt=csv';
+    q('#booksTag').textContent = (per ? per : 'everything on file') + ' · ' + (j.opts.basis === 'accrual' ? 'when the order came' : 'money in hand') + ' · ' + cur;
+    var m2 = function (n) { return (Number(n) || 0).toFixed(2); };
+    var stat = function (k, val, cls) { return '<div class="stat"><b class="' + (cls || '') + '">' + val + '</b><span>' + k + '</span></div>'; };
+    out.innerHTML = '<div class="grid c4" style="margin-top:.45rem">'
+      + stat('collected (paid)', m2(b.collected))
+      + stat('of which VAT', m2(v.vat), v.vat > 0 ? 'warn' : '')
+      + stat('net sales', m2(v.net))
+      + stat('not yet collected (all months)', m2(b.outstanding_balance), b.outstanding_balance > 0 ? 'warn' : '')
+      + '</div>'
+      + (v.rates && v.rates.length ? '<table class="tbl" style="margin-top:.5rem"><thead><tr><th>rate</th><th>gross</th><th>VAT</th><th>net</th><th>orders</th></tr></thead><tbody>'
+        + v.rates.map(function (x) { return '<tr><td>' + m2(x.rate_pct) + '%</td><td>' + m2(x.gross) + '</td><td>' + m2(x.vat) + '</td><td>' + m2(x.net) + '</td><td>' + x.count + '</td></tr>'; }).join('')
+        + '</tbody></table>' : '')
+      + '<p class="hint" style="margin-top:.45rem">' + (v.count || 0) + ' order(s) counted · ' + (v.skipped || 0) + ' not counted (cancelled, or unpaid on a cash basis)'
+      + (v.estimated ? ' · <b>' + v.estimated + ' estimated at today’s rate — these rows predate the tax fields</b>' : '')
+      + (v.missing ? ' · ' + v.missing + ' unreadable and excluded' : '')
+      + (b.rounding_identifiers ? ' · ' + m2(b.rounding_identifiers) + ' of odd cents that identify transfers, not income' : '')
+      + '</p><p class="hint">' + esc(b.note || '') + (v.registered ? '' : ' This shop is not marked VAT-registered, so no tax invoice is being issued.') + '</p>';
+  });
+}
+q('#booksPeriod').onchange = function () { S.booksPeriod = this.value; renderBooks(); };
+q('#booksBasis').onchange = function () { S.booksBasis = this.value; renderBooks(); };
+q('#booksAll').onclick = function () { S.booksPeriod = ''; renderBooks(); };
+
+/* ----------------------------------------------------------------- the mesh
+ *
+ * Adapted from the distribution mesh this house runs for its other product, shrunk to what a
+ * shop with no API keys can use: a planner with a real budget and a cooldown, rails that are text
+ * you paste, and one rule the writer here has never had to be told twice — a figure only appears
+ * if it is on the menu right now. Marking a line posted is the one write, it is optional, and a
+ * refused write changes nothing about what you can post tomorrow.
+ */
+function meshMsg(t, bad) { var e = q('#meshMsg'); if (e) { e.textContent = t; e.className = 'hint' + (bad ? ' flags' : ''); } }
+function renderMesh(force) {
+  var out = q('#meshOut');
+  if (!force && S.meshLoaded) { meshDraw(S.mesh); return; }
+  out.innerHTML = '<p class="hint">building today’s pack from your menu…</p>';
+  api('/api/mesh?handle=' + encodeURIComponent(S.handle)).then(function (r) {
+    var j = r.j || {};
+    if (!j.ok) { out.innerHTML = '<p class="hint">' + esc(j.error || 'the pack did not build') + '</p>'; return; }
+    S.mesh = j; S.meshLoaded = 1; meshDraw(j);
+  });
+}
+function meshDraw(j) {
+  var out = q('#meshOut'), p = j.plan || {}, beats = p.beats || [];
+  q('#meshJsonLn').href = j.card_url || ('/s/' + encodeURIComponent(S.handle) + '/mesh.json');
+  q('#meshJsonLn').textContent = 'public mesh file';
+  if (!beats.length) { out.innerHTML = '<p class="hint">Nothing to post today: a pack is only as good as the menu it is read from, and the menu could not be read.</p>'; return; }
+  var posted = j.posted || {};
+  out.innerHTML = beats.map(function (b, i) {
+    var rl = (j.rails || {})[b.rail] || { label: b.rail };
+    var was = b.item_key && posted[b.item_key];
+    return '<div class="box" style="margin-top:.4rem"><div class="row between" style="align-items:baseline">'
+      + '<span class="tiny muted"><b>' + esc(rl.label || b.rail) + '</b> · ' + esc(b.kind === 'promo' ? 'one promo of the day' : 'value')
+      + (b.price != null && b.price !== '' ? ' · ' + esc(String(b.item)) + ' at ' + Number(b.price).toFixed(2) : '')
+      + (was ? ' · marked posted ' + esc(String(was).slice(0, 10)) : '') + '</span>'
+      + '<span style="display:flex;gap:.3rem"><button class="sm" data-mc="' + i + '">Copy</button>'
+      + (b.item_key ? '<button class="sm sec" data-mm="' + esc(b.item_key) + '">' + (was ? 'Posted again?' : 'Marked posted') + '</button>' : '')
+      + '</span></div>'
+      + '<p style="white-space:pre-wrap;font-size:.82rem;margin:.35rem 0 0">' + esc(b.text) + '</p>'
+      + (b.why ? '<p class="tiny muted" style="margin:.25rem 0 0">held back: ' + esc(b.why) + '</p>' : '')
+      + '</div>';
+  }).join('')
+    + ((p.fails || []).length ? '<p class="flags" style="margin-top:.4rem">' + p.fails.map(function (f) { return esc(f.note); }).join('<br>') + '</p>' : '')
+    + '<p class="hint" style="margin-top:.4rem">' + esc(j.note || '') + (j.state_saved ? '' : ' · nothing remembered about what you posted, because nothing has been marked yet') + '</p>';
+  qa('[data-mc]', out).forEach(function (b) { b.onclick = function () {
+    var t = ((S.mesh.plan.beats || [])[Number(b.getAttribute('data-mc'))] || {}).text || '';
+    copyText(t); b.textContent = 'Copied ✓';
+  }; });
+  qa('[data-mm]', out).forEach(function (b) { b.onclick = function () {
+    var k = b.getAttribute('data-mm'); b.disabled = true;
+    api('/api/mesh/seen', { handle: S.handle, marked: [k] }).then(function (r) {
+      var j = (r && r.j) || {};
+      if (!j.ok) { meshMsg(j.error || 'not saved', true); b.disabled = false; return; }
+      meshMsg(j.note || 'Marked.', false);
+      if (j.saved && S.mesh) { S.mesh.posted = S.mesh.posted || {}; S.mesh.posted[k] = new Date().toISOString().slice(0, 10); meshDraw(S.mesh); }
+      else b.disabled = false;
+    });
+  }; });
+}
+q('#detMesh').addEventListener('toggle', function () { if (this.open) renderMesh(); });
+q('#meshGo').onclick = function () { renderMesh(1); };
+
 function renderShare() {
   var url = storeUrl();
   q('#shareLn').textContent = url; q('#shareLn').href = url;

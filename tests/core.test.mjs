@@ -1186,3 +1186,222 @@ test('the renew link answers to the same rule as a signed capability', () => {
   assert.equal(C.renewOk({ g: 'x' }, { auth_gen: 'x' }), true,
     'a record with no date is still judged on its generation, which is the stronger evidence');
 });
+
+/* ============================== 0.9.0: VAT, the books, the receipt, the mesh */
+
+test('0.9.0 a shop that never heard of VAT prices exactly as it did yesterday', () => {
+  const st = { currency: 'USD' };
+  const p = C.priceOrder(st, [{ name: 'Plate', price: 10, qty: 2 }], 'pickup', null);
+  assert.equal(p.tax, 0);
+  assert.equal(p.subtotal, 20);
+  assert.equal(p.vat.on, false, 'no rate means no VAT, in either mode');
+  assert.equal(p.vat.mode, 'excl');
+  assert.match(C.receiptText({ shop_name: 'S' }, { code: 'X-1', items: [{ name: 'Plate', qty: 2, unit: 10, total: 20 }], pricing: p }),
+    /not VAT-registered/, 'and the receipt says the plain truth about it');
+});
+
+test('0.9.0 the tax_pct a shop already set is the VAT rate, without a migration', () => {
+  const plan = C.vatPlan({ tax_pct: 15 });
+  assert.equal(plan.rate_pct, 15);
+  assert.equal(plan.on, true);
+  assert.equal(C.vatPlan({ tax_pct: 15, vat_rate_pct: 0 }).on, false, 'a shop can set the rate to nil and mean it');
+  assert.equal(C.vatPlan({ tax_pct: 15, vat_rate_pct: 21 }).rate_pct, 21, 'the new field wins over the old one');
+  assert.equal(C.vatPlan({ tax_pct: 999 }).rate_pct, 40, 'a rate outside the range is clamped, not trusted');
+  assert.match(C.vatPlan({ tax_pct: 15 }).price_note, /added at checkout/);
+  assert.match(C.vatPlan({ tax_pct: 15, vat_mode: 'incl' }).price_note, /include VAT/);
+});
+
+test('0.9.0 inclusive prices have the tax taken out of them, not added to them', () => {
+  const items = [{ name: 'Chicken', price: 100, qty: 1 }];
+  const ex = C.priceOrder({ tax_pct: 15 }, items, 'pickup', null);
+  const inc = C.priceOrder({ tax_pct: 15, vat_mode: 'incl' }, [{ name: 'Chicken', price: 115, qty: 1 }], 'pickup', null);
+  assert.equal(ex.subtotal, 115, 'exclusive: the shelf said 100, the buyer pays 115');
+  assert.equal(inc.subtotal, 115, 'inclusive: the shelf said 115, the buyer pays 115');
+  assert.equal(ex.tax, 15);
+  assert.equal(inc.tax, 15, 'and the VAT the shop owes is the same figure either way');
+  assert.equal(inc.vat.included, true);
+  assert.equal(ex.vat.included, false);
+  assert.equal(inc.vat.net, 100);
+});
+
+test('0.9.0 a zero-rated staple is zero-rated without turning the rest of the shop off', () => {
+  const st = { tax_pct: 15 };
+  const p = C.priceOrder(st, [{ name: 'Mealie meal', price: 100, qty: 1, vat_rate: 'zero' }, { name: 'Stew', price: 23, qty: 1 }], 'pickup', null);
+  assert.equal(p.lines[0].vat_pct, 0);
+  assert.equal(p.lines[1].vat_pct, 15);
+  assert.equal(p.tax, 3.45, '15% of the stew, nothing of the meal');
+  assert.equal(p.subtotal, 126.45, 'the meal is still on the invoice at its full price, with tax only on the stew');
+  const both = C.priceOrder(st, [{ name: 'Mealie meal', price: 100, qty: 1, vat_rate: 'zero' }], 'pickup', null);
+  assert.equal(both.tax, 0);
+  assert.equal(C.vatLinePct({ vat_rate: 'exempt' }, st), -1, 'out of scope is its own answer, not a zero');
+  assert.equal(C.vatLinePct({ vat_rate: '12.5' }, st), 12.5);
+  assert.equal(C.vatLinePct({ vat_rate: 'nonsense' }, st), 15, 'a cell nobody meant falls back to the shop');
+  assert.equal(C.cleanVatRate('18%'), '18');
+  assert.equal(C.cleanVatRate('ZERO'), '0');
+  assert.equal(C.cleanVatRate('-4'), '', 'a negative rate is refused, not obeyed');
+});
+
+test('0.9.0 the sheet gets a vat column and the editor gets a vat box', () => {
+  const rows = C.parseProducts('id,name,price,vat\nm,Mealie meal,20,zero\ns,Stew,25,\n', { currency: 'USD' });
+  assert.equal(rows[0].vat_rate, 'zero');
+  assert.equal(rows[1].vat_rate, '', 'a blank cell means the shop rate, not zero');
+  const e = C.sanitizeMenuEdit({ vat_rate: 'zero' }, 'shop');
+  assert.equal(e.vat_rate, '0');
+  assert.deepEqual(C.sanitizeMenuEdit({ price: '9' }, 'shop'), { price: 9 }, 'an edit that says nothing about VAT changes nothing about VAT');
+  const m = C.sanitizeMenu({ over: { m: { vat_rate: '12' } }, handle: 'shop' });
+  assert.equal(m.over.m.vat_rate, '12');
+});
+
+test('0.9.0 the books count the paid money on a cash basis and the orders on an accrual one', () => {
+  const rows = [
+    { id: 'a', code: 'A', at: '2026-10-01T09:00:00Z', marked_at: '2026-10-02T09:00:00Z', status: 'paid', total: 115, tax: 15, vat_pct: 15, pay_now: 115.07, rounding: 0.07 },
+    { id: 'b', code: 'B', at: '2026-10-03T09:00:00Z', status: 'awaiting_payment', total: 230, tax: 30, vat_pct: 15 },
+    { id: 'c', code: 'C', at: '2026-10-04T09:00:00Z', marked_at: '2026-10-04T10:00:00Z', status: 'paid', total: 60, tax: 0, vat_pct: 0 },
+    { id: 'd', code: 'D', at: '2026-10-05T09:00:00Z', marked_at: '2026-10-05T10:00:00Z', status: 'cancelled', total: 40, tax: 5, vat_pct: 15 },
+  ];
+  const cash = C.vatReturn(rows, { tax_pct: 15 }, { basis: 'cash', from: '2026-10-01', to: '2026-10-31' });
+  const acc = C.vatReturn(rows, { tax_pct: 15 }, { basis: 'accrual', from: '2026-10-01', to: '2026-10-31' });
+  assert.equal(cash.count, 2, 'two payments arrived in October');
+  assert.equal(cash.gross, 175);
+  assert.equal(cash.vat, 15, 'the zero-rated row is on the return at nil, not off it');
+  assert.equal(cash.net, 160);
+  assert.equal(acc.count, 3, 'a cancelled order is in neither');
+  assert.equal(acc.skipped, 1);
+  assert.equal(cash.rates.length, 2, 'two rates means two lines on the return');
+  assert.equal(cash.registered, false, 'the return reports what the shop claims about itself');
+});
+
+test('0.9.0 a row written before the tax fields are counted, and said out loud', () => {
+  const rows = [{ id: 'l', at: '2026-09-01T09:00:00Z', marked_at: '2026-09-01T10:00:00Z', status: 'paid', total: 115 }];
+  const r = C.vatReturn(rows, { tax_pct: 15 }, { basis: 'cash', period: '2026-09' });
+  assert.equal(r.count, 1);
+  assert.equal(r.estimated, 1, 'one row was worked out from today’s rate');
+  assert.equal(r.vat, 17.25, 'the estimate is the arithmetic, not a shrug: 115 at today’s 15%');
+  const j = C.vatReturn([{ id: 'n', at: '2026-09-02T09:00:00Z', marked_at: '2026-09-02T09:00:00Z', status: 'paid', total: 'nope' }], { tax_pct: 15 }, { basis: 'cash' });
+  assert.equal(j.missing, 1);
+  assert.equal(j.vat, 0, 'and an unreadable amount contributes nothing rather than a guess');
+});
+
+test('0.9.0 the summary and the CSV and the return are one computation in three clothes', () => {
+  const rows = [
+    { id: 'a', code: 'A', at: '2026-10-01T09:00:00Z', marked_at: '2026-10-02T09:00:00Z', status: 'paid', total: 115, tax: 15, vat_pct: 15, pay_now: 115.07, rounding: 0.07, rail: 'ecocash_usd', proof: '88123', payer: '0712345678' },
+    { id: 'b', code: 'B', at: '2026-10-03T09:00:00Z', status: 'awaiting_payment', total: 230, tax: 30, vat_pct: 15, rail: 'cod' },
+  ];
+  const st = { handle: 'shop', shop_name: 'Tino & Sons', tax_pct: 15, currency: 'USD' };
+  const s = C.booksSummary(rows, st, { period: '2026-10', basis: 'cash' });
+  assert.equal(s.vat.gross, 115);
+  assert.equal(s.collected, 115);
+  assert.equal(s.money_in_by_rail.length, 1);
+  assert.equal(s.money_in_by_rail[0].rail, 'ecocash_usd');
+  assert.equal(s.outstanding_balance, 230, 'what has not arrived is named, as a balance, not hidden by the basis');
+  assert.equal(s.with_proof, 1);
+  assert.equal(s.rounding_identifiers, 0.07, 'the odd cents that identify a transfer are not income and are shown separately');
+  const v = C.vatReturn(rows, st, { basis: 'cash', from: s.from, to: s.to });
+  assert.equal(s.vat.vat, v.vat, 'the panel and the return cannot disagree');
+  const csv = C.booksCsv(rows, st, { period: '2026-10', basis: 'cash' });
+  assert.ok(csv.startsWith('# tapstall books pack'), 'a preamble an accountant reads as notes');
+  assert.ok(csv.includes('date,ref,status,buyer,phone,service,rail,gross,vat,net'), 'then the real header');
+  assert.ok(csv.includes('A,paid'), 'the row is in it');
+  assert.ok(csv.includes('# totals'), 'and the totals are repeated where the file ends');
+  assert.equal(C.booksCsv([{ id: 'x', code: 'Q"1', at: '2026-10-09T09:00:00Z', status: 'paid', total: 1, tax: 0, vat_pct: 0 }], st, {}).includes('"Q""1"'), true, 'a quote in a code is escaped, not a new column');
+  assert.ok(C.booksCsv([{ id: 'y', code: 'OLD-1', at: '2026-10-08T09:00:00Z', status: 'paid', total: 100 }], st, { period: '2026-10' }).includes('OLD-1'),
+    'a paid row with no marked date is still in the month it was ordered, not silently dropped');
+  assert.equal(C.booksCsv([], st, { period: '2020-01' }).includes('gross,0.00'), true, 'an empty month is an empty month, said with zeros');
+});
+
+test('0.9.0 the receipt is the order it was printed from, in the money it was priced at', () => {
+  const priced = C.priceOrder({ tax_pct: 15, currency: 'USD' }, [{ name: 'Chicken', price: 100, qty: 1 }], 'pickup', null);
+  const o = { id: 'o1', code: 'MAM-7', at: '2026-10-01T09:00:00Z', marked_at: '2026-10-01T11:00:00Z',
+    buyer: { name: 'Rudo', phone: '263771234567' }, items: [{ name: 'Chicken', qty: 1, unit: 100, total: 100 }], pricing: priced };
+  const reg = { shop_name: 'Mama Too', handle: 'mamatoe', tax_pct: 15, vat_registered: true, vat_number: '4010000001', vat_address: '12 Mutare Rd' };
+  // The registration the *order* was priced under is what the document says: a shop that ticks the
+  // box in November does not restamp October's sales as tax invoices.
+  const pricedReg = C.priceOrder({ ...reg, tax_pct: 15 }, [{ name: 'Chicken', price: 100, qty: 1 }], 'pickup', null);
+  const oReg = { ...o, pricing: pricedReg };
+  const txt = C.receiptText(reg, oReg);
+  assert.match(txt, /TAX INVOICE/);
+  assert.match(txt, /4010000001/);
+  assert.match(txt, /MAM-7/);
+  assert.match(txt, /VAT @ 15%\s+15\.00/);
+  assert.match(txt, /Total\s+115\.00/);
+  assert.ok(C.receiptText({ shop_name: 'S', tax_pct: 15 }, o).includes('not VAT-registered'), 'an unregistered shop prints a receipt, not a tax invoice');
+  // the identity the order was priced under rides on the order, so a later tick-box does not
+  // restamp an old sale as a tax invoice
+  const html2 = C.receiptHtml({ shop_name: 'S', tax_pct: 15, vat_registered: true, vat_number: '9' }, o);
+  assert.match(html2, /<h2>Receipt<\/h2>/, 'this order was priced before the shop registered');
+  assert.match(C.receiptHtml(reg, { ...o, pricing: C.priceOrder(reg, [{ name: 'Chicken', price: 100, qty: 1 }], 'pickup', null) }), /Tax invoice/);
+  assert.match(html2, /noindex|not VAT-registered/);
+});
+
+test('0.9.0 sample art draws, caches, and never claims to be a photo', () => {
+  const svg = C.sampleArtSvg('2 litre Coke');
+  assert.match(svg, /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"/);
+  assert.match(svg, /2L|2l|2L/);
+  assert.ok(!/http:\/\/[^"]*\.(com|net)/.test(svg.replace('http://www.w3.org/2000/svg', '')), 'no external reference of any kind');
+  const u = C.sampleArtUrl('shop', { name: '2 litre Coke', cur: 'USD' });
+  assert.ok(u.startsWith('/art/shop/'), u);
+  assert.equal(u, C.sampleArtUrl('shop', { name: '2 litre Coke', cur: 'USD' }), 'the same row gives the same URL, so a year of cache is honest');
+  assert.notEqual(u, C.sampleArtUrl('shop', { name: 'Other', cur: 'USD' }));
+  assert.equal(C.realPhoto({ img: u, art: true }), '', 'fallback art is never a photo, for a crawler or anyone');
+  assert.equal(C.realPhoto({ img: '/i/shop/abc123' }), '/i/shop/abc123');
+  const withArt = C.applyMenu([{ id: 'x', name: 'X' }], { handle: 'shop' });
+  assert.equal(withArt[0].art, true);
+  assert.equal(C.applyMenu([{ id: 'x', name: 'X' }], { handle: 'shop', over: { x: { img: '' } } })[0].img, '', 'a merchant who cleared the box stays cleared');
+});
+
+test('0.9.0 the mesh has a budget, a memory, and no imagination', () => {
+  const st = { shop_name: 'Mama Too', handle: 'mam', currency: 'USD', tax_pct: 15, whatsapp: '263771234567', hours: 'Mon-Sat 08:00-18:00' };
+  const prods = Array.from({ length: 7 }, (_, i) => ({ id: 'p' + i, name: 'Item ' + (i + 1), price: 4 + i, cur: 'USD' }));
+  const b = C.meshPack(st, prods, { currency: 'USD' }, { origin: 'https://t.test' });
+  assert.equal(b.beats.length, C.MESH_BUDGET.per_day);
+  assert.equal(b.beats.filter((x) => x.kind === 'promo').length, 1, 'value beats, then one promo, always');
+  for (const x of b.beats) {
+    assert.ok(x.text.length <= C.MESH_RAILS[x.rail].max, x.rail + ' is over its own limit');
+    assert.match(x.text, /https:\/\/t\.test\/s\/mam/, 'every line ends where the order starts');
+    if (x.price) assert.ok(prods.some((p) => p.price === x.price), 'and every number is a price on the menu');
+  }
+  assert.notEqual(b.beats[0].item_key, b.beats[1].item_key, 'the two value lines are about different things');
+  assert.equal(b.beats.filter((x) => x.kind === 'value').map((x) => x.item_key).filter((x, i, a) => a.indexOf(x) !== i).length, 0, 'and no item is worth two value lines in one day');
+  const used = {}; used[b.beats[0].item_key] = b.day;
+  const again = C.meshPack(st, prods, { currency: 'USD' }, { origin: 'https://t.test', sent: { items: used } });
+  assert.ok(!again.beats.some((x) => x.item_key === b.beats[0].item_key), 'a line posted today is quiet for a week');
+  // Nothing on the menu is not nothing to say: the shop still exists, and a line that only says so
+  // is worth more than a queue that renders blank and gets ignored.
+  const empty = C.meshPack(st, [], { currency: 'USD' }, { origin: 'https://t.test' });
+  assert.equal(empty.beats.length, 1);
+  assert.ok(!/\d+\.\d{2} USD/.test(empty.beats[0].text), 'and not one figure in it');
+  assert.match(empty.beats[0].text, /write to us on WhatsApp/);
+  const broken = C.meshPack({ ...st, feed_error: 'feed_http_502' }, [], {}, { origin: 'https://t.test' });
+  assert.ok(!/\d+\.\d{2} USD/.test(broken.beats.map((x) => x.text).join(' ')), 'a shop whose sheet is down is not quoted a price');
+  assert.match(broken.beats[0].text, /confirm the price with you/);
+  const doc = C.meshJson(broken ? st : st, prods, {}, 'https://t.test');
+  assert.equal(doc.priced, true);
+  assert.equal(doc.items.length, 7);
+  assert.ok(!JSON.stringify(doc).includes('pay_account'), 'the public document carries no account number');
+  const marked = C.meshMark(C.meshMark(null, ['p1'], Date.now()), ['p1', 'p2'], Date.now());
+  assert.equal(Object.keys(marked.items).length, 2, 'the memory is a set of keys, not a log');
+});
+
+test('0.9.0 an operator patch fixes one row and leaves the rest of the shelf alone', () => {
+  const cur = { over: { a: { price: 5 }, b: { price: 7 } }, extra: [{ id: 'z', name: 'Added', price: 3 }], hide: [], order: [], note: 'from the merchant' };
+  const next = C.mergeMenuPatch(cur, { over: { a: { price: 6 } } }, 'shop');
+  assert.equal(next.over.a.price, 6, 'the row named is changed');
+  assert.equal(next.over.b.price, 7, 'the row not named is untouched');
+  assert.equal(next.extra.length, 1, 'and the merchant’s own added row is still there');
+  assert.equal(next.note, 'from the merchant', 'so is the note they wrote');
+  const lifted = C.mergeMenuPatch(cur, { over: { a: false } }, 'shop');
+  assert.equal(lifted.over.a, undefined, 'a row sent as false has its override taken off, and only that row');
+  const cleared = C.mergeMenuPatch(cur, { over: { b: { img: '' } } }, 'shop');
+  assert.equal(cleared.over.b.img, '', 'an explicit no-picture answer is respected through this door too');
+  // `extra` is replaced when it is sent (a list, not a map), and the ref rule still runs on what
+  // arrives: a patch cannot smuggle in another shop's picture.
+  const foreign = C.mergeMenuPatch(cur, { extra: [{ name: 'Borrowed', price: 1, img: '/i/other/abcd' }] }, 'shop');
+  assert.equal(foreign.extra.length, 1, 'the list sent is the list that replaces');
+  assert.equal(foreign.extra[0].img, '', 'and the foreign reference was stripped on the way in');
+  assert.equal(C.sanitizeMenuEdit({ available: false }, 'shop').available, false, 'both spellings of sold-out are read');
+  assert.equal(C.sanitizeMenuEdit({ out: true }, 'shop').available, false, 'the sheet word and the checkbox word');
+  assert.equal(C.sanitizeMenuEdit({ available: true }, 'shop').available, true, 'and back in');
+  const kept = C.mergeMenuPatch(cur, { over: { a: { popular: true } } }, 'shop');
+  assert.equal(kept.extra.length, 1, 'a patch that names no list leaves the list alone');
+  assert.deepEqual(C.mergeMenuPatch(undefined, {}, 'shop'), C.sanitizeMenu({ handle: 'shop' }), 'nothing stored plus nothing sent is an empty shelf, not a crash');
+});

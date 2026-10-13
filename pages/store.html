@@ -370,9 +370,36 @@ var TERM = /*__TAPSTALL_TERM__*/null;
     var del = CFG.delivery_fee || 0;
     var freeOver = Number(CFG.free_over) || 0;
     var dCharge = freeOver && st >= freeOver ? 0 : del;
-    var taxP = Number(CFG.tax_pct) || 0;
-    var tax = Math.round((st + dCharge) * taxP) / 100;
-    var sub = Math.round((st + dCharge + tax) * 100) / 100;
+    var taxP = Number(CFG.vat_rate_pct != null && CFG.vat_rate_pct !== '' ? CFG.vat_rate_pct : CFG.tax_pct) || 0;
+    var incl = String(CFG.vat_mode || 'excl') === 'incl';
+    /* A row's own VAT cell wins, read from the catalogue rather than the cart, so a cart left in
+       localStorage from last week cannot price itself and a row that went zero-rated today shows
+       zero today. This is the same arithmetic `priceOrder` runs on the worker, per line — the
+       preview that rounds differently from the receipt is a promise the shop breaks at the till. */
+    var rateOf = function (id) {
+      var p = null;
+      for (var i = 0; i < PRODUCTS.length; i++) if (PRODUCTS[i].id === id) { p = PRODUCTS[i]; break; }
+      var v = p && (p.vat_rate != null ? p.vat_rate : p.vat);
+      if (v == null || v === '') return taxP;
+      var t = String(v).trim().toLowerCase().replace(/%$/, '');
+      if (t === 'zero' || t === 'nil' || t === '0') return 0;
+      if (t === 'exempt' || t === 'out' || t === 'none' || t === '-') return -1;
+      var n = Number(t);
+      return isFinite(n) && n >= 0 && n <= 40 ? Math.round(n * 100) / 100 : taxP;
+    };
+    var vTot = 0, vBase = 0, vFlat = taxP > 0;
+    cart.forEach(function (c) {
+      var u = c.price + (c.addons || []).reduce(function (x, y) { return x + (Number(y) || 0); }, 0)
+        + (c.options || []).reduce(function (x, y) { return x + (Number(y && y.up) || 0); }, 0);
+      var tot = Math.round(u * c.qty * 100) / 100, r = rateOf(c.id);
+      if (r !== taxP) vFlat = false;
+      if (r <= 0) return;
+      vBase += tot;
+      vTot += incl ? Math.round((tot - tot / (1 + r / 100)) * 100) / 100 : Math.round(tot * r / 100 * 100) / 100;
+    });
+    if (dCharge && taxP > 0) { vBase += dCharge; vTot += incl ? Math.round((dCharge - dCharge / (1 + taxP / 100)) * 100) / 100 : Math.round(dCharge * taxP / 100 * 100) / 100; }
+    var tax = taxP > 0 ? Math.round(vTot * 100) / 100 : 0;
+    var sub = incl ? Math.round((st + dCharge) * 100) / 100 : Math.round((st + dCharge + tax) * 100) / 100;
     var railFee = 0, railNote = '';
     /* `rail_info` is the payment method this shop actually resolves to: one of
        the built-in tariffs, one the operator added this morning, or one the
@@ -395,10 +422,13 @@ var TERM = /*__TAPSTALL_TERM__*/null;
       '<div class="lines" style="border-top:1px solid #e6ebf0;padding-top:.4rem">' +
       '<div><span>Items</span><span>' + money(st) + '</span></div>' +
       (dCharge ? '<div><span>Delivery</span><span>' + money(dCharge) + '</span></div>' : (del ? '<div><span>Delivery</span><span>free over ' + money(freeOver) + '</span></div>' : '')) +
-      (taxP ? '<div><span>VAT ' + taxP + '%</span><span>' + money(tax) + '</span></div>' : '') +
+      (taxP ? '<div><span>' + (incl ? 'VAT ' + taxP + '% inside that price' : 'VAT ' + taxP + '%') + '</span><span>' + money(tax) + '</span></div>' : '') +
+      (!taxP ? '' : '<div><span class="hint">' + (incl ? 'Prices on the board already include VAT.' : 'VAT is added to the menu price here.') + '</span></div>') +
       (railFee ? '<div><span>' + esc(railName) + ' fee</span><span>' + money(railFee) + '</span></div>' : '') +
       '<div class="tot"><span>Pay now</span><span>' + money(sub + railFee) + '</span></div></div>' +
       (ZIG ? '<p class="hint">ZiG estimate at ' + ZIG + ': ' + Math.round((sub + railFee) * ZIG).toLocaleString() + ' ZiG. Pay what the final receipt says.</p>' : '') +
+      (CFG.vat_registered && CFG.vat_number
+        ? '<p class="hint">VAT No ' + esc(CFG.vat_number) + ' — you get a numbered tax receipt for this order.</p>' : '') +
       '<p class="hint">Payment: <b>' + esc(railName) + '</b>' + (railNote ? ' — ' + railNote : '') + (CFG.surcharge_mode === 'absorb' && railCosts && !cod ? ' — this shop covers the payment cost, you pay the menu price.' : '') + '</p>' +
       '<label>Your name *</label><input id="fName" autocomplete="name" placeholder="e.g. Rudo M.">' +
       '<label>WhatsApp number * (with code, e.g. 26377...)</label><input id="fPhone" inputmode="tel" autocomplete="tel" placeholder="263771234567">' +

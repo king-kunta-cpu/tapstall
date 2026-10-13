@@ -1,5 +1,61 @@
 # Tapstall — status
 
+## What we do about receipts, and the four bugs that answered it (2026-10-13, v0.9.0)
+
+The question asked was narrow — *are we issuing receipts?* — and the answer, read off the send
+paths rather than off the word, was **no, never**. `worker/worker.js:542` builds
+`wa_link: https://wa.me/<shop>?text=<summary>`: a message the *buyer* taps and sends, to the shop.
+The confirm page (:834) offers the same deep link. The only thing the platform pushes is a shop-side
+email, `if (env.EMAIL && st.notify_email) … notifyText(…)` (:629-634, again for `owner_email` at
+:1398) — and `env.EMAIL` is not bound on this account, so `__selftest` reports `email:false` and no
+mail of any kind leaves the Worker. There was no numbered document, no VAT line, and nothing the
+merchant could re-send. v0.9.0 closes that with `receiptText`/`receiptHtml` and `GET /api/receipt`,
+built from the order row and the order document, and `&fmt=wa` for delivery: an artefact with no new
+write path and no dependency on a binding that may not exist.
+
+The second half of the ask was to take the `hunta` content-distribution mesh from its handover doc,
+adapt it, and push it. **The doc was not reachable and this says so instead of inventing it.**
+`hunta-marketing/index.html:4060` lists `AGENT-HANDOVER.md` in a runbook vault that is in no public
+repo of the account (`/users/king-kunta-cpu/repos` returns two repos, 243 blobs between them, no
+`AGENT-HANDOVER.md`, no `NN-*.md`; no gists; a search for `hunta` finds nothing of theirs), and the
+only credential in this sandbox — the 55-character token embedded in `origin` — is push-scoped and
+answers `Bad credentials` to REST. So the mesh was adapted from what hunta actually *ships*:
+`scripts/expand_bible.py` (registry → planner with cadence and a value:promo gate → writer whose
+editor rejects hype and fabricated stats → one card per rail → witnesses that report only new
+failures → a weekly digest), snapshotted to `/tmp/hunta/` and summarised here because /tmp does not
+persist.
+
+**Four bugs the new tests found, all of them real, none of them in the tests.**
+
+1. `receiptHtml`/`receiptText` priced their own line items from `o.items`, which carries `price` and
+   `qty` but no `unit`/`total` — so a correct total of 115.00 printed two rows of `0.00`. The
+   receipt now reads `pricing.lines`, the figures the till froze, with the cart values only as a
+   fallback. It also opened `<h1>` and closed it with `</h2>`.
+2. `applyMenu` drew every fallback image from `/art/shop/…`, because `sanitizeMenu` deliberately does
+   not store a `handle` in the menu it writes. The handle now arrives as an argument at each read
+   site; the segment in the URL is the shop's own, which is the only reason the path is cacheable by
+   a person rather than by a glob.
+3. A row **added in the dashboard could not be edited in the dashboard**: the override map was merged
+   onto the sheet's rows only, so the way to change the price of a row you had just added was to
+   delete it and type it again. Extras now take the same `applyOver` pass as sheet rows.
+4. `sanitizeMenuEdit` read sold-out from `out: true` and back-in-stock from `available: true`, and
+   **nothing** read `available: false`. The merchant's checkbox sent `out`, so the shop worked; the
+   operator's new row editor sent `available: false` and got a 200 and no change. Both spellings are
+   read now, in one place, for every door.
+
+One design change came out of writing the operator's lever, and it is the one worth keeping an eye
+on: the console's `menu` action is a **patch**, not a replace. `sanitizeMenu` on a payload naming one
+row would have wiped the merchant's whole override layer — four added rows, gone, on a request that
+mentioned none of them — so `mergeMenuPatch` keeps everything the payload does not name, `{ id:
+false }` is how one override is lifted, a payload that changes nothing returns `changed:false` and
+spends no write, and `menu_revert` is still the only way to clear the layer.
+
+**The numbers.** 290 tests: core 101, live 124, pages 55, limits 10 — 33 of them written for this
+release, including six pages tests that read the shipped HTML and one live test that takes the write
+budget away (`env.STORES.put` throws) and asks for the books, the CSV and a receipt anyway, because a
+report that only works on an unspent day is a report that fails on the 31st. `__selftest` gained 18
+money keys, all of them derived-on-read and all of them added to `prod_check.sh`'s `SK` list.
+
 ## Three bugs the checks could not see (2026-10-13, v0.8.5)
 
 For two days `prod_check.sh` ran on accounts whose 1,000 free KV writes were gone, so every

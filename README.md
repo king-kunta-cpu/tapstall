@@ -70,10 +70,11 @@ pages/public/         what GitHub Pages uploads: _headers, the sample CSV, and
                       index.html/fees.html are copied in by CI from pages/, never
                       committed here (two consumers, one source)
 scripts/ui_kit.py     inlines kit.css into every page; `check` is the drift gate
-tests/core.test.mjs   49 unit tests on the money, the parser, the menu, the rails and the pictures
-tests/live.test.mjs   60 tests that run the real handler + cron against a stub KV
+tests/core.test.mjs   101 unit tests on the money, the parser, the menu, the rails, the pictures
+                      and the VAT
+tests/live.test.mjs   124 tests that run the real handler + cron against a stub KV
 tests/limits.test.mjs 10 tests on the free-tier budgets (writes, sizes, locks)
-tests/pages.test.mjs  23 tests on the shipped HTML itself (no browser needed)
+tests/pages.test.mjs  55 tests on the shipped HTML itself (no browser needed)
 scripts/deploy.sh     one command: tests → KV → templates → bundle → deploy → triggers → self-check
 scripts/deploy.sh --templates   the pages only, for the morning after a day whose 1,000 KV writes ran out
 scripts/build_bundle.sh   inlines core.js into .build/worker.js, ESM syntax check
@@ -330,6 +331,31 @@ verified ZW/SA tariffs) but it is now a **default, not the whole answer**:
   when that is the fact (and prunes nothing on a guess), `issueCap` binds each action to the field its
   own door consults (`n`, not `g`, for the operator's lever), and a scan over the source fails if a
   reader invents a third opinion or drops the marker that declares an exemption (v0.8.8).
+* **The money side, so a shop can close a month without hiring anybody** (v0.9.0). A `vatPlan`
+  reads the `tax_pct` every store already had, so no shop is migrated and no store document is
+  rewritten to change a name: prices can be quoted *excluding* VAT (added at checkout, what the
+  platform did before) or *including* it (what a shelf label in a ZW tuckshop means), and a row can
+  carry its own rate on a `vat` sheet column or a box in the editor, so mealie meal stays zero-rated
+  while the cooked food does not. The rate, the mode and the shop's VAT identity are **frozen on
+  each order** (`pricing.vat`), and the ledger row now carries `tax`, `net`, `vat_pct` and one entry
+  per rate — which is why `/api/books` (a panel and a CSV an accountant opens) answers from the row
+  list alone and still answers on a day the account has no writes left. What it refuses to do is
+  guess: rows written before the tax fields are counted separately and labelled as inferred, an
+  unreadable amount is excluded and named, and the footer says *sales side only*, because input VAT
+  on what a shop bought is not in these rows. A receipt exists too, and it is a document now rather
+  than a message the buyer is asked to send: `GET /api/receipt` prints a printable HTML invoice or
+  a plain-text one and `&fmt=wa` opens the buyer's own chat with it already composed, so delivery
+  uses the channel the shop already has instead of an SMTP binding this plan does not. The
+  operator console's rows go through `mergeMenuPatch` into the *merchant's own* sanitizer, so an
+  operator cannot say anything a merchant could not, a payload that forgets a row cannot destroy
+  it, and the merchant keeps Revert. A row with no photo gets `/art/<handle>/…svg` — initials on a
+  tint, drawn from the name, immutable for a year, no KV, no fabricated dish: `realPhoto()` is the
+  one function that decides what counts as a picture, and it says the art is not one, so no crawler
+  tag or share card ever promises otherwise. And `GET /s/<handle>/mesh.json` plus a shop's own daily
+  pack is this house's content-distribution mesh, shrunk to surfaces a merchant needs no token for
+  and one hard rule borrowed from the mesh's own editor: a figure that is not on the shop's menu
+  today does not appear in a post, which is what the mesh does when a sheet is unreadable (it
+  declines to quote prices and says so) rather than publishing a stale one.
 
 An invalid description at sign-up becomes `cash` rather than a rejected
 registration: a merchant who never opens the shop is worse than one whose slip
@@ -428,6 +454,11 @@ see and cancel, and because revoking takes one press.
   account, or the sheet link for a cash shop) — 12 tries per 10 minutes per
   store, so the answer space is not searchable. There is no second factor, and
   no support queue either, which is the point of a $0 product.
+* **Tax advice, and tax filing.** The platform computes VAT, prints it on the receipt, buckets it
+  by rate and hands the figures over as a CSV. It does not file a return, because filing is a
+  submission to a revenue authority under somebody else's registration, and $0 does not buy the
+  liability. The human still presses the button on eFiling or ZIMRA's site; what changed in v0.9.0
+  is that the numbers are ready when they do.
 * **A live order feed.** KV is eventually consistent: a new order appears in the
   dashboard list within about a minute, while the confirm link in the
   notification works the second it is sent. The ledger list and the order
