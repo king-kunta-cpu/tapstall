@@ -106,6 +106,32 @@ token, 48 after the prefix — which retires the guess recorded earlier in this 
 odd. It is not odd; it matches. So the token is fine in shape and unknown in fact, and the thing to
 check is that the value copied is the secret shown once at Create Token and not the token's id.
 
+**Three credentials have been pasted into this task and all three are unknown to Cloudflare; the
+control was run in the same request, so this is not the method failing.** Measured at 14:52 UTC against
+`GET /accounts`, which needs no scope at all:
+
+```
+cfut_1dH3…61f6ba9f  as pasted                  → 9109 "Invalid access token"   (and 10502 on the retry)
+cfut_1dH3…61f6ba9f  with the trailing 8 dropped → 9109 "Invalid access token"
+cfat_1dH3…61f6ba9f  prefix swapped              → 9109 "Invalid access token"
+cfat_…d1ad          the token this repo deploys with → VALID, accounts=['0c6059d950fad268faa25cbb6d21ef77']
+```
+
+The working token and the rejected ones have the same shape: a 5-character prefix, 40 characters, and
+an 8-hex-character tail — so length, the tail, and truncation are all ruled out by measurement, and the
+only difference left is that Cloudflare has no record of the `cfut_` strings. Every rejected credential
+here begins `cfut_`; the one that works begins `cfat_`. What that means in practice is not a theory
+about prefixes but a check worth doing first: create the token as a **Custom API Token** (My Profile →
+API Tokens → Create Token → Custom) and copy the **Token value** shown once immediately after Create —
+the value, not the token's id, and not a token from another screen.
+
+The second-best path needs no new secret at all, and it is the one to take if the goal is simply to
+finish the move: edit the `cfat_…` token this repo already deploys with, and add the new account to its
+**Account Resources**. Then `DST_TOKEN_FILE=~/.secrets/cf_token bash scripts/migrate_account.sh` runs
+as written, CI keeps its existing secret, and nothing has to be pasted anywhere. The cost is that one
+token can write to both accounts while the two exist side by side, which is also what makes the
+rollback a re-point rather than a restore.
+
 One more measured fact: after a handful of failures Cloudflare starts answering `429 code 10502
 "Too many authentication failures"` and `10429 "Rate limited"` on everything, including calls that
 would have worked. A migration script that retried through that would look like a broken account.
