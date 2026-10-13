@@ -74,6 +74,15 @@ README's recipe for fixing a page without a deploy — `PUT` it into `tpl:store`
 moment the bundle became authoritative; it now points at `--pages-override`, which is the door that
 still opens.
 
+The credential diagnosis in `MIGRATION.md` was rewritten the same evening, because the first
+version of it was wrong in a way worth naming: it read `code 1000` from `/user/tokens/verify` as proof
+that Cloudflare did not know the token, when in fact a working account-scoped token answers `code 1000`
+there too (measured against this repo's own `cfat_…` token, which deploys this Worker). The real
+discriminator is `GET /accounts` — `9109 "Invalid access token"` for an unknown string, versus
+`9109 "Unauthorized to access requested resource"` for a live token pointed outside its scope — and
+`scripts/cf_probe.py` now asks that question in one command and exits non-zero unless the token can act
+on the account it was given, which is the check `scripts/migrate_account.sh` refuses to skip.
+
 Still owed, and not fixable from here: the API token for the new account is invalid on arrival
 (`Invalid API Token`, every endpoint, from two networks), so the migration inventory in
 `MIGRATION.md` sits at 156 keys in the old namespaces and nothing has been created in

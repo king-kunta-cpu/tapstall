@@ -85,18 +85,46 @@ those 40 without the prefix        -> 1000
 the trailing 8 alone               -> 6003 "Invalid request headers"
 ```
 
-That is neither an IP restriction nor a scope problem, and the difference is worth writing down because
-it is the guess that costs a round trip: an IP-pinned token answers `9106 "Could not authenticate you
-from L3"`, which is precisely what the OLD account's token said from this sandbox at 14:20 UTC and what
-neither of these says now. A 1000/10000 pair means Cloudflare does not know the credential at all: it
-was never created, or was created and deleted, or was copied out of a field that is not the token. The
-new account therefore still has no namespaces, no Worker and nothing to migrate into, and the import
-half of `kv_migrate.py` stays unrun — while everything that needs only reads is already proven (156
-keys exported, byte-compared, metadata compared, `missing: 0 mismatch: 0`).
+That is neither an IP restriction nor a missing scope, and the way to tell the three apart is worth
+writing down because I got it wrong once here. `GET /user/tokens/verify` answers `code 1000
+"Invalid API Token"` for a **perfectly working** account-scoped token — this repo's own `cfat_…` token
+gets exactly that answer at 14:41 UTC and deploys the Worker fine — because that endpoint wants
+user-level auth. It proves nothing either way. What proves something is the same request to an endpoint
+that needs no scope:
 
-Nothing needs the dashboard: paste a token into `~/.secrets/cf_token-new`, then run the "Running it"
-sequence above. If it still answers 1000 there, the token is not the account's — check it was created
-under `652754…10822d` and not the personal one.
+```
+GET /accounts   with the working token   → success, one account listed (0c6059d9…, "Simalidudu@gmail.com's Account")
+GET /accounts   with the token you sent  → 9109 "Invalid access token"        ← Cloudflare does not know the string
+GET /accounts/6527…/workers/scripts with the working token → 9109 "Unauthorized to access requested resource"
+                                                              ← live token, simply not scoped to that account
+```
+
+Two different messages, and they mean two different fixes: `Unauthorized to access requested resource`
+is a scope edit, `Invalid access token` is a credential that was never created, was deleted, or was
+copied out of the wrong field. The pasted string is also 53 characters — the same length as the working
+token, 48 after the prefix — which retires the guess recorded earlier in this file that the length was
+odd. It is not odd; it matches. So the token is fine in shape and unknown in fact, and the thing to
+check is that the value copied is the secret shown once at Create Token and not the token's id.
+
+One more measured fact: after a handful of failures Cloudflare starts answering `429 code 10502
+"Too many authentication failures"` and `10429 "Rate limited"` on everything, including calls that
+would have worked. A migration script that retried through that would look like a broken account.
+So `scripts/cf_probe.py` exists — one read of five surfaces, one verdict, and it exits non-zero unless
+the token can act on *the account it was pointed at*, not merely on some account. That distinction is
+the second bug this file records: the first draft passed on a token that could list `/accounts`, which
+is how a deploy walks into the wrong account and succeeds there.
+
+Nothing needs the dashboard. Paste the secret into `~/.secrets/cf_token-new` and run:
+
+```bash
+DST_ACCOUNT=6527547015468a5ec705a1071010822d DST_TOKEN_FILE=~/.secrets/cf_token-new \
+  bash scripts/migrate_account.sh            # dry run: probes, reads, prints the plan, writes nothing
+DST_ACCOUNT=6527547015468a5ec705a1071010822d DST_TOKEN_FILE=~/.secrets/cf_token-new \
+  bash scripts/migrate_account.sh --apply    # stops after one key and the metadata check, for a human to read
+```
+
+It refuses to go past step 1 on a token that cannot read the destination, and it never takes the
+subdomain window — that is printed, not performed.
 
 While that is outstanding: `uploads/` still ships live credentials in the repo (the WhatsApp bot token,
 OpenRail and GAS keys, 13 wallet addresses) and those need rotating whatever account they point at.
