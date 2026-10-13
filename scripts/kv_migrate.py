@@ -141,8 +141,10 @@ def cmd_import(args, tok):
     done = skipped = 0
     for i, row in enumerate(rows):
         try:
+            # limit=1 is rejected by the KV API ("limit argument must be at least 10"), which is the
+            # first thing this probe learned the hard way at 15:01 UTC while moving a live account
             if not args.overwrite:
-                head = call(tok, "GET", ns_path(args, "/keys?prefix=" + urllib.parse.quote(row["name"], safe="") + "&limit=1"))
+                head = call(tok, "GET", ns_path(args, "/keys?prefix=" + urllib.parse.quote(row["name"], safe="") + "&limit=10"))
                 if (head.get("result") or []):
                     skipped += 1
                     continue

@@ -1,5 +1,28 @@
 # Tapstall — status
 
+## The account moved, and what still has the old name (2026-10-13, 15:20 UTC)
+
+Three credentials were rejected as unknown to Cloudflare and a fourth — same `cfut_` prefix, same
+length, same shape — worked, so everything this file said earlier about prefixes and character counts
+is retired by that one fact: the only signal that ever mattered was `GET /accounts`. The move it
+unblocked is done on the destination side. `6527547015468a5ec705a1071010822d` now holds
+`tapstall-stores` (38 keys) and `tapstall-orders` (118), every one imported through
+`scripts/kv_migrate.py` and then read back and byte-compared against the archives (`missing: 0,
+metadata mismatch: 0`), the `tapstall` Worker deployed from `.build/worker.js` — the artifact the
+suites run, which is what the config change last round was for — and `ADMIN_SECRET` re-set to the same
+value from the file, because a Worker secret cannot be read out of Cloudflare to be copied. Proof it
+is a working shop and not a copied namespace: `GET /s/mamatoe` on `tapstall.zlnew.workers.dev` answers
+200 with 45,945 bytes and the title `Mama Too Catering | Tapstall`, while `/__selftest` answers
+`pages_inlined: 11`, `pages_store_from: "bundle"`, `kv_roundtrip: true` on a write budget that is
+finally not spent, and `rate_limit_local_first: {requests: 9, ceiling: 8, writes: 1, refused: 1}`.
+
+What was deliberately not moved is the workers.dev prefix: `tapstall.simalidudu.workers.dev` is still
+the old account's and still serving, because releasing it and claiming it is a gap of minutes with no
+order-taking, and that is a decision with an owner rather than a step to slip into a deploy. CI's
+secrets still point at the source account too, which is worth naming plainly: until both move, a push
+deploys the *old* copy and the new one drifts. `MIGRATION.md` ends with those two steps and the rollback
+(they are re-pointed bindings, not a restore — the source was copied, not moved).
+
 ## The write budget is the machine (2026-10-13, v0.9.1)
 
 Four sections, one motive — the first three are the pipeline, the fourth is the account it runs on. The account is free, which means 1,000 KV writes a day shared by every

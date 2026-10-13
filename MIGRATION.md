@@ -70,6 +70,36 @@ spent, `import` stops where it can resume (keys already present are skipped unle
 a move can be spread over two days. The old namespaces must not be deleted until `prod_check.sh` is
 green against the new origin — a rollback after the copy is simply repointing the bindings.
 
+## Done 2026-10-13 at 15:20 UTC — the new account is live and holding the data
+
+```
+account 6527547015468a5ec705a1071010822d                  workers.dev prefix claimed here: zlnew
+KV      tapstall-stores a9016473abef4a66bcba6f200d7d4af3    38 keys, imported and byte-compared: missing 0, metadata 0
+KV      tapstall-orders 7dd531983a814ff5bb693598b93714d6   118 keys, imported and byte-compared: missing 0, metadata 0
+worker  tapstall, deployed from .build/worker.js via wrangler (574.33 KiB, gzip 165.15), 2 KV bindings, cron from the toml
+secret  ADMIN_SECRET re-set to the source value (a Worker secret cannot be read back, so it was copied from the file)
+proved  GET https://tapstall.zlnew.workers.dev/s/mamatoe → 200, 45,945 bytes, "<title>Mama Too Catering | Tapstall</title>"
+        /__selftest → version 0.9.1, pages_inlined 11, pages_store_from "bundle", kv_roundtrip true (fresh budget),
+                      rate_limit_local_first {requests 9, ceiling 8, writes 1, refused 1}
+```
+
+Two API shapes this run paid for and the scripts now carry: a KV existence probe must use `limit=10`
+(`limit=1` is refused with code 10028, and the importer stopped on its very first key until that was
+fixed), and a secret PUT needs `"type":"secret_text"` or it answers 100145 `unsupported type`.
+
+Still open, in the order that does not interrupt a shop:
+
+1. **The name.** `tapstall.simalidudu.workers.dev` — printed on receipts, pasted into WhatsApp threads —
+   is still the old account's, and still serving 0.9.1 correctly. Moving it means releasing the prefix
+   there and claiming it here, with minutes in between in which no order can be placed. Deliberately
+   not taken automatically; give me a quiet hour and it is two calls.
+2. **CI.** The repo secrets `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` still point at the source
+   account, so a push deploys to the old copy while the new one sits beside it. Until the name moves,
+   that is the one state that can produce two divergent shops, so it should be flipped in the same
+   sitting as step 1, and the Pages project re-pointed with it (`deploy.sh --push`).
+3. **Nothing deleted on the source.** It keeps serving until 1 and 2 are done; after that the rollback is
+   repointing bindings, because the namespaces were copied rather than moved.
+
 ## What is owed before any of this can run
 
 A token for `6527547015468a5ec705a1071010822d` with `Workers Scripts:Edit`, `Workers KV Storage:Edit`
@@ -119,8 +149,10 @@ cfat_…d1ad          the token this repo deploys with → VALID, accounts=['0c6
 
 The working token and the rejected ones have the same shape: a 5-character prefix, 40 characters, and
 an 8-hex-character tail — so length, the tail, and truncation are all ruled out by measurement, and the
-only difference left is that Cloudflare has no record of the `cfut_` strings. Every rejected credential
-here begins `cfut_`; the one that works begins `cfat_`. What that means in practice is not a theory
+only difference left is that Cloudflare has no record of the `cfut_` strings. Every rejected credential here begins `cfut_`, and so does the one that eventually worked
+(`cfut_…89d68a55`): same prefix, same 40+8 length, and Cloudflare knows that one. The shape was
+never the signal — `GET /accounts` was, answering `9109 "Invalid access token"` for a string it has
+no record of and `VALID accounts=['6527…']` for a live one. What that means in practice is not a theory
 about prefixes but a check worth doing first: create the token as a **Custom API Token** (My Profile →
 API Tokens → Create Token → Custom) and copy the **Token value** shown once immediately after Create —
 the value, not the token's id, and not a token from another screen.
