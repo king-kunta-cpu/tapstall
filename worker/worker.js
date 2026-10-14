@@ -33,6 +33,7 @@ import {
   receiptText, receiptHtml, sampleArtSvg, meshPack, meshJson, meshMark, meshWitness,
   meshAutoPlan, meshGrant, meshGrowth, meshIsPitch, meshValueBeats, meshSchedule, meshFirstTouch,
   MESH_AUTONOMY, MESH_AUTONOMY_V3, MESH_CHANNELS, MESH_OUTREACH, meshAccount, meshOutreachPlan,
+  meshQueueItem, meshQueueMerge, meshPress, meshPressFlush, MESH_QUEUE_DEFAULTS, MESH_BUFFER_CHANNEL,
   MESH_PUBLISH, MESH_BUFFER_FREE, MESH_DRIP, meshRailsTotal, meshRailHealth, meshDrip,
   MESH_RAILS, MESH_BUDGET,
   orderRow, packRow, unpackRow, mergeRows, MAX_ORDERS_KEPT,   // the ledger row, and the cap on it
@@ -306,6 +307,8 @@ async function route(req, url, env, ctx) {
   if (p === '/api/mesh') return meshView(req, url, env);
   if (p === '/api/mesh/seen' && req.method === 'POST') return meshSeen(req, env);
   if (p === '/api/mesh/auto' && req.method === 'POST') return meshAuto(req, env);
+  if (p === '/api/mesh/press' && req.method === 'POST') return meshPressSet(req, env);
+  if (p === '/api/mesh/publish' && req.method === 'POST') return meshPublish(req, env);
 
   // The one-tap confirm link: GET renders an inert page, the browser posts.
   if ((m = p.match(/^\/c\/([A-Za-z0-9._-]{20,400})$/))) return confirmPage(env, m[1]);
@@ -2401,6 +2404,7 @@ async function meshView(req, url, env) {
   const state = await env.ORDERS.get('mesh:' + handle, 'json').catch(() => null);
   const mf = meshFacts(st, url.origin);
   const pack = meshPack(st, products, mf, { origin: url.origin, sent: state || {} });
+  const pressQueue = ((await env.ORDERS.get('press:queue:' + handle, 'json').catch(() => null)) || {}).items || [];
   return json({
     ok: true, handle, plan: pack, rails: meshRailsTotal((pack && pack.beats) || []), budget: MESH_BUDGET,
     state_saved: !!state, posted: state ? (state.sent || {}) : {},
@@ -2414,6 +2418,9 @@ async function meshView(req, url, env) {
     channels: MESH_CHANNELS, policy_v3: MESH_AUTONOMY_V3,
     publish: MESH_PUBLISH, buffer_free: MESH_BUFFER_FREE, drip: MESH_DRIP,
     rail_health: meshRailHealth(state || {}),
+    press: (function () { const pr = meshPress(st, env); const q = pressQueue; return {
+      channels: pr.channels, has_token: pr.has_token, token_from: pr.token_from, missing: pr.missing,
+      cadence: pr.cadence || MESH_QUEUE_DEFAULTS, stored_in: pr.stored_in, queued: q }; })(),
     drip_plan: meshDrip(((meshFirstTouch(st, await ledgerRows(env, handle, 200)) || {}).queue) || [], state || {}), rails: { ...MESH_RAILS, ...Object.fromEntries(Object.keys(MESH_CHANNELS).filter((c) => !MESH_RAILS[c]).map((c) => [c, { name: c, max: MESH_CHANNELS[c].max }])) },
     account: meshAccount(st), rails_available: Object.keys(MESH_CHANNELS),
     outreach: meshOutreachPlan(st, { leads: st.outreach_list || [], state: state || {} }),
@@ -2425,6 +2432,76 @@ async function meshView(req, url, env) {
 /** The grant. A merchant turning the mesh on is one save, and turning it off is the same save the
  *  other way — which is what makes it safe to stop asking for approval per post: the thing being
  *  authorised is a policy with a ceiling, not an inbox. */
+/* v0.9.5: press intake and flush. `press` records what an account posts *through* — Buffer channel ids,
+ * a board, a cadence override, and optionally the token itself (env wins; KV is theirs to delete).
+ * `publish` composes today's plan into hunta's own queue format and sends what is due: with no credential
+ * an item says `queued` and nothing more, with one it calls Buffer and keeps the answer. `dry=1` returns
+ * the exact payload without sending anything, so a live distribution test can be run before a token is
+ * handed over. A rail that fails twice is dropped from cadence by itself; nothing here asks for a tap. */
+async function meshPressSet(req, env) {
+  const b = await readBody(req);
+  const who = await identify(req, env, b.handle || urlHandle(req));
+  if (!who || !who.st) return json({ ok: false, error: 'no store' }, 404);
+  if (who.anonymous || who.bad) return json({ ok: false, need_login: true, error: 'sign in first' }, 401);
+  if ((reqHeader(req, 'x-tapstall-confirm') || '') !== '1') return json({ ok: false, error: 'missing x-tapstall-confirm header' }, 403);
+  const doc = who.st, handle = doc.handle || who.handle;
+  const next = Object.assign({}, (doc.press && typeof doc.press === 'object') ? doc.press : {});
+  if (b.channels && typeof b.channels === 'object') {
+    next.channels = Object.assign({}, next.channels || {});
+    for (const k of Object.keys(b.channels)) {
+      const v = String(b.channels[k] || '');
+      if (!v) delete next.channels[k]; else next.channels[k] = v.slice(0, 40);
+    }
+  }
+  for (const k of ['board', 'image_base', 'landing']) if (typeof b[k] === 'string') next[k] = b[k].slice(0, 120);
+  if ('buffer_token' in b) next.buffer_token = (b.buffer_token === null || b.buffer_token === '') ? '' : String(b.buffer_token).slice(0, 200);
+  if (b.cadence && typeof b.cadence === 'object') next.cadence = b.cadence;
+  doc.press = next;
+  try { await env.STORES.put('store:' + handle, JSON.stringify(doc)); }
+  catch (e) { return json({ ok: false, error: 'no writes left to save the wiring', why: String(e && e.name || e) }, 503); }
+  const pr = meshPress(doc, env);
+  return json({ ok: true, handle, channels: Object.keys(next.channels || {}), has_token: pr.has_token, token_from: pr.token_from,
+    missing: pr.missing, stored_in: pr.stored_in, note: 'Wired. Nothing has been posted yet: that is /api/mesh/publish, and dry=1 first.' });
+}
+async function meshPublish(req, env) {
+  const b = await readBody(req).catch(() => ({}));
+  const who = await identify(req, env, b.handle || urlHandle(req));
+  if (!who || !who.st) return json({ ok: false, error: 'no store' }, 404);
+  if (who.anonymous || who.bad) return json({ ok: false, need_login: true, error: 'sign in first' }, 401);
+  const origin = new URL(req.url).origin;
+  const dry = b.dry === true || new URL(req.url).searchParams.get('dry') === '1';
+  if (!dry && (reqHeader(req, 'x-tapstall-confirm') || '') !== '1') return json({ ok: false, error: 'a real send needs the confirm header' }, 403);
+  const doc = who.st, handle = doc.handle || who.handle;
+  const products = (doc.feed_cache && doc.feed_cache.products) || [];
+  const facts = meshFacts(doc, origin);
+  const state = await env.ORDERS.get('mesh:' + handle, 'json').catch(() => null);
+  const plan = meshSchedule(doc, products, facts, { origin: origin, state: state || {}, now: Date.now() });
+  const pr = meshPress(doc, env);
+  const items = (plan.beats || []).map((beat, i) => meshQueueItem({ ...beat, seq: i }, {
+    landing: origin + '/s/' + handle, store: handle, now: Date.now(),
+    channel_id: (pr.channels || {})[MESH_BUFFER_CHANNEL[beat.rail] || beat.rail] || '', board: pr.board,
+    image: pr.image_base && beat.image ? String(pr.image_base) + String(beat.image) : '' }));
+  const prevQ = await env.ORDERS.get('press:queue:' + handle, 'json').catch(() => null) || {};
+  const merged = meshQueueMerge(prevQ, items, { store: handle, landing: origin + '/s/' + handle, cadence: pr.cadence || MESH_QUEUE_DEFAULTS });
+  const flush = await meshPressFlush(merged.items, pr, { dry: dry, now: Date.now() });
+  const sent = new Set(flush.results.filter((r) => r.status === 'sent').map((r) => r.id));
+  const kept = merged.items.filter((i) => !sent.has(i.id));
+  try { await env.ORDERS.put('press:queue:' + handle, JSON.stringify({ store: handle, landing: origin + '/s/' + handle, at: new Date().toISOString(), items: kept })); } catch (e) { /* a full queue is not worth failing the run for */ }
+  const rails = Object.assign({}, (state && state.rails && typeof state.rails === 'object') ? state.rails : {});
+  for (const r of flush.results) {
+    if (r.status === 'sent') rails[r.channel] = { ok: true, fails: 0, at: new Date().toISOString() };
+    else if (r.status === 'failed') rails[r.channel] = { ok: false, fails: (Number((rails[r.channel] || {}).fails) || 0) + 1, at: new Date().toISOString(), err: r.err || r.note };
+  }
+  try { await env.ORDERS.put('mesh:' + handle, JSON.stringify({ ...(state || {}), rails })); } catch (e) { /* same: report, do not break */ }
+  return json({ ok: true, handle, dry: dry, class: meshAccount(doc).class, socials: meshAccount(doc).socials,
+    composed: items.length, queued_now: merged.added, dropped: merged.dropped, still_queued: kept.length,
+    flush: { sent: flush.sent, queued: flush.queued, waiting: flush.waiting, results: flush.results },
+    rail_health: meshRailHealth({ rails }), auto: plan.on,
+    items: items.map((i) => ({ id: i.id, channel: i.channel, due: i.due, chars: String(i.text).length, link: !!i.link })),
+    note: dry ? 'dry run: the exact items and the exact call, sent to nobody'
+      : 'sent where a credential existed, queued where it did not; a rail that fails twice leaves the cadence on its own' });
+}
+
 async function meshAuto(req, env) {
   const b = await readBody(req);
   const who = await identify(req, env, b.handle || urlHandle(req));

@@ -3171,3 +3171,134 @@ export function meshRailsTotal(beats) {
   }
   return all;
 }
+
+/* ── v0.9.5: the press contract, copied from the running pipeline ───────────────────────────────
+ * hunta's `press/cadence.json` and `press/queue.json` are the interface its Buffer sender reads, so
+ * Tapstall composes into that shape instead of inventing one of our own: cadence numbers come from
+ * their file (a fixture in tests/fixtures, checked by test), and a queued item is
+ * { id, channel, channel_id, due, text, link, image, board, pin_title, landing, store }.
+ * Two ways out of the queue, and both are honest about what happened: if the shop has a Buffer access
+ * token we create the draft ourselves; if it does not, the item stays queued in a format their sender
+ * (or a cron on their own box, holding the keys we never ask for) picks up. Nothing is reported as
+ * posted because it was written down.
+ */
+export const MESH_BUFFER_CHANNEL = { x: 'twitter', linkedin: 'linkedin', pinterest: 'pinterest' };
+export const MESH_QUEUE_DEFAULTS = { grid_min: 40, per_day: 3, promo_per_day: 1, promo_min_gap_days: 3,
+  reply_per_day: 4, run_target: 4, longform_days: 7, topic_max_rails: 3 };
+export const MESH_GRAPHQL_URL = 'https://buffer.com/graphql';
+
+/** The queue item for one beat, in their keys, with a due time on the grid. `link` is only present on
+ *  the shop-facts half, because the value half has no link by design. */
+export function meshQueueItem(beat, opt) {
+  const o = opt || {}, now = o.now || Date.now(), grid = Number(o.grid_min || MESH_QUEUE_DEFAULTS.grid_min) * 60000;
+  const rail = String((beat && beat.rail) || (beat && beat.kind) || 'bluesky');
+  const chan = MESH_BUFFER_CHANNEL[rail] || (rail.indexOf('bsky') === 0 ? 'bluesky' : rail);
+  const n = Number(beat && beat.seq) || 0;
+  return {
+    id: String((beat && (beat.item_key || beat.id)) || ('b' + n)).replace(/[^\w:-]/g, '').slice(0, 40) + '-' + Math.floor(now / 864e5),
+    channel: chan, channel_id: String((o.channel_id || '') || '').slice(0, 40),
+    due: new Date(Math.ceil((now + 60000) / grid) * grid + n * grid).toISOString(),
+    text: String((beat && beat.text) || '').slice(0, Number(beat && beat.max) || 300),
+    link: beat && beat.kind === 'promo' ? String(beat.link || o.landing || '') : '',
+    image: String((beat && beat.image) || o.image || ''),
+    board: rail === 'pinterest' ? String(o.board || '') : '',
+    pin_title: rail === 'pinterest' ? meshClip((beat && beat.item) || '', 60) : '',
+    landing: String(o.landing || ''), store: String(o.store || ''),
+    kind: String((beat && beat.kind) || 'value'), posted_by: String((beat && beat.posted_by) || 'shop words'),
+  };
+}
+
+/** Merge new items into the shop's queue: one item per rail per slot, the day's cadence as the ceiling,
+ *  a promo never twice inside its gap, and nothing already queued by id. A full queue is a normal state,
+ *  not an error, so it reports how much it dropped instead of failing. */
+export function meshQueueMerge(prev, items, opt) {
+  const o = opt || {}, now = o.now || Date.now(), cad = o.cadence || MESH_QUEUE_DEFAULTS;
+  const keep = ((prev && prev.items) || []).filter((it) => it && it.due && Date.parse(it.due) > now - 60000);
+  const byId = new Set(keep.map((i) => i.id));
+  const day = Math.floor(now / DAY_MS);
+  const perRail = {}; const promoGap = {};
+  for (const i of keep) {
+    perRail[i.channel] = (perRail[i.channel] || 0) + (Math.floor(Date.parse(i.due) / DAY_MS) === day ? 1 : 0);
+    if (i.kind === 'promo') promoGap[i.channel] = Math.floor(Date.parse(i.due) / DAY_MS);
+  }
+  const dropped = []; const added = [];
+  for (const it of (Array.isArray(items) ? items : [])) {
+    if (byId.has(it.id)) { dropped.push({ id: it.id, why: 'already queued' }); continue; }
+    const limit = Number((cad.rails && cad.rails[it.channel] && cad.rails[it.channel].per_day) || cad.per_day || MESH_QUEUE_DEFAULTS.per_day);
+    if ((perRail[it.channel] || 0) >= limit) { dropped.push({ id: it.id, channel: it.channel, why: 'cadence for today is full: ' + limit }); continue; }
+    if (it.kind === 'promo') {
+      const last = promoGap[it.channel];
+      if (typeof last === 'number' && day - last < (Number(cad.promo_min_gap_days) || MESH_QUEUE_DEFAULTS.promo_min_gap_days)) {
+        dropped.push({ id: it.id, channel: it.channel, why: 'promo gap ' + (cad.promo_min_gap_days || 3) + ' days' }); continue;
+      }
+    }
+    added.push(it); byId.add(it.id); perRail[it.channel] = (perRail[it.channel] || 0) + 1;
+    if (it.kind === 'promo') promoGap[it.channel] = day;
+  }
+  return { items: keep.concat(added).sort((a, b) => String(a.due).localeCompare(String(b.due))), added: added.length, dropped,
+    store: String((prev && prev.store) || (o.store || '')), landing: String((prev && prev.landing) || o.landing || '') };
+}
+
+/** The Buffer draft call, kept small and loud: it either returns an id or it returns an error, and a
+ *  rail with no token or no channel id is an error, never a silent skip. `verified` is set only by a
+ *  response we actually got, so nothing in this code can report a post it did not see accepted. */
+export function meshBufferCall(press, item) {
+  const p = press || {};
+  if (!p.buffer_token) return { call: null, err: 'no Buffer access token wired for this account' };
+  const ch = String(item.channel_id || (p.channels || {})[item.channel] || '');
+  if (!ch) return { call: null, err: 'no Buffer channel id for ' + item.channel };
+  const body = JSON.stringify({
+    operationName: 'createDraft',
+    query: 'mutation createDraft($input: CreateDraftInput!) { createDraft(input: $input) { draft { id state } } }',
+    variables: { input: { channelId: ch, text: item.text, publishAt: item.due,
+      attachments: item.image ? [{ type: 'IMAGE', url: item.image }] : undefined } },
+  });
+  return { err: '', call: { url: MESH_GRAPHQL_URL, method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: 'Bearer ' + String(p.buffer_token).slice(0, 200) },
+    body: body } };
+}
+
+/** Resolve what an account can actually send with: the owner's env secrets win, a shop's own stored
+ *  config is second, and a missing piece is returned as a reason rather than a silent no-op. Cadence
+ *  comes from the shop if it set one, otherwise from the pipeline's file. */
+export function meshPress(st, env) {
+  const p = (st && st.press && typeof st.press === 'object') ? st.press : {};
+  const e = env || {};
+  const channels = Object.assign({}, p.channels || {});
+  const out = { channels: channels, has_token: !!(e.PRESS_BUFFER_TOKEN || p.buffer_token),
+    token_from: e.PRESS_BUFFER_TOKEN ? 'env' : (p.buffer_token ? 'kv' : 'nowhere'),
+    board: p.board || '', image_base: p.image_base || '', landing: p.landing || '', store: (st && st.handle) || '',
+    cadence: (p.cadence && typeof p.cadence === 'object') ? p.cadence : null,
+    stored_in: p.buffer_token ? 'kv (theirs to delete; prefer the worker secret)' : 'env',
+    missing: [] };
+  if (!out.has_token) out.missing.push('PRESS_BUFFER_TOKEN');
+  if (!Object.keys(channels).length) out.missing.push('a channel id per rail (Buffer: Channels, the 24-character id)');
+  return out;
+}
+
+/** Send what is due. `dry` returns exactly what would be sent and calls nothing; a real send records
+ *  every outcome, and a rail that fails twice is dropped from the cadence by meshRailHealth, without
+ *  a question to anyone. The queue is their format, so a sender on their own box can drain it instead. */
+export async function meshPressFlush(items, press, opt) {
+  const o = opt || {}, now = o.now || Date.now(), dry = !!o.dry, fetcher = o.fetch || (typeof fetch === 'function' ? fetch : null);
+  const results = [];
+  for (const it of (Array.isArray(items) ? items : [])) {
+    if (Date.parse(it.due) > now) { results.push({ id: it.id, channel: it.channel, status: 'waiting', due: it.due }); continue; }
+    const call = meshBufferCall(press, it);
+    if (call.err) { results.push({ id: it.id, channel: it.channel, status: 'queued', sent: false, err: call.err, verified: false }); continue; }
+    if (dry) { results.push({ id: it.id, channel: it.channel, status: 'dry', url: call.call.url, due: it.due, chars: String(it.text).length, verified: false }); continue; }
+    if (!fetcher) { results.push({ id: it.id, channel: it.channel, status: 'queued', sent: false, err: 'no fetch in this runtime', verified: false }); continue; }
+    try {
+      const r = await fetcher(call.call.url, { method: call.call.method || 'POST', headers: call.call.headers, body: call.call.body });
+      const txt = await r.text();
+      const ok = r.status >= 200 && r.status < 300 && !/"errors"\s*:\s*\[/.test(txt);
+      results.push({ id: it.id, channel: it.channel, status: ok ? 'sent' : 'failed', http: r.status, sent: ok,
+        verified: ok, note: ok ? 'the draft was accepted by Buffer' : txt.slice(0, 160) });
+    } catch (e) {
+      results.push({ id: it.id, channel: it.channel, status: 'failed', sent: false, err: String(e && e.message || e).slice(0, 160), verified: false });
+    }
+  }
+  return { results, sent: results.filter((r) => r.status === 'sent').length, queued: results.filter((r) => r.status === 'queued').length,
+    waiting: results.filter((r) => r.status === 'waiting').length, dry: dry, at: new Date(now).toISOString(),
+    note: 'A post is only called posted when the platform said yes. Everything else stays queued and says so.' };
+}

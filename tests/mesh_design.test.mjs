@@ -60,8 +60,19 @@ test('the mesh costs the account at most one write a day per shop', () => {
 test('no node can publish without the shop, because there is nothing to publish with', () => {
   assert.match(doc, /That one is \*\*rejected here\*\*/, 'the doc must not claim an approval gate this product does not have');
   assert.match(doc, /replies_only/, 'and it must name the gate it does have');
-  assert.doesNotMatch(worker, /'\/api\/mesh\/(publish|send|post|schedule)'/,
-    'there is no auto-publish endpoint, and adding one must be a decision with a test written for it');
+  // the decision the owner made twice in writing: the loop has to close on its own, so the endpoint
+  // exists now. What the guard protects since then is not the absence of a door but who can open it.
+  assert.match(worker, /'\/api\/mesh\/publish'/, 'there is one named action to send on, because a mesh that needs a person to fire it is not a mesh');
+  for (const alias of ['send', 'post', 'schedule']) {
+    assert.equal(new RegExp("'\\/api\\/mesh\\/" + alias + "'").test(worker), false, 'and no ' + alias + ' alias: one door, not four ways to spell it');
+  }
+  const pubSrc = worker.slice(worker.indexOf('async function meshPublish'), worker.indexOf('async function meshAuto'));
+  assert.ok(pubSrc.length > 400, 'the publisher handler is readable, not a stub');
+  assert.match(pubSrc, /await identify\(req, env,/, 'a send is always signed in as a shop: nothing can post as someone who did not sign in');
+  assert.match(pubSrc, /x-tapstall-confirm/, 'a real send needs the confirm header, so a stray request cannot fire a batch');
+  assert.match(pubSrc, /dry/, 'and the dry path exists, which is how this was tested before any token was handed over');
+  assert.match(pubSrc, /press:queue:/, 'items land in the queue format the pipeline already reads');
+  assert.match(pubSrc, /r\.status === 'sent'/, 'and a post is only counted when the platform answered, by that answer alone');
   assert.match(worker, /meshMark\(prev, Array\.isArray\(b\.marked\) \? b\.marked : \[\], Date\.now\(\)\)/,
     'state changes only by marking what a human looked at');
 });
@@ -309,4 +320,89 @@ test('replies: the machine answers the informational ones on the two rails that 
   assert.ok(r.escalate_to_human.some((x) => /price/.test(x)) && r.escalate_to_human.some((x) => /angry/.test(x)),
     'price, complaint, refund, anger: straight to the human, no template in front of it');
   assert.equal(core.MESH_AUTONOMY_V3.human, 'replies_only', 'so the policy line still says exactly what is gated');
+});
+
+/* v0.9.5 — the press contract, checked against the pipeline's own files. */
+test('our cadence is the cadence the running system uses, not numbers I made up', async () => {
+  const core = await import('file://' + join(root, 'worker', 'core.js'));
+  const fs = await import('node:fs');
+  const hunta = JSON.parse(fs.readFileSync(join(root, 'tests', 'fixtures', 'hunta-cadence.json'), 'utf8'));
+  const d = core.MESH_QUEUE_DEFAULTS;
+  assert.equal(d.promo_per_day, hunta.promo_per_day, 'one promo a day, as their file says');
+  assert.equal(d.promo_min_gap_days, hunta.promo_min_gap_days, 'and ' + hunta.promo_min_gap_days + ' days before the same item is sold again');
+  assert.equal(d.reply_per_day, hunta.reply_per_day, 'four replies a day');
+  assert.equal(d.run_target, hunta.run_target, 'four runs a day is what the grid is built around');
+  assert.equal(d.longform_days, hunta.longform_days, 'long form once a week');
+  assert.equal(d.topic_max_rails, hunta.topic_max_rails, 'one topic rides at most three rails');
+  assert.equal(new Set(Object.keys(hunta).filter((k) => typeof hunta[k] === 'object')).size >= 10, true,
+    'and the rail set is theirs: ' + Object.keys(hunta).filter((k) => typeof hunta[k] === 'object').length + ' rails');
+  assert.equal(d.per_day, 3, 'three beats per rail per day, which is what every rail entry says');
+  assert.equal(hunta.grid_min, undefined, 'the grid is not in their file, it is the 40 minutes the docs name');
+  assert.equal(d.grid_min, 40, 'so we state it ourselves, and it matches Buffer\'s own spacing');
+});
+
+test('a queued item is written in their keys, so their sender can drain ours', async () => {
+  const core = await import('file://' + join(root, 'worker', 'core.js'));
+  const fs = await import('node:fs');
+  const theirs = JSON.parse(fs.readFileSync(join(root, 'tests', 'fixtures', 'hunta-queue-item.json'), 'utf8'));
+  const sample = theirs.items[0];
+  const ours = core.meshQueueItem({ kind: 'value', rail: 'x', item_key: 'v1', text: 'A value post about reading boards, no pitch in it.', max: 280 },
+    { now: Date.parse(sample.due), landing: theirs.landing, store: theirs.store, channel_id: sample.channel_id });
+  for (const k of Object.keys(sample)) assert.ok(k in ours, 'their key ' + k + ' exists in our item');
+  assert.equal(ours.channel, sample.channel, 'a beat on the x rail is queued for channel twitter, which is what Buffer calls it');
+  assert.equal(ours.channel_id, sample.channel_id, 'the 24-character channel id goes through untouched');
+  assert.ok(Date.parse(ours.due) >= Date.parse(sample.due), 'a due time no earlier than the run: ' + ours.due);
+  const du = new Date(ours.due);
+  assert.equal(du.getUTCSeconds(), 0, 'and it lands exactly on the grid');
+  assert.equal(du.getUTCMinutes() % 40, 0, 'on Buffer\'s 40-minute spacing, minute ' + du.getUTCMinutes());
+  assert.equal(ours.link, '', 'a value beat carries no link, by construction, not by clipping');
+  const promo = core.meshQueueItem({ kind: 'promo', rail: 'x', item_key: 'p1', text: 'Nyama is 6.00 USD, available now', link: theirs.landing, max: 280 },
+    { now: Date.parse(sample.due), landing: theirs.landing, store: theirs.store, channel_id: sample.channel_id });
+  assert.equal(promo.link, theirs.landing, 'the shop-facts beat carries the store link, which is the whole point of it');
+  assert.equal(promo.image, '', 'no card, no fake card url');
+  const pin = core.meshQueueItem({ kind: 'promo', rail: 'pinterest', item_key: 'p2', item: 'Nyama', text: 'Nyama is 6.00 USD', link: theirs.landing },
+    { now: Date.parse(sample.due), store: theirs.store, board: 'hunta-boards' });
+  assert.equal(pin.board, 'hunta-boards', 'and a pin needs the board, or Buffer answers Board not found from a stale cache');
+  assert.equal(pin.pin_title, 'Nyama', 'with a title of its own');
+
+  const merged = core.meshQueueMerge({ items: [ours] }, [ours, promo], { now: Date.parse(sample.due) + 1000 });
+  assert.equal(merged.added, 1, 'the duplicate id is not queued twice');
+  assert.equal(merged.dropped[0].why, 'already queued', 'and it says why');
+  const full = core.meshQueueMerge({ items: [ours, promo] }, [core.meshQueueItem({ kind: 'value', rail: 'x', item_key: 'v9', text: 'third', max: 280 }, { now: Date.parse(sample.due) }),
+    core.meshQueueItem({ kind: 'value', rail: 'x', item_key: 'v10', text: 'fourth would be too many', max: 280 }, { now: Date.parse(sample.due) })], { now: Date.parse(sample.due) + 2000 });
+  assert.equal(full.items.length, 3, 'the rail is full at three for the day: what was queued plus one that fit');
+  assert.equal(full.added, 1, 'so the fourth is refused rather than silently deferred');
+  assert.equal(full.dropped.filter((x) => /cadence/.test(String(x.why))).length, 1, 'and it says the cadence is why');
+});
+
+test('no credential means queued, never posted: the sender only says sent when the platform answered', async () => {
+  const core = await import('file://' + join(root, 'worker', 'core.js'));
+  const item = { id: 'x1', channel: 'twitter', channel_id: '', due: new Date(Date.now() - 60000).toISOString(), text: 'value', kind: 'value' };
+  const noToken = await core.meshPressFlush([item], {}, { now: Date.now() });
+  assert.equal(noToken.results[0].status, 'queued', 'no token: the item is queued and says so');
+  assert.equal(noToken.sent, 0, 'nothing is claimed as sent');
+  assert.equal(noToken.results[0].verified, false, 'and the verified flag is what makes a lie visible');
+  const noChan = await core.meshPressFlush([{ ...item, channel_id: '' }], { buffer_token: 't' }, { now: Date.now() });
+  assert.match(noChan.results[0].err, /no Buffer channel id/, 'a token with no channel id is a named missing piece, not a silent skip');
+  const dry = await core.meshPressFlush([{ ...item, channel_id: 'abc', text: 'value post' }], { buffer_token: 't' }, { dry: true, now: Date.now() });
+  assert.equal(dry.results[0].status, 'dry', 'dry runs describe the call and send nothing');
+  assert.match(dry.results[0].url, /buffer\.com\/graphql/, 'to the same endpoint the pipeline uses');
+  const future = await core.meshPressFlush([{ ...item, channel_id: 'abc', due: new Date(Date.now() + 3600e3).toISOString() }], { buffer_token: 't' }, { now: Date.now() });
+  assert.equal(future.results[0].status, 'waiting', 'an item due later stays waiting rather than firing early');
+  const calls = [];
+  const ok = await core.meshPressFlush([{ ...item, channel_id: 'abc', text: 'value post' }], { buffer_token: 't' },
+    { now: Date.now(), fetch: async (u, o) => {
+        calls.push({ u, auth: o.headers.authorization, body: o.body });
+        return { status: 200, text: async () => '{"data":{"createDraft":{"draft":{"id":"d1"}}}}' };
+    } });
+  assert.equal(ok.sent, 1, 'a real send, verified by the response');
+  assert.equal(ok.results[0].status, 'sent', 'and the status is the platform\'s answer, not ours');
+  assert.match(calls[0].auth, /^Bearer t$/, 'the token rides as a bearer header');
+  assert.equal(JSON.parse(calls[0].body).variables.input.channelId, 'abc', 'to the channel the shop wired');
+  const bad = await core.meshPressFlush([{ ...item, channel_id: 'abc', text: 'value post' }], { buffer_token: 't' },
+    { now: Date.now(), fetch: async () => ({ status: 200, text: async () => '{"errors":[{"message":"Channel not connected"}]}' }) });
+  assert.equal(bad.sent, 0, 'a 200 with errors in the body is a failure — this is the bug class the docs call prompt blindness');
+  assert.equal(bad.results[0].status, 'failed', 'and it is recorded as one, so the rail can be dropped for it');
+  const health = core.meshRailHealth({ rails: { twitter: { ok: false, fails: 2 } }, cadence: { twitter: 3 } });
+  assert.equal(health.dropped[0].rail, 'twitter', 'two of those and the rail leaves the cadence without a question to anyone');
 });

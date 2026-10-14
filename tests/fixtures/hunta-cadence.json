@@ -1,0 +1,53 @@
+{
+ "bsky": {
+  "per_day": 3
+ },
+ "bsky_a": {
+  "per_day": 3
+ },
+ "bsky_b": {
+  "per_day": 3
+ },
+ "devto": {
+  "per_day": 3
+ },
+ "linkedin": {
+  "per_day": 3
+ },
+ "linkedin_a": {
+  "per_day": 3
+ },
+ "linkedin_b": {
+  "per_day": 3
+ },
+ "longform_days": 7,
+ "nostrnote": {
+  "per_day": 3
+ },
+ "pinterest": {
+  "per_day": 3
+ },
+ "pinterest_b": {
+  "per_day": 3
+ },
+ "promo_min_gap_days": 3,
+ "promo_per_day": 1,
+ "reply_per_day": 4,
+ "run_target": 4,
+ "topic_max_rails": 3,
+ "whop_private": {
+  "per_day": 1
+ },
+ "whop_public": {
+  "per_day": 1
+ },
+ "x": {
+  "per_day": 3
+ },
+ "x_a": {
+  "per_day": 3
+ },
+ "x_b": {
+  "per_day": 3
+ }
+}
