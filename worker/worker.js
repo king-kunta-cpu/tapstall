@@ -2660,6 +2660,14 @@ async function menuEdit(req, env) {
   if (!who || !who.st) return json({ ok: false, error: 'no store' }, 404);
   const lr = lockRes(who); if (lr) return lr;
   if (who.anonymous || who.bad) return json({ ok: false, need_login: true, error: 'sign in first' }, 401);
+  // The shop's items belong to the shop. Their console can rewrite them; this one cannot — an owner
+  // with a save button next to a merchant's prices is a support queue with a billing relationship.
+  if (String(reqHeader(req, 'x-tapstall-console') || '').toLowerCase() === 'owner' && !env.TAPSTALL_OWNER_EDITS) {
+    return json({ ok: false, error: 'shop items belong to the shop', console: 'owner',
+      where: 'the merchant console: /s/' + String((who.st && who.st.handle) || '') + ' — they sign in with their store name and PIN',
+      why: 'we are not their back office. Their menu, their prices, their keys to change them',
+      escape: 'for a migration only: set TAPSTALL_OWNER_EDITS=1 on this Worker, make the write, unset it' }, 403);
+  }
   // Same rule as a settings write: a browser session can be planted by a form on
   // someone else's page, so the dashboard has to say so out loud with a header.
   // An API key is already a secret the merchant keeps, not a cookie a page has.

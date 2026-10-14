@@ -487,3 +487,13 @@ test('a seller whose shop has nothing to say posts the company material instead 
   const broken = core.meshIdentityPlan(Object.assign({ id: 'seller:a' }, idn), { beats: [{ kind: 'value', text: '', rail: 'x' }, null] }, { price_usd: 60 }, { now: Date.parse('2026-10-14T06:00:00Z') });
   assert.ok(broken.beats.length > 0 && broken.beats.every((b) => b.text), 'empty or missing lines are not sent as blank posts');
 });
+
+test('the owner console cannot rewrite a shop items, and the refusal names where to do it', () => {
+  const src = read('pages/src/admin.html');
+  assert.match(src, /x-tapstall-console', 'owner'/, 'the owner console stamps itself, so the boundary has something to read');
+  assert.match(worker, /x-tapstall-console'\) \|\| ''\)\s*\.toLowerCase\(\)\s*===\s*'owner'/, 'the route refuses an owner-stamped menu write');
+  assert.match(worker, /shop items belong to the shop/, 'with a message a human can act on');
+  assert.match(worker, /their menu, their prices, their keys to change them/i, 'and the reason is the positioning, not a style rule');
+  assert.match(worker, /TAPSTALL_OWNER_EDITS/, 'one escape hatch, off by default, named in the answer so it is not a secret');
+  assert.match(worker, /merchant console: \/s/, 'and it points at the page where the merchant does it');
+});
