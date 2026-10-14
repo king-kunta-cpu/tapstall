@@ -3412,8 +3412,8 @@ export function meshCompanyBeats(identity, facts, opt) {
       posted_by: 'shop facts' });
   }
   const rails = Object.keys((identity && identity.rails) || {});
-  const beats = out.map((b) => ({ ...b, to: rails.length ? rails : ['bluesky'], auto_send: rails.some((r) => (MESH_PUBLISH[r] || {}).via === 'buffer' || (MESH_PUBLISH[r] || {}).via === 'direct') }));
-  return { on: true, beats: beats.slice(0, per), blocked: Number(f.price_usd) > 0 ? [] : [{ why: 'no price in facts: a company promo cannot invent one either' }],
+  const beats = out.map((b) => ({ ...b, to: rails.length ? rails : ['bluesky'], rails_from: rails.length ? 'identity' : 'default', auto_send: rails.some((r) => (MESH_PUBLISH[r] || {}).via === 'buffer' || (MESH_PUBLISH[r] || {}).via === 'direct') }));
+  return { on: true, source: 'company', beats: beats.slice(0, per), blocked: Number(f.price_usd) > 0 ? [] : [{ why: 'no price in facts: a company promo cannot invent one either' }],
     human: 'replies_only', identity: (identity && identity.id) || 'owner' };
 }
 

@@ -2523,7 +2523,10 @@ async function pressRun(req, env) {
     } else {
       plan = meshCompanyBeats(e, { price_usd: PRICE_USD, free_days: FREE_DAYS, feed_ok: true, price_ok: true }, { origin: origin, now: Date.now() });
     }
-    const items = (plan.beats || []).map((beat, i) => meshQueueItem(Object.assign({}, beat, { seq: i }), { landing: origin + '/fees', store: id, now: Date.now(),
+    // the identity's own rails, not the drafting surface and not the shop's channels: an item addressed
+    // to whatsapp_status from a seller run would sit in the queue forever, since nothing sends there
+    const idRails = Object.keys(e.rails || {});
+    const items = (plan.beats || []).map((beat, i) => meshQueueItem(Object.assign({}, beat, { seq: i, to: idRails.length ? idRails : (beat.to || []) }), { landing: origin + '/fees', store: id, now: Date.now(),
       channel_id: ((e.rails || {})[beat.rail] || {}).channel_id || press.channels[beat.rail] || '', board: press.board }));
     const prevQ = await env.ORDERS.get('press:queue:' + id, 'json').catch(() => null) || {};
     const merged = meshQueueMerge(prevQ, items, { store: id, landing: origin + '/fees', cadence: e.cadence || MESH_QUEUE_DEFAULTS });

@@ -444,6 +444,8 @@ test('company content is composed with the same provenance rule as a shop: no nu
   assert.equal(b.beats.length, core.MESH_QUEUE_DEFAULTS.per_day, 'three beats a day on a company account, the pipeline number');
   assert.equal(b.beats.filter((x) => x.kind === 'value').length, 2, 'two of them value');
   assert.equal(b.beats.filter((x) => x.kind === 'promo').length, 1, 'one company facts, with the price in it');
+  assert.equal(b.source, 'company', 'and the plan says what material it is, so a run can report it');
+  assert.equal(b.beats[0].rails_from, 'identity', 'the rails come from the identity, not from a drafting surface');
   assert.match(JSON.stringify(b.beats), /60/, 'the price came from the facts handed in');
   for (const v of b.beats.filter((x) => x.kind === 'value')) assert.match(v.text, /\/[a-z.]+$/, 'and every value line cites where it is true: ' + v.text.slice(-24));
   assert.ok(!/discount|%\s?off|free trial month/i.test(JSON.stringify(b.beats)), 'no invented offer on a company promo either');
