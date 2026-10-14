@@ -3189,10 +3189,28 @@ export const MESH_GRAPHQL_URL = 'https://buffer.com/graphql';
 
 /** The queue item for one beat, in their keys, with a due time on the grid. `link` is only present on
  *  the shop-facts half, because the value half has no link by design. */
+/** Which channel a beat actually goes out on. The rail a line was drafted for is often an assist surface
+ *  (a status update, the paper by the till), and a queue item naming one of those is a post that can never
+ *  happen; so the destination list wins, and only a channel something can physically send is chosen. */
+export function meshBeatChannel(beat) {
+  const want = [] .concat((beat && beat.to) || [], (beat && beat.rail) || 'bluesky');
+  for (const w of want) {
+    const key = String(w);
+    const pub = MESH_PUBLISH[key];
+    if (!pub) continue;
+    if (pub.via === 'buffer' || pub.via === 'direct' || pub.via === 'own') {
+      return { channel: pub.via === 'buffer' ? (MESH_BUFFER_CHANNEL[key] || key) : key, via: pub.via, rail: key };
+    }
+  }
+  for (const w of want) { const pub = MESH_PUBLISH[String(w)]; if (pub) return { channel: String(w), via: 'none', rail: String(w) }; }
+  return { channel: 'bluesky', via: 'none', rail: String((beat && beat.rail) || 'bluesky') };
+}
+
 export function meshQueueItem(beat, opt) {
   const o = opt || {}, now = o.now || Date.now(), grid = Number(o.grid_min || MESH_QUEUE_DEFAULTS.grid_min) * 60000;
-  const rail = String((beat && beat.rail) || (beat && beat.kind) || 'bluesky');
-  const chan = MESH_BUFFER_CHANNEL[rail] || (rail.indexOf('bsky') === 0 ? 'bluesky' : rail);
+  const pick = meshBeatChannel(beat);
+  const rail = pick.rail;
+  const chan = o.channel_name ? String(o.channel_name) : pick.channel;
   const n = Number(beat && beat.seq) || 0;
   return {
     id: String((beat && (beat.item_key || beat.id)) || ('b' + n)).replace(/[^\w:-]/g, '').slice(0, 40) + '-' + Math.floor(now / 864e5),
@@ -3204,7 +3222,7 @@ export function meshQueueItem(beat, opt) {
     board: rail === 'pinterest' ? String(o.board || '') : '',
     pin_title: rail === 'pinterest' ? meshClip((beat && beat.item) || '', 60) : '',
     landing: String(o.landing || ''), store: String(o.store || ''),
-    kind: String((beat && beat.kind) || 'value'), posted_by: String((beat && beat.posted_by) || 'shop words'),
+    kind: String((beat && beat.kind) || 'value'), posted_by: String((beat && beat.posted_by) || 'shop words'), via: pick.via,
   };
 }
 
@@ -3284,6 +3302,13 @@ export async function meshPressFlush(items, press, opt) {
   const results = [];
   for (const it of (Array.isArray(items) ? items : [])) {
     if (Date.parse(it.due) > now) { results.push({ id: it.id, channel: it.channel, status: 'waiting', due: it.due }); continue; }
+    // Buffer is only for the rails Buffer can hold. A direct rail is a script with the shop's own key,
+    // an assist surface is a person with a phone, and neither is our call to make or to claim.
+    if (it.via === 'none') { results.push({ id: it.id, channel: it.channel, status: 'queued', sent: false, verified: false,
+      err: 'no API exists for ' + it.channel + ': the item is prepared for a person, and nothing is called posted until they do it' }); continue; }
+    if (it.via === 'direct' || it.via === 'own') { results.push({ id: it.id, channel: it.channel, status: 'queued', sent: false, verified: false,
+      err: it.via === 'own' ? 'published on our own node: the feed is the post'
+        : "a direct rail is sent by the script that holds the key, in the shop's own repo or the owner's box" }); continue; }
     const call = meshBufferCall(press, it);
     if (call.err) { results.push({ id: it.id, channel: it.channel, status: 'queued', sent: false, err: call.err, verified: false }); continue; }
     if (dry) { results.push({ id: it.id, channel: it.channel, status: 'dry', url: call.call.url, due: it.due, chars: String(it.text).length, verified: false }); continue; }
