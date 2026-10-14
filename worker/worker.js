@@ -33,13 +33,14 @@ import {
   receiptText, receiptHtml, sampleArtSvg, meshPack, meshJson, meshMark, meshWitness,
   meshAutoPlan, meshGrant, meshGrowth, meshIsPitch, meshValueBeats, meshSchedule, meshFirstTouch,
   MESH_AUTONOMY, MESH_AUTONOMY_V3, MESH_CHANNELS, MESH_OUTREACH, meshAccount, meshOutreachPlan,
+  MESH_PUBLISH, MESH_BUFFER_FREE, MESH_DRIP, meshRailsTotal, meshRailHealth, meshDrip,
   MESH_RAILS, MESH_BUDGET,
   orderRow, packRow, unpackRow, mergeRows, MAX_ORDERS_KEPT,   // the ledger row, and the cap on it
   EDITABLE_FIELDS, SOFT_FIELDS, sign, adminStore, normaliseRail, resolveRail,
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '0.9.4';
+const VERSION = '0.9.5';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
@@ -2401,7 +2402,7 @@ async function meshView(req, url, env) {
   const mf = meshFacts(st, url.origin);
   const pack = meshPack(st, products, mf, { origin: url.origin, sent: state || {} });
   return json({
-    ok: true, handle, plan: pack, rails: MESH_RAILS, budget: MESH_BUDGET,
+    ok: true, handle, plan: pack, rails: meshRailsTotal((pack && pack.beats) || []), budget: MESH_BUDGET,
     state_saved: !!state, posted: state ? (state.sent || {}) : {},
     auto: { on: !!(state && state.auto && state.auto.on), at: (state && state.auto && state.auto.at) || null,
       flips: (state && state.auto && state.auto.flips) || 0, policy: MESH_AUTONOMY },
@@ -2411,7 +2412,10 @@ async function meshView(req, url, env) {
     schedule: meshSchedule(st, products, mf || meshFacts(st, url.origin), { origin: url.origin, state: state || {}, now: Date.now() }),
     touch: meshFirstTouch(st, await ledgerRows(env, handle, 200)),
     channels: MESH_CHANNELS, policy_v3: MESH_AUTONOMY_V3,
-    account: meshAccount(st), rails: Object.keys(MESH_CHANNELS),
+    publish: MESH_PUBLISH, buffer_free: MESH_BUFFER_FREE, drip: MESH_DRIP,
+    rail_health: meshRailHealth(state || {}),
+    drip_plan: meshDrip(((meshFirstTouch(st, await ledgerRows(env, handle, 200)) || {}).queue) || [], state || {}), rails: { ...MESH_RAILS, ...Object.fromEntries(Object.keys(MESH_CHANNELS).filter((c) => !MESH_RAILS[c]).map((c) => [c, { name: c, max: MESH_CHANNELS[c].max }])) },
+    account: meshAccount(st), rails_available: Object.keys(MESH_CHANNELS),
     outreach: meshOutreachPlan(st, { leads: st.outreach_list || [], state: state || {} }),
     card_url: (url.origin || '') + '/s/' + handle + '/mesh.json',
     note: 'Nothing here is sent anywhere. Tap Copy, then post it yourself — the pack is rebuilt from your menu each morning, so a price that moved today is not in a post you make tomorrow.',

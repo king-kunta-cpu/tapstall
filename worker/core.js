@@ -2917,30 +2917,47 @@ export const MESH_RAIL_SOURCE = "the rails and the cadence are the pipeline's ow
  * autonomous by default: he wrote the policy, so a grant would be him asking himself for permission.
  * A seller's account is delegated to the same machine — their key, their number, one tap of theirs
  * to stop — and a trial account has nothing connected, so it has nothing to post with. */
+/* Three kinds of account, and the difference is who we may post *as* — not how careful we are.
+ *  owner    the company's own accounts. Autonomous by default: he wrote the policy, so a grant or a
+ *           tap would be him asking himself for permission.
+ *  seller   staff and people reselling Tapstall on the company's behalf. They hand over real
+ *           credentials (Bluesky app password, Telegram bot token, Mastodon token, a free X bearer, an
+ *           nsec we generate, dev.to key) and the machine posts to those accounts itself.
+ *  operator anyone selling *with* the platform. Their socials are not ours to touch — we are not a
+ *           content agency — so they get the free nodes we run, and copy they can post themselves. */
+export const MESH_OWN_NODES = ['gpages'];
 export const MESH_ACCOUNT_CLASSES = {
-  owner:  { auto_default: true,  credentials: "the owner's own company accounts", revoke: "flip the default off in ops" },
-  seller: { auto_default: true,  credentials: "delegated: the seller hands over their app password, bot token or nsec, and the owner's machine posts to it", revoke: "they change the password at the provider, or tap revoke in ops" },
-  trial:  { auto_default: false, credentials: "none until they connect their own", revoke: "nothing to revoke: it never posts" },
+  owner:    { auto_default: true,  socials: true,  credentials: "the owner's own company accounts", revoke: "flip the default off in ops" },
+  seller:   { auto_default: true,  socials: true,  credentials: "delegated for real: the seller hands over their app password, bot token or nsec and the machine posts to their account", revoke: "they change the password at the provider, or tap revoke in ops" },
+  operator: { auto_default: false, socials: false, credentials: "none, and none are asked for: an operator's accounts stay theirs", revoke: "nothing to revoke; the platform only ever publishes its own nodes" },
+  // kept so an old document still classifies: a trial shop is an operator with nothing connected
+  trial:    { auto_default: false, socials: false, credentials: "none until they connect their own", revoke: "nothing to revoke: it never posts" },
 };
 
 export function meshAccount(st) {
   const s = st || {};
   const cls = s.mesh_class || (s.owner === true || s.type === 'company' ? 'owner'
-    : (s.plan === 'trial' || /trial/i.test(String(s.status || '')) ? 'trial' : 'seller'));
+    : (s.staff === true || s.reseller === true || s.delegate === true || /staff|reseller|seller/i.test(String(s.role || '')) ? 'seller'
+      : (s.plan === 'trial' || /trial/i.test(String(s.status || '')) ? 'trial' : 'operator')));
   const c = MESH_ACCOUNT_CLASSES[cls] || MESH_ACCOUNT_CLASSES.seller;
   const ch = (s.mesh_channels && typeof s.mesh_channels === 'object') ? s.mesh_channels : {};
   return { class: cls, auto_default: c.auto_default, credentials: c.credentials, revoke: c.revoke,
     rails: Object.keys(ch).filter((k) => ch[k] && ch[k].on), delegated: cls === 'seller',
-    on_behalf_of: cls === 'seller' ? "a seller's account, posted to by the owner's machine on credentials the seller gave" : "the owner's own account" };
+    socials: c.socials, own_nodes: MESH_OWN_NODES,
+    on_behalf_of: cls === 'seller' ? "a seller's account, posted to by the owner's machine on credentials the seller gave"
+      : cls === 'owner' ? "the owner's own account" : "an operator's shop, published on the platform's own nodes only" };
 }
 
 /* Outreach the way the pipeline does it: the machine composes, one tap sends the batch, the mailbox
  * ramps, and the reply stays at a human pace. What is deliberately absent is a per-message
  * approval, which is how a growth machine becomes a to-do list nobody gets to. */
 export const MESH_OUTREACH = {
-  compose: 'auto', send: 'one owner tap sends the whole batch', at_utc: '08:21', weekdays_only: true,
+  compose: 'auto', send: 'auto', approvals: 'none', at_utc: '08:21', weekdays_only: true,
+  human_for: ['reply', 'price', 'complaint', 'anything a customer is angry about'],
   ramp_per_day: [20, 40, 60, 80, 100], batch_max: 80,
-  replies: { per_day: 4, mode: 'human', order: 'questions first' },
+  replies: { per_day: 4, scan_per_day: 3, mode: 'human', order: 'questions first',
+    auto_first_reply_on: ['bluesky', 'nostr'],
+    escalate_to_human: ['price', 'complaint', 'refund', 'anything a customer is angry about'] },
   basis: ['ledger', 'uploaded list', 'follower who engaged'],
 };
 
@@ -2952,16 +2969,19 @@ export function meshOutreachPlan(st, opt) {
   const total = Number((state.outreach && state.outreach.total) || 0);
   const cap = ramp[Math.min(ramp.length - 1, Math.floor(total / 100))];
   const list = Array.isArray(o.leads) ? o.leads : [];
+  const acct = meshAccount(st);
+  const sendable = !!acct.socials || (o.channels || []).length > 0;   // a credential is a physical limit, not an approval
   const batch = list.slice(0, Math.max(0, Math.min(MESH_OUTREACH.batch_max, cap - sent))).map((l, i) => {
     const to = String((l && (l.phone || l.email || l.handle)) || l || '').slice(0, 60);
-    return { to, kind: /@/.test(to) ? 'email' : 'dm_whatsapp', i: i + 1, sends: false, tap_sends_batch: true,
+    return { to, kind: /@/.test(to) ? 'email' : 'dm_whatsapp', i: i + 1,
+      sends: sendable, approved_by: null, waits_for: sendable ? 'nothing: the window sends it' : 'an outbound credential for this account',
       text: meshClip((l && l.note) ? String(l.note) : String(l), 220) };
   });
   return { composed: batch.length, send_at_utc: MESH_OUTREACH.at_utc, on: weekday || !MESH_OUTREACH.weekdays_only,
     skip_reason: (!weekday && MESH_OUTREACH.weekdays_only) ? 'weekend: the pipeline composes on weekdays only' : '',
     cap_today: cap, sent_today: sent, ramp_day: Math.floor(total / 100) + 1, batch,
     replies: MESH_OUTREACH.replies, basis: MESH_OUTREACH.basis,
-    note: 'The batch is ready as one action. No message waits for its own yes, and no reply is ever sent from this code.' };
+    note: 'Composed here, sent by the window, capped by the ramp. Nothing waits for a yes; what waits for a person is the reply, because that is the half where a sale is won.' };
 }
 
 export const MESH_AUTONOMY_V3 = {
@@ -3025,6 +3045,7 @@ export function meshSchedule(st, products, facts, opt) {
   const o = opt || {}, now = o.now || Date.now(), day = Math.floor(now / DAY_MS);
   const state = o.state || {};
   const auto = state.auto ? state.auto.on === true : meshAccount(st).auto_default;   // owner and seller accounts run by default
+  const acct = meshAccount(st);
   const seen = (state.items && typeof state.items === 'object') ? state.items : {};
   const fresh = (k) => { const d = seen[k]; return !d || (day - Math.floor(Date.parse(String(d)) / DAY_MS)) >= MESH_BUDGET.item_cooldown_days; };
   const v = meshValueBeats(st, products, facts, o);
@@ -3040,7 +3061,7 @@ export function meshSchedule(st, products, facts, opt) {
   const beats = chosen.map((b, i) => {
     const autoCh = open.filter((c) => (MESH_CHANNELS[MESH_RAIL_ALIAS[c] || c] || MESH_FALLBACK).mode === 'auto');
     return { ...b, slot: MESH_AUTONOMY_V3.windows_utc[i % MESH_AUTONOMY_V3.windows_utc.length],
-      to: open.length ? open : (b.kind === 'promo' ? ['whatsapp', 'counter'] : ['whatsapp']),
+      to: (acct.socials ? ((acct.socials ? open : []).length ? open : ['whatsapp']) : MESH_OWN_NODES).slice(), socials_allowed: acct.socials,
       posted_by: (b.kind === 'promo' ? 'shop facts' : 'shop words'), on_behalf_of: meshAccount(st).on_behalf_of, delegate: meshAccount(st).delegated,
       auto_send: auto && autoCh.length > 0, channels_auto: autoCh };
   });
@@ -3075,4 +3096,78 @@ export function meshFirstTouch(st, rows, opt) {
     refused: list.length - (unpaid.length + counts.size), touch: MESH_AUTONOMY_V3.touch,
     note: 'Warm contacts only, read off this shop’s ledger. A reply lands in the inbox, and a person answers it — '
       + 'that half is not automated because a template in a conversation is how a customer leaves.' };
+}
+
+/* ── v0.9.5: the publisher is Buffer's free GraphQL, not app keys ──────────────────────────────
+ * Straight from the hunta docs (AGENT-HANDOVER, 19 §pipeline, 20 §distribution, 26 §scale-up):
+ *   PUBLISH  Buffer GraphQL (X, LinkedIn, Pinterest, scheduled on a 40-min grid) · Bluesky · Nostr ·
+ *            dev.to · Whop
+ * X is free because it is posted *through a free Buffer org*: the seller connects their own X in Buffer
+ * and pastes the Buffer access token plus the connected channel id, which is exactly `PRESS_BUFFER_TOKEN_A`
+ * and `PRESS_CHANNEL_X_A` in the scale-up doc. There is no app to create and no paid tier to buy.
+ * A rail that cannot be reached by API is not a failure of the plan, it is a rail in `assist` mode.
+ */
+export const MESH_PUBLISH = {
+  x:         { via: 'buffer', grid_min: 40, needs: 'a free Buffer org: access token + the connected channel id' },
+  linkedin:  { via: 'buffer', grid_min: 40, needs: 'same Buffer token, the LinkedIn channel id' },
+  pinterest: { via: 'buffer', grid_min: 40, needs: 'same Buffer token, a board id (Buffer caches the board list: re-select the board after a rename)' },
+  bluesky:   { via: 'direct', grid_min: 40, needs: 'handle + app password (their own repo can push it too)' },
+  nostr:     { via: 'direct', grid_min: 40, needs: 'an nsec per shop and any public relay: no signup, no cost, nothing to approve' },
+  telegram:  { via: 'direct', grid_min: 40, needs: 'bot token + channel id' },
+  mastodon:  { via: 'direct', grid_min: 40, needs: 'instance + access token' },
+  devto:     { via: 'direct', grid_min: 40, needs: 'free api key; the long-form home of the value beats' },
+  gpages:    { via: 'own',    grid_min: 40, needs: 'nothing: these are our nodes' },
+  whatsapp:  { via: 'none',   grid_min: 0,  needs: 'their number, their hand: no API exists and we do not pretend one does' },
+  facebook:  { via: 'none',   grid_min: 0,  needs: 'groups: no API for this' },
+  instagram: { via: 'none',   grid_min: 0,  needs: 'business account + token if they have one' },
+  counter:   { via: 'none',   grid_min: 0,  needs: 'the paper by the till' },
+};
+export const MESH_BUFFER_FREE = { org_channels: 3, queued_per_channel: 10, grid_min: 40, posts_per_day_ceiling: 36 };
+/** Two failed windows in a row and the rail comes out of the cadence by itself. This is the no-wait
+ *  doctrine in the docs (45): the machine resolved "reconnect or remove?" by removing, without asking,
+ *  because a dead rail plans zero posts and the owner's attention is the scarce budget. The entry goes
+ *  back in the cadence the moment the rail works again — restore the line, restore the rail. */
+export const MESH_RAIL_HEALTH = { fail_limit: 2, action: 'drop from cadence', ask_human: false, ledger: 'mesh:<handle>.rails' };
+export function meshRailHealth(state, opt) {
+  const o = opt || {}, st = (state && typeof state === 'object') ? state : {};
+  const seen = (st.rails && typeof st.rails === 'object') ? st.rails : {};
+  const cadence = (st.cadence && typeof st.cadence === 'object') ? st.cadence : {};
+  const dropped = [], healthy = [];
+  for (const rail of Object.keys(seen)) {
+    const f = Number((seen[rail] || {}).fails) || 0;
+    const ok = (seen[rail] || {}).ok === true;
+    if (f >= MESH_RAIL_HEALTH.fail_limit && !ok) dropped.push({ rail, fails: f, note: 'out of the cadence until it answers again; a person is not consulted about a dead rail' });
+    else healthy.push(rail);
+  }
+  const list = Object.keys(cadence).filter((r) => !dropped.some((d) => d.rail === r));
+  return { healthy, dropped, cadence_active: list.map((r) => ({ rail: r, per_day: Number(cadence[r]) || 0 })),
+    policy: MESH_RAIL_HEALTH, judged_by: 'the ledger, never the run annotation' };
+}
+/** Drip, cap and park — the outreach shape the docs settled on (12 §drip, 08-10 handover entry): send
+ *  the batch in drips on the grid rather than all at once; the cap is a runaway bound, and at the cap
+ *  the remainder is parked for the next compose run. It must never demand a tap: that is the sentence
+ *  the pipeline had to rewrite in code after it stalled on exactly that. */
+export const MESH_DRIP = { batch_cap: 30, drip_per_slot: 6, grid_min: 40, at_cap: 'park the remainder for the next compose run', cap_demands_tap: false };
+export function meshDrip(queue, state, opt) {
+  const o = opt || {}, st = (state && typeof state === 'object') ? state : {};
+  const cap = Number(o.batch_cap || MESH_DRIP.batch_cap), slot = Number(o.drip_per_slot || MESH_DRIP.drip_per_slot);
+  const sent = Number((st.outreach && st.outreach.sent) || 0);
+  const room = Math.max(0, cap - sent);
+  const releasing = queue.slice(0, Math.min(slot, room));
+  const parked = queue.slice(releasing.length);
+  return { release: releasing.length, per_slot: slot, parked: parked.length, cap, sent_today: sent,
+    grid_min: MESH_DRIP.grid_min, tap_required: false, cap_demands_tap: MESH_DRIP.cap_demands_tap,
+    at_cap: releasing.length ? '' : MESH_DRIP.at_cap, note: 'The cap bounds the runaway; it does not ask anyone for permission.' };
+}
+/** Every rail this shop's plan can name must have a limit on the payload, or a caller measuring a beat
+ *  against its rail reads undefined and the truncation only shows up as a post that came out short. */
+export function meshRailsTotal(beats) {
+  const all = {};
+  for (const r of Object.keys(MESH_RAILS)) all[r] = MESH_RAILS[r];
+  for (const c of Object.keys(MESH_CHANNELS)) if (!all[c]) all[c] = { name: c, max: MESH_CHANNELS[c].max };
+  for (const b of (Array.isArray(beats) ? beats : [])) {
+    const r = b && b.rail ? String(b.rail) : '';
+    if (r && !all[r]) all[r] = { name: r, max: Number(MESH_AUTONOMY_V3.max_chars || (typeof MESH_AUTONOMY === 'object' ? MESH_AUTONOMY.max_chars : 0) || 300) };
+  }
+  return all;
 }

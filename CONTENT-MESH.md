@@ -134,8 +134,15 @@ Two kinds of account, and they do not start the same way:
   them — and the owner's machine posts to their account with it. They stop it by changing the password at
   the provider or tapping revoke in ops; `schedule.beats[].on_behalf_of` says out loud whose account said
   it, because that is the thing a platform asks you to be able to answer;
-- **a trial shop** (`trial`) has nothing connected, so it has nothing to post with and stays off until it
-  grants. That is the only class the old grant flow was ever really for, and the 0.9.2 tests now say so.
+- **an operator** — anyone selling *with* the platform rather than for it — is the default class, and
+  the boundary is structural: `socials: false`, no credential asked for or held, no batch sent from their
+  number, nothing autonomous on their accounts. We are not a content agency. What they get is the free
+  nodes we do run (`MESH_OWN_NODES = ['gpages']`: the shop's `mesh.json`, its Pages mirror, its sitemap)
+  published on the same rhythm, and the copy for their own accounts, which they post if they want to.
+  An operator's beats are physically incapable of naming a social destination, and the test that says so
+  is `tests/mesh_design.test.mjs`, not a paragraph here;
+- **a trial shop** (`trial`) is an operator with nothing connected: off until it grants, which is the
+  only case the grant flow was ever really for, and the 0.9.2 tests now scope it that way.
 
 The cadence is the pipeline's, not a mood: X ≥3 a day, LinkedIn ≥3, dev.to 3, daily pins, daily Bluesky and
 Nostr, ratio two value to one shop facts, weekends included. Replies are a human's, at a human pace —

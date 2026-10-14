@@ -140,7 +140,7 @@ test('the growth queue is conversations, read from the ledger, and says so', asy
 /* v0.9.3 — what the autonomy actually promises, asserted where it is decided. */
 test('the plan posts itself where a channel can be posted to, and never pretends elsewhere', async () => {
   const core = await import('file://' + join(root, 'worker', 'core.js'));
-  const st = { handle: 'mamatoe', shop_name: 'Mama Too', currency: 'USD', mesh_channels: { bluesky: { on: true }, whatsapp: { on: true } } };
+  const st = { handle: 'mamatoe', shop_name: 'Mama Too', currency: 'USD', mesh_class: 'seller', mesh_channels: { bluesky: { on: true }, x: { on: true }, whatsapp: { on: true } } };
   const rows = [{ id: 'm1', name: 'Nyama', desc: 'Slow-cooked overnight, so the meat gives up', category: 'Mains', price: 6 },
                 { id: 'm2', name: 'Maheu', category: 'Drinks', price: 2, available: false },
                 { id: 'm3', name: 'Matoke', category: 'Mains', price: 5, available: false }];
@@ -155,7 +155,7 @@ test('the plan posts itself where a channel can be posted to, and never pretends
   assert.ok(plan.beats.every((b) => b.slot), 'each beat is on the clock, not fired at random');
   assert.equal(new Set(plan.beats.map((b) => b.slot)).size, plan.beats.length, 'and no two share a window on the same day');
   assert.ok(plan.beats.every((b) => b.auto_send === true), 'an authorised API channel means it sends itself');
-  const assist = core.meshSchedule({ handle: 'x', mesh_channels: { whatsapp: { on: true } } }, rows, {}, { state: { auto: { on: true } }, now: Date.now() });
+  const assist = core.meshSchedule({ handle: 'x', mesh_class: 'seller', mesh_channels: { whatsapp: { on: true } } }, rows, {}, { state: { auto: { on: true } }, now: Date.now() });
   assert.ok(assist.beats.every((b) => b.auto_send === false), 'a channel with no API is never claimed to have been posted to');
   assert.match(assist.beats[0].to.join(','), /whatsapp/, 'it is queued for the person instead, which is honest and still costs them a tap');
   const trial = core.meshSchedule({ handle: 't', plan: 'trial', mesh_channels: { x: { on: true } } }, rows, {}, { state: {}, now: Date.now() });
@@ -182,4 +182,131 @@ test('first touch reaches warm contacts, caps itself, and hands the reply to a h
   assert.equal(t.refused, 1, 'and the count of rows it would not touch is said out loud');
   assert.match(t.touch.kinds.join(','), /dm_whatsapp|email|comment_reply/, 'the channels it may use');
   assert.match(t.note, /a template in a conversation is how a customer leaves/, 'the reason is in the payload, not only in the doc');
+});
+
+/* v0.9.5 — three classes of account, and no tap anywhere in the loop. */
+test('a shop on the platform is an operator, and an operator\'s socials are not ours to hold', async () => {
+  const core = await import('file://' + join(root, 'worker', 'core.js'));
+  const rows = [{ id: 'm1', name: 'Nyama', desc: 'Slow-cooked overnight, so the meat gives up', category: 'Mains', price: 6 }];
+  const f = { feed_ok: true, price_ok: true, hours_text: 'Mon-Fri 08:00-16:00' };
+  const op = { handle: 'mamatoe', shop_name: 'Mama Too', currency: 'USD', mesh_channels: { x: { on: true }, bluesky: { on: true } } };
+  const a = core.meshAccount(op);
+  assert.equal(a.class, 'operator', 'the default for a shop that merely sells with us: not staff, not the owner');
+  assert.equal(a.socials, false, 'and we hold nothing on their accounts, in any class of action');
+  assert.match(a.credentials, /none, and none are asked for/, 'that is stated in the payload, not implied');
+  const plan = core.meshSchedule(op, rows, f, { now: Date.parse('2026-10-14T04:00:00Z'), state: {} });
+  assert.equal(plan.on, false, 'so nothing is autonomous on their accounts, and no grant is offered for them');
+  const why = core.meshAutoPlan(op, rows, f, { now: Date.parse('2026-10-14T04:00:00Z'), state: {} });
+  assert.match(why.why, /no standing grant for this shop/, 'the public feed still answers in plain words');
+  const seller = core.meshAccount({ mesh_class: 'seller' });
+  assert.equal(seller.socials, true, 'a seller is different: real credentials, handed over on purpose');
+  assert.equal(seller.auto_default, true, 'and it runs from the day it is configured, with no one approving it');
+  const owner = core.meshAccount({ owner: true });
+  assert.equal(owner.class, 'owner', 'the company\'s own accounts');
+  assert.equal(core.meshAccount({ plan: 'trial' }).class, 'trial', 'a trial is its own thing and posts nowhere');
+  for (const cls of ['operator', 'trial']) {
+    const p2 = core.meshSchedule({ handle: 'h', mesh_class: cls, mesh_channels: { x: { on: true } } }, rows, f, { now: Date.parse('2026-10-14T04:00:00Z'), state: {} });
+    assert.ok((p2.beats || []).every((b) => !b.to || b.to.every((c) => core.MESH_OWN_NODES.includes(c))),
+      cls + ' beats never name a social rail as a destination: ' + JSON.stringify((p2.beats || []).map((b) => b.to)));
+  }
+});
+
+test('the batch sends itself: a tap on every batch is the clog that would end the loop', async () => {
+  const core = await import('file://' + join(root, 'worker', 'core.js'));
+  const o = core.MESH_OUTREACH;
+  assert.equal(o.send, 'auto', 'composed by the machine, sent by the window');
+  assert.equal(o.approvals, 'none', 'no approval of any size sits in this path');
+  assert.match(o.human_for.join(','), /reply/, 'the human is on the reply');
+  assert.match(o.human_for.join(','), /price|complaint/, 'and on the parts of a conversation with money or anger in it');
+  const now = Date.parse('2026-10-14T04:00:00Z');   // a Wednesday
+  const plan = core.meshOutreachPlan({ mesh_class: 'seller', mesh_channels: { x: { on: true } } }, { leads: [{ phone: '0781' }, { email: 'a@b.c' }], now });
+  assert.equal(plan.composed, 2, 'both messages are written');
+  assert.ok(plan.batch.every((b) => b.sends === true), 'and each one is marked as going, because a credential exists');
+  assert.equal(plan.batch[0].approved_by, null, 'nobody approved it, and that is the point');
+  assert.match(plan.batch[0].waits_for, /nothing/, 'the wait field says what it waits for, in words');
+  const capped = core.meshOutreachPlan({ mesh_class: 'seller' }, { leads: Array.from({ length: 200 }, (_, i) => ({ phone: '078' + i })), now, state: { outreach: { sent: 0, total: 0 } } });
+  assert.equal(capped.composed, 20, 'day one of the ramp is twenty, whatever the list size: the cap is arithmetic');
+  const weekend = core.meshOutreachPlan({ mesh_class: 'seller' }, { leads: [{ phone: '0781' }], now: Date.parse('2026-10-18T04:00:00Z') });
+  assert.equal(weekend.on, false, 'and the pipeline rests on a Sunday, as the bible says');
+  assert.match(weekend.skip_reason, /weekend/, 'saying why, in the payload');
+  const op = core.meshOutreachPlan({ handle: 'mamatoe' }, { leads: [{ phone: '0781' }], now });
+  assert.equal(op.batch[0].sends, false, 'an operator gets no batch: we do not message from an account we do not hold');
+  assert.match(op.batch[0].waits_for, /credential/, 'and it names the missing thing instead of asking for a tap');
+});
+
+/* v0.9.5 — the publisher layer, read out of the hunta docs rather than guessed at. */
+test('X is a free Buffer rail, not a paid app: via buffer, on the 40-minute grid', async () => {
+  const core = await import('file://' + join(root, 'worker', 'core.js'));
+  assert.equal(core.MESH_PUBLISH.x.via, 'buffer', 'X posts through Buffer, which is how the pipeline pays nothing for it');
+  assert.equal(core.MESH_PUBLISH.x.grid_min, 40, 'on the same grid the docs name');
+  assert.doesNotMatch(JSON.stringify(core.MESH_PUBLISH.x), /paid|app keys|bearer from/, 'and the payload must not claim a paid app anywhere');
+  assert.match(core.MESH_PUBLISH.x.needs, /free Buffer org/, 'what it needs is a Buffer token and a channel id');
+  assert.equal(core.MESH_PUBLISH.linkedin.via, 'buffer', 'LinkedIn the same way');
+  assert.equal(core.MESH_PUBLISH.pinterest.via, 'buffer', 'and Pinterest, board id and all');
+  assert.equal(core.MESH_PUBLISH.bluesky.via, 'direct', 'Bluesky stays direct: an app password is simpler than a middleman');
+  assert.equal(core.MESH_PUBLISH.nostr.via, 'direct', 'Nostr is a relay post on a key we make');
+  assert.equal(core.MESH_PUBLISH.whatsapp.via, 'none', 'and the rails with no API say none, out loud');
+  for (const [rail, p] of Object.entries(core.MESH_PUBLISH)) {
+    assert.ok(['buffer', 'direct', 'own', 'none'].includes(p.via), rail + ' declares how it is published');
+    assert.ok(typeof p.needs === 'string' && p.needs.length > 8, rail + ' states what the credential is');
+  }
+  assert.equal(core.MESH_BUFFER_FREE.grid_min, 40, 'the free plan is what the caps are built on');
+  assert.ok(core.MESH_BUFFER_FREE.posts_per_day_ceiling >= core.MESH_AUTONOMY_V3.per_day, 'three beats a day fits a free org with room to spare: ' + JSON.stringify(core.MESH_BUFFER_FREE));
+});
+
+test('a dead rail is dropped from the cadence without asking anyone, and returns when the cadence does', async () => {
+  const core = await import('file://' + join(root, 'worker', 'core.js'));
+  const state = { rails: { pinterest: { fails: 2, ok: false }, x: { fails: 1, ok: false }, bluesky: { fails: 0, ok: true } },
+                  cadence: { x: 3, pinterest: 1, bluesky: 1 } };
+  const h = core.meshRailHealth(state);
+  assert.deepEqual(h.dropped.map((d) => d.rail), ['pinterest'], 'two failed windows is the limit, the same number the pipeline uses');
+  assert.equal(h.healthy.includes('x'), true, 'one failure is not a verdict, it is noise');
+  assert.equal(h.cadence_active.some((c) => c.rail === 'pinterest'), false, 'and the dropped rail plans nothing, rather than planning zeros');
+  assert.match(h.dropped[0].note, /a person is not consulted/, 'the doctrine is written into the reason');
+  assert.equal(core.MESH_RAIL_HEALTH.ask_human, false, 'no question is asked of the owner');
+  assert.equal(core.MESH_RAIL_HEALTH.fail_limit, 2, 'the threshold is data');
+  assert.match(h.judged_by, /the ledger, never the run annotation/, 'health is read off the ledger, because an annotation that says landed while the ledger says false is the bug they already had');
+});
+
+test('outreach drips, caps and parks: the cap never demands a tap', async () => {
+  const core = await import('file://' + join(root, 'worker', 'core.js'));
+  const now = Date.parse('2026-10-14T06:00:00Z');   // a Wednesday
+  const leads = Array.from({ length: 90 }, (_, i) => ({ phone: '078' + (1000 + i) }));
+  const d = core.meshOutreachPlan({ mesh_class: 'seller', mesh_channels: { x: { on: true } } }, { leads, now });
+  assert.equal(d.batch.length, 20, 'day one of the ramp is twenty, not eighty: ' + d.batch.length);
+  const mature = core.meshOutreachPlan({ mesh_class: 'seller', mesh_channels: { x: { on: true } } }, { leads, now, state: { outreach: { sent: 0, total: 500 } } });
+  assert.equal(mature.batch.length, 80, 'a mailbox past its ramp fills the batch to batch_max, which is where 80 lives');
+  const drip = core.meshDrip(d.batch, { outreach: { sent: 0, total: 0 } });
+  assert.equal(drip.release, 6, 'but only six go in this slot');
+  assert.equal(drip.parked, 14, 'the rest wait their turn on the grid, they are not thrown away');
+  assert.equal(drip.tap_required, false, 'and nobody is asked to release them');
+  assert.equal(drip.cap_demands_tap, false, 'the sentence the pipeline had to rewrite in code, written here from the start');
+  assert.equal(drip.grid_min, 40, 'on the same grid Buffer uses');
+  const atCap = core.meshDrip(d.batch, { outreach: { sent: 30, total: 300 } });
+  assert.equal(atCap.release, 0, 'at the cap nothing more goes');
+  assert.match(atCap.at_cap, /park the remainder/, 'it parks');
+  assert.match(atCap.note, /does not ask anyone for permission/, 'and says so');
+  assert.equal(core.MESH_DRIP.batch_cap, 30, 'the cap is the pipeline number, 30 a day, not a feeling');
+});
+
+test('the payload carries a limit for every rail a beat can name', async () => {
+  const core = await import('file://' + join(root, 'worker', 'core.js'));
+  const beats = [{ rail: 'whatsapp_status' }, { rail: 'bluesky' }, { rail: 'nostr' }, { rail: 'a_rail_nobody_named_yet' }];
+  const rails = core.meshRailsTotal(beats);
+  for (const b of beats) {
+    assert.ok(rails[b.rail] && Number.isFinite(rails[b.rail].max), b.rail + ' has a real limit: ' + JSON.stringify(rails[b.rail]));
+    assert.ok(rails[b.rail].max > 0, b.rail + ' is not zero, which would silently swallow every post');
+  }
+});
+
+test('replies: the machine answers the informational ones on the two rails that allow it, and hands over anything with money in it', async () => {
+  const core = await import('file://' + join(root, 'worker', 'core.js'));
+  const r = core.MESH_OUTREACH.replies;
+  assert.equal(r.per_day, 4, 'four a day is the pipeline number for reply-DMs');
+  assert.equal(r.scan_per_day, 3, 'an inbox scan three times a day, not a live socket');
+  assert.deepEqual(r.auto_first_reply_on, ['bluesky', 'nostr'], 'and only where a reply is a post, not a private thread');
+  assert.match(r.mode, /human/, 'the default stays a person');
+  assert.ok(r.escalate_to_human.some((x) => /price/.test(x)) && r.escalate_to_human.some((x) => /angry/.test(x)),
+    'price, complaint, refund, anger: straight to the human, no template in front of it');
+  assert.equal(core.MESH_AUTONOMY_V3.human, 'replies_only', 'so the policy line still says exactly what is gated');
 });
