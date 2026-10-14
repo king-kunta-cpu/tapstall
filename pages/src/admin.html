@@ -1430,9 +1430,6 @@ function printDay() {
   w.document.close();
 }
 </script>
-<script>/* the owner console declares itself, so a shop's items can be refused a write from here */
-(function(){ if (window.__tapConsoleStamp) return; window.__tapConsoleStamp = 1;
-  var f = window.fetch; window.fetch = function (u, o) { o = o || {}; var h = new Headers(o.headers || {});
-    h.set('x-tapstall-console', 'owner'); o.headers = h; return f.apply(this, [u, o]); }; })();</script>
+
 </body>
 </html>

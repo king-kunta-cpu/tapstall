@@ -488,12 +488,14 @@ test('a seller whose shop has nothing to say posts the company material instead 
   assert.ok(broken.beats.length > 0 && broken.beats.every((b) => b.text), 'empty or missing lines are not sent as blank posts');
 });
 
-test('the owner console cannot rewrite a shop items, and the refusal names where to do it', () => {
-  const src = read('pages/src/admin.html');
-  assert.match(src, /x-tapstall-console', 'owner'/, 'the owner console stamps itself, so the boundary has something to read');
-  assert.match(worker, /x-tapstall-console'\) \|\| ''\)\s*\.toLowerCase\(\)\s*===\s*'owner'/, 'the route refuses an owner-stamped menu write');
-  assert.match(worker, /shop items belong to the shop/, 'with a message a human can act on');
-  assert.match(worker, /their menu, their prices, their keys to change them/i, 'and the reason is the positioning, not a style rule');
-  assert.match(worker, /TAPSTALL_OWNER_EDITS/, 'one escape hatch, off by default, named in the answer so it is not a secret');
-  assert.match(worker, /merchant console: \/s/, 'and it points at the page where the merchant does it');
+test("the items table belongs to the client dashboard, and no console claims a shop's menu", () => {
+  const shop = read('pages/admin.html');
+  assert.match(shop, /id="menuEdit"/, 'the shop console carries the items table');
+  assert.match(shop, /id="menuSave"/, 'with a save that is armed only when a row changed');
+  assert.match(shop, /id="menuAdd"/, 'and a button to add one');
+  assert.match(shop, /k === 'drop'/, 'an item added here can be deleted here');
+  assert.match(shop, /api\('\/api\/menu', \{ handle: S\.handle, menu: MDRAFT \}, \{ confirm: '1' \}\)/, 'it writes through the shop session with the confirm header');
+  assert.doesNotMatch(shop, /x-tapstall-console/, 'it stamps itself as nothing: it is the shop');
+  assert.doesNotMatch(worker, /x-tapstall-console/, 'and no route refuses a shop its own items');
+  assert.doesNotMatch(read('pages/src/ops.html'), /api\('\/api\/menu'/, 'the fleet console reads every menu and writes none');
 });
