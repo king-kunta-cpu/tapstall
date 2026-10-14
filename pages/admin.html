@@ -348,7 +348,7 @@ details.box .in{padding:.5rem 0 .7rem}
     <div class="flags hide" id="shopWarn"></div>
     <div id="menuList" style="margin-top:.3rem"></div>
 
-    <details class="box" id="detMenu">
+    <details class="box" id="detMenu" open>
       <summary id="menuSum">Edit items here — price, sold out, hide, add one</summary>
       <div class="in">
         <p class="hint" style="margin-top:0">Your sheet stays the base. What you change here wins over the row it came from and is on the store page at once; Revert hands a row back to the sheet. Nothing here needs Google.</p>
@@ -682,6 +682,7 @@ function moveItem(list, id, dir) {
   MDRAFT.order.splice(to, 0, MDRAFT.order.splice(at, 1)[0]);
   menuRows();
 }
+function fph0(u) { u = String(u || ''); return !u || u.indexOf('sample-menu.csv') >= 0 || u.indexOf('raw.githubusercontent') >= 0; }
 function menuRows() {
   var box = q('#menuEdit'); if (!box || !q('#detMenu').open) return;
   if (!MDRAFT) MDRAFT = draftFrom(S.store.menu);
@@ -1416,8 +1417,18 @@ function renderShop() {
   sw.classList.toggle('hide', !warns.length); sw.innerHTML = warns.map(function (t) { return '⚠ ' + esc(t); }).join('<br>');
   var n = feed.length, out = feed.filter(function (p) { return p.available === false; }).length;
   q('#menuN').textContent = n ? (n + ' items' + (out ? ' · ' + out + ' out of stock' : '')) : 'No menu loaded';
-  q('#menuSub').textContent = n ? 'sheet re-read every ' + (S.store.cache_seconds || 120) + 's' : (S.store.feed_error || 'add your Google Sheet link under “Change what buyers see”');
+  q('#menuSub').textContent = n ? (fph0(S.store.feed_url) ? 'items live here, not in a sheet' : 'sheet re-read every ' + (S.store.cache_seconds || 120) + 's') : (S.store.feed_error || 'add your Google Sheet link under “Change what buyers see”');
   q('#menuOpen').href = S.store.feed_url || '#';
+  // A placeholder sheet is not a source. Pointing a client at a sample CSV in our own
+  // repo teaches them the platform is a demo, so the link only appears when it is theirs.
+  var fsheet = String(S.store.feed_url || '');
+  var fph = !fsheet || fsheet.indexOf('sample-menu.csv') >= 0 || fsheet.indexOf('raw.githubusercontent') >= 0;
+  q('#menuOpen').style.display = fph ? 'none' : '';
+  q('#menuOpen').textContent = fph ? 'no sheet linked' : 'Open sheet';
+  // The re-read is the same lie with a button on it: pointed at a sample, it would fetch that
+  // sample back over anything the shop had typed here.
+  q('#menuReload').style.display = fph ? 'none' : '';
+  q('#menuReload').textContent = fph ? 'no sheet to re-read' : 'Re-read my sheet';
   q('#menuList').innerHTML = feed.slice(0, 8).map(function (p) {
     return '<div class="menuRow"><span>' + esc(p.name) + (p.cat ? ' <span class="hint">· ' + esc(p.cat) + '</span>' : '')
       + (p.available === false ? ' <span class="badge bad">out</span>' : '') + '</span><b>' + Number(p.price || 0).toFixed(2) + '</b></div>';

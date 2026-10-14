@@ -499,3 +499,12 @@ test("the items table belongs to the client dashboard, and no console claims a s
   assert.doesNotMatch(worker, /x-tapstall-console/, 'and no route refuses a shop its own items');
   assert.doesNotMatch(read('pages/src/ops.html'), /api\('\/api\/menu'/, 'the fleet console reads every menu and writes none');
 });
+
+test("the client dashboard is honest about where a shop's items live", () => {
+  const shop = read('pages/admin.html');
+  assert.match(shop, /id="detMenu" open/, 'the items table is open when they arrive, not behind a summary click');
+  assert.match(shop, /items live here, not in a sheet/, 'a shop with no sheet is told the truth in the line that used to say otherwise');
+  assert.match(shop, /indexOf\('sample-menu\.csv'\)/, 'our own placeholder is recognised as a placeholder');
+  assert.match(shop, /q\('#menuReload'\)\.style\.display = fph \? 'none' : ''/, 'and the button that would fetch it back over their edits is removed, not warned about');
+  assert.match(shop, /var fph = !fsheet \|\| fsheet\.indexOf\('sample-menu\.csv'\) >= 0/, 'the placeholder is decided once, before either control is drawn');
+});
