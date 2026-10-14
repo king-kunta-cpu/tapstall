@@ -222,8 +222,20 @@ for i in 1 2 3 4 5 6 7 8; do
   [[ "$GOT" == "$WANT" ]] && break
   sleep 3
 done
-curl -sf -A "Mozilla/5.0" --max-time 15 "$BASE/__ping" >/dev/null || die "worker did not answer /__ping"
-ok "worker live: $BASE (${GOT:-version not readable yet})"
+WANT=$(node -p "require('./package.json').version" 2>/dev/null || echo "")
+LIVE=""; PV=""
+for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+  PV=$(curl -sf -A "Mozilla/5.0" --max-time 15 "$BASE/__ping" 2>/dev/null || true)
+  LIVE=$(printf '%s' "$PV" | jq -r '.version // empty' 2>/dev/null || true)
+  if [ -n "$WANT" ] && [ "$LIVE" = "$WANT" ]; then break; fi
+  sleep 3
+done
+[ -n "$PV" ] || die "worker did not answer /__ping"
+if [ -n "$WANT" ] && [ "$LIVE" != "$WANT" ]; then
+  die "deployed worker still reports ${LIVE:-unreadable} while git says $WANT: a stale bundle was served, so this deploy is not done"
+fi
+ok "version confirmed live: $LIVE" 
+ok "worker live: $BASE (version $LIVE)"
 [[ "$GOT" == "$WANT" ]] || warn "edge still answers ${GOT:-nothing} while this deploy uploaded $WANT — still propagating; the upload itself succeeded"
 echo "--- /__selftest ---"
 # This print is a status line, not the deploy's verdict: the /__ping loop above is what
