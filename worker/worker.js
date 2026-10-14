@@ -35,6 +35,7 @@ import {
   MESH_AUTONOMY, MESH_AUTONOMY_V3, MESH_CHANNELS, MESH_OUTREACH, meshAccount, meshOutreachPlan,
   meshQueueItem, meshQueueMerge, meshPress, meshPressFlush, MESH_QUEUE_DEFAULTS, MESH_BUFFER_CHANNEL,
   meshRegister, meshCompanyIdentities, meshCompanyBeats, meshPressLedger, MESH_ID_CLASSES, MESH_ID_RAIL_DEFAULTS,
+  meshIdentityPlan,
   MESH_PUBLISH, MESH_BUFFER_FREE, MESH_DRIP, meshRailsTotal, meshRailHealth, meshDrip,
   MESH_RAILS, MESH_BUDGET,
   orderRow, packRow, unpackRow, mergeRows, MAX_ORDERS_KEPT,   // the ledger row, and the cap on it
@@ -2516,9 +2517,9 @@ async function pressRun(req, env) {
     if (e.source && e.source.store) {
       const doc = await env.STORES.get('store:' + e.source.store, 'json').catch(() => null) || {};
       const products = (doc.feed_cache && doc.feed_cache.products) || [];
-      plan = meshSchedule(Object.assign({}, doc, { mesh_class: e.class }), products, meshFacts(doc, origin),
+      const sp = meshSchedule(Object.assign({}, doc, { mesh_class: e.class }), products, meshFacts(doc, origin),
         { origin: origin, state: { auto: { on: true } }, now: Date.now() });
-      plan.identity = id;
+      plan = meshIdentityPlan(Object.assign({ id: id }, e), sp, { price_usd: PRICE_USD, free_days: FREE_DAYS, feed_ok: true, price_ok: true }, { origin: origin, now: Date.now() });
     } else {
       plan = meshCompanyBeats(e, { price_usd: PRICE_USD, free_days: FREE_DAYS, feed_ok: true, price_ok: true }, { origin: origin, now: Date.now() });
     }
@@ -2534,7 +2535,7 @@ async function pressRun(req, env) {
     out.push({ id, class: e.class, ok: true, dry: dry, composed: items.length, queued_now: merged.added, dropped: merged.dropped.length,
       sent: flush.sent, waiting: flush.waiting, token_env: e.token_env, token_present: !!press.buffer_token,
       results: flush.results.map((r) => ({ channel: r.channel, status: r.status, due: r.due, err: r.err || r.note || '' })),
-      rail_health: meshRailHealth(ledger) });
+      material: plan.source, fallback_from: plan.fallback_from || '', rail_health: meshRailHealth(ledger) });
   }
   return json({ ok: true, dry: dry, identities: out.length, ran: out,
     note: dry ? 'dry: the exact items and the exact Buffer call, sent to nobody'

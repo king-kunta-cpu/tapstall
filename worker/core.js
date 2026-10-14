@@ -3432,3 +3432,16 @@ export function meshPressLedger(prev, results, opt) {
     sent: (results || []).filter((r) => r.status === 'sent').length, queued: (results || []).filter((r) => r.status === 'queued').length }]).slice(-30);
   return { rails, history: hist, yield: hist.reduce((a, h) => a + (Number(h.sent) || 0), 0) };
 }
+
+/** Which material an identity posts. A shop-fed identity uses that shop's facts when there are facts; if
+ *  the menu is empty, missing or broken, the identity still has something to say, because a registered
+ *  seller who posts nothing is a registered seller doing nothing — and the fallback is company material,
+ *  which is what a reseller is actually reselling. Silence is a state to report, never a plan to ship. */
+export function meshIdentityPlan(identity, storePlan, facts, opt) {
+  const o = opt || {}, e = identity || {};
+  const fromStore = (storePlan && Array.isArray(storePlan.beats)) ? storePlan.beats.filter((b) => b && b.text) : [];
+  if (fromStore.length) return Object.assign({ source: 'store', identity: e.id || '' }, storePlan, { beats: fromStore });
+  const comp = meshCompanyBeats(e, facts, o);
+  return Object.assign({}, comp, { source: 'company', fallback_from: (storePlan && e.source && e.source.store) ? String(e.source.store) : '',
+    blocked: (comp.blocked || []).concat((storePlan && storePlan.blocked) || []) });
+}

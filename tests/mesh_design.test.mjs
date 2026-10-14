@@ -469,3 +469,19 @@ test('the run writes a ledger per identity, so a dead rail is seen and dropped w
   assert.equal(r3.yield, 1, 'the ledger itself carries the one send it saw, which is what a yield log means');
   assert.equal(r3.history.length, 3, 'one row per run, kept short');
 });
+
+test('a seller whose shop has nothing to say posts the company material instead of saying nothing', async () => {
+  const core = await import('file://' + join(root, 'worker', 'core.js'));
+  const idn = core.meshRegister({}, { id: 'seller:a', class: 'seller', rails: { x: { channel_id: 'a' } }, source: { store: 'novatmode' } }).identity;
+  const empty = core.meshIdentityPlan(Object.assign({ id: 'seller:a' }, idn), { beats: [], blocked: [{ why: 'no items to price' }] },
+    { price_usd: 60, free_days: 60 }, { origin: 'https://tapstall.zlnew.workers.dev', now: Date.parse('2026-10-14T06:00:00Z') });
+  assert.equal(empty.source, 'company', 'the fallback is the company material, not silence');
+  assert.equal(empty.beats.length, core.MESH_QUEUE_DEFAULTS.per_day, 'and it is a full day of it');
+  assert.equal(empty.fallback_from, 'novatmode', 'it says which shop had nothing, so the operator can see the hole');
+  assert.ok(empty.blocked.some((b) => /no items to price/.test(String(b.why))), 'the shop-side reason is kept, not overwritten');
+  const withMenu = core.meshIdentityPlan(Object.assign({ id: 'seller:a' }, idn), { beats: [{ kind: 'value', text: 'Nyama: slow-cooked overnight', rail: 'x' }] }, {}, {});
+  assert.equal(withMenu.source, 'store', 'a shop with facts keeps its own voice');
+  assert.equal(withMenu.beats.length, 1, 'and its beats pass through untouched');
+  const broken = core.meshIdentityPlan(Object.assign({ id: 'seller:a' }, idn), { beats: [{ kind: 'value', text: '', rail: 'x' }, null] }, { price_usd: 60 }, { now: Date.parse('2026-10-14T06:00:00Z') });
+  assert.ok(broken.beats.length > 0 && broken.beats.every((b) => b.text), 'empty or missing lines are not sent as blank posts');
+});
