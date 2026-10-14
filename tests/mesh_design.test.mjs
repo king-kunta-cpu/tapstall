@@ -406,3 +406,66 @@ test('no credential means queued, never posted: the sender only says sent when t
   const health = core.meshRailHealth({ rails: { twitter: { ok: false, fails: 2 } }, cadence: { twitter: 3 } });
   assert.equal(health.dropped[0].rail, 'twitter', 'two of those and the rail leaves the cadence without a question to anyone');
 });
+
+/* v0.9.6 — the press registry: company accounts and delegated sellers, and an operator that cannot be
+ * registered at all. This is the boundary the platform's whole positioning depends on, so it is asserted
+ * here rather than trusted to whoever next writes a handler. */
+test('the registry holds owner and seller identities, and refuses an operator in every direction', async () => {
+  const core = await import('file://' + join(root, 'worker', 'core.js'));
+  const SHOPS = ['mamatoe', 'kotaking', 'vatmode', 'automesh'];
+  const bad = core.meshRegister({}, { id: 'mamatoe', class: 'owner' }, { refuse_ids: SHOPS });
+  assert.equal(bad.ok, false, 'a shop handle cannot become a sending identity, even when labelled owner');
+  assert.match(bad.why, /we never post to their socials/, 'and the refusal says the rule, not just the verdict');
+  const cls = core.meshRegister({}, { id: 'press:shop', class: 'operator' });
+  assert.equal(cls.ok, false, 'there is no operator class in the registry to name');
+  assert.match(cls.why, /not a content agency/, 'with the reason it exists');
+  const sec = core.meshRegister({}, { id: 'seller:a', class: 'seller', buffer_token: 'abc' });
+  assert.equal(sec.ok, false, 'a token in the body is refused: KV is readable by the whole worker');
+  assert.match(sec.why, /token_env/, 'and it points at the env secret instead');
+  const ok = core.meshRegister({}, { id: 'seller:a', class: 'seller', token_env: 'PRESS_BUFFER_TOKEN_A',
+    rails: { x: { channel_id: '69fb5a1a5c4c051afa1829dc' }, bluesky: { handle: 'seller-a.bsky.social' }, whatsapp: {} },
+    source: { store: 'vatmode' } }, { refuse_ids: SHOPS, now: Date.parse('2026-10-14T06:00:00Z') });
+  assert.equal(ok.ok, true, 'a seller identity with a store as its content source registers');
+  assert.deepEqual(Object.keys(ok.identity.rails).sort(), ['bluesky', 'x'], 'only rails with a sender survive: whatsapp has no API and is not smuggled in as a sending rail');
+  assert.deepEqual(ok.ignored_rails.map((i) => i.rail), ['whatsapp'], 'and the drop is reported, never silent');
+  assert.match(ok.ignored_rails[0].why, /a person posts to this one/, 'with the reason');
+  assert.equal(ok.identity.rails.x.channel, 'twitter', 'and the buffer rail is stored under the name the sender uses');
+  assert.equal(ok.identity.token_env, 'PRESS_BUFFER_TOKEN_A', 'with the secret named, never held');
+  assert.equal(ok.identity.source.store, 'vatmode', 'the shop it writes about stays a shop: content source, not send target');
+  assert.ok(JSON.stringify(ok.identity).indexOf('69fb5a1a') > -1, 'channel ids are kept: they are identifiers, not secrets');
+  assert.equal(core.meshRegister({ 'seller:a': ok.identity }, { id: 'owner', class: 'owner', rails: { nostr: {} } }).count, 2, 'the registry is a map, so a fleet is a loop rather than a schema');
+});
+
+test('company content is composed with the same provenance rule as a shop: no number without a fact', async () => {
+  const core = await import('file://' + join(root, 'worker', 'core.js'));
+  const reg = core.meshRegister({}, { id: 'owner', class: 'owner', rails: { x: { channel_id: 'a' }, bluesky: {}, devto: {} } });
+  const idn = reg.identity;
+  const b = core.meshCompanyBeats(idn, { price_usd: 60, free_days: 60 }, { origin: 'https://tapstall.zlnew.workers.dev', now: Date.parse('2026-10-14T06:00:00Z') });
+  assert.equal(b.beats.length, core.MESH_QUEUE_DEFAULTS.per_day, 'three beats a day on a company account, the pipeline number');
+  assert.equal(b.beats.filter((x) => x.kind === 'value').length, 2, 'two of them value');
+  assert.equal(b.beats.filter((x) => x.kind === 'promo').length, 1, 'one company facts, with the price in it');
+  assert.match(JSON.stringify(b.beats), /60/, 'the price came from the facts handed in');
+  for (const v of b.beats.filter((x) => x.kind === 'value')) assert.match(v.text, /\/[a-z.]+$/, 'and every value line cites where it is true: ' + v.text.slice(-24));
+  assert.ok(!/discount|%\s?off|free trial month/i.test(JSON.stringify(b.beats)), 'no invented offer on a company promo either');
+  const noPrice = core.meshCompanyBeats(idn, {}, { now: Date.parse('2026-10-14T06:00:00Z') });
+  assert.equal(noPrice.beats.filter((x) => x.kind === 'promo').length, 0, 'with no price in the facts, the promo is not written');
+  assert.match(noPrice.blocked[0].why, /cannot invent one either/, 'and the reason is recorded');
+  const day = new Set();
+  for (let d = 0; d < 7; d += 1) { const x = core.meshCompanyBeats(idn, { price_usd: 60 }, { now: Date.parse('2026-10-14T06:00:00Z') + d * 864e5 }); day.add(x.beats[0].text.slice(0, 30)); }
+  assert.ok(day.size >= 4, 'the rhythm rotates through the material rather than repeating one line: ' + day.size + ' distinct opening beats in a week');
+});
+
+test('the run writes a ledger per identity, so a dead rail is seen and dropped without a question', async () => {
+  const core = await import('file://' + join(root, 'worker', 'core.js'));
+  const r1 = core.meshPressLedger(null, [{ channel: 'twitter', status: 'sent', due: 'd1' }], { now: Date.parse('2026-10-14T07:00:00Z') });
+  assert.equal(r1.rails.twitter.ok, true, 'a send is recorded as health');
+  const r2 = core.meshPressLedger(r1, [{ channel: 'twitter', status: 'failed', err: 'Channel not connected' }], { now: Date.parse('2026-10-15T07:00:00Z') });
+  assert.equal(r2.rails.twitter.fails, 1, 'a failure counts from the last state');
+  const r3 = core.meshPressLedger(r2, [{ channel: 'twitter', status: 'failed', err: 'Channel not connected' }], { now: Date.parse('2026-10-16T07:00:00Z') });
+  assert.equal(r3.rails.twitter.fails, 2, 'twice, and it is at the limit');
+  const health = core.meshRailHealth(r3, { now: Date.parse('2026-10-16T08:00:00Z') });
+  assert.deepEqual(health.dropped.map((d) => d.rail), ['twitter'], 'so the rail leaves the cadence on its own; a dead rail is not a question for the owner');
+  assert.equal(health.yield === undefined, true, 'health does not invent a yield number the ledger does not have');
+  assert.equal(r3.yield, 1, 'the ledger itself carries the one send it saw, which is what a yield log means');
+  assert.equal(r3.history.length, 3, 'one row per run, kept short');
+});

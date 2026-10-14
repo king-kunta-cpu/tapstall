@@ -34,6 +34,7 @@ import {
   meshAutoPlan, meshGrant, meshGrowth, meshIsPitch, meshValueBeats, meshSchedule, meshFirstTouch,
   MESH_AUTONOMY, MESH_AUTONOMY_V3, MESH_CHANNELS, MESH_OUTREACH, meshAccount, meshOutreachPlan,
   meshQueueItem, meshQueueMerge, meshPress, meshPressFlush, MESH_QUEUE_DEFAULTS, MESH_BUFFER_CHANNEL,
+  meshRegister, meshCompanyIdentities, meshCompanyBeats, meshPressLedger, MESH_ID_CLASSES, MESH_ID_RAIL_DEFAULTS,
   MESH_PUBLISH, MESH_BUFFER_FREE, MESH_DRIP, meshRailsTotal, meshRailHealth, meshDrip,
   MESH_RAILS, MESH_BUDGET,
   orderRow, packRow, unpackRow, mergeRows, MAX_ORDERS_KEPT,   // the ledger row, and the cap on it
@@ -41,7 +42,7 @@ import {
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '0.9.5';
+const VERSION = '0.9.6';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
@@ -308,6 +309,8 @@ async function route(req, url, env, ctx) {
   if (p === '/api/mesh/seen' && req.method === 'POST') return meshSeen(req, env);
   if (p === '/api/mesh/auto' && req.method === 'POST') return meshAuto(req, env);
   if (p === '/api/mesh/press' && req.method === 'POST') return meshPressSet(req, env);
+  if (p === '/api/press/accounts' && req.method === 'POST') return pressAccounts(req, env);
+  if (p === '/api/press/run' && req.method === 'POST') return pressRun(req, env);
   if (p === '/api/mesh/publish' && req.method === 'POST') return meshPublish(req, env);
 
   // The one-tap confirm link: GET renders an inert page, the browser posts.
@@ -1760,6 +1763,13 @@ async function selftest(env) {
       [{ id: 'x', name: 'Test item', desc: 'Slow-cooked overnight, so the meat gives up on its own', category: 'Mains', price: 12.5 }], {}, {});
     const advert = meshValueBeats({ handle: 'selftest' },
       [{ id: 'y', name: 'Truffle risotto', desc: 'Order now, 20% off, US$40 - click the link in bio', category: 'Mains', price: 40 }], {}, {});
+    t.press_operator_refused = meshRegister({}, { id: 'anyshop', class: 'operator' }, { refuse_ids: ['anyshop'] }).ok === false;
+    t.press_no_secrets_in_registry = meshRegister({ owner: {} }, { id: 'seller-x', class: 'seller', buffer_token: 'no' }).ok === false;
+    t.press_company_beats_priced = (function () { const r = meshRegister({}, { id: 'owner', class: 'owner', rails: { x: { channel_id: 'abc' } } }, {});
+      const b = meshCompanyBeats(r.identity, { price_usd: PRICE_USD, free_days: FREE_DAYS }, { origin: 'https://tapstall.zlnew.workers.dev', now: Date.now() });
+      return b.beats.length === MESH_QUEUE_DEFAULTS.per_day && b.beats.some((x) => x.kind === 'promo'); })();
+    t.press_queue_shape = (function () { const it = meshQueueItem({ kind: 'value', rail: 'x', item_key: 'k1', text: 'value line', to: ['x'], max: 280 }, { now: Date.now(), channel_id: 'abc' });
+      return it.channel === 'twitter' && it.channel_id === 'abc' && it.via === 'buffer'; })();
     t.mesh_no_pitch_in_feed = clean.beats.length > 0 && clean.beats.every((x) => !meshIsPitch(x.text).pitch)
       && !/US\$|https?:|wa\.me|order now|discount|\$[0-9]/i.test(JSON.stringify(clean.beats));
     t.mesh_pitch_filter_drops = advert.beats.length === 0 && advert.blocked.length === 1
@@ -2438,6 +2448,99 @@ async function meshView(req, url, env) {
  * an item says `queued` and nothing more, with one it calls Buffer and keeps the answer. `dry=1` returns
  * the exact payload without sending anything, so a live distribution test can be run before a token is
  * handed over. A rail that fails twice is dropped from cadence by itself; nothing here asks for a tap. */
+/* ── v0.9.6: the press registry and the run, for company accounts and delegated sellers ─────────
+ * `accounts` registers an identity (owner, or seller:<name>) with its channel ids and the name of the
+ * env secret that holds its token; it refuses an id that belongs to a shop, refuses any class but
+ * owner/seller, and refuses a secret in the body. `run` composes for each identity, queues in the
+ * pipeline's own format, sends what is due, and writes the outcome where rail health is judged from.
+ * An operator's shop cannot be reached by either route: the registry has no shape for one, and the id
+ * list it refuses is read from the shops themselves. */
+async function pressAdmin(req, env) {
+  const secret = String((reqHeader(req, 'x-tapstall-admin') || '')).trim();
+  if (!secret || !env.ADMIN_SECRET || secret !== String(env.ADMIN_SECRET)) return json({ ok: false, error: 'admin secret required' }, 401);
+  if ((reqHeader(req, 'x-tapstall-confirm') || '') !== '1') return json({ ok: false, error: 'missing x-tapstall-confirm header' }, 403);
+  return null;
+}
+async function pressRegistry(env) {
+  const raw = await env.STORES.get('press:registry', 'json').catch(() => null);
+  return (raw && typeof raw === 'object') ? raw : {};
+}
+async function pressShopIds(env) {
+  const ids = [];
+  try {
+    const list = await env.STORES.list({ prefix: 'store:' });
+    for (const k of ((list && list.keys) || [])) ids.push(String(k.name || '').replace(/^store:/, '').toLowerCase());
+  } catch (e) { /* a failed list makes the guard looser, so it is said, not hidden */ }
+  return ids;
+}
+async function pressAccounts(req, env) {
+  const denied = await pressAdmin(req, env); if (denied) return denied;
+  const b = await readBody(req).catch(() => ({}));
+  const reg = await pressRegistry(env);
+  const act = String(b.action || 'list');
+  if (act === 'list') {
+    const masked = {};
+    for (const [id, e] of Object.entries(reg)) masked[id] = { class: e.class, token_env: e.token_env, rails: Object.keys(e.rails || {}),
+      channel_ids: Object.fromEntries(Object.entries(e.rails || {}).map(([k, v]) => [k, String(v.channel_id || '').slice(0, 6) + (v.channel_id ? '…' : '')])), source: e.source || {} };
+    return json({ ok: true, action: 'list', classes: MESH_ID_CLASSES, identities: masked, defaults: MESH_ID_RAIL_DEFAULTS,
+      note: 'tokens are never stored here: they are the named env secret, so a departed seller is one secret change, not an edit to a document' });
+  }
+  if (act === 'forget') {
+    const id = String(b.id || '').toLowerCase();
+    if (!reg[id]) return json({ ok: false, error: 'no such identity' }, 404);
+    delete reg[id];
+    try { await env.STORES.put('press:registry', JSON.stringify(reg)); } catch (e) { return json({ ok: false, error: 'no writes left to forget it', why: String(e && e.name || e) }, 503); }
+    return json({ ok: true, action: 'forget', id: id, left: Object.keys(reg).length, note: 'removed here; the provider password change is what actually stops them' });
+  }
+  const guard = await pressShopIds(env);
+  const res = meshRegister(reg, b, { refuse_ids: guard, now: Date.now() });
+  if (!res.ok) return json(Object.assign({ refused_because: 'a shop on the platform is an operator, and the platform does not post to an operator socials in any shape' }, res), 400);
+  try { await env.STORES.put('press:registry', JSON.stringify(reg)); } catch (e) { return json({ ok: false, error: 'no writes left to save the registry', why: String(e && e.name || e) }, 503); }
+  return json({ ok: true, action: 'register', id: res.id, identity: { class: res.identity.class, token_env: res.identity.token_env,
+    rails: Object.keys(res.identity.rails), has_token_in_env: !!env[res.identity.token_env] }, count: res.count });
+}
+async function pressRun(req, env) {
+  const denied = await pressAdmin(req, env); if (denied) return denied;
+  const b = await readBody(req).catch(() => ({}));
+  const dry = b.dry === true;
+  const reg = await pressRegistry(env);
+  const only = b.id ? [String(b.id).toLowerCase()] : null;
+  const origin = new URL(req.url).origin;
+  const out = [];
+  for (const id of (only || Object.keys(reg))) {
+    const e = reg[id];
+    if (!e) { out.push({ id, ok: false, error: 'not registered' }); continue; }
+    const press = { channels: Object.fromEntries(Object.entries(e.rails || {}).map(([k, v]) => [v.channel || k, v.channel_id || ''])),
+      buffer_token: env[e.token_env] || '', board: (e.rails && e.rails.pinterest && e.rails.pinterest.board) || '' };
+    let plan;
+    if (e.source && e.source.store) {
+      const doc = await env.STORES.get('store:' + e.source.store, 'json').catch(() => null) || {};
+      const products = (doc.feed_cache && doc.feed_cache.products) || [];
+      plan = meshSchedule(Object.assign({}, doc, { mesh_class: e.class }), products, meshFacts(doc, origin),
+        { origin: origin, state: { auto: { on: true } }, now: Date.now() });
+      plan.identity = id;
+    } else {
+      plan = meshCompanyBeats(e, { price_usd: PRICE_USD, free_days: FREE_DAYS, feed_ok: true, price_ok: true }, { origin: origin, now: Date.now() });
+    }
+    const items = (plan.beats || []).map((beat, i) => meshQueueItem(Object.assign({}, beat, { seq: i }), { landing: origin + '/fees', store: id, now: Date.now(),
+      channel_id: ((e.rails || {})[beat.rail] || {}).channel_id || press.channels[beat.rail] || '', board: press.board }));
+    const prevQ = await env.ORDERS.get('press:queue:' + id, 'json').catch(() => null) || {};
+    const merged = meshQueueMerge(prevQ, items, { store: id, landing: origin + '/fees', cadence: e.cadence || MESH_QUEUE_DEFAULTS });
+    const flush = await meshPressFlush(merged.items, press, { dry: dry, now: Date.now() });
+    const sent = new Set(flush.results.filter((r) => r.status === 'sent').map((r) => r.id));
+    try { await env.ORDERS.put('press:queue:' + id, JSON.stringify({ store: id, landing: origin + '/fees', at: new Date().toISOString(), items: merged.items.filter((i) => !sent.has(i.id)) })); } catch (e2) { /* a full queue is not worth failing the run for */ }
+    const ledger = meshPressLedger(await env.ORDERS.get('press:state:' + id, 'json').catch(() => null), flush.results, { now: Date.now() });
+    try { await env.ORDERS.put('press:state:' + id, JSON.stringify(ledger)); } catch (e2) { /* same */ }
+    out.push({ id, class: e.class, ok: true, dry: dry, composed: items.length, queued_now: merged.added, dropped: merged.dropped.length,
+      sent: flush.sent, waiting: flush.waiting, token_env: e.token_env, token_present: !!press.buffer_token,
+      results: flush.results.map((r) => ({ channel: r.channel, status: r.status, due: r.due, err: r.err || r.note || '' })),
+      rail_health: meshRailHealth(ledger) });
+  }
+  return json({ ok: true, dry: dry, identities: out.length, ran: out,
+    note: dry ? 'dry: the exact items and the exact Buffer call, sent to nobody'
+      : 'sent where the env secret existed, queued where it did not; nothing is counted as posted unless the platform answered' });
+}
+
 async function meshPressSet(req, env) {
   const b = await readBody(req);
   const who = await identify(req, env, b.handle || urlHandle(req));

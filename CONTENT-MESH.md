@@ -150,6 +150,39 @@ four a day, questions first. Cold outreach is composed at 08:21 on weekdays into
 owner tap sends, mailbox ramped 20 → 100 over five working days: the machine writes, one action fires the
 set, nobody approves eighty messages.
 
+## Who it posts as: identities, not shops
+
+A **shop** is an operator's business. A **sending identity** is an account the company controls, and the
+two are never the same record. `MESH_ID_CLASSES = ['owner', 'seller']` — there is no third value, and
+`/api/press/accounts` refuses a registration whose id matches a shop handle on the platform, whose class
+is anything else, or whose body carries a token:
+
+```
+POST /api/press/accounts   { action:'register', id:'owner',    class:'owner',  token_env:'PRESS_BUFFER_TOKEN',
+                             rails:{ x:{channel_id:'69fb…dc'}, bluesky:{handle:'coremerch.bsky.social'}, devto:{} },
+                             source:{ store:'vatmode' } }        ← optional: whose menu the facts come from
+POST /api/press/accounts   { action:'register', id:'seller:a', class:'seller', token_env:'PRESS_BUFFER_TOKEN_A', … }
+POST /api/press/run        { id:'owner', dry:true }              → composes, queues, sends what is due
+POST /api/press/run        { }                                    → every identity, on the same code path
+```
+
+`meshRegister` writes `press:registry` in STORES and keeps only identifiers: a Buffer channel id is not a
+secret, an access token is, so the registry names `token_env` and the secret itself lives in the worker.
+That is what makes a departed seller one secret change instead of a document edit, and it is why the
+registry can be read by any handler without becoming a credential store. Content for a company identity
+with no `source.store` comes from `MESH_COMPANY_VALUE` — six lines about what the platform is, each one
+ending in the route where it is true (`/onboard`, `/fees`, `/api/books`, `/rails`, `/fees.ics`,
+`/s/<handle>/mesh.json`), rotated by the day so a week of posting is not one sentence repeated. The
+company promo states `PRICE_USD` and `FREE_DAYS`, taken from facts passed into the run; hand it no price
+and it writes no price: `blocked[0].why` says *a company promo cannot invent one either*.
+
+Per identity the run writes `press:queue:<id>` (the pipeline's own item format, so a sender on the
+owner's box can drain it) and `press:state:<id>` — the yield log, one row per run. Two failed windows on
+a rail and `meshRailHealth` drops that rail from the identity's cadence without asking anyone, exactly as
+the pipeline's no-wait doctrine removes `pinterest_a`; put the entry back and the rail returns. Nothing
+in this system has ever been reported as posted unless the platform said so: `status:'queued'` with a
+reason is the honest state of an identity that has no token wired yet, and that is what a first run shows.
+
 ## What the machine can send by itself, and what it physically cannot
 
 `MESH_CHANNELS` declares the capability per channel, because pretending otherwise is how a shop loses an

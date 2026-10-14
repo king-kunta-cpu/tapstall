@@ -3327,3 +3327,108 @@ export async function meshPressFlush(items, press, opt) {
     waiting: results.filter((r) => r.status === 'waiting').length, dry: dry, at: new Date(now).toISOString(),
     note: 'A post is only called posted when the platform said yes. Everything else stays queued and says so.' };
 }
+
+/* ── v0.9.6: the press registry — company accounts and seller accounts, and nobody else ─────────
+ * An identity is not a shop. A shop is an operator's business, and the platform never posts to an
+ * operator's socials; an identity is a *sending* account the company controls — the owner's own
+ * accounts, or a seller's account delegated to the company by them. So the registry is keyed by
+ * identity id, it holds channel ids and refs, and it cannot hold a token: tokens live in the worker's
+ * env secrets, named per identity (`token_env`), which is what makes a revoked seller a matter of
+ * changing one secret instead of editing a document.
+ *
+ * This exists because a live test was once run by relabelling an operator's shop as an owner account.
+ * That is the exact thing the boundary forbids, so now it is refused by the code that writes the
+ * registry, and a test says so.
+ */
+export const MESH_ID_CLASSES = ['owner', 'seller'];
+export const MESH_ID_RAIL_DEFAULTS = { owner: ['x', 'bluesky', 'nostr', 'devto', 'linkedin'], seller: ['x', 'bluesky', 'telegram', 'nostr'] };
+
+/** The company's own material, as data with a source path: the value half for a company account is the
+ *  thing the platform teaches (nodes, provenance, ledger-first books), and it must cite where it is
+ *  true, same rule as a shop's facts. A line with no `path` cannot be composed. */
+export const MESH_COMPANY_VALUE = [
+  { text: 'A shop front that is a URL, a photo and a phone number: no app store, no card terminal, nothing for the customer to install.', path: '/onboard' },
+  { text: 'Every post we make is written from a row that was read today. If the menu did not answer, no price appears anywhere in the feed.', path: '/s/<handle>/mesh.json' },
+  { text: 'Books that come out of orders rather than a Sunday evening: the ledger is the record, the receipt is the proof.', path: '/api/books' },
+  { text: 'VAT is a percentage of what you actually sold, and the split is done where the order is taken, not in a spreadsheet later.', path: '/fees' },
+  { text: 'A pricing page that doubles as a calendar: the renewal dates are a file any app can subscribe to.', path: '/fees.ics' },
+  { text: 'Free nodes, not a subscription to reach your own customers: a feed, a sitemap, a plain-text page, and the shop keeps the copy.', path: '/rails' },
+];
+
+export function meshCompanyIdentities(reg) {
+  const r = (reg && typeof reg === 'object') ? reg : {};
+  return Object.keys(r).map((id) => ({ id, ...r[id] })).filter((e) => MESH_ID_CLASSES.includes(e.class));
+}
+
+/** Validate and upsert. Refusals are returned as data, because a registry that fails silently is how an
+ *  operator ends up posted at by accident. */
+export function meshRegister(reg, rec, opt) {
+  const o = opt || {}, r = (reg && typeof reg === 'object') ? reg : {};
+  const e = rec || {}, id = String(e.id || '').trim().toLowerCase().replace(/[^a-z0-9_:.-]/g, '').slice(0, 40);
+  const refused = (o.refuse_ids || []).map((x) => String(x).toLowerCase());
+  if (!id) return { ok: false, error: 'an identity needs an id (owner, or seller:<name>)' };
+  if (!MESH_ID_CLASSES.includes(e.class)) {
+    return { ok: false, error: 'class must be ' + MESH_ID_CLASSES.join(' or '), why: 'the platform is not a content agency: it holds no identity for an operator, and cannot be made to' };
+  }
+  if (refused.includes(id)) return { ok: false, error: 'refused', id: id, why: 'that id belongs to a shop on the platform, and a shop is an operator: we never post to their socials' };
+  if (['buffer_token', 'token', 'app_password', 'nsec', 'api_key', 'bot_token'].some((k) => k in e)) {
+    return { ok: false, error: 'no secrets in the registry', why: 'name the env secret instead (token_env); KV is readable by the whole worker, a secret is not' };
+  }
+  const rails = {}; const ignored = [];
+  for (const [name, v] of Object.entries((e.rails && typeof e.rails === 'object') ? e.rails : {})) {
+    const pub = MESH_PUBLISH[name];
+    if (!pub) { ignored.push({ rail: name, why: 'not a rail we know' }); continue; }
+    // a rail with no sender is not a sending rail: registering it would only produce items that sit in
+    // the queue forever, so it is refused here and named, rather than recorded and quietly never sent
+    if (pub.via === 'none') { ignored.push({ rail: name, why: 'no API exists for it: an identity posts to channels, a person posts to this one' }); continue; }
+    rails[name] = { via: pub.via, channel: MESH_BUFFER_CHANNEL[name] || name,
+      channel_id: String((v && v.channel_id) || '').slice(0, 40), handle: String((v && v.handle) || '').slice(0, 60),
+      board: String((v && v.board) || '').slice(0, 40), needs: pub.needs };
+  }
+  const next = { class: e.class, token_env: String(e.token_env || (e.class === 'owner' ? 'PRESS_BUFFER_TOKEN' : 'PRESS_BUFFER_TOKEN_' + id.replace(/[^a-z0-9]/g, '').toUpperCase().slice(-6))),
+    source: (e.source && typeof e.source === 'object') ? { store: String(e.source.store || '').slice(0, 40) } : {},
+    cadence: (e.cadence && typeof e.cadence === 'object') ? e.cadence : null,
+    rails, at: new Date(o.now || Date.now()).toISOString(), rails_default: MESH_ID_RAIL_DEFAULTS[e.class] };
+  r[id] = Object.assign({}, r[id] || {}, next);
+  return { ok: true, id: id, identity: r[id], count: Object.keys(r).length, ignored_rails: ignored };
+}
+
+/** Company content, with the same rule as a shop's: a number may only appear if the facts handed in
+ *  carry it, and a value line cites the place it is true. */
+export function meshCompanyBeats(identity, facts, opt) {
+  const o = opt || {}, f = facts || {}, now = o.now || Date.now(), day = Math.floor(now / DAY_MS);
+  const lines = MESH_COMPANY_VALUE.filter((l) => l.path);
+  const out = [];
+  const per = Number(MESH_QUEUE_DEFAULTS.per_day) || 3;
+  const take = Math.max(1, per - 1);
+  for (let i = 0; i < take; i += 1) {
+    const l = lines[(day + i) % lines.length];
+    out.push({ kind: 'value', item_key: 'company:' + (day + i) % lines.length, text: l.text + ' — ' + l.path, source: l.path, rail: 'bluesky' });
+  }
+  if (Number(f.price_usd) > 0) {
+    out.push({ kind: 'promo', item_key: 'company:price', rail: 'x',
+      text: 'A storefront, orders on WhatsApp, books from the ledger, for ' + (Number(f.price_usd) || 0).toFixed(0) + ' US dollars a year'
+        + (Number(f.free_days) > 0 ? ', with ' + f.free_days + ' days free first' : '') + '. ' + String(o.origin || '') + '/fees',
+      posted_by: 'shop facts' });
+  }
+  const rails = Object.keys((identity && identity.rails) || {});
+  const beats = out.map((b) => ({ ...b, to: rails.length ? rails : ['bluesky'], auto_send: rails.some((r) => (MESH_PUBLISH[r] || {}).via === 'buffer' || (MESH_PUBLISH[r] || {}).via === 'direct') }));
+  return { on: true, beats: beats.slice(0, per), blocked: Number(f.price_usd) > 0 ? [] : [{ why: 'no price in facts: a company promo cannot invent one either' }],
+    human: 'replies_only', identity: (identity && identity.id) || 'owner' };
+}
+
+/** One run for one identity: compose, queue, send what is due, and write the outcome where health is
+ *  judged from. The registry never sees a token; the env does, and a missing one is reported as a
+ *  reason, not a failure of the run. */
+export function meshPressLedger(prev, results, opt) {
+  const o = opt || {}, st = (prev && typeof prev === 'object') ? prev : {};
+  const rails = Object.assign({}, (st.rails && typeof st.rails === 'object') ? st.rails : {});
+  for (const r of (results || [])) {
+    const k = String(r.channel || 'unknown');
+    if (r.status === 'sent') rails[k] = { ok: true, fails: 0, at: r.due || new Date(o.now || Date.now()).toISOString(), id: r.id };
+    else if (r.status === 'failed') rails[k] = { ok: false, fails: (Number((rails[k] || {}).fails) || 0) + 1, at: new Date(o.now || Date.now()).toISOString(), err: String(r.err || r.note || '').slice(0, 160) };
+  }
+  const hist = ((st.history && Array.isArray(st.history)) ? st.history : []).concat([{ at: new Date(o.now || Date.now()).toISOString(),
+    sent: (results || []).filter((r) => r.status === 'sent').length, queued: (results || []).filter((r) => r.status === 'queued').length }]).slice(-30);
+  return { rails, history: hist, yield: hist.reduce((a, h) => a + (Number(h.sent) || 0), 0) };
+}
