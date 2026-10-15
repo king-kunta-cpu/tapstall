@@ -44,7 +44,7 @@ import {
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '0.9.12';
+const VERSION = '0.9.13';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
@@ -1169,15 +1169,30 @@ async function proofAdd(req, url, env) {
  *  `cf-connecting-ip` is Cloudflare's own, so a flood cannot lie about it. The gate
  *  arms only where ADMIN_SECRET exists — i.e. a real deployment — because the test
  *  harness builds many stores a run from one address, and a pilot that onboards five
- *  merchants a month will never meet 3+1. */
+ *  merchants a month will never meet 3+1.
+ *
+ *  Memory is the fast path, never the whole defence: a flood spreads across colos
+ *  and isolates, and a counter that resets with each is a courtesy, not a cap. So
+ *  the trip persists — one KV write, spent only on an address that actually burst,
+ *  holding the freeze to the end of its day — exactly the bargain the PIN throttle
+ *  strikes: guesses are cheap to remember, the freeze is what costs. */
 const regMem = new Map();                        // ip -> { wn, win, n, day }
 const REG_HOUR = 3, REG_DAY = 6;
-function regGate(ip, env) {
+async function regGate(ip, env) {
   if (!env.ADMIN_SECRET) return 0;
+  const now = Date.now();
+  if (env.STORES) {
+    try {
+      const held = await env.STORES.get('regl:' + ip);
+      if (held) {
+        const until = Number(JSON.parse(held).until) || 0;
+        if (until > now) return Math.ceil((until - now) / 1000);
+      }
+    } catch (e) { /* the read budget is gone; a courtesy gate does not add to the fire */ }
+  }
   const hour = Number.isFinite(+env.REG_HOUR) ? +env.REG_HOUR : REG_HOUR;   // harness runs 3/6, not 10,000
   const day = Number.isFinite(+env.REG_DAY) ? +env.REG_DAY : REG_DAY;
   if (hour < 0 || day < 0) return 0;
-  const now = Date.now();
   let e = regMem.get(ip);
   if (!e || e.day <= now) {
     if (regMem.size > 4096) regMem.clear();      // bounded the same way the isolate is; a reset only ever resets grace
@@ -1188,15 +1203,20 @@ function regGate(ip, env) {
   const waitHour = e.wn >= hour ? Math.max(1, Math.ceil((e.win - now) / 1000)) : 0;
   const waitDay = e.n >= day ? Math.max(1, Math.ceil((e.day - now) / 1000)) : 0;
   const wait = waitHour || waitDay;
-  if (wait) return wait;
-  e.wn++; e.n++;
-  return 0;
+  if (!wait) { e.wn++; e.n++; return 0; }
+  if (env.STORES) {
+    try {
+      await env.STORES.put('regl:' + ip, JSON.stringify({ until: e.day, n: e.n }),
+        { expirationTtl: Math.ceil((e.day - now) / 1000) + 60 });
+    } catch (e2) { /* write budget: memory keeps the rest of the hour, which is all a courtesy gate can promise */ }
+  }
+  return wait;
 }
 
 async function register(req, url, env) {
-  const gated = regGate(ipOf(req), env);
+  const gated = await regGate(ipOf(req), env);
   if (gated) {
-    return json({ ok: false, error: 'too many stores created from this network just now — try again in a little while, and if you are setting up for real, keep this window open' },
+    return json({ ok: false, error: 'too many stores have been created from this network — the shop-creation window opens again later today; if you are setting up for real, come back after it and nothing you typed is lost' },
       429, { 'retry-after': String(gated) });
   }
   const b = await req.json().catch(() => null);

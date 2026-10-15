@@ -83,8 +83,11 @@ retry. `load()` now keeps silent at boot when no store name exists (no stray 404
 buys one quiet retry before bouncing a live session, and if it must bounce, keeps the store name
 in the field and says what happened, what did not, and that nothing was paid. The same sweep
 metered the one open door that writes: `POST /api/register` had no throttle, and every store it
-creates costs KV writes the whole platform shares — three an hour, six a day per connecting
-address, in memory, armed only where `ADMIN_SECRET` exists, and a 429 that explains itself.
+creates costs KV writes the whole platform shares. The gate is the PIN throttle's exact bargain —
+three an hour, six a day per connecting address, remembered in memory where it is free, and the
+freeze persisted in one KV write spent only on an address that actually burst, because a counter
+that resets with each isolate is a courtesy and a flood does not arrive on one isolate. Armed
+only where `ADMIN_SECRET` exists; a 429 that explains itself and says roughly when to return.
 
 The old alias deploy was fixed in the same pass: `deploy.sh` cleaned `.build` *before* the legacy
 hostname's block, so every CI run that month warned `entry-point file not found`, took the warning as

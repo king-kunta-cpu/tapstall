@@ -4418,7 +4418,7 @@ test('0.9.12 the one open door that writes is metered per address', async () => 
   // test is about the rule firing, at sizes the suite can walk through.
   const src = readFileSync(join(root, 'worker/worker.js'), 'utf8');
   assert.match(src, /const REG_HOUR = 3, REG_DAY = 6;/, 'the shipped sizes: three an hour, six a day, from one address');
-  assert.match(src, /'too many stores created from this network/, 'and a refusal that says what happened, not a bare 429');
+  assert.match(src, /too many stores have been created from this network/, 'and a refusal that says what happened, not a bare 429');
 
   const savedH = env.REG_HOUR, savedD = env.REG_DAY;
   env.REG_HOUR = 2; env.REG_DAY = 3;
@@ -4437,7 +4437,12 @@ test('0.9.12 the one open door that writes is metered per address', async () => 
       body: { shop_name: 'Gate other', handle: 'gate-other', whatsapp: '263770000099',
         feed_url: 'https://docs.google.com/spreadsheets/d/22222222222222222222222222222222222222222222/edit' } });
     assert.ok(other.json.ok, 'the meter runs per connecting address — which only Cloudflare can set');
-    // the day cap, on an address the hour window has already freed
+    // the trip persists: a flood spreads across colos and isolates, and a memory
+    // counter alone is a courtesy to nobody — so the freeze outlives this isolate,
+    // in one KV write spent only on the address that burst (the pinFail bargain)
+    const held = env.STORES._map.get('regl:196.77.77.77');
+    assert.ok(held, 'the frozen address is written down, not just remembered');
+    assert.ok(Number(JSON.parse(held.value).until) > Date.now(), 'and it holds to the end of its day');
     env.REG_HOUR = 0;   // zero an hour, three a day: only the day cap can ever answer
     const daily = await call('/api/register', { method: 'POST', ip: '196.79.79.79',
       body: { shop_name: 'Gate day', handle: 'gate-day', whatsapp: '263770000011',
