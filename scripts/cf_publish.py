@@ -115,6 +115,11 @@ def main():
     redir = os.environ.get("REDIRECT_TO", "").strip()
     if redir:
         bindings.append({"type": "plain_text", "name": "REDIRECT_TO", "text": redir})
+    # and the canonical origin rides the same rule: a publisher that only knows KV
+    # bindings silently dropped both, and every mail built from "today's" host lost it
+    origin = os.environ.get("PUBLIC_ORIGIN", "").strip()
+    if origin:
+        bindings.append({"type": "plain_text", "name": "PUBLIC_ORIGIN", "text": origin})
 
     assets_dir = os.path.join(bundle, "assets")
     metadata = {

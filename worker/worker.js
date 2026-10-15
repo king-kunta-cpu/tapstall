@@ -44,7 +44,7 @@ import {
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '0.9.10';
+const VERSION = '0.9.11';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
@@ -1320,7 +1320,7 @@ async function adminView(req, url, env) {
     // No admin_url here on purpose: a login code inside a JSON body turns any
     // XSS on the dashboard into a saved 7-day credential. The session cookie is
     // HttpOnly, so the page itself cannot read it back.
-    store: { ...adminStore(st), feed_url: st.feed_url, renew_url: st.renew_url, dashboard_path: '/a',
+    store: { ...adminStore(st), feed_url: st.feed_url, renew_url: renewLink(st, url.origin), dashboard_path: '/a',
       // the *date* the PIN was set, not anything about it: an owner scanning this
       // should be able to see "changed 3 days ago" without the dashboard ever
       // holding a credential it could leak
@@ -1809,7 +1809,7 @@ async function runCron(env) {
         if (env.EMAIL && st.owner_email) {
           try {
             await sendMail(env, st.owner_email, `Your store renews in ${Math.ceil(leftDays)} days`,
-              `${st.shop_name} runs until ${new Date(st.paid_until).toDateString()}.\nRenew here and it switches over automatically: ${st.renew_url}\n${PRICE_USD} USD / 365 days. No monthly billing, no foreign-card subscription.`);
+              `${st.shop_name} runs until ${new Date(st.paid_until).toDateString()}.\nRenew here and it switches over automatically: ${renewLink(st, env.PUBLIC_ORIGIN || '')}\n${PRICE_USD} USD / 365 days. No monthly billing, no foreign-card subscription.`);
           } catch (e) {}
         }
         out.warned++;
@@ -3342,6 +3342,18 @@ async function revertPending(req, url, env) {
    store's own copy of the URL follows. Every site that bumps `auth_gen` calls this, so no lever
    can half-revoke. Two writes on a rare action; the origin is kept by string, because these sites
    do not all have the request URL to hand and the link must stay on the host it was issued on. */
+/** Where a shop's renew link points *today*. The stored absolute URL is a fact about
+ *  the day it was minted — hosts move, brands move, and a link frozen on the old name
+ *  dies quietly while the store itself follows the redirect fine. The token is the
+ *  durable half, so the pages and the mails take the host from the request (or from
+ *  PUBLIC_ORIGIN, when no browser is involved) and keep only the path from the record.
+ *  The ops console still shows the stored value: for an operator, "what the document
+ *  says" is the useful truth. */
+function renewLink(st, origin) {
+  const tok = String((st && st.renew_url) || '').split('/renew/')[1] || '';
+  return tok && origin ? `${String(origin).replace(/\/+$/, '')}/renew/${tok}` : ((st && st.renew_url) || '');
+}
+
 async function rotateRenewLink(env, st) {
   if (!st || !st.renew_url || !env || !env.STORES) return;
   const head = String(st.renew_url).split('/renew/')[0];

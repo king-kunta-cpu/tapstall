@@ -4383,3 +4383,25 @@ test('0.9.10 the watcher credits the chain: exact matches, the 1% band, replays,
   chainRows = [];
   globalThis.fetch = realFetch;
 });
+
+test('0.9.11 the renew link follows the host a shop is served from, not the host it was minted on', async () => {
+  // the incident that makes this a rule: two store documents still carried renew links
+  // on a hostname that no longer resolves, because the URL was frozen at registration
+  // and every move since has been a redirect. The token is durable; the host is not.
+  const key = 'store:chainchef';
+  const st = JSON.parse(env.STORES._map.get(key).value);
+  const before = st.renew_url;
+  st.renew_url = 'https://oldbrand.defunct.test/renew/zz123456789012';
+  await env.STORES.put(key, JSON.stringify(st));
+  const dash = await call('/api/admin?handle=chainchef', { cookie: ch.cookie });
+  assert.equal(dash.json.store.renew_url, 'https://tapstall.test/renew/zz123456789012',
+    'the plan card carries the same token on the origin the merchant is standing on');
+  const pub = await call('/s/chainchef/config.json');
+  assert.ok(!JSON.stringify(pub.json).includes('zz123456789012'), 'and the public config still says nothing about renewals at all');
+  const tok = 'zz123456789012';
+  await env.STORES.put('renew:' + tok, JSON.stringify({ handle: 'chainchef', made: Date.now(), g: '0' }));
+  const page = await call('/renew/' + tok);
+  assert.equal(page.status, 200, 'the moved link still opens from any host that serves the app: ' + page.status);
+  st.renew_url = before;
+  await env.STORES.put(key, JSON.stringify(st));
+});

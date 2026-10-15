@@ -1,5 +1,5 @@
 # Tapstall — status
-## The shop with no sheet, and the money that needs no permission (2026-10-15, v0.9.9 → v0.9.10)
+## The shop with no sheet, and the money that needs no permission (2026-10-15, v0.9.9 → v0.9.11)
 
 Three related honesty fixes shipped together, because they share a sentence: *a shop is allowed to
 be a shop without anybody else's infrastructure.*
@@ -61,6 +61,17 @@ the free key, answered as HTTP 200 with an `Error` body, which the reader raises
 reading as a silent empty hour. Both parsers and the test stub were rewritten against the probe
 output, and the script stays in the repo precisely because the next drift will be caught the same
 way: docs are a claim, the answer is the fact.
+
+**0.9.11, same afternoon:** two store documents still held `renew_url` values minted on a hostname
+that no longer resolves — the URL was a fact about registration day, and brands have moved twice
+since. The stored value is now only the durable half: the dashboard's plan card and the expiry mail
+take the origin from the request or from `PUBLIC_ORIGIN` (which the deploy binds, and which both
+publishers had never emitted until now — the same one-line omission class that once left
+`REDIRECT_TO` off the alias, and the `cf_publish.py` comment naming it is the reason this one is a
+binding and not a guess). The ops console deliberately still shows what the document says. The
+deploy's alias probe learned a retry loop the same day: its three curls ran inside edge propagation,
+so every log since the move carried a confident warning for a redirect that worked a minute later,
+and a warning that is usually transient is a warning that gets ignored.
 
 The old alias deploy was fixed in the same pass: `deploy.sh` cleaned `.build` *before* the legacy
 hostname's block, so every CI run that month warned `entry-point file not found`, took the warning as

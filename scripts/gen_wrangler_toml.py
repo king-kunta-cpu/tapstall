@@ -45,7 +45,8 @@ if redir:
 # anything with a body, so a browser mid-order is never told "go somewhere else".
 [vars]
 REDIRECT_TO = "%s"
-""" % redir
+PUBLIC_ORIGIN = "%s"
+""" % (redir, os.environ.get("PUBLIC_ORIGIN", "").strip())
 if cron:
     out += """
 [triggers]

@@ -130,7 +130,12 @@ if [[ "${PAGES_KV:-0}" == 1 ]]; then
     || warn "the rollback copies above are not current. The live pages are — they are in the bundle — so this costs a rollback, not a merchant"
 fi
 
+# BASE is computed before the publish that binds it, not after the one that
+# verifies it: PUBLIC_ORIGIN travels with the deployment, so a cron mail written at
+# 00:15 on a host nobody is looking at still names a URL that exists.
+BASE="https://$WORKER_NAME.$(workers_subdomain | tail -1).workers.dev"
 NAME="$WORKER_NAME" STORES_ID="$STORES_ID" ORDERS_ID="$ORDERS_ID" WITH_CRON=1 REDIRECT_TO="" \
+  PUBLIC_ORIGIN="$BASE" \
   python3 scripts/gen_wrangler_toml.py
 
 say "publishing worker to Cloudflare"
@@ -171,6 +176,7 @@ if [[ -x node_modules/.bin/wrangler ]]; then
 else
   warn "wrangler not installed (npm i) — using the dependency-free publisher"
   CF_TOKEN="$CF_TOKEN" CF_ACCOUNT="$CF_ACCOUNT" WORKER_NAME="$WORKER_NAME" \
+    PUBLIC_ORIGIN="$BASE" \
     python3 scripts/cf_publish.py "$WORKER_NAME" .build "kv:STORES:$STORES_ID" "kv:ORDERS:$ORDERS_ID"
 fi
 
@@ -207,8 +213,7 @@ rm -rf .build
 CF_TOKEN="$CF_TOKEN" CF_ACCOUNT="$CF_ACCOUNT" python3 scripts/set_triggers.py "$WORKER_NAME" "15 6,12,18,0 * * *" || warn "trigger check failed"
 
 # ---------------------------------------------------------------- self-check
-BASE="https://$WORKER_NAME.$(workers_subdomain | tail -1).workers.dev"
-# The wait is for *this build*, not merely for a live Worker. The edge keeps serving the previous
+: "${BASE:?BASE is set above, before the publish that binds it}"# The wait is for *this build*, not merely for a live Worker. The edge keeps serving the previous
 # version for a few seconds after an upload, and a selftest printed inside that window shows
 # yesterday's number under a green deploy: that false alarm has now cost two investigations
 # (prod_check's "ping reports the version", and a 0.8.2 upload reporting 0.8.1 in the log). The
@@ -263,6 +268,7 @@ done
 if [[ -n "${LEGACY_WORKER_NAME:-}" && "$LEGACY_WORKER_NAME" != "$WORKER_NAME" ]]; then
   say "alias worker $LEGACY_WORKER_NAME -> redirects to $BASE"
   NAME="$LEGACY_WORKER_NAME" STORES_ID="$STORES_ID" ORDERS_ID="$ORDERS_ID" WITH_CRON=0 REDIRECT_TO="$BASE" \
+    PUBLIC_ORIGIN="$BASE" \
     python3 scripts/gen_wrangler_toml.py || warn "alias config not written"
   # The main publish cleans `.build` up *before* this block, and until v0.9.10 the
   # wrangler branch took that missing entry-point as the end of the story: every run
@@ -287,18 +293,28 @@ if [[ -n "${LEGACY_WORKER_NAME:-}" && "$LEGACY_WORKER_NAME" != "$WORKER_NAME" ]]
     # running the sweep a second time — which is also how a $0 account burns half
     # its daily KV writes on nothing.
     CF_TOKEN="$CF_TOKEN" CF_ACCOUNT="$CF_ACCOUNT" WORKER_NAME="$LEGACY_WORKER_NAME" \
-      REDIRECT_TO="$BASE" TAPSTALL_CRON="" \
+      REDIRECT_TO="$BASE" TAPSTALL_CRON="" PUBLIC_ORIGIN="$BASE" \
       python3 scripts/cf_publish.py "$LEGACY_WORKER_NAME" .build "kv:STORES:$STORES_ID" "kv:ORDERS:$ORDERS_ID" \
       || warn "alias publish failed"
   fi
   WORKER_NAME="$LEGACY_WORKER_NAME" put_secret ADMIN_SECRET "$ADMIN_SECRET" || warn "alias secret not set"
   OLD="https://$LEGACY_WORKER_NAME.$(workers_subdomain | tail -1).workers.dev"
-  say "alias answers $OLD/__ping -> $(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$OLD/__ping")"
-  # An assertion, not a log line: `200 ->` used to print here as a fact and the
-  # regression it described went by twice.
-  ALINK=$(curl -s -o /dev/null -w '%{http_code} -> %{redirect_url}' --max-time 20 "$OLD/s/mamatoe")
+  # A deploy's own probes race the edge: every run this month said "404" here for a
+  # Worker that answered "200 / 301" when curled a minute later, and a warning that
+  # is usually transient is a warning that gets ignored. Re-probe before crying, and
+  # say which answer was a lap behind. (An assertion, not a log line: `200 ->` used
+  # to print here as a fact and the regression it described went by twice.)
+  ALINK=''; APING=''
+  for _try in 1 2 3 4; do
+    APING=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$OLD/__ping")
+    ALINK=$(curl -s -o /dev/null -w '%{http_code} -> %{redirect_url}' --max-time 20 "$OLD/s/mamatoe")
+    [[ "$ALINK" == 301* ]] && break
+    say "alias probe $_try: __ping=$APING link=$ALINK (propagation?)"
+    sleep 15
+  done
+  say "alias answers $OLD/__ping -> $APING"
   if [[ "$ALINK" == 301* ]]; then say "alias redirects a saved store link: $ALINK"
-  else warn "alias is NOT redirecting (got: $ALINK) — the old hostname is serving the app itself, so it lost REDIRECT_TO and the daily sweep runs from two origins"; fi
+  else warn "alias is NOT redirecting after 4 probes (got: $ALINK) — the old hostname is serving the app itself, so it lost REDIRECT_TO and the daily sweep runs from two origins"; fi
   # The alias inherited a cron schedule from the day it was the only Worker, and
   # this token cannot delete it (PUT /schedules -> success:false). That is safe
   # rather than sloppy: a Worker deployed with REDIRECT_TO returns from
