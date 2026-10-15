@@ -4080,3 +4080,306 @@ test('0.9.2 the console hands the human the conversations instead of a queue of 
   const after = await call('/s/automesh/mesh.json');
   assert.equal(after.json.auto.on, false, 'the feed reflects the revocation immediately, no cache waiting on it');
 });
+
+/* ------------------------------------------------------------------ 0.9.10: USDT on Tron.
+ * The whole chain feature through the real doors: register with no sheet, type a menu,
+ * take an order, and have a cron sweep read a stubbed TronGrid and mark it paid. The stub
+ * answers the wire format the docs promise (trc20 history + transaction ret codes), which
+ * is also the format pinned live by scripts/probe_trongrid.sh before the first deploy —
+ * the two agreeing is what this file proves about the parser.
+ */
+const CH = 'chainchef';
+const CH_WALLET = 'TXuStMHPUxoRX8NPTTpJU6jBsBtZDRw2Uy';
+const USDT = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
+let ch = {};
+let chainRows = [];                       // the transfers "the chain" will report
+let chainVerify = 'SUCCESS';              // what the re-verification answers
+let chainKnown = true;                    // and whether the node has heard of it at all
+
+// The wire format is not the docs' — it is what the live endpoints answered on
+// 2026-10-15 (scripts/probe_trongrid.sh): `block_timestamp` on the list rows, `type`
+// distinguishing Transfers from Approvals, and the verification living on the node
+// endpoint as {id, receipt:{result}} with no `ret` array at all. A stub that spoke
+// the documentation instead of the network would green-light a parser that matches
+// nothing in production, which is exactly what the first probe caught.
+function tronStub() {
+  globalThis.fetch = async (u, init) => {
+    const s = String(u);
+    if (s.includes('/v1/accounts/') && s.includes('transactions/trc20')) {
+      return new Response(JSON.stringify({ data: chainRows.map((x) => ({
+        transaction_id: x.txid, block_timestamp: x.at, value: String(x.units),
+        type: x.type || 'Transfer',
+        from: x.from || 'TKfBuyerWalletPlaceholder000000000000x', to: x.to || CH_WALLET,
+        token_info: { address: x.contract || USDT, decimals: 6, symbol: 'Tether USD', name: 'Tether USD' },
+      })) }), { headers: { 'content-type': 'application/json' } });
+    }
+    if (s.includes('/wallet/gettransactioninfobyid')) {
+      let want = '';
+      try { want = String(JSON.parse(init && init.body).value); } catch (e) {}
+      if (!chainKnown) return new Response('{}', { headers: { 'content-type': 'application/json' } });   // unknown txid: the node knows nothing
+      return new Response(JSON.stringify({ id: want, blockNumber: 87140369,
+        receipt: { result: chainVerify, energy_fee: 6428500 } }), { headers: { 'content-type': 'application/json' } });
+    }
+    throw new Error('the watcher reached for something other than the chain: ' + s.slice(0, 80));
+  };
+}
+
+test('0.9.10 register with no sheet is a real store: empty shelf, sample refused, typed items live', async () => {
+  const r = await call('/api/register', { method: 'POST', body: {
+    shop_name: 'Chain Chef', handle: CH, market: 'zw', city: 'Harare',
+    whatsapp: '263770009999', currency: 'USD', feed_url: '',
+    rail: 'usdt_trc20', pay_account: CH_WALLET,
+  } });
+  assert.equal(r.status, 201, r.text);
+  assert.equal(r.json.products_loaded, 0, 'no sheet, no rows — and not one sample row quietly handed over');
+  ch = { key: r.json.key, pin: r.json.pin };
+  const s = await loginWithPin(ch.key, ch.pin);
+  ch.cookie = s.cookie;
+
+  const feed = await call('/s/chainchef/feed.json');
+  assert.equal(feed.status, 200, 'a no-sheet shop still has a feed door, and it answers');
+  assert.deepEqual(feed.json.products, [], 'empty is said as empty');
+
+  // nothing leaves the Worker for a placeholder feed, not even when the button is forced
+  const saved = globalThis.fetch;
+  let outs = 0;
+  globalThis.fetch = async (u, i) => { outs++; return saved(u, i); };
+  await call('/s/chainchef/feed.json?fresh=1');
+  await call('/s/chainchef');
+  await call('/s/chainchef/feed.json?fresh=1');
+  globalThis.fetch = saved;
+  assert.equal(outs, 0, 'a placeholder is refused before the fetch line is reached, so even fresh=1 cannot fetch the demo back over their edits');
+
+  // the storefront says so instead of promising sheet mechanics
+  const page = await call('/s/chainchef');
+  assert.equal(page.status, 200);
+  assert.match(page.text, /No products loaded yet/, 'the empty-shop sentence is the one the page JS actually prints');
+
+  const save = await call('/api/menu', { method: 'POST', cookie: ch.cookie, confirm: true,
+    body: { handle: CH, menu: { extra: [
+      { id: 'k1', name: 'Kota special', price: 6.3, available: true },
+      { id: 'k2', name: 'Full polish', price: 12.03, available: true },
+    ] } } });
+  assert.equal(save.status, 200, save.text);
+  assert.match(save.json.note, /saved is the menu/, 'the note tells this shop that the save IS the shelf — there is no sheet underneath to hand back to');
+  const feed2 = await call('/s/chainchef/feed.json?fresh=1');
+  assert.equal(feed2.json.products.length, 2, 'typed rows are the shelf immediately');
+  assert.equal(feed2.json.products[0].id, 'k1');
+
+  // and the delete round: row off, tray holds it, nothing touched the server until Save
+  const del = await call('/api/menu', { method: 'POST', cookie: ch.cookie, confirm: true,
+    body: { handle: CH, menu: { extra: [{ id: 'k1', name: 'Kota special', price: 6.3, available: true }],
+      del: [{ id: 'k2', name: 'Full polish', price: 12.03, deleted: true }] } } });
+  assert.equal(del.json.ok, true, del.text);
+  const feed3 = await call('/s/chainchef/feed.json?fresh=1');
+  assert.equal(feed3.json.products.length, 1, 'the deleted row is off the shelf');
+  const doc = JSON.parse(env.STORES._map.get('store:chainchef').value);
+  assert.equal(doc.menu.del[0].name, 'Full polish', 'and kept in full — the tray can put it back');
+  const back = await call('/api/menu', { method: 'POST', cookie: ch.cookie, confirm: true,
+    body: { handle: CH, menu: { extra: [{ id: 'k1', name: 'Kota special', price: 6.3, available: true },
+      { id: 'k2', name: 'Full polish', price: 12.03, available: true }], del: [] } } });
+  assert.equal(back.json.ok, true);
+  const feed4 = await call('/s/chainchef/feed.json?fresh=1');
+  assert.equal(feed4.json.products.length, 2, 'put back from the tray is just another save');
+});
+
+test('0.9.10 a legacy shop whose menu WAS the sample keeps its rows, as its own, once', async () => {
+  // the migration with no migration: a store document from before v0.9.10 still carries
+  // the sample's rows in feed_cache. The next read promotes them to authored items and
+  // empties the cache; the one after proves the shelf belongs to the shop now.
+  await env.STORES.put('store:demoleg', JSON.stringify({
+    handle: 'demoleg', shop_name: 'Demo Legacy', currency: 'USD',
+    feed_url: 'https://raw.githubusercontent.com/zimlink/tapstall/main/pages/sample-menu.csv',
+    whatsapp: '263771234567', paid_until: Date.now() + 30 * 864e5,
+    feed_cache: { at: Date.now(), count: 2, error: null, products: [
+      { id: '1', name: 'Chicken kota', price: 11, cur: 'USD', available: true },
+      { id: '2', name: 'Beef kota', price: 12.5, cur: 'USD', available: true },
+    ] },
+  }), { metadata: { handle: 'demoleg' } });
+  const f1 = await call('/s/demoleg/feed.json');
+  assert.equal(f1.json.products.length, 2, 'the rows the shop had been trading on do not vanish at the fold');
+  const doc = JSON.parse(env.STORES._map.get('store:demoleg').value);
+  assert.equal(doc.menu.extra.length, 2, 'they arrive on the authored list');
+  assert.equal(doc.menu.extra[0].starter, true, 'flagged as starters, so the dashboard can say what they were');
+  assert.deepEqual(doc.feed_cache.products, [], 'the sample cache is emptied behind them — the seed can fire exactly once');
+  const f2 = await call('/s/demoleg/feed.json?fresh=1');
+  assert.equal(f2.json.products.length, 2, 'and the rows stay, because they are the menu now, not the sample');
+  const saved = globalThis.fetch;
+  let outs = 0;
+  globalThis.fetch = async (u, i) => { outs++; return saved(u, i); };
+  await call('/s/demoleg/feed.json?fresh=1');
+  globalThis.fetch = saved;
+  assert.equal(outs, 0, 'nothing fetched, even forced — there is no sample left to resurrect');
+});
+
+test('0.9.10 the watcher credits the chain: exact matches, the 1% band, replays, and one deferral', async () => {
+  tronStub();
+  const t0 = Date.now();
+  let at = t0 - 60_000;
+  const send = (units, extra) => chainRows.push(Object.assign({ txid: 'tx' + chainRows.length + 'f'.repeat(60), units, at: at += 1000 }, extra || {}));
+
+  // each vector gets its own row: distinct prices, distinct unique cents, one order per amount
+  await call('/api/menu', { method: 'POST', cookie: ch.cookie, confirm: true,
+    body: { handle: CH, menu: { extra: [
+      { id: 'k0', name: 'Taster', price: 6.20, available: true },
+      { id: 'k1', name: 'Kota special', price: 6.30, available: true },
+      { id: 'k3', name: 'Kota short', price: 6.35, available: true },
+      { id: 'k4', name: 'Kota claim', price: 6.40, available: true },
+      { id: 'k5', name: 'Kota ghost', price: 6.45, available: true },
+      { id: 'k6', name: 'Kota later', price: 6.50, available: true },
+      { id: 'k7', name: 'Kota manual', price: 6.55, available: true },
+      { id: 'k8', name: 'Kota hand', price: 6.60, available: true },
+    ] } } });
+  const place = async (name, itemId, price, buyer) => {
+    const o = await call('/api/order', { method: 'POST', ip: '41.2.2.' + (5 + chainRows.length),
+      body: { handle: CH, service: 'pickup', buyer: Object.assign({ name, phone: '0781234567' }, buyer || {}),
+        items: [{ id: itemId, name: 'Kota', price, qty: 1 }] } });
+    assert.equal(o.status, 201, o.text);
+    return { id: o.json.order.id, code: o.json.order.code, pay: Number(o.json.pricing.pay_now) };
+  };
+  const U = (v) => Math.round(v * 1e6);
+  assert.equal(U(6.34), 6_340_000, 'a cent is 10,000 units — the test speaks the chain’s units from here');
+
+  // Every vector carries its own base price: the unique-cents rule then gives every open
+  // order a distinct amount, which is the whole matching scheme and also what keeps this
+  // test honest — four orders at one price would be a genuine ambiguity the watcher must refuse.
+  const o0 = await place('Tino', 'k0', 6.20);
+  assert.ok(o0.pay > 6.3, 'unique cents ride on a chain order too: ' + o0.pay);
+
+  const w = await call('/api/settings', { method: 'POST', cookie: ch.cookie, confirm: true,
+    body: { handle: CH, crypto_watch: true } });
+  assert.equal(w.status, 200, w.text);
+  assert.deepEqual(w.json.held, ['crypto_watch'], 'a switch that lets software mark money paid rides the same 15-minute fuse as the wallet it watches');
+  let st = JSON.parse(env.STORES._map.get('store:chainchef').value);
+  assert.notEqual(st.crypto_watch, true, 'not live yet');
+  st.pending.apply_at = Date.now() - 1000;
+  await env.STORES.put('store:chainchef', JSON.stringify(st), { metadata: st.menu ? { handle: CH } : undefined });
+
+  // — the four orders the ladder needs
+  const exact = await place('Exact E', 'k1', 6.30);
+  const short = await place('Short S', 'k3', 6.35);
+  const claim = await place('Claim C', 'k4', 6.40, { proof: 'cc'.repeat(32) });
+  const ghost = await place('Ghost G', 'k5', 6.45);
+  send(U(exact.pay));                                        // exact → credit
+  send(U(short.pay) - 30_000);                               // 0.47% short → credit and say so
+  send(Math.round(U(claim.pay) * 0.5), { txid: 'cc'.repeat(32) });  // the claimed txid, half the amount → flag, never credit
+  const unclaimed = U(9.99);
+  send(unclaimed, { txid: 'dd'.repeat(32), from: 'TOtherWalletNobodyClaimedThis0000000000' });   // traffic
+  send(U(exact.pay), { to: 'TNotMyAddress00000000000000000000x' });   // somebody else’s wallet
+
+  const cron = await call('/__selftest?scheduled=1');
+  assert.equal(cron.status, 200);
+  const c = cron.json.scheduled.crypto;
+  assert.equal(c.watching, 1, 'exactly the one shop that asked, list-walked with the expiry pass');
+  assert.equal(c.credited, 2, 'exact and short-inside-the-band, both credited');
+  assert.ok(c.flagged >= 2, 'the claimed half-payment and the unattributed one flagged: ' + JSON.stringify(c));
+  assert.equal(c.errors, 0, 'the stub answered, so nothing errored');
+
+  const dash = await call('/api/admin?handle=chainchef', { cookie: ch.cookie });
+  const rows = dash.json.orders;
+  const find = (o) => rows.find((x) => x && x.code === o.code);
+  const e = find(exact);
+  assert.equal(e.status, 'paid', 'the exact transfer marked the order');
+  assert.equal(e.crypto.kind, 'exact');
+  assert.equal(e.crypto.by, 'watcher');
+  assert.equal(String(e.crypto.paid), String(exact.pay), 'and what landed is on the record, in dollars');
+  const srow = find(short);
+  assert.equal(srow.status, 'paid', 'a 300-micro shortfall inside 1% is credited, not refused');
+  assert.equal(srow.crypto.kind, 'underpaid');
+  assert.equal(srow.crypto.shortfall, 0.03, 'to the cent, for the human');
+  assert.ok((srow.risk_flags || []).some((f) => /crypto_underpaid/.test(f)), 'flagged on the row the merchant reads');
+  const crow = find(claim);
+  assert.equal(crow.status, 'awaiting_payment', 'half an order on a matching TxID is not money to move automatically');
+  if (process.env.CHAINDEBUG) console.log('CROW', JSON.stringify({ flags: crow.risk_flags, crypto: crow.crypto, docflags: JSON.parse(env.ORDERS._map.get(`order:${CH}:${claim.id}`).value).risk_flags }), 'FLAGGED', JSON.stringify((await call('/api/crypto/check', { method: 'POST', cookie: ch.cookie, confirm: true, body: { handle: CH } })).json.flagged));
+  assert.ok((crow.risk_flags || []).some((f) => /crypto_underpaid/.test(f)), 'and the row says so for the merchant')
+  assert.equal(crow.crypto.credited, false, 'the memo says what it found, and that it did nothing');
+  const grow = find(ghost);
+  assert.equal(grow.status, 'awaiting_payment', 'and an unclaimed payment touches nobody');
+
+  const audit = dash.json.audit.filter((a) => a.act === 'mark');
+  assert.ok(audit.some((a) => /chain/.test(a.via)), 'the audit line says who did it: ' + JSON.stringify(audit.map((a) => a.via)));
+
+  // the report the dashboard prints — and the deferral proof: replay changes nothing
+  st = JSON.parse(env.STORES._map.get('store:chainchef').value);
+  assert.ok((st.crypto_report || []).length >= 2, 'the shorts and the strays are on the record');
+  assert.ok(st.crypto_report.some((r) => r.kind === 'underpaid' && r.code === short.code));
+  assert.ok(st.crypto_report.some((r) => r.kind === 'unattributed'));
+  assert.ok(!st.crypto_report.some((r) => r.code === exact.code), 'an exact payment is not a discrepancy — no row, no mail, nothing to read');
+  assert.ok(await env.STORES.get('ctx:chainchef'), 'the cursor is kept, so the next sweep starts where this one ended');
+
+  const before = JSON.stringify(env.ORDERS._map.get(`order:${CH}:${exact.id}`).value);
+  const again = await call('/__selftest?scheduled=1');
+  assert.equal(again.json.scheduled.crypto.credited, 0, 'the same transfers again credit nothing: the paid order is not open and the txid is spent');
+  assert.equal(JSON.stringify(env.ORDERS._map.get(`order:${CH}:${exact.id}`).value), before, 'byte-identical, which is what replay-proof means');
+
+  // deferral: the history row says money moved, the re-verification says the transaction
+  // failed — the credit waits, the ledger line is NOT written, and the next look finishes it
+  const def = await place('Later L', 'k6', 6.50);
+  chainVerify = 'OUT_OF_ENERGY';   // what a reverted or stuck transaction actually answers
+  send(U(def.pay), { txid: 'ee'.repeat(32) });
+  const d1 = await call('/__selftest?scheduled=1');
+  assert.equal(d1.json.scheduled.crypto.deferred, 1, 'one credit deferred for want of verification');
+  const stillOpen = await call('/api/admin?handle=chainchef', { cookie: ch.cookie });
+  assert.equal(stillOpen.json.orders.find((x) => x.code === def.code).status, 'awaiting_payment', 'and the order is exactly where it was');
+  chainVerify = 'SUCCESS';
+  const d3 = await call('/__selftest?scheduled=1');
+  assert.equal(d3.json.scheduled.crypto.credited, 1, 'verification came good, and the replay picks the transfer up — deferred, not dropped');
+  assert.equal((await call('/api/admin?handle=chainchef', { cookie: ch.cookie })).json.orders.find((x) => x.code === def.code).status, 'paid');
+
+  // the dashboard's own button: same function, same rules, and it answers in one note
+  const man = await place('Manual M', 'k7', 6.55);
+  send(U(man.pay), { txid: 'ff'.repeat(32) });
+  const noHdr = await call('/api/crypto/check', { method: 'POST', cookie: ch.cookie, body: { handle: CH } });
+  assert.equal(noHdr.status, 403, 'a session alone is not consent here either: ' + noHdr.text);
+  const anon = await call('/api/crypto/check', { method: 'POST', body: { handle: CH } });
+  assert.equal(anon.status, 401, 'and the door is not public');
+  const hit = await call('/api/crypto/check', { method: 'POST', cookie: ch.cookie, confirm: true, body: { handle: CH } });
+  assert.equal(hit.status, 200, hit.text);
+  assert.equal(hit.json.ok, true);
+  assert.match(hit.json.note, /1 order\(s\) credited/, 'the button says what it just did: ' + hit.json.note);
+  assert.equal((await call('/api/admin?handle=chainchef', { cookie: ch.cookie })).json.orders.find((x) => x.code === man.code).status, 'paid');
+  const audit2 = await call('/api/admin?handle=chainchef', { cookie: ch.cookie });
+  assert.ok(audit2.json.audit.some((a) => a.act === 'mark' && a.via === 'session'), 'a watcher credit from the button is audited through the button’s own door');
+
+  // the merchant's tap and the watcher's tap land the same way: audit line, marked_at, buyer stats
+  const hand = await place('Hand H', 'k8', 6.60);
+  const human = await call('/api/mark', { method: 'POST', cookie: ch.cookie, confirm: true,
+    body: { handle: CH, id: hand.id, status: 'paid' } });
+  assert.equal(human.status, 200, human.text);
+  const after = await call('/api/admin?handle=chainchef', { cookie: ch.cookie });
+  const h2 = after.json.orders.find((x) => x.code === hand.code);
+  assert.equal(h2.status, 'paid');
+  assert.ok(!h2.crypto, 'a human tap leaves no chain memo — it saw no chain — while the ledger records it identically', 'and the mark line is one audit line either way');
+  const marks = after.json.audit.filter((a) => a.act === 'mark');
+  assert.ok(marks.some((a) => a.via === 'link' || a.via === 'session'), 'the human path audits with its own via: ' + JSON.stringify(marks.map((m) => m.via)));
+
+  // An Approval is not money: the endpoint lists it beside Transfers, with a value
+  // that is an allowance, and a `to` that is the beneficiary. A watcher that trusts
+  // the feed to have filtered what it never filtered bills allowances as payments.
+  const appr = await place('Approver A', 'k8', 6.60);
+  chainRows = [{ txid: 'ap'.repeat(32), units: U(7.28), at: Date.now(), type: 'Approval' }];
+  const quiet = await call('/api/crypto/check', { method: 'POST', cookie: ch.cookie, confirm: true, body: { handle: CH } });
+  assert.equal(quiet.json.ok, true, quiet.text);
+  assert.equal(quiet.json.scanned, 0, 'the Approval never reaches the matcher at all: ' + JSON.stringify(quiet.json.scanned));
+  assert.equal((await call('/api/admin?handle=chainchef', { cookie: ch.cookie })).json.orders.find((x) => x.code === appr.code).status, 'awaiting_payment', 'and the order nobody paid stays open');
+
+  // a txid the node does not know defers, forever, quietly — no half-verified credit
+  chainRows = [{ txid: 'gh'.repeat(32), units: U(appr.pay), at: Date.now() }];
+  chainKnown = false;
+  const ghostTx = await call('/api/crypto/check', { method: 'POST', cookie: ch.cookie, confirm: true, body: { handle: CH } });
+  assert.equal(ghostTx.json.deferred.length, 1, 'list says it moved, node says it never existed: believe the node');
+  assert.equal((await call('/api/admin?handle=chainchef', { cookie: ch.cookie })).json.orders.find((x) => x.code === appr.code).status, 'awaiting_payment');
+  chainVerify = 'SUCCESS';
+  chainKnown = true;   // the block appears on the node: the wait was the proof, not a policy
+  const told = await call('/api/crypto/check', { method: 'POST', cookie: ch.cookie, confirm: true, body: { handle: CH } });
+  assert.equal(told.json.deferred.length, 0, 'and the deferral is a wait, not a verdict');
+  assert.equal(told.json.credited.length, 1, 'when the node starts believing the transfer, the credit finally runs');
+  assert.equal((await call('/api/admin?handle=chainchef', { cookie: ch.cookie })).json.orders.find((x) => x.code === appr.code).status, 'paid');
+
+  // and a shop on a phone rail is untouched by all of this machinery
+  const mamDash = await call('/api/admin?handle=mamatoe', { cookie: store.cookie });
+  assert.equal(mamDash.status, 200, 'the EcoCash shop is still here for this last check: ' + mamDash.text);
+  assert.equal(mamDash.json.store.crypto_watch ? true : false, false, 'the watcher never switched itself on for a shop that did not ask');
+  chainRows = [];
+  globalThis.fetch = realFetch;
+});

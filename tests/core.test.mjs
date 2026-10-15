@@ -770,6 +770,10 @@ test('a payment reference cannot be walked, and a payment window closes', () => 
 const SEO_STORE = {
   handle: 'kotaking', shop_name: 'Kota King', tagline: 'Halal fried chicken and kota',
   location: 'Harare CBD', currency: 'ZAR', whatsapp: '263771234567', rail: 'cash',
+  // a sheet behind it: since v0.9.10 the head describes cached feed rows only for a shop
+  // that *has* a feed — for one that doesn't, its authored list is the shelf and the cache
+  // is stale by definition, and a crawler must not be told more than the storefront shows
+  feed_url: 'https://docs.google.com/spreadsheets/d/1a2b3c4d5e6f7g8h9i0jklmnop/edit#gid=0',
   week: [{ slots: [{ o: 540, c: 1260 }] }, null, null, null, null, null, { slots: [{ o: 600, c: 1020 }] }],
   logo: '/i/kotaking/logo-1',
   feed_cache: { products: [
@@ -1404,4 +1408,198 @@ test('0.9.0 an operator patch fixes one row and leaves the rest of the shelf alo
   const kept = C.mergeMenuPatch(cur, { over: { a: { popular: true } } }, 'shop');
   assert.equal(kept.extra.length, 1, 'a patch that names no list leaves the list alone');
   assert.deepEqual(C.mergeMenuPatch(undefined, {}, 'shop'), C.sanitizeMenu({ handle: 'shop' }), 'nothing stored plus nothing sent is an empty shelf, not a crash');
+});
+
+/* ------------------------------------------------------------------ 0.9.10: USDT on Tron */
+const CONTRACT = C.RAILS.usdt_trc20.crypto.contract;
+const WALLET = 'TXuStMHPUxoRX8NPTTpJU6jBsBtZDRw2Uy';   // shape-valid, nobody's real wallet
+
+test('0.9.10 a Tron address is T plus 33 base58 characters, and the shape check means it', () => {
+  assert.equal(C.isTronAddr('T' + 'A'.repeat(33)), true);
+  assert.equal(C.isTronAddr(WALLET), true);
+  assert.equal(C.isTronAddr(' ' + WALLET + ' '), true, 'spaces around are the paste, not the address');
+  assert.equal(C.isTronAddr(WALLET.toLowerCase()), false, 'base58 is case-sensitive: guessing one letter of somebody’s checksum is how USDT is lost');
+  assert.equal(C.isTronAddr('T' + '0'.repeat(33)), false, '0 is not in the alphabet');
+  assert.equal(C.isTronAddr('T' + 'O'.repeat(33)), false, 'neither is O');
+  assert.equal(C.isTronAddr('T' + 'l'.repeat(33)), false, 'nor a lowercase L');
+  assert.equal(C.isTronAddr('T' + 'I'.repeat(33)), false, 'nor an upper i');
+  assert.equal(C.isTronAddr('T' + 'A'.repeat(32)), false, '33 characters after the T, not 32');
+  assert.equal(C.isTronAddr('T' + 'A'.repeat(34)), false, 'not 34 either');
+  assert.equal(C.isTronAddr(''), false);
+  assert.equal(C.isTronAddr(null), false, 'nothing typed is not a wallet');
+  assert.equal(C.isTronAddr('0x742d35Cc6634C05329362b4'), false, 'an EVM hex is not this shape at any length');
+  assert.match(C.RAILS.usdt_trc20.crypto.contract, /^T[1-9A-HJ-NP-Za-km-z]{33}$/);   // the real USDT contract, by the same rule
+});
+
+test('0.9.10 six decimals: a cent is 10,000 units and a bill is always exact in both', () => {
+  assert.equal(C.toUnits(6.34), 6_340_000, 'the odd cents of a unique-price order survive the trip — that is the whole matching scheme');
+  assert.equal(C.toUnits('6.34'), 6_340_000, 'a string off an HTTP body counts the same as a number');
+  assert.equal(C.toUnits(0.01), 10_000);
+  assert.equal(C.toUnits('nan-ish'), 0, 'garbage reads as zero, and zero is not money');
+  assert.equal(C.toUnits(12.03, 18), 12.03e18, 'the decimals count is the asset’s, passed by the caller, not baked into the arithmetic');
+  assert.equal(C.fromUnits(6_340_000), 6.34);
+  for (const v of [1, 10.5, 0.05, 6.34, 999999.99]) assert.equal(C.fromUnits(C.toUnits(v)), v, v + ' round-trips');
+});
+
+test('0.9.10 the match is the odd cents: exact credits, one percent says so, more is nobody’s order', () => {
+  const at = Date.UTC(2026, 9, 15, 3, 0, 0);
+  const T = (units, extra) => Object.assign({ txid: 'a1'.repeat(32), units, at }, extra || {});
+  const A = (extra) => Object.assign({ id: 'a', code: 'K7M2QF', status: 'awaiting_payment',
+    units: C.toUnits(6.34), proof: '' }, extra || {});
+  const UNCLAIMED = 'a1'.repeat(32);   // not any order's TxID: pure chain traffic
+
+  let r = C.cryptoMatch([T(C.toUnits(6.34))], [A()], 0.01);
+  assert.equal(r.credits.length, 1, 'exact match credits');
+  assert.equal(r.credits[0].kind, 'exact');
+  assert.equal(r.credits[0].order_id, 'a', 'and it knows which order — by the amount, because the chain carries no memo');
+  assert.equal(r.credits[0].shortfall_units, 0);
+  assert.equal(r.loose.length + r.flags.length, 0, 'nothing is left unexplained');
+
+  r = C.cryptoMatch([T(C.toUnits(6.34) - 30_000)], [A()], 0.01);
+  assert.equal(r.credits.length, 1, 'a 0.47% short payment is a wallet fee, not a fraud');
+  assert.equal(r.credits[0].kind, 'underpaid', 'credited and said so, never quietly');
+  assert.equal(r.credits[0].shortfall_units, 30_000, 'the shortfall is in chain units, where the arithmetic happened');
+
+  r = C.cryptoMatch([T(C.toUnits(5.00), { txid: UNCLAIMED })], [A({ proof: UNCLAIMED })], 0.01);
+  assert.equal(r.credits.length, 0, 'nobody credits 79% of an order because a number matched');
+  assert.equal(r.flags.length, 1);
+  assert.equal(r.flags[0].kind, 'underpaid', 'the buyer named this order and this transfer — that is evidence for a human, not an instruction');
+  assert.equal(r.flags[0].order_id, 'a');
+
+  r = C.cryptoMatch([T(C.toUnits(5.00), { txid: UNCLAIMED })], [A({ proof: UNCLAIMED.slice(0, 40) })], 0.01);
+  assert.equal(r.flags.length, 1, 'a stored proof is cleanProof’d to 40 of a 64-character TxID — prefix, or the claim line is dead in production and alive only in this file');
+  assert.equal(r.flags[0].kind, 'underpaid');
+  r = C.cryptoMatch([T(C.toUnits(5.00))], [A({ proof: '1234567' })], 0.01);
+  assert.equal(r.flags.length, 0, 'a seven-character “code” is not a TxID prefix and claims nothing');
+  assert.equal(r.loose.length, 1);
+
+  r = C.cryptoMatch([T(C.toUnits(5.00), { txid: UNCLAIMED })], [A()], 0.01);
+  assert.equal(r.flags.length, 0, 'an unclaimed odd amount is not a discrepancy, just somebody else’s Tuesday');
+  assert.equal(r.loose.length, 1, 'but it is counted, so the report can say the sweep saw traffic');
+
+  r = C.cryptoMatch([T(C.toUnits(6.34) + 20_000)], [A()], 0.01);
+  assert.equal(r.credits[0].kind, 'overpaid', 'more inside the band is their overpay and the shop’s to notice');
+
+  r = C.cryptoMatch([T(C.toUnits(6.34))], [A({ id: 'a' }), A({ id: 'b' })], 0.01);
+  assert.equal(r.credits.length, 0, 'nothing is guessed when a guess spends money twice');
+  assert.equal(r.flags[0].kind, 'ambiguous');
+  assert.deepEqual(r.flags[0].order_ids, ['a', 'b'], 'and the human is told every order it could be');
+
+  r = C.cryptoMatch([T(C.toUnits(6.34))], [A({ status: 'paid' })], 0.01);
+  assert.equal(r.credits.length, 0, 'a paid order is not an open one — even by the buyer’s own refund');
+  assert.equal(r.loose.length, 1, 'counted as traffic, not credited as anything');
+
+  r = C.cryptoMatch([T(C.toUnits(6.34)), T(C.toUnits(6.34), { txid: 'b2'.repeat(32) })], [A()], 0.01);
+  assert.equal(r.credits.length, 1, 'one order, one credit — a second transfer is not a second payment for it');
+  assert.equal(r.loose.length, 1, 'the second is loose until a person says otherwise');
+
+  r = C.cryptoMatch([T(C.toUnits(6.34)), { txid: 'a1'.repeat(32), units: 99, at }], [A()], 0.01);
+  assert.equal(r.credits.length, 1, 'a replayed txid line is skipped, not double-counted');
+  assert.equal(r.loose.length + r.flags.length, 0, 'skipped means skipped');
+
+  r = C.cryptoMatch([{ txid: '', units: 6_340_000, at }, { txid: 'c3'.repeat(32), units: 0, at }, null,
+    undefined, { txid: 'd4'.repeat(32) }, T(C.toUnits(6.34))], [A()], 0.01);
+  assert.equal(r.credits.length, 1, 'the one well-formed transfer still does its job next to four junk ones');
+  assert.equal(r.loose.length + r.flags.length, 0, 'and the junk makes no noise');
+
+  r = C.cryptoMatch([T(6_340_000 * 0.5)], [A()], 0.01);
+  assert.equal(r.credits.length, 0);
+  r = C.cryptoMatch([T(C.toUnits(12.03) - 120_300)], [A({ units: C.toUnits(12.03) })], 0.01);
+  assert.equal(r.credits.length, 1, 'at the exact edge of the band is inside it');
+  r = C.cryptoMatch([T(C.toUnits(12.03) - 120_301)], [A({ units: C.toUnits(12.03) })], 0.01);
+  assert.equal(r.credits.length, 0, 'one micro over it is outside, and the buyer keeps owing the rest');
+
+  r = C.cryptoMatch([T(0), T(C.toUnits(6.34))], [A()], 25);
+  assert.equal(r.credits.length, 1, 'the band is read as a percentage, and 25% of anything is a policy somebody should have to type');
+  r = C.cryptoMatch([T(C.toUnits(6.34))], [A()], 9999);
+  assert.equal(r.credits.length, 1, 'a nonsense tolerance is clamped to 50%, not trusted');
+  r = C.cryptoMatch([T(C.toUnits(4.00))], [A()], 9999);
+  assert.equal(r.credits.length, 1, 'and 4 dollars inside a 50% band of 6.34 credits — which is exactly why nobody gets to set that number');
+
+  r = C.cryptoMatch([], [], 0.01);
+  assert.deepEqual(r, { credits: [], flags: [], loose: [] }, 'a quiet hour is three empty lists, not a crash');
+  assert.equal(C.cryptoMatch(undefined, undefined).credits.length, 0, 'and nothing at all in is still nothing at all out');
+});
+
+test('0.9.10 the slip, when the rail is a chain, says USDT, says TRC-20, and drops the lines that cannot apply', () => {
+  const st = { shop_name: 'Chain Chef', currency: 'USD', pay_account: WALLET, pay_holder: 'MAMA TOE',
+    reference_format: '{code}', rail: 'usdt_trc20' };
+  const pay = C.payInstructions(st, { id: 'o1', code: 'K7M2QF' }, { rail: C.RAILS.usdt_trc20, pay_now: 6.34 });
+  assert.equal(pay.currency, 'USDT', 'the unit on the big line is the asset, not the shop’s ZAR');
+  assert.equal(pay.account, WALLET, 'printed exactly as typed: base58 is case-sensitive and a “prettier” address is a lost one');
+  assert.equal(pay.account_label, 'TRC-20 address', 'the field says which network it wants before anything is pasted into it');
+  assert.ok(pay.steps.some((s) => /not recoverable/.test(s)), 'the wrong-chain warning is a numbered step, not a footnote');
+  assert.ok(pay.steps.some((s) => /exactly 6\.34 USDT/.test(s)), 'amount and unit are in the send line itself');
+  assert.ok(pay.steps.some((s) => /TRC-20 \(TRON\)/.test(s)), 'the chain id is internal and lowercase; the buyer sees it upper, in wallet language');
+  assert.match(pay.note, /odd cents/, 'the buyer is told why the number is odd — that is what makes the payment findable');
+  assert.ok(!pay.steps.some((s) => /Check it reads/.test(s)), 'no holder check on a chain: the confirmation screen shows a wallet, not a name, and promising the lie would teach buyers to ignore the line that matters on the other rails');
+  assert.ok(!pay.steps.some((s) => /Use reference/.test(s)), 'a TRC-20 transfer has no reference field to use — telling them to fill one trains them to skip the real step');
+  assert.equal(pay.crypto.asset, 'USDT');
+  assert.equal(pay.crypto.network, 'TRC-20');
+  assert.equal(pay.proof, '', 'nothing typed yet is nothing printed, on any rail');
+  const pay2 = C.payInstructions({ ...st, rail_accts: { usdt_trc20: { acct: 'T' + 'D'.repeat(33) } } },
+    { code: 'K7M2QF' }, { rail: C.RAILS.usdt_trc20, pay_now: 6.34 });
+  assert.equal(pay2.account, 'T' + 'D'.repeat(33), 'the per-rail row wins over the store default, same as every other rail');
+  const pe = C.payInstructions(st, { code: 'K7M2QF' }, { rail: C.RAILS.eocash, pay_now: 6.34 });
+  assert.equal(pe.crypto, null, 'nothing crypto on an EcoCash rail, ever');
+  assert.equal(pe.currency, 'USD', 'and the unit goes back to the shop’s own');
+  assert.ok(pe.steps.some((s) => /Use reference/.test(s)), 'the phone rails keep their reference line');
+});
+
+test('0.9.10 the placeholder rule is exact — it decides a UI now, not just a warning', () => {
+  assert.equal(C.isPlaceholderFeed(''), true);
+  assert.equal(C.isPlaceholderFeed(undefined), true);
+  assert.equal(C.isPlaceholderFeed(null), true);
+  assert.equal(C.isPlaceholderFeed('https://tapstall.dev/data/sample-menu.csv'), true, 'the onboarding default');
+  assert.equal(C.isPlaceholderFeed('https://zimlink.simalidudu.co.zw/pages/sample-menu.csv'), true, 'the Pages one, at either path');
+  assert.equal(C.isPlaceholderFeed('https://x.test/data/sample-menu.csv?v=3'), true, 'a query does not launder a sample');
+  assert.equal(C.isPlaceholderFeed('https://raw.githubusercontent.com/zimlink/tapstall/main/pages/sample-menu.csv'), true);
+  assert.equal(C.isPlaceholderFeed('https://raw.githubusercontent.com/mari/menus/main/sample-menu.csv'), false, 'somebody else’s repo, our filename: their menu. The rule is the sample’s path, not the host');
+  assert.equal(C.isPlaceholderFeed('https://raw.githubusercontent.com/zimlink/tapstall/main/pages/README.md'), false, 'our own repo, not the file: not ours to call a placeholder');
+  assert.equal(C.isPlaceholderFeed('https://docs.google.com/spreadsheets/d/abc/edit#gid=0'), false);
+  assert.equal(C.isPlaceholderFeed('sample-menu.csv'), false, 'a bare filename somebody typed is not ours to call a sample — the rule is our path or nothing');
+});
+
+test('0.9.10 no real feed means the cache describes nothing — the head cannot out-live the shelf', () => {
+  // shelfRows is the seam: same cached rows, and whether they count depends on whether
+  // there is a feed under them at all. seoFacts reads through it, which is the one place
+  // the old loose rule could make a crawler describe rows no page ever showed.
+  const rows = [{ id: 'a', name: 'Chicken kota', price: 22.5, cur: 'ZAR' }];
+  const stale = { shop_name: 'S', currency: 'ZAR',
+    feed_url: 'https://raw.githubusercontent.com/zimlink/tapstall/main/pages/sample-menu.csv',
+    feed_cache: { ts: 1, products: rows } };
+  assert.doesNotMatch(C.seoFacts(stale, ORIGIN, MON_10).desc, /Chicken kota/, 'the demo rows are not this shop’s shelf, cached or not');
+  assert.match(C.seoFacts({ ...stale, feed_url: 'https://docs.google.com/spreadsheets/d/abc/edit' }, ORIGIN, MON_10).desc,
+    /Chicken kota/, 'a cached real sheet still describes the shelf while a fetch fails — that is what the cache is for');
+});
+
+test('0.9.10 a client delete keeps the row restorable and never falls on a stranger', () => {
+  // the authed dashboard lets a no-sheet shop delete any row — so `del` must carry the full
+  // item to the tray that restores it, tolerate a bare id, dedupe, and still refuse to let a
+  // delete reach through to the sheet rows it shares ids with by accident (1, 2, 3, ...)
+  const m = C.sanitizeMenu({ handle: 'shop',
+    extra: [{ id: 'e1', name: 'Kota', price: 5 }, { id: 'e2', name: 'Chips', price: 3 }],
+    del: [{ id: 'e2', name: 'Chips', price: 3, available: false }, { id: 'e2', name: 'Chips again', price: 1 }, { id: '' }, 'e9', { id: 'x'.repeat(80) }],
+  }, 'shop');
+  assert.equal(m.del.length, 3, 'the duplicate id is dropped and the empty one never was; bare ids ride along');
+  assert.equal(m.del[2].id.length, 60, 'and an over-long id is cut to what the shelf allows, not kept as a receipt of the overflow');
+  assert.equal(m.del[0].name, 'Chips', 'a deleted row keeps its copy — the tray is built from `del`, so the first write decides');
+  assert.equal(m.del[0].deleted, true, 'and says what it is');
+  assert.equal(m.del[1].id, 'e9');
+  assert.deepEqual(Object.keys(m.del[1]), ['id'], 'a bare id is all a bare id can promise: no restorable copy, and nothing invented');
+  assert.equal(m.extra.length, 2, 'sanitize stores the list it was given; the falling-out is applyMenu’s job');
+
+  const shelf = C.applyMenu(
+    [{ id: '1', name: 'Sheet one', price: 4 }, { id: '2', name: 'Sheet two', price: 9 }],
+    { extra: [{ id: 'e1', name: 'Kota', price: 5 }, { id: 'e2', name: 'Chips', price: 3 }],
+      del: [{ id: 'e2', name: 'Chips', price: 3 }],
+      over: { e2: { popular: true } }, order: ['e1', 'e2'], hide: [] },
+    'shop');
+  assert.deepEqual(shelf.map((p) => p.id), ['e1', '1', '2'], 'the deleted extra is off the shelf, and the surviving order is extras-first as always');
+  assert.ok(!shelf.some((p) => p.id === 'e2'), 'everywhere');
+  const sameId = C.applyMenu([{ id: 'e2', name: 'Sheet chip', price: 7 }], { del: [{ id: 'e2', name: 'My chip', price: 3 }], extra: [] }, 'shop');
+  assert.deepEqual(sameId.map((p) => p.id), ['e2'], 'and a base row that merely shares the id keeps standing: the delete falls on this shop’s list, never on the sheet under it');
+
+  const bare = C.applyMenu([], { extra: [{ id: 'e1', name: 'Kota', price: 5 }], del: ['e1'] }, 'shop');
+  assert.equal(bare.length, 0, 'the bare-id form deletes too — it just cannot be restored from');
 });

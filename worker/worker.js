@@ -39,11 +39,12 @@ import {
   MESH_PUBLISH, MESH_BUFFER_FREE, MESH_DRIP, meshRailsTotal, meshRailHealth, meshDrip,
   MESH_RAILS, MESH_BUDGET,
   orderRow, packRow, unpackRow, mergeRows, MAX_ORDERS_KEPT,   // the ledger row, and the cap on it
+  isPlaceholderFeed, isTronAddr, cryptoMatch, toUnits, fromUnits, railAcctOf,
   EDITABLE_FIELDS, SOFT_FIELDS, sign, adminStore, normaliseRail, resolveRail,
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '0.9.9';
+const VERSION = '0.9.10';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
@@ -299,6 +300,7 @@ async function route(req, url, env, ctx) {
   if (p === '/api/settings' && req.method === 'POST') return settingsEdit(req, url, env);
   if (p === '/api/settings/revert' && req.method === 'POST') return revertPending(req, url, env);
   if (p === '/api/menu' && req.method === 'POST') return menuEdit(req, env);
+  if (p === '/api/crypto/check' && req.method === 'POST') return cryptoCheck(req, env);
   if (p === '/api/image' && req.method === 'POST') return imageUpload(req, env);
   if (p === '/api/revoke' && req.method === 'POST') return revokeKeys(req, url, env);
   // The books and the receipt, on the shop's own authority: no new credential, no new surface for
@@ -428,13 +430,61 @@ async function writeStore(env, st) {
 }
 
 /* --------------------------------------------------------------- products */
+/** One-time, and only ever on a shop whose base turns out to be our own sample: lift
+ *  whatever the demo feed had cached — with the shop's edits already folded in, so a
+ *  price someone corrected yesterday is not "reverted" to the fixture tomorrow — into
+ *  the authored list, and mark the promoted rows as starters so the dashboard can say
+ *  what they are: "these arrived with the account; edit or delete, they are yours now."
+ *  It runs in the read path like the pending-settings fold does, so no migration script
+ *  exists to forget, and the cache it clears is what makes it fire exactly once. */
+function seedAuthoredFromCache(st) {
+  const rows = st.feed_cache && Array.isArray(st.feed_cache.products) ? st.feed_cache.products : [];
+  // Fires exactly once: only for a shop that has the sample's rows cached and no menu
+  // of its own yet (the cache empties on the way out, and a shop that has typed rows
+  // is not being handed duplicates of a fixture it already overrode).
+  if (!rows.length || (st.menu && (st.menu.extra || []).length)) return false;
+  const eff = applyMenu(rows, st.menu, st.handle);   // the shop's own edits, on the sample's rows
+  const promoted = eff.map((p) => ({
+    id: String(p.id || '').slice(0, 60), name: p.name, cat: p.cat, price: p.price, cur: p.cur,
+    desc: p.desc, img: realPhoto(p) || '', available: p.available !== false, popular: !!p.popular,
+    vat_rate: p.vat_rate, opts: p.opts, addons: p.addons, starter: true,
+  }));
+  // A row the shop had hidden in overlay mode is a row it had deleted in authored mode:
+  // the hide list rides into `del` so the intent survives the fold, not the artefact.
+  const dead = [...((st.menu && st.menu.hide) || []), ...(((st.menu && st.menu.del) || []).map((x) => (x && typeof x === 'object' ? x.id : x)))];
+  const seeded = sanitizeMenu({
+    extra: promoted, del: dead,
+    note: (st.menu && st.menu.note) || 'starter items — from the sample menu, now yours to change or delete',
+  });
+  for (const x of seeded.extra) x.starter = true;
+  st.feed_cache = { at: Date.now(), products: [], count: 0, error: 'no_feed' };
+  st.menu = seeded;
+  return true;
+}
+
 /**
  * The store's menu: whatever the sheet said, with this store's own dashboard edits
  * laid over it. The cache holds the sheet as fetched — the edits are applied on the
  * way out, never inside the cache — so "Revert this row to my sheet" is a matter of
  * dropping an override, and a sheet that comes back tomorrow still arrives clean.
+ *
+ * A shop with no sheet — none linked, or the pointer to our own sample that
+ * onboarding once offered — has a different base, and v0.9.10 is the honesty of it:
+ * there is nothing to overlay, so the authored list IS the menu. `applyMenu` over an
+ * empty base is that sentence in code; the one-time `seedAuthoredFromCache` below is
+ * the one-time mercy: shops whose "menu" has been the demo CSV all along keep their
+ * rows on the switch, as their own, editable and deletable, instead of waking up to
+ * an empty shelf. The sample is never fetched again, and `?fresh=1` cannot resurrect
+ * it, because the branch runs before anything reads a URL.
  */
 async function loadProducts(st, env, force) {
+  if (isPlaceholderFeed(st.feed_url)) {
+    if (seedAuthoredFromCache(st)) {
+      // the seed is worth one write: it turns a fixture into a starting point
+      try { await writeStore(env, st); } catch (e) { /* seeded in memory today, again tomorrow */ }
+    }
+    return applyMenu([], st.menu, st.handle);
+  }
   const ms = (st.cache_seconds || 120) * 1000;
   if (!force && st.feed_cache && st.feed_cache.at && Date.now() - st.feed_cache.at < ms) return applyMenu(st.feed_cache.products, st.menu, st.handle);
   let products = [], error = null;
@@ -792,17 +842,18 @@ async function markPaid(req, url, env) {
     return json({ ok: true, id: o.id, status: o.status, already: true });
   }
   const prev = o.status;
-  o.status = want;
-  o.marked_at = new Date().toISOString();
-  if (o.status === 'paid') {
-    const hk = `buyer:${handle}:${o.buyer_hash}`;
-    const rec = (await env.STORES.get(hk, 'json')) || { count: 0, unpaid: 0 };
-    rec.unpaid = Math.max(0, (rec.unpaid || 0) - 1);
-    await env.STORES.put(hk, JSON.stringify(rec), { expirationTtl: 180 * 86400 });
+  let logged;
+  if (want === 'paid') {
+    // the same credit the chain watcher runs — one path from "the money is believed"
+    // to "the ledger says paid", whichever hand believed it
+    logged = await creditOrder(env, st, o, viaCap ? 'link' : 'session', ipOf(req), '');
+  } else {
+    o.status = want;
+    o.marked_at = new Date().toISOString();
+    // one write: the document and the row the dashboard reads are the same object now
+    await saveOrder(env, handle, o);   // the ledger keeps pace, or tries to
+    logged = await pushAudit(env, st, { act: 'mark', via: viaCap ? 'link' : 'session', fields: [o.code + ' → ' + want], ip: ipOf(req) });
   }
-  // one write: the document and the row the dashboard reads are the same object now
-  await saveOrder(env, handle, o);   // the ledger keeps pace, or tries to
-  const logged = await pushAudit(env, st, { act: 'mark', via: viaCap ? 'link' : 'session', fields: [o.code + ' → ' + want], ip: ipOf(req) });
   // an undo link for 15 minutes, same shape, opposite action
   // undo returns the order to whatever it was before this tap
   const undo = await issueCap(secret, { a: 'mark', h: handle, id, s: prev, g: String(st.auth_gen || '0') }, UNDO_TTL);
@@ -1460,12 +1511,279 @@ async function hookPayfast(req, url, env, ctx) {
   return say({ ok: true, activated: st.handle, paid_until: new Date(st.paid_until).toISOString(), days: tx.days });
 }
 
+/* ------------------------------------------------------- crypto: watch the till */
+/**
+ * The crypto rail has two modes, and the order of them is the whole design brief:
+ *
+ *  manual — the EcoCash path, unchanged in kind: the slip prints an address, the
+ *      buyer sends and (optionally) pastes the TxID, a human looks at their wallet
+ *      and taps Confirm. Zero cost, zero setup beyond the address itself, available
+ *      to every shop the moment this deploys — a watcher that is down, unbilled or
+ *      never enabled cannot stall an order.
+ *  watcher — the same credit without the tap. Once the shop flips it on, the cron
+ *      reads the address's incoming USDT (TRC-20) transfers off TronGrid's public
+ *      API and applies the tolerance policy: inside 1% of an open order's exact
+ *      amount the order is credited and any shortfall is *flagged, not refused*;
+ *      outside it, nothing moves by machine and the row waits for a human. Every
+ *      discrepancy goes on a nightly report.
+ *
+ * There is no provider in the loop, and that is the route, not an omission: a hosted
+ * crypto checkout takes a percentage and demands an account, a key, and settlement in
+ * a currency the seller does not keep. TronGrid needs none of those — 100,000 free
+ * calls a day on the public cluster, one call per watching shop per cron slot at this
+ * shop count — and TRC-20 transfers carry no memo field, so the matching key had to be
+ * the amount. It already is: `unique_change`'s odd cents make every open total unique
+ * at the micro-unit level, which is what `cryptoMatch` reads. USDT on Tron is the
+ * asset this method buys; TRX (needs a price feed, 2% band) and EVM chains (need a
+ * paid indexer or a node) are excluded by the arithmetic, not by taste.
+ *
+ * The five guards, mapped to this file: re-deposit is `ctx:tx:*` (a transfer is spent
+ * once, for 40 days of memory); idempotency is the order's own status, re-read at the
+ * moment of credit; API re-verification is `tronTxOk` — a list row is not believed,
+ * the transaction's own record has to say the contract accepted it; amount and asset
+ * are the band in `cryptoMatch` and the contract filter below, both before any write.
+ */
+const TRONGRID_API = 'https://api.trongrid.io';
+const WATCH_SCAN_CAP = 50;                       // transfers per shop per sweep
+const WATCH_ORDER_WINDOW = 14 * 864e5;           // older than this, a human owns it
+const TX_MEMORY_DAYS = 40;
+const CRYPTO_REPORT_CAP = 24;                    // rows the dashboard can hold per shop
+const CRYPTO_REPORT_DAYS = 14;                   // and how long it may hold them
+
+function tronHeaders(env) {
+  // A key is optional and buys rate ceiling only; the watcher is built to run
+  // without one, so `TRONGRID_KEY` is a comfort, never a dependency.
+  const h = { 'user-agent': 'tapstall/1 (chain watch)' };
+  if (env.TRONGRID_KEY) h['TRON-PRO-API-KEY'] = String(env.TRONGRID_KEY);
+  return h;
+}
+
+async function tronUsdtTransfers(env, addr, contract, sinceMs) {
+  const q = 'only_confirmed=true&only_to=true&limit=' + WATCH_SCAN_CAP
+    + '&contract_address=' + encodeURIComponent(contract)
+    + '&min_timestamp=' + (Math.max(0, Number(sinceMs) || 0) + 1);
+  const r = await fetch(`${TRONGRID_API}/v1/accounts/${encodeURIComponent(addr)}/transactions/trc20?${q}`,
+    { headers: tronHeaders(env) });
+  if (!r.ok) throw new Error('trongrid_' + r.status);
+  const doc = await r.json().catch(() => null);
+  // the free plan throttles at 3 rps and answers the excess with an Error body at
+  // HTTP 200 — read as an empty hour, it would silently skip money; read as an
+  // error, the store's whole sweep aborts and the next cron slot re-reads it
+  if (doc && doc.Error) throw new Error('trongrid_ratelimited');
+  // field names are what the API actually returned when this was written (probed live
+  // 2026-10-15): `block_timestamp` — there is no plain `timestamp` on these rows —
+  // and `type`, which distinguishes a Transfer from an Approval. An approval's
+  // "value" is an allowance the owner granted, not money sent: trusting an endpoint
+  // to have filtered by the type nobody asked it for is how phantom payments happen.
+  return (((doc && doc.data) || [])).map((x) => ({
+    txid: String((x && x.transaction_id) || '').slice(0, 80),
+    at: Number(x && (x.block_timestamp != null ? x.block_timestamp : x.timestamp)) || 0,
+    type: String((x && x.type) || ''),
+    units: Math.round(Number(x && x.value) || 0),
+    from: String((x && x.from) || '').slice(0, 42),
+    to: String((x && x.to) || '').slice(0, 42),
+    contract: String((x && x.token_info && x.token_info.address) || contract || ''),
+  })).filter((x) => x.txid && x.units > 0 && (!x.type || x.type === 'Transfer'));
+}
+
+/** Re-verification. A sweep row is an event somebody indexed; this is the chain
+ *  being asked directly whether the transaction executed. The live shape, probed
+ *  2026-10-15, is `receipt.result` on the node's transaction-info answer — the
+ *  older `ret[].contractRet` is honoured too, because a `data[0].ret` shape is
+ *  what the docs still show and endpoints drift. A txid the node does not know
+ *  answers `{}` and defers. Anything short of an explicit SUCCESS — a dead
+ *  endpoint, a rate-limit, a revert — defers the credit to the next sweep.
+ *  A watcher that cannot verify credits nothing; that is the difference between
+ *  this and a webhook that trusts a POST. */
+async function tronTxOk(env, txid) {
+  try {
+    const r = await fetch(`${TRONGRID_API}/wallet/gettransactioninfobyid`, {
+      method: 'POST',
+      headers: Object.assign({ 'content-type': 'application/json' }, tronHeaders(env)),
+      body: JSON.stringify({ value: String(txid) }),
+    });
+    if (!r.ok) return false;
+    const doc = await r.json().catch(() => null);
+    if (!doc || typeof doc !== 'object') return false;
+    if (doc.Error) return false;
+    const rows = Array.isArray(doc.data) ? doc.data : [doc];
+    let judged = 0;
+    for (const d of rows) {
+      if (!d || typeof d !== 'object') continue;
+      const rid = String(d.id || d.tx_id || '');
+      if (rid && rid !== String(txid)) continue;          // an answer about another transaction is not an answer
+      const rec = (d.receipt && d.receipt.result) || null;
+      const rets = (d.ret && d.ret.length ? d.ret : (d.tx_info && d.tx_info.ret)) || [];
+      if (!rec && !rets.length) continue;                 // {} for an unknown txid: nothing to believe
+      judged++;
+      if (rec && rec !== 'SUCCESS') return false;
+      if (!rets.every((x) => !x || x.contractRet == null || x.contractRet === 'SUCCESS')) return false;
+    }
+    return judged > 0;
+  } catch (e) { return false; }
+}
+
+/** "The money has been counted", in one place, because there are now two hands that
+ *  count it: the merchant's tap and the watcher's credit. A ledger half that lives
+ *  twice is a ledger half that drifts — status, marked_at, the buyer's unpaid counter,
+ *  the row the dashboard reads, the audit line. */
+async function creditOrder(env, st, o, via, ip, note) {
+  o.status = 'paid';
+  o.marked_at = new Date().toISOString();
+  try {
+    const hk = `buyer:${st.handle}:${o.buyer_hash}`;
+    const rec = (await env.STORES.get(hk, 'json')) || { count: 0, unpaid: 0 };
+    rec.unpaid = Math.max(0, (rec.unpaid || 0) - 1);
+    await env.STORES.put(hk, JSON.stringify(rec), { expirationTtl: 180 * 86400 });
+  } catch (e) { /* a buyer-stat read must not hold up a payment being believed */ }
+  await saveOrder(env, st.handle, o);
+  return await pushAudit(env, st, { act: 'mark', via, fields: [o.code + ' → paid' + (note ? ' · ' + note : '')], ip: ip || '' });
+}
+
+/** One shop's sweep. `manual` marks the dashboard button, which is the same code on
+ *  the same rules — a watcher that also answers a "check now" is a watcher the
+ *  merchant can trust at 19:00 without waiting for the next cron slot. */
+async function cryptoSweep(env, st, manual) {
+  const out = { scanned: 0, credited: [], flagged: [], deferred: [], loose: 0, skipped: null, errors: [] };
+  const rail = resolveRail(st, st.rail || 'cash', await railsCatalog(env));
+  const cr = rail.crypto;
+  if (!cr) { out.skipped = 'no_crypto_rail'; return out; }
+  const det = railAcctOf(st, rail.key, rail);
+  const addr = String(det.acct || '').trim();
+  if (!isTronAddr(addr)) { out.skipped = 'bad_address'; return out; }
+  let since = 0;
+  try { since = Number((await env.STORES.get('ctx:' + st.handle, 'json') || {}).at) || 0; } catch (e) { since = 0; }
+  if (!since) since = Date.now() - WATCH_ORDER_WINDOW;      // first run: the window the ledger still owns
+  let rows;
+  try { rows = await tronUsdtTransfers(env, addr, cr.contract, since); }
+  catch (e) { out.errors.push(String((e && e.message) || e).slice(0, 60)); return out; }
+  // The asset guard runs over what the API *returned*, not over what it was asked
+  // for: a filter that silently misfires must not be able to bill a TRX transfer
+  // to a USDT order.
+  rows = rows.filter((x) => x.to === addr && x.contract === cr.contract);
+  out.scanned = rows.length;
+  if (!rows.length) return out;
+  const now = Date.now();
+  const ledger = await ledgerRows(env, st.handle, 100);
+  const open = ledger
+    .filter((r) => r && r.id && r.status !== 'paid' && r.status !== 'cancelled'
+      && (Number(r.pay_now) || 0) > 0 && (!r.at || now - Date.parse(r.at) < WATCH_ORDER_WINDOW))
+    .map((r) => ({ id: r.id, code: r.code || '', units: toUnits(r.pay_now, cr.decimals), status: r.status, proof: r.proof || '' }));
+  const m = cryptoMatch(rows, open, cr.tolerance_pct || 0.01);
+  const report = [];
+  for (const c of m.credits) {
+    const tk = 'ctx:tx:' + c.txid;
+    if (await env.STORES.get(tk)) { out.flagged.push({ txid: c.txid, kind: 'replay' }); continue; }
+    const key = `order:${st.handle}:${c.order_id}`;
+    const o = await env.ORDERS.get(key, 'json');
+    if (!o || o.status === 'paid' || o.status === 'cancelled') continue;   // idempotency, at the write
+    if (!(await tronTxOk(env, c.txid))) { out.deferred.push({ txid: c.txid, order_id: c.order_id }); continue; }
+    const paid = fromUnits(c.units, cr.decimals), expected = fromUnits(c.expected_units, cr.decimals);
+    o.crypto = { txid: c.txid, paid, expected, shortfall: round2(expected - paid) > 0 ? round2(expected - paid) : 0,
+                 kind: c.kind, by: 'watcher', at: new Date().toISOString() };
+    const flags = [...(o.risk_flags || [])];
+    if (c.kind === 'underpaid') flags.push(`crypto_underpaid: ${paid} of ${expected} USDT`);
+    if (c.kind === 'overpaid') flags.push(`crypto_overpaid: ${paid} for ${expected} USDT`);
+    o.risk_flags = [...new Set(flags)].slice(0, 8);
+    await creditOrder(env, st, o, manual ? 'session' : 'chain', '', c.txid.slice(0, 10) + '…');
+    await env.STORES.put(tk, '1', { expirationTtl: TX_MEMORY_DAYS * 86400 });
+    out.credited.push({ order_id: c.order_id, code: o.code, kind: c.kind, paid, expected });
+    if (c.kind !== 'exact') report.push({ at: new Date().toISOString(), kind: c.kind, code: o.code, paid, expected,
+      shortfall: round2(Math.max(0, expected - paid)), txid: c.txid.slice(0, 16) + '…' });
+  }
+  for (const f of m.flags) {
+    // Ambiguous and self-reported rows attach to the order as a flag and to the
+    // report — never as a credit. The watcher's job ends where arithmetic stops.
+    if (f.order_id) {
+      const key = `order:${st.handle}:${f.order_id}`;
+      const o = await env.ORDERS.get(key, 'json');
+      if (o && o.status !== 'paid' && o.status !== 'cancelled') {
+        o.risk_flags = [...new Set([...(o.risk_flags || []), `crypto_${f.kind}: ${fromUnits(f.units, cr.decimals)} USDT seen`])].slice(0, 8);
+        o.crypto = { txid: f.txid, paid: fromUnits(f.units, cr.decimals), expected: fromUnits(f.expected_units || 0, cr.decimals),
+                     by: 'watcher', at: new Date().toISOString(), credited: false };
+        await saveOrder(env, st.handle, o);
+      }
+    }
+    out.flagged.push({ txid: f.txid, kind: f.kind, order_id: f.order_id || null });
+    report.push({ at: new Date().toISOString(), kind: f.kind, code: f.code || '', paid: fromUnits(f.units, cr.decimals),
+      expected: f.expected_units ? fromUnits(f.expected_units, cr.decimals) : 0, txid: String(f.txid).slice(0, 16) + '…' });
+  }
+  for (const l of m.loose) {
+    out.loose++;
+    report.push({ at: new Date().toISOString(), kind: 'unattributed', paid: fromUnits(l.units, cr.decimals),
+      txid: String(l.txid).slice(0, 16) + '…' });
+    out.flagged.push({ txid: l.txid, kind: 'unattributed' });
+  }
+  const newest = rows.reduce((a, x) => Math.max(a, x.at || 0), since);
+  if (newest > since) await env.STORES.put('ctx:' + st.handle, JSON.stringify({ at: newest }), { expirationTtl: 60 * 86400 });
+  if (report.length) {
+    st.crypto_report = [...report.reverse(), ...(st.crypto_report || [])]
+      .filter((r) => now - Date.parse(r.at || 0) < CRYPTO_REPORT_DAYS * 864e5).slice(0, CRYPTO_REPORT_CAP);
+    await writeStore(env, st);
+  }
+  if (out.credited.length) auditHook(env, { waitUntil: (p) => { try { p && p.catch && p.catch(() => {}); } catch (e) {} } },
+    'crypto', st.handle + ': ' + out.credited.length + ' credited by watcher');
+  return out;
+}
+
+/** The nightly underpayment report — one mail a day per shop, listing what the band
+ *  caught, sent to the address the shop already used for order alerts. No EMAIL
+ *  binding configured? The report still happened: it lives in the store document,
+ *  where the dashboard prints it, and `sent_at` simply stays empty. A mechanism that
+ *  only exists when a credential is present would quietly not exist. */
+async function cryptoNightly(env, st) {
+  const rows = (st.crypto_report || []).filter((r) => !r.sent_at && (r.kind === 'underpaid' || r.kind === 'overpaid' || r.kind === 'unattributed'));
+  if (!rows.length) return 0;
+  const lines = rows.map((r) => `${String(r.at || '').slice(0, 16).replace('T', ' ')}  ${r.kind}${r.code ? '  order ' + r.code : ''}  `
+    + (r.paid != null ? `paid ${r.paid} USDT` : '') + (r.expected ? ` of ${r.expected}` : '')
+    + (r.shortfall ? ` (short ${r.shortfall})` : '') + (r.txid ? '  tx ' + r.txid : ''));
+  const body = `Crypto discrepancies — ${st.shop_name || st.handle}\n\n`
+    + `${lines.join('\n')}\n\nNothing here was refused or cancelled. A short payment inside the 1% band was credited to the order it matched; `
+    + `one that matched nothing, or matched twice, waits for you. This mail is the nightly report; the dashboard lists the same rows live.\n`
+    + `Dashboard: /a — Payment methods.`;
+  const to = st.notify_email || st.owner_email || '';
+  const sent = await sendMail(env, to, `Crypto report: ${rows.length} discrepancy(ies) — ${st.shop_name || st.handle}`, body);
+  const stamp = new Date().toISOString();
+  st.crypto_report = (st.crypto_report || []).map((r) => (rows.indexOf(r) >= 0 ? Object.assign({}, r, { sent_at: stamp }) : r));
+  await writeStore(env, st);
+  return sent ? rows.length : -rows.length;
+}
+
+/** The dashboard's "look at the chain now": one sweep for this shop, on this tap,
+ *  on the same rules and through the same function as the cron. */
+async function cryptoCheck(req, env) {
+  const b = await readBody(req);
+  const who = await identify(req, env, (b && b.handle) || urlHandle(req));
+  if (!who || !who.st) return json({ ok: false, error: 'no store' }, 404);
+  if (who.anonymous || who.bad) return json({ ok: false, need_login: true, error: 'sign in first' }, 401);
+  if (who.via === 'sess' && (reqHeader(req, 'x-tapstall-confirm') || '') !== '1') {
+    return json({ ok: false, error: 'missing x-tapstall-confirm header' }, 403);
+  }
+  const out = await cryptoSweep(env, who.st, true);
+  const credited = out.credited.length, flagged = out.flagged.length;
+  return json({
+    ok: true,
+    ...out,
+    note: out.skipped === 'bad_address'
+      ? 'No wallet to watch: the payment number for this method is not a Tron address (T, then 33 characters). Fix it under Payment methods and tap again.'
+      : out.skipped === 'no_crypto_rail'
+        ? 'This shop is not on a crypto rail, so there is no chain to read.'
+        : out.errors.length
+          ? 'The chain reader (TronGrid) did not answer — ' + out.errors[0] + '. Nothing was credited and nothing was lost: the next check reads it again.'
+          : credited + flagged === 0
+            ? 'Checked every incoming transfer since the last look: nothing matched an open order.'
+            : credited + ' order(s) credited, ' + flagged + ' left for you to count.',
+  }, 200, { 'Cache-Control': 'no-store' });
+}
+
 /* ------------------------------------------------------------------ cron */
 async function runCron(env) {
   const out = { checked: 0, suspended: 0, reinstated: 0, warned: 0 };
   if (!env.STORES) return out;
   // heartbeat: proves the schedule actually fires, without opening a dashboard
   try { await env.STORES.put('cron:last', JSON.stringify({ at: new Date().toISOString(), unix: Date.now() })); } catch (e) {}
+  const watch = [];                                  // shops that asked for the chain reader
+  const nightly = new Date().getUTCHours() === 0;    // the 00:15 slot owns the report
   let cursor, loops = 0;
   do {
     const list = await env.STORES.list({ prefix: 'store:', cursor });
@@ -1473,6 +1791,7 @@ async function runCron(env) {
       out.checked++;
       const st = await env.STORES.get(k.name, 'json');
       if (!st) continue;
+      if (st.crypto_watch) watch.push(st);
       const leftDays = ((st.paid_until || 0) - Date.now()) / 864e5;
       if (leftDays <= 0 && !st.suspended) {
         st.suspended = true; st.suspended_at = new Date().toISOString();
@@ -1498,6 +1817,20 @@ async function runCron(env) {
     }
     cursor = list.cursor;
   } while (cursor && loops++ < 10);
+  /* The chain readers run after the sweep finished reading, on the same documents —
+   * capped at twenty shops a slot so a wedged TronGrid can never make the cron slow
+   * for the expiry walk that actually keeps the doors shut. */
+  out.crypto = { watching: watch.length, credited: 0, flagged: 0, deferred: 0, errors: 0, reports: 0 };
+  for (const st of watch.slice(0, 20)) {
+    try {
+      const s = await cryptoSweep(env, st, false);
+      out.crypto.credited += s.credited.length;
+      out.crypto.flagged += s.flagged.length;
+      out.crypto.deferred += s.deferred.length;
+      out.crypto.errors += (s.errors ? s.errors.length : 0);
+      if (nightly) { const n = await cryptoNightly(env, st); if (n) out.crypto.reports++; }
+    } catch (e) { out.crypto.errors++; }
+  }
   return out;
 }
 
@@ -2672,8 +3005,15 @@ async function menuEdit(req, env) {
   // The handle rides along so a reference can be checked against the store saving
   // it: /i/other-shop/abc is not a picture of this shop's food.
   const next = sanitizeMenu(Object.assign({}, b.menu, { handle: st.handle }));
-  const touched = Object.keys(next.over).length + next.hide.length + next.extra.length + (next.order.length ? 1 : 0);
+  const touched = Object.keys(next.over).length + next.hide.length + next.extra.length + next.del.length + (next.order.length ? 1 : 0);
   if (!touched) delete st.menu; else st.menu = next;
+  // A shop with no sheet has no cached shelf either — not after a save. The loader
+  // already refuses to read it; this is the same refusal said to the one other place
+  // that looks (ops' feed columns), so a promoted-starter row cannot be double-counted
+  // as both "authored" and "from the feed" by two surfaces with two truths.
+  if (isPlaceholderFeed(st.feed_url) && st.feed_cache && (st.feed_cache.products || []).length) {
+    st.feed_cache = { at: Date.now(), products: [], count: 0, error: 'no_feed' };
+  }
   await writeStore(env, st);
   await pushAudit(env, st, {
     act: 'menu', via: who.via, ip: ipOf(req),
@@ -2686,11 +3026,16 @@ async function menuEdit(req, env) {
   // references, and a merchant saves a menu a handful of times a day at most.
   await pruneImages(env, st, refsBefore);
   const eff = await loadProducts(st, env);
+  const noSheet = isPlaceholderFeed(st.feed_url);
   return json({
     ok: true, edits: touched, items: eff.length,
-    note: touched
-      ? 'Saved on the store, so buyers see it on their next load. Nothing in your sheet was touched — a row you edited here keeps this value until you press Revert on it.'
-      : 'Everything is back to your sheet: no row is overridden here any more.',
+    note: noSheet
+      ? (touched
+        ? 'Saved — and here, saved is the menu: no sheet sits under it, so what you typed is what buyers get, deletes and all.'
+        : 'The menu is empty now. With no sheet to fall back on, the store page shows “no items yet” until you add one — or link a sheet and its rows become the base.')
+      : touched
+        ? 'Saved on the store, so buyers see it on their next load. Nothing in your sheet was touched — a row you edited here keeps this value until you press Revert on it.'
+        : 'Everything is back to your sheet: no row is overridden here any more.',
   });
 }
 
@@ -3441,8 +3786,9 @@ async function opsHealth(env) {
     const r = await fetch(REPO_RAW + 'ci-deploy.log', { headers: { 'user-agent': 'tapstall/1 (operator health check)' } });
     if (r.ok) { const txt = await r.text(); ci = txt.split('\n').filter(l => /==== exit|tests |pass |fail /.test(l)).slice(-6); }
   } catch (e) { ci = null; }
-  // what the two money doors were asked for in the last 24 hours, by outcome
-  const hooks = { refused: 0, ignored: 0, already: 0, activated: 0, hours: [] };
+  // what the two money doors were asked for in the last 24 hours, by outcome,
+  // plus the third door: transfers the chain watcher turned into paid orders
+  const hooks = { refused: 0, ignored: 0, already: 0, activated: 0, crypto: 0, hours: [] };
   try {
     const list = await env.STORES.list({ prefix: 'hooks:', limit: 200 });
     const since = hookHourStamp(Date.now() - 24 * 3600 * 1000);

@@ -351,7 +351,7 @@ details.box .in{padding:.5rem 0 .7rem}
     <details class="box" id="detMenu" open>
       <summary id="menuSum">Edit items here — price, sold out, hide, add one</summary>
       <div class="in">
-        <p class="hint" style="margin-top:0">Your sheet stays the base. What you change here wins over the row it came from and is on the store page at once; Revert hands a row back to the sheet. Nothing here needs Google.</p>
+        <p class="hint" style="margin-top:0" id="menuHint">Your sheet stays the base. What you change here wins over the row it came from and is on the store page at once; Revert hands a row back to the sheet. Nothing here needs Google.</p>
         <div id="menuEdit"></div>
         <div style="display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;margin-top:.6rem">
           <button class="sm" id="menuSave" disabled>Save</button>
@@ -630,16 +630,23 @@ function reFeed() {
 function draftFrom(saved) {
   var m = saved || {};
   return { over: JSON.parse(JSON.stringify(m.over || {})), hide: (m.hide || []).slice(),
+           del: JSON.parse(JSON.stringify(m.del || [])),
            extra: JSON.parse(JSON.stringify(m.extra || [])), order: (m.order || []).slice() };
 }
-function draftTouched(d) { return Object.keys(d.over).length + d.hide.length + d.extra.length + (d.order.length ? 1 : 0); }
+function draftTouched(d) { return Object.keys(d.over).length + d.hide.length + d.extra.length + (d.del || []).length + (d.order.length ? 1 : 0); }
 function isNewId(id) { return String(id || '').indexOf('dash-') === 0; }
 function extraIdx(d, id) { for (var i = 0; i < d.extra.length; i++) if (d.extra[i].id === id) return i; return -1; }
 /** Mirror of applyMenu() so the list shows what the store page will show. */
 function mergeFeed(feed, d) {
+  var deadIds = {}; (d.del || []).forEach(function (x) { deadIds[(x && typeof x === 'object') ? x.id : x] = 1; });
+  var extraIds = {}; (d.extra || []).forEach(function (x) { extraIds[x.id] = 1; });
   var over = d.over || {}, out = [];
   (feed || []).forEach(function (p) {
     if (d.hide.indexOf(p.id) >= 0) return;
+    // In no-sheet mode the server's list IS the draft's extras: showing both would
+    // print every row twice. Where an id lives in both, the draft owns it — the
+    // server agrees, its base for these shops is empty by definition.
+    if (extraIds[p.id]) return;
     var o = over[p.id] || {}, q = {}; for (var k in p) q[k] = p[k];
     if (o.name) q.name = o.name;
     if (o.cat) q.cat = o.cat;
@@ -652,8 +659,10 @@ function mergeFeed(feed, d) {
     out.push(q);
   });
   d.extra.forEach(function (x) {
+    if (deadIds[x.id]) return;   // mirrors applyMenu: hard-deleted rows are out of the menu, not hidden from it
     out.push({ id: x.id, name: x.name, cat: x.cat || '', price: Number(x.price) || 0,
-               available: x.available !== false, desc: x.desc || '', img: x.img || '', edited: true });
+               available: x.available !== false, desc: x.desc || '', img: x.img || '',
+               starter: !!x.starter, edited: true });
   });
   if (d.order.length) {
     var w = d.order.slice(), pos = {};
@@ -682,22 +691,37 @@ function moveItem(list, id, dir) {
   MDRAFT.order.splice(to, 0, MDRAFT.order.splice(at, 1)[0]);
   menuRows();
 }
-function fph0(u) { u = String(u || ''); return !u || u.indexOf('sample-menu.csv') >= 0 || u.indexOf('raw.githubusercontent') >= 0; }
+/* The exact mirror of `isPlaceholderFeed` in the worker, because v0.9.10 made this
+ * line a switch and not a caption: on the far side of it the dashboard stops being
+ * an overlay on a sheet and becomes the menu itself. Tighter than the old rule on
+ * purpose — every `raw.githubusercontent` was once called a sample, which was fine
+ * for hiding a link and is not fine for deciding which UI a shop gets: a merchant
+ * who hosts their own CSV on GitHub has a feed, theirs, not ours. Only the sample's
+ * own path is the sample. */
+function fph0(u) {
+  u = String(u || '');
+  if (!u) return true;
+  return /\/(data|pages)\/sample-menu\.csv(\?|$)/.test(u)
+    || (/raw\.githubusercontent\.com\/[^/]+\/(zimlink|tapstall)\//.test(u) && /sample-menu\.csv/.test(u));
+}
 function menuRows() {
   var box = q('#menuEdit'); if (!box || !q('#detMenu').open) return;
   if (!MDRAFT) MDRAFT = draftFrom(S.store.menu);
+  var auth = fph0(S.store.feed_url);       // no sheet: this dashboard IS the menu
   var list = mergeFeed(S.feed || [], MDRAFT), d = MDRAFT;
-  var hidden = (S.feed || []).filter(function (p) { return d.hide.indexOf(p.id) >= 0; });
+  var hidden = auth ? [] : (S.feed || []).filter(function (p) { return d.hide.indexOf(p.id) >= 0; });
+  var tray = auth ? (d.del || []).filter(function (x) { return x && typeof x === 'object' && x.name; }) : [];
   box.innerHTML = list.map(function (p) {
     var fresh = isNewId(p.id);
     return '<div class="mrow' + (fresh ? ' added' : '') + '" data-id="' + esc(p.id) + '">'
       + '<span class="nm">' + esc(p.name) + (p.cat ? ' <i>· ' + esc(p.cat) + '</i>' : '')
-      + (p.edited ? ' <span class="badge">edited here</span>' : (fresh ? ' <span class="badge">new</span>' : '')) + '</span>'
+      + (auth ? (p.starter ? ' <span class="badge">starter — yours now</span>' : (fresh ? ' <span class="badge">new</span>' : ''))
+          : p.edited ? ' <span class="badge">edited here</span>' : (fresh ? ' <span class="badge">new</span>' : '')) + '</span>'
       + '<input class="pr" data-k="price" inputmode="decimal" value="' + Number(p.price || 0).toFixed(2) + '">'
       + '<button class="sm" data-k="out">' + (p.available === false ? 'Back in stock' : 'Sold out') + '</button>'
-      + (fresh ? '<button class="sm" data-k="drop">Delete</button>' : '<button class="sm" data-k="hide">Hide</button>')
+      + (auth || fresh ? '<button class="sm" data-k="drop">Delete</button>' : '<button class="sm" data-k="hide">Hide</button>')
       + '<button class="sm" data-k="up" title="move up">↑</button><button class="sm" data-k="down" title="move down">↓</button>'
-      + (p.edited ? '<button class="sm sec" data-k="revert">Revert</button>' : '')
+      + (auth ? '' : (p.edited ? '<button class="sm sec" data-k="revert">Revert</button>' : ''))
       + picHtml(p.img, 'image link, or drop a file — optional',
           'data-which="row" data-id="' + esc(p.id) + '"', '')
       + '</div>';
@@ -705,11 +729,22 @@ function menuRows() {
     + (hidden.length ? '<div class="hint">hidden by you: ' + hidden.map(function (p) {
         return esc(p.name) + ' <button class="sm" data-k="show" data-id="' + esc(p.id) + '">show it again</button>';
       }).join(' · ') + '</div>' : '')
-    + (list.length ? '' : '<p class="hint">Nothing to show yet — add your sheet link, or press Add an item below and the store will run on what you typed here.</p>');
+    + (tray.length ? '<div class="hint">deleted here — restorable until you move on: ' + tray.map(function (p) {
+        return esc(p.name) + ' <button class="sm" data-k="restore" data-id="' + esc(p.id) + '">put it back</button>';
+      }).join(' · ') + '</div>' : '')
+    + (list.length ? '' : (auth
+        ? '<p class="hint">Empty shelf. Press “Add an item” and type yours — this dashboard IS your menu, no spreadsheet needed anywhere.</p>'
+        : '<p class="hint">Nothing to show yet — add your sheet link, or press Add an item below and the store will run on what you typed here.</p>'));
+  var h = q('#menuHint');
+  if (h) h.textContent = auth
+    ? 'There is no sheet, so what you save here IS the menu: buyers see it on their next load, and Delete removes a row for real — the tray below holds it until you save something else. Paste a Google Sheet link under “Change what buyers see” and the sheet becomes the base.'
+    : 'Your sheet stays the base. What you change here wins over the row it came from and is on the store page at once; Revert hands a row back to the sheet. Nothing here needs Google.';
+  var mc = q('#menuClear'); if (mc) mc.style.display = auth ? 'none' : '';
   var touched = draftTouched(d);
   q('#menuSave').disabled = !touched;
   q('#menuSave').textContent = touched ? 'Save ' + touched + ' change' + (touched > 1 ? 's' : '') : 'Save';
-  q('#menuSum').textContent = touched ? 'Your menu — ' + touched + ' change' + (touched > 1 ? 's' : '') + ' made here' : 'Edit items here — price, sold out, hide, add one';
+  q('#menuSum').textContent = touched ? 'Your menu — ' + touched + ' change' + (touched > 1 ? 's' : '') + ' made here'
+    : (auth ? 'Your items — sold out, price, add one, delete one' : 'Edit items here — price, sold out, hide, add one');
 }
 q('#detMenu').addEventListener('toggle', function () { menuRows(); });
 q('#menuEdit').onchange = function (e) {
@@ -728,7 +763,32 @@ q('#menuEdit').onclick = function (e) {
   if (k === 'out') setEdit(id, { out: p.available !== false });
   else if (k === 'hide') { MDRAFT.hide.push(id); menuRows(); }
   else if (k === 'show') { MDRAFT.hide = MDRAFT.hide.filter(function (x) { return x !== id; }); menuRows(); }
-  else if (k === 'drop') { MDRAFT.extra = MDRAFT.extra.filter(function (x) { return x.id !== id; }); menuRows(); }
+  else if (k === 'drop') {
+    if (fph0(S.store.feed_url) && p) {
+      // no-sheet mode: a delete is a delete. The row leaves the menu and lands in the
+      // tray, which is what makes the save undoable and the shelf honest at once.
+      MDRAFT.del = (MDRAFT.del || []).filter(function (x) { return ((x && typeof x === 'object') ? x.id : x) !== id; });
+      MDRAFT.del.push({ id: p.id, name: p.name, cat: p.cat || '', price: Number(p.price) || 0,
+                        desc: p.desc || '', img: p.img || '', available: p.available !== false });
+      delete MDRAFT.over[id];
+      MDRAFT.order = MDRAFT.order.filter(function (x) { return x !== id; });
+    }
+    MDRAFT.extra = MDRAFT.extra.filter(function (x) { return x.id !== id; });
+    menuRows();
+  }
+  else if (k === 'restore') {
+    var gone = null;
+    MDRAFT.del = (MDRAFT.del || []).filter(function (x) {
+      var xi = (x && typeof x === 'object') ? x.id : x;
+      if (xi === id && x && typeof x === 'object' && x.name) { gone = x; return false; }
+      return xi !== id;
+    });
+    if (gone) {
+      MDRAFT.extra.push({ id: gone.id, name: gone.name, cat: gone.cat || '', price: Number(gone.price) || 0,
+                          desc: gone.desc || '', img: gone.img || '', available: gone.available !== false, starter: true });
+    }
+    menuMsg('Back on the list — press Save to put it on the store.', false); menuRows();
+  }
   else if (k === 'revert') {
     delete MDRAFT.over[id];
     MDRAFT.hide = MDRAFT.hide.filter(function (x) { return x !== id; });
@@ -797,7 +857,7 @@ function renderFields() {
       f = '<div class="f"><label>' + esc(LABEL[k] || k) + (inst ? '' : ' <span class="n">· 15-min hold</span>') + '</label>'
         + '<select data-k="' + k + '"><option value="1"' + (v ? ' selected' : '') + '>yes</option><option value="0"' + (!v ? ' selected' : '') + '>no</option></select></div>';
     } else if (k === 'rail' || k === 'surcharge_mode' || k === 'vat_mode') {
-      var opts = k === 'rail' ? (Object.keys(S.rails || {}).length ? Object.keys(S.rails) : ['cash', 'ecocash_usd', 'ecocash_zig', 'payfast', 'payshap', 'yoco'])
+      var opts = k === 'rail' ? (Object.keys(S.rails || {}).length ? Object.keys(S.rails) : ['cash', 'ecocash_usd', 'ecocash_zig', 'usdt_trc20', 'payfast', 'payshap', 'yoco'])
         : k === 'vat_mode' ? ['excl', 'incl'] : ['absorb', 'pass'];
       // Which way round the price on the board is quoted, said in the shop's words rather than a
       // tax acronym, because the two answers move the number a buyer pays in opposite directions.
@@ -1029,7 +1089,7 @@ function autoProof(type, spec) {
 var SPEC_PH = { phone: '0771234567', bank: '1234567890', shapid: '0821234567', wallet: 'wallet ID', link: 'https://…' };
 function railKeys() {
   var keys = Object.keys(S.rails || {}).length ? Object.keys(S.rails)
-    : ['cash', 'ecocash_usd', 'ecocash_zig', 'innbucks', 'onepay', 'zipit', 'payshap', 'ozow', 'payfast', 'custom'];
+    : ['cash', 'ecocash_usd', 'ecocash_zig', 'usdt_trc20', 'innbucks', 'onepay', 'zipit', 'payshap', 'ozow', 'payfast', 'custom'];
   if (keys.indexOf('custom') < 0) keys.push('custom');
   return keys;
 }
@@ -1046,7 +1106,7 @@ function railRows() {
     var holdOff = k === 'custom' ? (S.store.rail_def || {}).holder === false : r.holder === false;
     var hasTill = k === 'custom' ? !!(S.store.rail_def || {}).till : !!r.till;
     return '<div class="arow' + (inuse ? ' on' : '') + '"><span class="an">' + esc(label) + (inuse ? ' <i>· in use</i>' : '') + '</span>'
-      + '<input data-ra="' + k + ':acct" inputmode="' + (spec === 'phone' || spec === 'bank' ? 'numeric' : 'text') + '" value="' + esc(row.acct || '') + '" placeholder="' + esc(SPEC_PH[spec] || '') + '">'
+      + '<input data-ra="' + k + ':acct" inputmode="' + (spec === 'phone' || spec === 'bank' ? 'numeric' : 'text') + '" value="' + esc(row.acct || '') + '" placeholder="' + esc((r.crypto ? 'T… (34 characters, Tron only)' : (SPEC_PH[spec] || ''))) + '">'
       + (holdOff ? '' : '<input data-ra="' + k + ':holder" value="' + esc(row.holder || '') + '" placeholder="name they should see">')
       + (hasTill ? '<input data-ra="' + k + ':till" value="' + esc(row.till || '') + '" placeholder="till / paybill">' : '')
       + '<span class="hint">' + (row.acct ? 'their own number'
@@ -1067,6 +1127,54 @@ function renderAccts() {
     qa('#railAccts [data-ra$=":acct"]').forEach(function (el) { if (!el.value.trim()) el.value = S.store.pay_account || ''; });
     q('#saveMsg').textContent = 'Filled in — press Save to send them.';
   };
+  /* The crypto half of the card, and only when the rail in use is a chain. Two modes,
+   * in this order: manual first — the EcoCash discipline, address printed, buyer sends,
+   * a human taps — and the watcher as the opt-in that turns that tap into arithmetic.
+   * Nothing here is required for the rail to work, which is the point of building it
+   * around the free public chain reader instead of a provider. */
+  var cr = ((S.rails || {})[S.store.rail] || {}).crypto || null;
+  if (cr) {
+    var row = (S.store.rail_accts || {})[S.store.rail] || {};
+    var acct = String(row.acct || S.store.pay_account || '').trim();
+    var shaped = /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(acct);
+    var rep = (S.store.crypto_report || []);
+    var unseen = rep.filter(function (r) { return !r.sent_at; }).length;
+    b.innerHTML += '<div class="seclab">Crypto — ' + esc(cr.asset || 'USDT') + ' on ' + esc(String(cr.chain || 'tron').toUpperCase()) + ' (' + esc(cr.network || 'TRC-20') + ')</div>'
+      + '<p class="hint" style="margin-top:0">' + (shaped
+          ? 'Watching <b>' + esc(acct.slice(0, 6)) + '…' + esc(acct.slice(-6)) + '</b> — a transfer that lands on an open order’s exact amount marks it paid; a short one inside 1% is still credited and said so; anything else waits for you. '
+          + (unseen ? '<b>' + unseen + ' recent discrepancy(ies) below.</b>' : 'No discrepancies open.')
+          : 'No Tron address for this method yet — T plus 33 characters, in the box above. Until then the rail works exactly like EcoCash: the address prints on the slip, the buyer sends, you tap. Nothing is broken, only the automation is missing.') + '</p>'
+      + '<div style="display:flex;gap:.6rem;align-items:center;flex-wrap:wrap;margin:.25rem 0 .4rem">'
+      + '<label class="hint" style="display:flex;gap:.3rem;align-items:center"><input type="checkbox" id="watchOn"' + (S.store.crypto_watch ? ' checked' : '') + (shaped ? '' : ' disabled') + '>let the watcher confirm by itself (cron, and no provider in the loop)</label>'
+      + '<button class="sm" id="chainNow">Check the chain now</button>'
+      + '<span class="hint" id="chainOut"></span></div>'
+      + (rep.length ? '<div class="hint">' + rep.slice(0, 6).map(function (r) {
+          return String(r.at || '').slice(5, 16).replace('T', ' ') + ' · ' + esc(r.kind) + (r.code ? ' · order ' + esc(r.code) : '')
+            + (r.paid != null ? ' · ' + esc(r.paid) + (r.expected ? ' of ' + esc(r.expected) : '') + ' USDT' : '')
+            + (r.shortfall ? ' (short ' + esc(r.shortfall) + ')' : '') + (r.sent_at ? '' : ' <b>· new</b>');
+        }).join('<br>') + (rep.length > 6 ? '<br>+ ' + (rep.length - 6) + ' older in the record' : '') + '</div>' : '')
+      + '<p class="hint">Matching is by the odd cents the order asks for — the same trick the phone rails use, because a TRC-20 transfer carries no memo. The TxID the buyer typed links to the explorer in the orders list, so a human can always do what the watcher does.</p>';
+    var wo = q('#watchOn');
+    if (wo) wo.onchange = function () {
+      api('/api/settings', { handle: S.handle, crypto_watch: wo.checked }).then(function (r) {
+        if (!r.j || !r.j.ok) { wo.checked = !wo.checked; q('#saveMsg').innerHTML = '<span style="color:#b00020">' + esc((r.j && r.j.error) || 'not saved') + '</span>'; return; }
+        q('#saveMsg').textContent = wo.checked
+          ? 'The watcher is on: every cron look reads the chain and credits only what matches an open order to the cent (1% band included).'
+          : 'The watcher is off: confirming is yours, one tap, like every other rail. The buyer’s number and TxID are on the order either way.';
+        load();
+      });
+    };
+    var cn = q('#chainNow');
+    if (cn) cn.onclick = function () {
+      cn.disabled = true; q('#chainOut').textContent = 'reading the chain…';
+      api('/api/crypto/check', { handle: S.handle }).then(function (r) {
+        cn.disabled = false;
+        var j = r.j || {};
+        q('#chainOut').textContent = j.ok ? (j.note || 'done') : ((j.error || j.why) || 'the check did not answer');
+        if (j.ok) setTimeout(load, 400);
+      });
+    };
+  }
 }
 function collectAccts() {
   var els = qa('#railAccts [data-ra]');
@@ -1279,7 +1387,15 @@ function row(o) {
     + (o.buyer && o.buyer.address ? ' · ' + esc(o.buyer.address) : '') + '\n'
     + (o.items || []).map(function (i) { return (i.qty || 1) + 'x ' + esc(i.name); }).join('\n')
     + (o.buyer && o.buyer.payer ? '\nfrom ' + esc(o.buyer.payer) : '')
-    + (o.buyer && o.buyer.proof ? '\n' + esc((p.rail && p.rail.proof_label) || 'code') + ': ' + esc(o.buyer.proof) : '')
+    + (o.buyer && o.buyer.proof ? '\n' + esc((p.rail && p.rail.proof_label) || 'code') + ': '
+        // On a chain the proof is a document: the same page the watcher read, opened for
+        // the human, is the whole reconciliation. Hex-shaped ones become the link.
+        + (p.rail && p.rail.crypto && /^[0-9a-fA-F]{32,80}$/.test(String(o.buyer.proof).trim())
+            ? '<a href="https://tronscan.org/#/transaction/' + encodeURIComponent(String(o.buyer.proof).trim()) + '" target="_blank" rel="noopener">open on the explorer ↗</a>'
+            : esc(o.buyer.proof)) : '')
+    + (o.crypto ? '\n' + esc(o.crypto.paid) + ' USDT seen' + (o.crypto.expected ? ' of ' + esc(o.crypto.expected) : '')
+        + (o.crypto.shortfall ? ' — short ' + esc(o.crypto.shortfall) + ', order credited anyway' : '')
+        + (o.crypto.credited === false ? ' — left for you' : ' — ' + esc(o.crypto.by || 'watcher')) : '')
     + (o.buyer && o.buyer.note ? '\nNote: ' + esc(o.buyer.note) : '') + '</div>'
     + '<div><span class="badge ' + (o.status === 'paid' ? 'paid' : (o.status === 'cod' ? 'cod' : 'new')) + '">' + esc(o.status) + '</span> '
     + '<span class="badge">' + esc(o.service) + '</span>'
@@ -1422,7 +1538,7 @@ function renderShop() {
   // A placeholder sheet is not a source. Pointing a client at a sample CSV in our own
   // repo teaches them the platform is a demo, so the link only appears when it is theirs.
   var fsheet = String(S.store.feed_url || '');
-  var fph = !fsheet || fsheet.indexOf('sample-menu.csv') >= 0 || fsheet.indexOf('raw.githubusercontent') >= 0;
+  var fph = fph0(fsheet);   // one rule with the worker since v0.9.10 — a GitHub-hosted menu of your own is a sheet
   q('#menuOpen').style.display = fph ? 'none' : '';
   q('#menuOpen').textContent = fph ? 'no sheet linked' : 'Open sheet';
   // The re-read is the same lie with a button on it: pointed at a sample, it would fetch that

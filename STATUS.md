@@ -1,4 +1,83 @@
 # Tapstall — status
+## The shop with no sheet, and the money that needs no permission (2026-10-15, v0.9.9 → v0.9.10)
+
+Three related honesty fixes shipped together, because they share a sentence: *a shop is allowed to
+be a shop without anybody else's infrastructure.*
+
+**The sample is a path, not a host (0.9.9 → 0.9.10).** Onboarding once offered our demo CSV as a
+default `feed_url`, and the first fix was a warning; the honest fix is that a shop whose feed is the
+demo *has no feed*, full stop: the loader (`isPlaceholderFeed`, core) refuses it before anything
+reads a URL, `loadProducts` runs the shop's authored list as the entire menu, the dashboard deletes
+instead of hiding, and the SEO head reads through the same seam so a crawler cannot be told about
+rows no page ever shows. The rule had to become exact — the sample's path in our two repos, not
+anything that merely looks like a sample — because the predicate now decides a UI, not just a
+button: a merchant who hosts their own CSV on GitHub raw has a feed. `seedAuthoredFromCache` is the
+mercy that makes the flip safe: legacy shops whose shelf *was* the demo rows keep them, promoted
+once to authored items flagged `starter`, and the emptied cache is what makes it fire exactly once.
+
+**USDT on Tron, with no provider in the loop (0.9.10).** A new rail — `usdt_trc20` — works like the
+phone rails first: address printed, buyer sends, human taps. The automation on top is a cron-side
+reader of TronGrid's free public API (no account, no webhook, no key required — a key is a
+comfort, never a dependency) plus one arithmetic rule in the core: `cryptoMatch`. A TRC-20 transfer
+carries no memo, so the amount *is* the address book — and unique cents already make every open
+order's total distinct. Exact credits; one percent short credits and is flagged, never refused (the
+wallet's own network fee must not make a shop distrust its automation); over-band is never credited;
+a TxID the buyer typed on their order attaches as evidence for a human and moves nothing
+automatically; two open orders fitting one transfer is *ambiguous*, which is a person's job. Every
+credit re-verifies the transaction's `ret` codes through a second endpoint before it marks anything —
+a watcher that cannot verify credits nothing, which is the whole difference between this and a
+webhook that trusts a POST — and the txid ledger (`ctx:tx:*`, 40 days) makes a replay a no-op. The
+merchant's tap and the watcher's tap share one function now (`creditOrder` in the worker), because a
+ledger half that lives twice is a ledger half that drifts, and a live test pins that both hands land
+identically except in the `via`.
+
+What the first full test of the *buyer* path found is the best argument this file exists: the claimed
+-TxID check compared the order's stored proof to the full 64-character txid — but proofs pass
+through `cleanProof`, which caps them at 40 characters. The equality was dead code in production and
+green in every unit test that handed it whole txids. The matcher now compares prefixes (8 characters
+minimum, case-insensitive both ways), and the test that found it passes a truncated proof through
+`cryptoMatch` on purpose so the truncation itself stays pinned. Same release caught the other half:
+a slip that "pretty-printed" Tron addresses to lowercase — base58 is case-sensitive, and a lowercased
+address is an invalid one, so the rail prints them exactly as typed, everywhere, verbatim.
+
+`crypto_watch` is off until a shop turns it on, and turning it on rides the same 15-minute fuse as
+the payout account it watches, because a switch that lets software mark money paid is a money
+setting. The dashboard's Payment-methods card gains the watcher's whole life: an address that has to
+be shaped right to enable anything, a checkbox, a "check the chain now" button that runs the exact
+function the cron runs, and the discrepancy ring (`crypto_report`, 24 rows / 14 days) that the
+nightly mail sends when there is a mail — a mechanism that only exists when a credential is present
+would quietly not exist, so the rows live in the store document either way.
+
+The TronGrid format was probed live before this shipped (`scripts/probe_trongrid.sh`, 2026-10-15
+19:58 UTC, output green) and it disagreed with the docs twice over: the per-account list rows carry
+`block_timestamp`, not `timestamp` — a parser written from the docs would have silently frozen the
+cursor and re-scanned the same window every slot — and the verification endpoint is the node's
+`POST /wallet/gettransactioninfobyid` answering `{id, receipt:{result}}`, not the documented
+`GET /v1/transactions/<txid>`, which now 404s like the retired global transfer list. The rows also
+say `type`, and the endpoint includes `Approval` entries whose "value" is an allowance, not money:
+the parser takes only Transfers, and a live test plants an Approval shaped exactly like an unpaid
+order's payment and asserts the watcher walks past it. Rate-limit reality is in there too — 3 rps on
+the free key, answered as HTTP 200 with an `Error` body, which the reader raises rather than
+reading as a silent empty hour. Both parsers and the test stub were rewritten against the probe
+output, and the script stays in the repo precisely because the next drift will be caught the same
+way: docs are a claim, the answer is the fact.
+
+The old alias deploy was fixed in the same pass: `deploy.sh` cleaned `.build` *before* the legacy
+hostname's block, so every CI run that month warned `entry-point file not found`, took the warning as
+a shrug, and left the old name serving whatever it last had — which is how a redirect alias ends up
+running the sweep from two origins. The bundle is now rebuilt for the alias, and a failed wrangler
+falls through to the dependency-free publisher instead of to silence.
+
+Suite: 334/334 (core 108, live 131+3 new, pages, limits, mesh). The 0.9.10 additions pin: address
+shape against the alphabet's missing 0/O/I/l; the unit arithmetic; the full tolerance ladder
+including the micro at the band edge; the slip's wording (and that the phone rails' wording did NOT
+change); the placeholder rule vector by vector; the delete round-trip — `del` keeps the full item for
+the restore tray and never falls on a base row that shares its id; and the whole chain merchant
+journey live: register with no sheet, type the menu, take orders, sweep a stubbed TronGrid, credit,
+defer on a failed verify, replay as a no-op, and check the button. The wire format the stub speaks is
+the format in the TronGrid docs; `scripts/probe_trongrid.sh` asks the real one and its output is
+pasted below at deploy time, because I do not get to call it confirmed before it has been curled.
+
 
 ## Every URL is the new one now, and the quota clock is gone (2026-10-13, 15:58 UTC)
 

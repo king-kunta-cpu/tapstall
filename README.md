@@ -53,8 +53,10 @@ best-effort; a quota answers 503 with a retry time instead of a 500).
 2. **Know what a rail actually costs.** `worker/core.js` holds the per-rail
    math — EcoCash USD 1.4% + 2% IMTT, ZiG 2.0% + 1.5%, PayShap 0.5%, PayFast
    2.9% + R1 — and a merchant picks `absorb` (we report the cost they eat) or
-   `pass` (the buyer pays it). Zimbabwe has no "automatic" rails at all, so
-   pass-through surcharging is not a toggle there; it has to be computed.
+   `pass` (the buyer pays it). Zimbabwe has no automatic mobile-money rails, so
+   pass-through surcharging is not a toggle there; it has to be computed. The one
+   exception on the menu is the chain: USDT on Tron confirms itself, because a public
+   ledger is a reader nobody has to integrate with — see `usdt_trc20` and v0.9.10.
 
 ## Layout
 
@@ -156,8 +158,9 @@ and `deploy.sh` no longer writes those keys except behind `PAGES_KV=1`, which ex
 ## Markets are data, not code
 
 The one thing that made this a Zimbabwe-shaped product was a table of payment
-methods in the source. It still exists (`RAILS` in `worker/core.js`, nine
-verified ZW/SA tariffs) but it is now a **default, not the whole answer**:
+methods in the source. It still exists (`RAILS` in `worker/core.js`: nine verified
+ZW/SA tariffs, `cash`, and a provider-free TRC-20 stable rail whose "tariff" is a
+wallet fee the buyer pays) but it is now a **default, not the whole answer**:
 
 - `GET /rails` is public and returns built-ins ⊕ whatever the operator has
   published in KV (`rails:extra`), plus a `custom` entry. Storefront, onboarding

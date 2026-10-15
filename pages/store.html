@@ -426,6 +426,7 @@ var TERM = /*__TAPSTALL_TERM__*/null;
       (!taxP ? '' : '<div><span class="hint">' + (incl ? 'Prices on the board already include VAT.' : 'VAT is added to the menu price here.') + '</span></div>') +
       (railFee ? '<div><span>' + esc(railName) + ' fee</span><span>' + money(railFee) + '</span></div>' : '') +
       '<div class="tot"><span>Pay now</span><span>' + money(sub + railFee) + '</span></div></div>' +
+      (R && R.crypto ? '<p class="hint">' + esc(R.crypto.asset || 'USDT') + ' on the ' + esc(String(R.crypto.chain || 'tron').toUpperCase()) + ' network (' + esc(R.crypto.network || 'TRC-20') + ') only — sent on any other chain it cannot be recovered. Your wallet’s network fee is on top; the exact total is on your receipt.</p>' : '') +
       (ZIG ? '<p class="hint">ZiG estimate at ' + ZIG + ': ' + Math.round((sub + railFee) * ZIG).toLocaleString() + ' ZiG. Pay what the final receipt says.</p>' : '') +
       (CFG.vat_registered && CFG.vat_number
         ? '<p class="hint">VAT No ' + esc(CFG.vat_number) + ' — you get a numbered tax receipt for this order.</p>' : '') +
@@ -539,8 +540,8 @@ var TERM = /*__TAPSTALL_TERM__*/null;
       '<div class="badge">Stored with the shop — no screenshot needed</div>' +
       '<div class="paybox">' +
       '<div style="font-size:.78rem;color:#9fb2c4">Pay exactly</div>' +
-      '<div class="big">' + (pay.amount || pr.pay_now) + ' ' + esc(CUR) + '</div>' +
-      (ZIG ? '<div style="font-size:.78rem;color:#9fb2c4">≈ ' + Math.round((pay.amount || 0) * ZIG).toLocaleString() + ' ZiG</div>' : '') +
+      '<div class="big">' + (pay.amount || pr.pay_now) + ' ' + esc(pay.crypto ? (pay.crypto.asset || 'USDT') : CUR) + '</div>' +
+      (ZIG && !pay.crypto ? '<div style="font-size:.78rem;color:#9fb2c4">≈ ' + Math.round((pay.amount || 0) * ZIG).toLocaleString() + ' ZiG</div>' : '') +
       '<div class="kv"><span>Method</span><span>' + esc(pay.rail || pr.rail && pr.rail.label || '') + '</span></div>' +
       (pay.dial ? '<div class="kv"><span>Dial</span><span>' + esc(pay.dial) + '</span></div>' : '') +
       (pay.account ? '<div class="kv"><span>' + esc(pay.account_label || 'To') + '</span><span>' + esc(pay.account)

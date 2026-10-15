@@ -25,6 +25,24 @@ export const RAILS = {
   payshap: { label: 'PayShap (SA)', dial: 'ShapID', pct: 0.005, imtt: 0, fixed: 0, type: 'manual', spec: 'shapid', holder: true, till: false, proof: 'ask' },
   ozow: { label: 'Ozow (SA)', dial: 'link', pct: 0.01, imtt: 0, fixed: 0, type: 'auto', spec: 'bank', holder: true, till: false, proof: 'none' },
   payfast: { label: 'PayFast card (SA)', dial: 'hosted', pct: 0.029, imtt: 0, fixed: 1.0, type: 'auto', spec: 'link', holder: false, till: true, proof: 'none' },
+  /* USDT on Tron, and only that, for the reason the method dictates: the watcher that
+   * costs nothing is TronGrid's free public API (no account, no key, no per-call fee), and
+   * it reads one chain. A dollar-pegged asset settles the other half of the problem — the
+   * amount an order must carry — without a price oracle, which is why TRX (2% band, needs
+   * a feed) and EVM chains (need a paid index or a node) stay out until there is a reason.
+   * The buyer's network fee is their wallet's, not this rail's: `pct: 0`. `proof: 'ask'`
+   * is the EcoCash discipline kept whole — a TxID that can be pasted into an explorer is
+   * how a human confirms in ten seconds when no watcher is running; nothing here refuses
+   * an order for leaving it out.
+   */
+  usdt_trc20: { label: 'USDT (Tron, TRC-20)', dial: 'wallet app', pct: 0, imtt: 0, fixed: 0, type: 'manual', spec: 'wallet', holder: false, till: false, proof: 'ask',
+                proof_label: 'TxID from the wallet',
+                proof_hint: 'The long receipt number on the transfer in your wallet app (tap it to copy) — it opens on the explorer with no login',
+                crypto: { chain: 'tron', network: 'TRC-20', asset: 'USDT',
+                          contract: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t', decimals: 6,
+                          // the OPENRAIL policy, adopted verbatim: 1% on a stable, a short
+                          // payment flagged not refused, and a nightly report of the shorts
+                          tolerance_pct: 0.01 } },
 };
 
 /**
@@ -109,7 +127,8 @@ export const proofDefault = (type, spec) => (type === 'cod' || type === 'auto' |
 export const proofNoun = (rail) => {
   const r = rail && typeof rail === 'object' ? rail : {};
   const d = PROOF_NOUN[r.spec] || PROOF_NOUN.none;
-  return { word: d.word, label: String(r.proof_label || '').trim().slice(0, 40) || d.label, hint: d.hint };
+  return { word: d.word, label: String(r.proof_label || '').trim().slice(0, 40) || d.label,
+           hint: String(r.proof_hint || '').trim().slice(0, 120) || d.hint };
 };
 /**
  * The sentence a merchant sends when the money is on its way and cannot be found.
@@ -714,6 +733,30 @@ export function normalizeFeedUrl(u) {
   return /^https?:\/\//.test(s) ? s : null;
 }
 
+/**
+ * Is this feed_url "no sheet at all"? Every shop that arrived without a real one holds
+ * either nothing or a pointer to our own sample (`/data/sample-menu.csv`, or the file in
+ * the zimlink/tapstall repos) — and the sample is a fixture, not a source: fetching it
+ * back over a shop's own edits is what v0.9.9 stopped offering, and a shop of four fake
+ * items is what this stops being. Said once, in core, because three surfaces must agree:
+ * the storefront's loader, the dashboard's rows, and the SEO head. A merchant who hosts
+ * their own CSV on GitHub raw keeps their feed — the rule is the sample's path, not the
+ * host. (The client mirror in `admin.html` is pinned to this function by a test.)
+ */
+export function isPlaceholderFeed(u) {
+  const s = String(u == null ? '' : u).trim();
+  if (!s) return true;
+  return /\/(data|pages)\/sample-menu\.csv(\?|$)/.test(s)
+    || (/raw\.githubusercontent\.com\/[^/]+\/(zimlink|tapstall)\//.test(s) && /sample-menu\.csv/.test(s));
+}
+
+/** A Tron address is `T` plus 33 base58 characters, and the alphabet is missing
+ *  `0`, `O`, `I`, `l` on purpose — a shape check that lets `0lIlO` through is a
+ *  check that trades a buyer's USDT for a typo. The watcher refuses anything that
+ *  fails this; a manual-only shop is never stopped by it, because the address is
+ *  printed exactly as the merchant typed it either way. */
+export const isTronAddr = (v) => /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(String(v == null ? '' : v).trim());
+
 /** Menu CSV -> product objects the storefront renders. */
 export function parseProducts(csv, st = {}) {
   const rows = parseCSV(csv);
@@ -844,7 +887,11 @@ export function priceOrder(st = {}, items = [], service = 'pickup', railKey = 'c
             // proof rides in here for the same reason spec does: the slip is printed
             // from this object later, and an order that arrived without a code still
             // has to be able to say that this rail wanted one
-            proof: rail.proof || proofDefault(rail.type, rail.spec), proof_label: rail.proof_label || '' },
+            proof: rail.proof || proofDefault(rail.type, rail.spec), proof_label: rail.proof_label || '',
+            proof_hint: rail.proof_hint || '',
+            // and a chain says its own piece: contract, decimals, the tolerance the
+            // watcher will apply, the network the buyer must not get wrong
+            crypto: rail.crypto || null },
     fee: mode === 'pass' ? fee : 0,
     fee_absorbed_by_merchant: mode === 'absorb' ? fee : 0,
     surcharge_mode: mode,
@@ -879,11 +926,22 @@ export function payInstructions(st = {}, order = {}, pricing = {}) {
   // in it and inventing one is how a merchant phones a stranger's line.
   const from = cleanPayer((order.buyer || {}).payer, det.spec);
   const proofMode = rail.proof || proofDefault(rail.type, det.spec);
-  const pn = proofNoun({ spec: det.spec, proof_label: rail.proof_label });
+  const pn = proofNoun({ spec: det.spec, proof_label: rail.proof_label, proof_hint: rail.proof_hint });
   const proof = cleanProof((order.buyer || {}).proof);
+  const cr = rail.crypto || null;
   const steps = cod
     ? ['Nothing to pay now — pay the runner or pay at pickup.']
-    : [`Open ${rail.label}${rail.dial ? ' (' + rail.dial + ')' : ''}`,
+    : cr
+      // On a chain there is no name in the confirmation and no reference field on
+      // the transfer — there is only the address and the amount. So the two things
+      // that can end badly both get a line before money leaves: the network, and
+      // the exact number whose odd cents are what makes the payment findable.
+      ? [`Open your wallet app (Trust, Binance, Yellow Card, Luno — anything that holds USDT)`,
+         `Send exactly ${pricing.pay_now} USDT to ${to}`,
+         `Only on the ${cr.network || 'TRC-20'} (${String(cr.chain || 'tron').toUpperCase()}) network. USDT sent on any other chain is not recoverable by anybody`,
+         'Send the TxID with your order if it asks — it makes the wait shorter',
+         `Reference for your own records: ${ref}`]
+      : [`Open ${rail.label}${rail.dial ? ' (' + rail.dial + ')' : ''}`,
        `Send exactly ${pricing.pay_now} ${cur} to ${to}`,
        // The confirmation screen's name is the only check a buyer can make before
        // money leaves, and a wallet swap looks exactly like a valid payment.
@@ -893,11 +951,14 @@ export function payInstructions(st = {}, order = {}, pricing = {}) {
        // recover after the app has been closed — and this line costs a buyer nothing.
        ...(proofMode !== 'none' ? [`Keep the code the app shows after sending — ${pn.label.toLowerCase()} comes to this shop with it`] : [])];
   return {
-    rail: rail.label, dial: rail.dial, account: acct, account_label: det.label, holder: det.holder,
-    till: det.till, reference: ref, amount: pricing.pay_now, currency: cur,
+    rail: rail.label, dial: rail.dial, account: acct, account_label: cr ? (cr.network || 'TRC-20') + ' address' : det.label, holder: det.holder,
+    till: det.till, reference: ref, amount: pricing.pay_now, currency: cr ? (cr.asset || 'USDT') : cur,
     // Manual rails are the ones where "which number did he send from?" is the whole
     // reconciliation, so the buyer is asked — and the answer rides on the slip.
     ask_payer: railWantsPayer({ type: rail.type, spec: det.spec }),
+    // the storefront prints the explorer link for a chain TxID without learning
+    // what a chain is; a rail says so once, here
+    crypto: cr ? { chain: cr.chain || '', network: cr.network || '', asset: cr.asset || 'USDT', tolerance_pct: cr.tolerance_pct || 0.01 } : null,
     payer_from: from,
     // what the buyer's receipt and the merchant's ledger both show, plus the two
     // words that tell a buyer where to look for it
@@ -907,6 +968,88 @@ export function payInstructions(st = {}, order = {}, pricing = {}) {
     note: 'Pay the EXACT amount. The odd cents are what links your payment to your order — no screenshot needed.',
     steps,
   };
+}
+
+/* ------------------------------------------------------------------ crypto */
+/** Dollars to chain units and back. USDT on Tron is six decimals, so a cent is
+ *  10,000 units and the odd cents a unique-cents order carries survive the trip
+ *  exactly — which is the whole reason a chain payment can be matched by amount. */
+export const toUnits = (usd, decimals = 6) => Math.round((Number(usd) || 0) * Math.pow(10, Number(decimals) || 0));
+export const fromUnits = (u, decimals = 6) => Math.round(Number(u) || 0) / Math.pow(10, Number(decimals) || 0);
+
+/**
+ * The tolerance policy, as pure arithmetic, in the one shape a chain allows:
+ * TRC-20 transfers carry no memo and no reference field, so the amount is the
+ * address book — an order's odd cents make every open total unique, and this
+ * matches each transfer against the open orders and nothing else.
+ *
+ *  within ±tol of one open order → credit it; a short payment inside the band is
+ *      credited *and* flagged, never refused (the OPENRAIL line: exact-cent is the
+ *      right rule for a fixed price and the wrong one for a chain)
+ *  within tol of two open orders → nothing is credited: an amount that fits two
+ *      orders identifies neither, and a guess that ships someone's lunch is worse
+ *      than one more row for the human
+ *  a buyer typed this TxID on their order → flagged onto the order for them to
+ *      count; never auto-credited on amount alone
+ *  none of the above             → loose: money arrived, say so, name the amount
+ *
+ * A transfer is consumed once, and a second sweep that sees the same txid is a
+ * replay: `credits` for an already-taken order cannot happen because a paid order
+ * is not open. The caller layers the KV facts on top (txid ledger, order status);
+ * this function only says who *would* match whom.
+ */
+export function cryptoMatch(transfers, orders, tolPct = 0.01) {
+  const tol = Math.min(0.5, Math.max(0, Number(tolPct) || 0.01));
+  const credits = [];
+  const flags = [];
+  const loose = [];
+  const consumed = new Set();
+  const taken = new Set();
+  const open = (Array.isArray(orders) ? orders : []).filter((o) => o && o.id != null
+    && o.status !== 'paid' && o.status !== 'cancelled' && Number(o.units) > 0);
+  for (const t of (Array.isArray(transfers) ? transfers : [])) {
+    const txid = t && t.txid != null ? String(t.txid).trim() : '';
+    if (!txid || consumed.has(txid)) continue;
+    const paid = Math.round(Number(t.units) || 0);
+    if (paid <= 0) continue;
+    const cands = [];
+    for (const o of open) {
+      if (taken.has(o.id)) continue;
+      const band = Math.floor(Number(o.units) * tol);
+      if (paid >= Number(o.units) - band && paid <= Number(o.units) + band) {
+        cands.push({ o, kind: paid < o.units ? 'underpaid' : (paid > o.units ? 'overpaid' : 'exact') });
+      }
+    }
+    if (cands.length === 1) {
+      const { o, kind } = cands[0];
+      taken.add(o.id); consumed.add(txid);
+      credits.push({ order_id: o.id, code: o.code || '', txid, units: paid, expected_units: Number(o.units),
+        shortfall_units: kind === 'underpaid' ? Number(o.units) - paid : 0, kind });
+      continue;
+    }
+    if (cands.length > 1) {
+      consumed.add(txid);
+      flags.push({ txid, units: paid, at: Number(t.at) || 0, kind: 'ambiguous', order_ids: cands.map((c) => c.o.id) });
+      continue;
+    }
+    // The buyer's typed proof is a cleanProof'd 40 characters; a chain TxID is 64 hex.
+    // Compare like prefixes, not like equal strings, or the claim line is dead code in
+    // production while every unit test hands it whole txids and calls it green.
+    const txLower = txid.toLowerCase();
+    const claimed = open.find((o) => {
+      if (taken.has(o.id)) return false;
+      const p = String(o.proof || '').trim().toLowerCase();
+      return p.length >= 8 && (txLower.startsWith(p) || p.startsWith(txLower));
+    });
+    if (claimed) {
+      consumed.add(txid);
+      flags.push({ txid, units: paid, at: Number(t.at) || 0, order_id: claimed.id, code: claimed.code || '',
+        expected_units: Number(claimed.units), kind: paid < claimed.units ? 'underpaid' : (paid > claimed.units ? 'overpaid' : 'exact') });
+      continue;
+    }
+    loose.push({ txid, units: paid, at: Number(t.at) || 0, from: String(t.from || '').slice(0, 42) });
+  }
+  return { credits, flags, loose };
 }
 
 export function riskFlags(st = {}, order = {}, hist = {}) {
@@ -1020,6 +1163,10 @@ export function publicStore(st, catalog, nowMs) {
   const r = resolveRail(st, st.rail || 'cash', catalog);
   out.rail_info = { key: r.key, label: r.label, dial: r.dial, type: r.type,
                     pct: r.pct, imtt: r.imtt, fixed: r.fixed, added: !!r.added,
+                    // a chain tells the storefront which network the number is on,
+                    // so the warning under the pay button can be printed before the
+                    // order too, not only on the receipt after it
+                    crypto: r.crypto ? { chain: r.crypto.chain || '', network: r.crypto.network || '', asset: r.crypto.asset || 'USDT' } : null,
                     // the storefront asks for the sender's number only on rails where
                     // that is how a payment gets found, so it needs the shape here
                     spec: r.spec || 'wallet',
@@ -1284,6 +1431,13 @@ const SET = {
   owner_email: (v) => (!v ? '' : isEmail(v) ? String(v).toLowerCase().slice(0, 120) : null),
   unique_change: (v) => !(v === false || v === 'false' || v === 0 || v === '0'),
   require_optin: (v) => v === true || v === 'true' || v === 1 || v === '1',
+  /* The watcher is a boolean switch, not a credential: what it can ever do is READ
+   * a public chain for the address already printed to buyers, and credit an order
+   * a human could have confirmed by hand. So it lives beside `require_optin`, and
+   * everything it might be used *on* (the rail, the address) stays in the money
+   * path with its 15-minute fuse. Off is the default; a rail with no watcher set up
+   * behaves exactly as the EcoCash line does — money in, human taps. */
+  crypto_watch: (v) => v === true || v === 'true' || v === 1 || v === '1',
   reference_format: (v) => { const s = String(v || '{code}'); return /^[{ }A-Za-z0-9_-]{1,30}$/.test(s) ? s : null; },
   order_prefix: (v) => { const s = String(v || '').replace(/[^A-Za-z0-9-]/g, '').slice(0, 6); return s || null; },
 };
@@ -1467,7 +1621,7 @@ export function sanitizeMenu(input) {
   // dashboard posts one object, and the check that matters is "does this path
   // belong to the store saving it". An unknown handle disables refs, not URLs.
   const handle = m.handle != null && validHandle(String(m.handle)) ? String(m.handle) : '';
-  const out = { over: {}, hide: [], extra: [], order: [], set_at: new Date().toISOString() };
+  const out = { over: {}, hide: [], extra: [], order: [], del: [], set_at: new Date().toISOString() };
   const over = m.over && typeof m.over === 'object' ? m.over : {};
   for (const k of Object.keys(over).slice(0, MENU_CAP)) {
     const clean = sanitizeMenuEdit(over[k], handle);
@@ -1475,6 +1629,21 @@ export function sanitizeMenu(input) {
   }
   const hide = new Set((Array.isArray(m.hide) ? m.hide : []).map((x) => String(x).slice(0, 60)).filter(Boolean));
   out.hide = [...hide].slice(0, MENU_CAP);
+  /* `del` is the hard-delete list, and it exists because of the shops that have no sheet:
+   * for them the authored list IS the menu, so "Hide" is a lie — there is nothing to hand
+   * back. A deleted row is removed from the extras and kept here, in full, so the save that
+   * deletes is also the tray the row can be picked out of again ("put it back" for a
+   * moment's slip, gone for good once the tray is emptied). A caller may name an id alone;
+   * it then suppresses without a restorable copy, which is all a bare id can promise.
+   */
+  const delSeen = new Set();
+  for (const x of (Array.isArray(m.del) ? m.del : []).slice(0, MENU_CAP)) {
+    const bare = x && typeof x === 'object' ? String(x.id == null ? '' : x.id).slice(0, 60) : String(x).slice(0, 60);
+    if (!bare || delSeen.has(bare)) continue;
+    delSeen.add(bare);
+    const item = x && typeof x === 'object' && String(x.name || '').trim() ? MENU_ITEM(Object.assign({}, x, { id: bare }), { handle }) : null;
+    if (item) { item.deleted = true; out.del.push(item); } else out.del.push({ id: bare });
+  }
   const seen = new Set();
   for (const x of (Array.isArray(m.extra) ? m.extra : []).slice(0, MENU_CAP)) {
     const item = MENU_ITEM(x, { handle });
@@ -1508,7 +1677,7 @@ export function mergeMenuPatch(cur, patch, handle) {
   }
   const pick = (k) => (b[k] !== undefined ? b[k] : c[k]);
   return sanitizeMenu({
-    over, hide: pick('hide'), extra: pick('extra'), order: pick('order'), note: pick('note'), handle,
+    over, hide: pick('hide'), del: pick('del'), extra: pick('extra'), order: pick('order'), note: pick('note'), handle,
   });
 }
 
@@ -1532,6 +1701,12 @@ export function applyMenu(products, menu, handle) {
   const m = menu && typeof menu === 'object' ? menu : {};
   const over = m.over && typeof m.over === 'object' ? m.over : {};
   const hide = new Set(Array.isArray(m.hide) ? m.hide : []);
+  // Hard deletes fall on the shop's own rows only. `hide` hands a sheet row back on revert, and a
+  // `del` that suppressed the *base* would suppress a stranger too: the sample rows are numbered
+  // 1, 2, 3, and so is the first page of every real sheet a shop might link the week after.
+  const del = new Set((Array.isArray(m.del) ? m.del : [])
+    .map((x) => (x && typeof x === 'object' ? String(x.id == null ? '' : x.id) : String(x)).slice(0, 60))
+    .filter(Boolean));
   const base = (Array.isArray(products) ? products : []).filter((p) => p && p.id && !hide.has(p.id));
   const applyOver = (p) => {
     const o = over[p.id];
@@ -1552,7 +1727,7 @@ export function applyMenu(products, menu, handle) {
   // Sheet rows and dashboard rows take the same override map. Before this, an item added in the
   // dashboard could be deleted and added again but never corrected — a price typed twice to change
   // a price — because the merge only ever looked at the sheet's rows.
-  const extras = (Array.isArray(m.extra) ? m.extra : []).filter((x) => x && x.id && !hide.has(x.id)).map(applyOver);
+  const extras = (Array.isArray(m.extra) ? m.extra : []).filter((x) => x && x.id && !hide.has(x.id) && !del.has(x.id)).map(applyOver);
   let all = base.map(applyOver).concat(extras).slice(0, MENU_CAP);
   const order = Array.isArray(m.order) ? m.order : null;
   if (order && order.length) {
@@ -1797,9 +1972,11 @@ const sentences = (parts) => {
 
 /** Rows for the head and the structured data — the cached shelf if there is one,
  *  otherwise the dashboard's own items. `loadProducts` is never called here: a
- *  Google sheet that is slow must not be able to slow down a page's first byte. */
+ *  Google sheet that is slow must not be able to slow down a page's first byte.
+ *  A shop with no sheet has no cached shelf either: the head describes the authored
+ *  menu, because anything else would put the sample's items in somebody's Google result. */
 function shelfRows(st) {
-  const cached = st && st.feed_cache && Array.isArray(st.feed_cache.products) ? st.feed_cache.products : [];
+  const cached = !isPlaceholderFeed(st && st.feed_url) && st && st.feed_cache && Array.isArray(st.feed_cache.products) ? st.feed_cache.products : [];
   return applyMenu(cached, st && st.menu, st && st.handle);
 }
 

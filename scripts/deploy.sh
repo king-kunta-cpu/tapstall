@@ -264,10 +264,20 @@ if [[ -n "${LEGACY_WORKER_NAME:-}" && "$LEGACY_WORKER_NAME" != "$WORKER_NAME" ]]
   say "alias worker $LEGACY_WORKER_NAME -> redirects to $BASE"
   NAME="$LEGACY_WORKER_NAME" STORES_ID="$STORES_ID" ORDERS_ID="$ORDERS_ID" WITH_CRON=0 REDIRECT_TO="$BASE" \
     python3 scripts/gen_wrangler_toml.py || warn "alias config not written"
+  # The main publish cleans `.build` up *before* this block, and until v0.9.10 the
+  # wrangler branch took that missing entry-point as the end of the story: every run
+  # warned `alias deploy failed` and the old hostname kept serving whatever it last
+  # had, which is how an alias loses REDIRECT_TO and runs the sweep from two origins.
+  # The bundle is cheap to rebuild and byte-identical to the one just published, so
+  # rebuild first, and let a failed wrangler fall through to the dependency-free
+  # publisher instead of falling through to silence.
+  [[ -f .build/worker.js ]] || bash scripts/build_bundle.sh .build
+  ALIAS_DEPLOYED=0
   if [[ -x node_modules/.bin/wrangler ]]; then
-    CLOUDFLARE_API_TOKEN="$CF_TOKEN" CLOUDFLARE_ACCOUNT_ID="$CF_ACCOUNT" \
-      node_modules/.bin/wrangler deploy --config wrangler.toml 2>&1 | grep -Ev "^$" | tail -3 || warn "alias deploy failed"
-  else
+    if CLOUDFLARE_API_TOKEN="$CF_TOKEN" CLOUDFLARE_ACCOUNT_ID="$CF_ACCOUNT" \
+      node_modules/.bin/wrangler deploy --config wrangler.toml 2>&1 | grep -Ev "^$" | tail -3; then ALIAS_DEPLOYED=1; fi
+  fi
+  if [[ "$ALIAS_DEPLOYED" != 1 ]]; then
     # the bundle is normally cleaned up above; the dependency-free publisher needs
     # it, so rebuild rather than "succeed" at publishing nothing
     [[ -d .build ]] || bash scripts/build_bundle.sh .build
