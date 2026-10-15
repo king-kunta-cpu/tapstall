@@ -124,10 +124,10 @@ const env = {
   STORES: kvStub(),
   ORDERS: kvStub(),
   ADMIN_SECRET: 'test-secret',
-  // the register gate ships at 3/hour + 6/day per address — the whole suite
-  // builds stores from one harness address, and one test below proves the gate
-  // itself at 2/3 instead of trusting these numbers
-  REG_HOUR: 100000, REG_DAY: 100000,
+  // the register meter ships at 3/hour + 6/day per address — the whole suite
+  // builds stores from one harness address, so it passes a wide meter; one test
+  // below proves the rule itself at 2/3 instead of trusting these numbers
+  REG_RL: { windowSec: 3600, max: 100000 }, REG_RL_DAY: { windowSec: 86400, max: 100000 },
 };
 
 let worker;
@@ -4414,14 +4414,17 @@ test('0.9.12 the one open door that writes is metered per address', async () => 
   // The KV write budget is the whole platform's, shared: an unthrottled
   // POST /api/register is a script that spends the day's 1,000 writes on
   // nobody's shops and leaves the trading merchants unable to save an order.
-  // The gate is per connecting address, in memory, in production only — so this
-  // test is about the rule firing, at sizes the suite can walk through.
+  // The meter is the orders limiter — memory up to half the ceiling, the shared
+  // KV counter from there — because a flood arrives on many isolates and a
+  // counter that only lives in one is a courtesy, not a cap.
   const src = readFileSync(join(root, 'worker/worker.js'), 'utf8');
-  assert.match(src, /const REG_HOUR = 3, REG_DAY = 6;/, 'the shipped sizes: three an hour, six a day, from one address');
+  assert.match(src, /const REG_RL = \{ windowSec: 3600, max: 3 \}, REG_RL_DAY = \{ windowSec: 86400, max: 6 \};/,
+    'the shipped sizes: three an hour, six a day, from one address');
   assert.match(src, /too many stores have been created from this network/, 'and a refusal that says what happened, not a bare 429');
+  assert.match(src, /rateLimited\(env, regIp, 'reg:', env\.REG_RL \|\| REG_RL\)/, 'through the platform\'s own hybrid limiter, not a second one');
 
-  const savedH = env.REG_HOUR, savedD = env.REG_DAY;
-  env.REG_HOUR = 2; env.REG_DAY = 3;
+  const savedH = env.REG_RL, savedD = env.REG_RL_DAY;
+  env.REG_RL = { windowSec: 3600, max: 2 }; env.REG_RL_DAY = { windowSec: 86400, max: 3 };
   const ip = '196.77.77.77';   // an address this suite has never registered from
   const reg = (n) => call('/api/register', { method: 'POST', ip,
     body: { shop_name: 'Gate ' + n, handle: 'gate-' + n, whatsapp: '26377000000' + n,
@@ -4432,26 +4435,27 @@ test('0.9.12 the one open door that writes is metered per address', async () => 
     const third = await reg(3);
     assert.equal(third.status, 429, 'third in the hour is the flood line: ' + third.text);
     assert.match(third.json.error, /too many stores/i, 'and it explains itself');
+    // the ceiling is written down at the ceiling, so a cold or different isolate refuses
+    // the same address from the shared counter — which is the whole point over memory
+    const win = Math.floor(Date.now() / 3600e3);
+    const shared = env.STORES._map.get('rl:reg:' + ip + ':' + win);
+    assert.ok(shared, 'the frozen address is written down, not just remembered');
+    assert.ok(Number(shared.value) >= 2, 'and the shared count reaches the ceiling any isolate can read');
     // a different address is a different merchant, not the same flood
     const other = await call('/api/register', { method: 'POST', ip: '196.77.78.78',
       body: { shop_name: 'Gate other', handle: 'gate-other', whatsapp: '263770000099',
         feed_url: 'https://docs.google.com/spreadsheets/d/22222222222222222222222222222222222222222222/edit' } });
-    assert.ok(other.json.ok, 'the meter runs per connecting address — which only Cloudflare can set');
-    // the trip persists: a flood spreads across colos and isolates, and a memory
-    // counter alone is a courtesy to nobody — so the freeze outlives this isolate,
-    // in one KV write spent only on the address that burst (the pinFail bargain)
-    const held = env.STORES._map.get('regl:196.77.77.77');
-    assert.ok(held, 'the frozen address is written down, not just remembered');
-    assert.ok(Number(JSON.parse(held.value).until) > Date.now(), 'and it holds to the end of its day');
-    env.REG_HOUR = 0;   // zero an hour, three a day: only the day cap can ever answer
-    const daily = await call('/api/register', { method: 'POST', ip: '196.79.79.79',
-      body: { shop_name: 'Gate day', handle: 'gate-day', whatsapp: '263770000011',
+    assert.ok(other.json.ok, 'and the meter runs per connecting address — which only Cloudflare can set');
+    // the day cap, on an address the hour window would let through all day
+    env.REG_RL = { windowSec: 3600, max: 100 };
+    const day = (n) => call('/api/register', { method: 'POST', ip: '196.79.79.79',
+      body: { shop_name: 'Gate day ' + n, handle: 'gate-day-' + n, whatsapp: '26377000001' + n,
         feed_url: 'https://docs.google.com/spreadsheets/d/33333333333333333333333333333333333333333333/edit' } });
-    assert.equal(daily.status, 429, 'REG_HOUR=0 means the address may never burst past the day gate; even the first call is refused');
-    // (0 in the hour is the ceiling, so this address has already spent it — the
-    // point proved is that the ceiling is read from env at the gate, and the day
-    // field exists beside it; the shipped numbers are pinned above.)
+    assert.ok((await day(1)).json.ok, 'one');
+    assert.ok((await day(2)).json.ok, 'two');
+    assert.ok((await day(3)).json.ok, 'three');
+    assert.equal((await day(4)).status, 429, 'and the sixth-a-day line holds even at hour three');
   } finally {
-    env.REG_HOUR = savedH; env.REG_DAY = savedD;
+    env.REG_RL = savedH; env.REG_RL_DAY = savedD;
   }
 });
