@@ -1,5 +1,5 @@
 # Tapstall — status
-## The shop with no sheet, and the money that needs no permission (2026-10-15, v0.9.9 → v0.9.11)
+## The shop with no sheet, and the money that needs no permission (2026-10-15, v0.9.9 → v0.9.12)
 
 Three related honesty fixes shipped together, because they share a sentence: *a shop is allowed to
 be a shop without anybody else's infrastructure.*
@@ -72,6 +72,19 @@ binding and not a guess). The ops console deliberately still shows what the docu
 deploy's alias probe learned a retry loop the same day: its three curls ran inside edge propagation,
 so every log since the move carried a confident warning for a redirect that worked a minute later,
 and a warning that is usually transient is a warning that gets ignored.
+
+**0.9.12, that night, after a client report:** five merchants, one symptom — the login form on
+the landing page, and the same form again inside the dashboard, so operators type their details
+twice. The whole round trip proved correct on production with a cookie jar in `curl` (a fresh
+store, real `POST /api/auth`, real `GET /api/admin`, `via: sess`), so the harm was the client's
+bounce: after a good sign-in, any single failed read — one 401, one 500 at the edge, a moment of
+TLS lag on a phone — silently threw the merchant back to a blank form with no reason and no
+retry. `load()` now keeps silent at boot when no store name exists (no stray 404 greeting),
+buys one quiet retry before bouncing a live session, and if it must bounce, keeps the store name
+in the field and says what happened, what did not, and that nothing was paid. The same sweep
+metered the one open door that writes: `POST /api/register` had no throttle, and every store it
+creates costs KV writes the whole platform shares — three an hour, six a day per connecting
+address, in memory, armed only where `ADMIN_SECRET` exists, and a 429 that explains itself.
 
 The old alias deploy was fixed in the same pass: `deploy.sh` cleaned `.build` *before* the legacy
 hostname's block, so every CI run that month warned `entry-point file not found`, took the warning as

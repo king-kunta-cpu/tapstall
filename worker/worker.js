@@ -44,7 +44,7 @@ import {
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '0.9.11';
+const VERSION = '0.9.12';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
@@ -1158,7 +1158,47 @@ async function proofAdd(req, url, env) {
 }
 
 /* -------------------------------------------------------------- register */
+
+/** Onboarding is the one open door that WRITES, and on the free plan every store
+ *  shares a single budget of 1,000 KV writes a day: an unbounded `POST /api/register`
+ *  is therefore a script that can eat the whole day before noon and leave the trading
+ *  merchants unable to record an order. The gate follows the PIN throttle's philosophy
+ *  exactly — the thing being protected is cost, not a secret, so the count lives in a
+ *  warm isolate and nothing about an attempt is persisted: three stores an hour from
+ *  one connecting address, six a day, and a refusal that says when to come back.
+ *  `cf-connecting-ip` is Cloudflare's own, so a flood cannot lie about it. The gate
+ *  arms only where ADMIN_SECRET exists — i.e. a real deployment — because the test
+ *  harness builds many stores a run from one address, and a pilot that onboards five
+ *  merchants a month will never meet 3+1. */
+const regMem = new Map();                        // ip -> { wn, win, n, day }
+const REG_HOUR = 3, REG_DAY = 6;
+function regGate(ip, env) {
+  if (!env.ADMIN_SECRET) return 0;
+  const hour = Number.isFinite(+env.REG_HOUR) ? +env.REG_HOUR : REG_HOUR;   // harness runs 3/6, not 10,000
+  const day = Number.isFinite(+env.REG_DAY) ? +env.REG_DAY : REG_DAY;
+  if (hour < 0 || day < 0) return 0;
+  const now = Date.now();
+  let e = regMem.get(ip);
+  if (!e || e.day <= now) {
+    if (regMem.size > 4096) regMem.clear();      // bounded the same way the isolate is; a reset only ever resets grace
+    e = { wn: 0, win: now + 36e5, n: 0, day: now + 864e5 };
+    regMem.set(ip, e);
+  }
+  if (e.win <= now) { e.win = now + 36e5; e.wn = 0; }
+  const waitHour = e.wn >= hour ? Math.max(1, Math.ceil((e.win - now) / 1000)) : 0;
+  const waitDay = e.n >= day ? Math.max(1, Math.ceil((e.day - now) / 1000)) : 0;
+  const wait = waitHour || waitDay;
+  if (wait) return wait;
+  e.wn++; e.n++;
+  return 0;
+}
+
 async function register(req, url, env) {
+  const gated = regGate(ipOf(req), env);
+  if (gated) {
+    return json({ ok: false, error: 'too many stores created from this network just now — try again in a little while, and if you are setting up for real, keep this window open' },
+      429, { 'retry-after': String(gated) });
+  }
   const b = await req.json().catch(() => null);
   if (!b) return json({ ok: false, error: 'bad json' }, 400);
   const handle = slug(String(b.handle || b.shop_name || '')).slice(0, 30);
@@ -1960,11 +2000,6 @@ function localNote(ipKey, window) {
   hit.n++; hit.at = now;
   return hit.n;
 }
-function localCount(ipKey, window) {
-  const hit = localHits.get(ipKey);
-  return hit && hit.window === window ? hit.n : 0;
-}
-
 async function rateLimited(env, ip, bucket, rl) {
   if (!env.STORES) return false;
   const win = rl || RL;

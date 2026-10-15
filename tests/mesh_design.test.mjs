@@ -513,3 +513,21 @@ test("the client dashboard is honest about where a shop's items live", () => {
   assert.match(shop, /var fph = fph0\(fsheet\)/, 'the placeholder is decided once, before either control is drawn');
   assert.match(shop, /q\('#menuReload'\)\.style\.display = fph \? 'none' : ''/, 'and the button that would fetch it back over their edits is removed, not warned about');
 });
+
+test('0.9.12 the login form asks once — a second time has a reason, and the shop name survives it', () => {
+  // Five merchants, one symptom: sign in, and the form is back on the dashboard.
+  // The server answers the whole round-trip correctly on production (proved by the
+  // live login journey), so the harm was the client: any single failed read after
+  // a good sign-in silently threw them back to a blank form — no reason, no retry,
+  // and it even fired with no store name at boot as a stray 404 on the page.
+  const shop = read('pages/admin.html');
+  assert.match(shop, /if \(!S\.handle\) return;\s*\/\/ a boot with no store name/,
+    'a boot with nothing typed in asks the server nothing, so the login card is never greeted by an error');
+  assert.match(shop, /S\.loadRetry = 1;\s*setTimeout\(function \(\) \{ S\.loadRetry = 0; load\(\); \}, 1000\);/,
+    'one mid-session failure buys a single quiet retry before anyone is bounced');
+  assert.match(shop, /stopped working mid-look/, 'and if it does bounce, the page says what happened and what did not');
+  assert.match(shop, /q\('#fK'\)\.value = S\.handle;\s*\/\/ the store name they typed, kept; only the PIN is ever theirs/,
+    'the store name they typed is re-filled — they re-enter a PIN, not their identity');
+  const src = read('pages/src/admin.html');
+  assert.ok(src.indexOf('S.loadRetry') > src.indexOf('function load'), 'the retry lives in load(), which every refresher calls');
+});

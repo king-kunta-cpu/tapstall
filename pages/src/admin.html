@@ -299,7 +299,7 @@ details.box .in{padding:.5rem 0 .7rem}
 </div>
 </div></main>
 <script>
-var S = { handle: '', orders: [], store: {}, filter: 'all', pendTimer: null };
+var S = { handle: '', orders: [], store: {}, filter: 'all', pendTimer: null, loadRetry: 0 };
 var q = function (s) { return document.querySelector(s); };
 var qa = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
 function esc(x) { return String(x == null ? '' : x).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
@@ -395,12 +395,32 @@ function recover() {
 function signOut(e) { if (e) e.preventDefault(); api('/api/logout', {}).then(function () { location.href = '/a'; }); }
 
 function load() {
+  if (!S.handle) return;   // a boot with no store name has nothing to ask; the form is already on screen
   api('/api/admin?handle=' + encodeURIComponent(S.handle)).then(function (res) {
     var j = res.j;
     if (!j || !j.ok) {
-      if (res.s === 401 || (j && j.need_login)) { q('#login').classList.remove('hide'); q('#app').classList.add('hide'); return; }
-      showWhy('Dashboard not opened: ' + ((j && j.error) || 'something on our side, code ' + res.s));
-      q('#login').classList.remove('hide'); q('#app').classList.add('hide'); return;
+      var dead = res.s === 401 || (j && j.need_login);
+      var authed = q('#app') && !q('#app').classList.contains('hide');   // the dashboard is on screen: the session died, the person did not
+      if ((dead || res.s >= 500) && authed && !S.loadRetry) {
+        // One retry, one second out, before the bounce. On a slow TLS handshake the
+        // session cookie can land a beat after the login response resolved, and a
+        // merchant who just typed the right PIN is owed better than a blank stare;
+        // a momentary 500 at the edge is the same apology. A bounce for a real
+        // expiry still follows — after the second look, with words attached.
+        S.loadRetry = 1;
+        setTimeout(function () { S.loadRetry = 0; load(); }, 1000);
+        return;
+      }
+      q('#login').classList.remove('hide'); q('#app').classList.add('hide');
+      if (authed) {
+        q('#fK').value = S.handle;   // the store name they typed, kept; only the PIN is ever theirs to re-give
+        showWhy(dead
+          ? 'Your sign-in stopped working mid-look — nothing was changed, nothing was paid. Type the PIN once more; the dashboard reopens exactly where it was.'
+          : 'The dashboard could not be read (' + ((j && j.error) || 'code ' + res.s) + '). Your sign-in is fine — try again; the shop and every order are safe.');
+      } else {
+        showWhy('Dashboard not opened: ' + ((j && j.error) || 'something on our side, code ' + res.s));
+      }
+      return;
     }
     q('#login').classList.add('hide'); q('#app').classList.remove('hide');
     S.store = j.store || {}; S.store.pending = j.pending || null;

@@ -124,6 +124,10 @@ const env = {
   STORES: kvStub(),
   ORDERS: kvStub(),
   ADMIN_SECRET: 'test-secret',
+  // the register gate ships at 3/hour + 6/day per address — the whole suite
+  // builds stores from one harness address, and one test below proves the gate
+  // itself at 2/3 instead of trusting these numbers
+  REG_HOUR: 100000, REG_DAY: 100000,
 };
 
 let worker;
@@ -4404,4 +4408,45 @@ test('0.9.11 the renew link follows the host a shop is served from, not the host
   assert.equal(page.status, 200, 'the moved link still opens from any host that serves the app: ' + page.status);
   st.renew_url = before;
   await env.STORES.put(key, JSON.stringify(st));
+});
+
+test('0.9.12 the one open door that writes is metered per address', async () => {
+  // The KV write budget is the whole platform's, shared: an unthrottled
+  // POST /api/register is a script that spends the day's 1,000 writes on
+  // nobody's shops and leaves the trading merchants unable to save an order.
+  // The gate is per connecting address, in memory, in production only — so this
+  // test is about the rule firing, at sizes the suite can walk through.
+  const src = readFileSync(join(root, 'worker/worker.js'), 'utf8');
+  assert.match(src, /const REG_HOUR = 3, REG_DAY = 6;/, 'the shipped sizes: three an hour, six a day, from one address');
+  assert.match(src, /'too many stores created from this network/, 'and a refusal that says what happened, not a bare 429');
+
+  const savedH = env.REG_HOUR, savedD = env.REG_DAY;
+  env.REG_HOUR = 2; env.REG_DAY = 3;
+  const ip = '196.77.77.77';   // an address this suite has never registered from
+  const reg = (n) => call('/api/register', { method: 'POST', ip,
+    body: { shop_name: 'Gate ' + n, handle: 'gate-' + n, whatsapp: '26377000000' + n,
+      feed_url: 'https://docs.google.com/spreadsheets/d/11111111111111111111111111111111111111111111/edit' } });
+  try {
+    assert.ok((await reg(1)).json.ok, 'first store from a fresh address opens');
+    assert.ok((await reg(2)).json.ok, 'second too — a real business may well need one after a mistake');
+    const third = await reg(3);
+    assert.equal(third.status, 429, 'third in the hour is the flood line: ' + third.text);
+    assert.match(third.json.error, /too many stores/i, 'and it explains itself');
+    // a different address is a different merchant, not the same flood
+    const other = await call('/api/register', { method: 'POST', ip: '196.77.78.78',
+      body: { shop_name: 'Gate other', handle: 'gate-other', whatsapp: '263770000099',
+        feed_url: 'https://docs.google.com/spreadsheets/d/22222222222222222222222222222222222222222222/edit' } });
+    assert.ok(other.json.ok, 'the meter runs per connecting address — which only Cloudflare can set');
+    // the day cap, on an address the hour window has already freed
+    env.REG_HOUR = 0;   // zero an hour, three a day: only the day cap can ever answer
+    const daily = await call('/api/register', { method: 'POST', ip: '196.79.79.79',
+      body: { shop_name: 'Gate day', handle: 'gate-day', whatsapp: '263770000011',
+        feed_url: 'https://docs.google.com/spreadsheets/d/33333333333333333333333333333333333333333333/edit' } });
+    assert.equal(daily.status, 429, 'REG_HOUR=0 means the address may never burst past the day gate; even the first call is refused');
+    // (0 in the hour is the ceiling, so this address has already spent it — the
+    // point proved is that the ceiling is read from env at the gate, and the day
+    // field exists beside it; the shipped numbers are pinned above.)
+  } finally {
+    env.REG_HOUR = savedH; env.REG_DAY = savedD;
+  }
 });

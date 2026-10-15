@@ -1407,7 +1407,11 @@ test('0.9.0 an operator patch fixes one row and leaves the rest of the shelf alo
   assert.equal(C.sanitizeMenuEdit({ available: true }, 'shop').available, true, 'and back in');
   const kept = C.mergeMenuPatch(cur, { over: { a: { popular: true } } }, 'shop');
   assert.equal(kept.extra.length, 1, 'a patch that names no list leaves the list alone');
-  assert.deepEqual(C.mergeMenuPatch(undefined, {}, 'shop'), C.sanitizeMenu({ handle: 'shop' }), 'nothing stored plus nothing sent is an empty shelf, not a crash');
+  // set_at is a wall-clock stamp each call takes for itself; comparing it across two
+  // calls is a race with the millisecond, so it is off the table before the compare.
+  const shelfMerged = C.mergeMenuPatch(undefined, {}, 'shop'), shelfEmpty = C.sanitizeMenu({ handle: 'shop' });
+  delete shelfMerged.set_at; delete shelfEmpty.set_at;
+  assert.deepEqual(shelfMerged, shelfEmpty, 'nothing stored plus nothing sent is an empty shelf, not a crash');
 });
 
 /* ------------------------------------------------------------------ 0.9.10: USDT on Tron */
