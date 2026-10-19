@@ -28,15 +28,18 @@ jobs:
           ORIGIN: https://tapstall.zlnew.workers.dev
           HANDLE: logintest        # the internal test store, never a real operator's shop
         run: |
+          set +e   # GitHub's bash -e would kill the step on rc=1 before anything prints —
+                   # the run that taught us this produced 4 minutes of silence and no log
           bash scripts/prod_check.sh > /tmp/prod.out 2>/tmp/prod.err; rc=$?
-          cat /tmp/prod.out
+          sed 's/\x1b\[[0-9;]*m//g' /tmp/prod.out > /tmp/prod.clean
+          cat /tmp/prod.clean
           tail -c 600 /tmp/prod.err
           {
             echo "## prod_check (weekly outside witness)"
-            grep -E "^(W/F|L=|BEAT |VERSION|HEARTBEAT|PING-)" /tmp/prod.out | tail -n 8
-            grep -cE "^  \+ ✓" /tmp/prod.out | sed 's/^/passed checks: /'
+            grep -E "^(target:|store:)" /tmp/prod.clean
+            grep -cE "^  \+ " /tmp/prod.clean | sed 's/^/passed checks: /'
             echo "failed checks:"
-            grep -E "^  \+ ✗" /tmp/prod.out || echo none
-            grep -E "not ok|beat .*never" /tmp/prod.out || echo "beats ok"
+            grep -E "^  - " /tmp/prod.clean || echo none
+            grep -cE "^  ! " /tmp/prod.clean | sed 's/^/blocked lines: /'
           } >> "$GITHUB_STEP_SUMMARY"
           exit $rc
