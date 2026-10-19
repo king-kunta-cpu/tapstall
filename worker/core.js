@@ -3065,8 +3065,9 @@ export function meshGrowth(st, rows, opt) {
  * The rail list and the cadence are the hunta bible's own machine section: X >=3 posts a day per
  * persona, LinkedIn >=3, dev.to 3, daily pins, daily Bluesky and Nostr ("niche value, low
  * competition"), planner ratio two value to one promo, replies capped at four a day at human pace,
- * and cold outreach composed at 08:21 on weekdays with one owner tap sending the whole batch to a
- * ramped mailbox. The line I had wrong was the price of X: the write-only free tier is 1,500 posts
+ * and cold outreach composed at 08:21 on weekdays to a ramped mailbox. Their pipeline fires that
+ * batch with a tap; here the window sends it under standing policy — a tap on every batch is a
+ * clog, not a control, so the controls are the ramp, the cap and the kill switch (v1.0.0). The line I had wrong was the price of X: the write-only free tier is 1,500 posts
  * a month, so a shop's three beats a day is nothing against it and no seller needs a paid app.
  */
 const MESH_RAIL_ALIAS = { whatsapp_status: 'whatsapp', fb_group: 'facebook', ig: 'instagram', x_thread: 'x', paper: 'counter' };
@@ -3125,8 +3126,9 @@ export function meshAccount(st) {
       : cls === 'owner' ? "the owner's own account" : "an operator's shop, published on the platform's own nodes only" };
 }
 
-/* Outreach the way the pipeline does it: the machine composes, one tap sends the batch, the mailbox
- * ramps, and the reply stays at a human pace. What is deliberately absent is a per-message
+/* Outreach under standing policy: the machine composes, the scheduled window sends the batch,
+ * the mailbox ramps, and the reply stays at a human pace. There is no send tap and no approval
+ * step for anybody — least of all the owner, whose attention is the scarcest budget in the system. What is deliberately absent is a per-message
  * approval, which is how a growth machine becomes a to-do list nobody gets to. */
 export const MESH_OUTREACH = {
   compose: 'auto', send: 'auto', approvals: 'none', at_utc: '08:21', weekdays_only: true,
@@ -3460,15 +3462,63 @@ export function meshPress(st, env) {
   const p = (st && st.press && typeof st.press === 'object') ? st.press : {};
   const e = env || {};
   const channels = Object.assign({}, p.channels || {});
-  const out = { channels: channels, has_token: !!(e.PRESS_BUFFER_TOKEN || p.buffer_token),
-    token_from: e.PRESS_BUFFER_TOKEN ? 'env' : (p.buffer_token ? 'kv' : 'nowhere'),
+  // v1.0.0: a credential is never read out of KV. A shop document any handler can read is not a
+  // secret store, and the registry already refuses secrets for exactly this reason — the shop
+  // door now refuses them too, so a token handed over in the old shape is ignored, not used.
+  const out = { channels: channels, has_token: !!e.PRESS_BUFFER_TOKEN,
+    token_from: e.PRESS_BUFFER_TOKEN ? 'env' : 'nowhere',
     board: p.board || '', image_base: p.image_base || '', landing: p.landing || '', store: (st && st.handle) || '',
     cadence: (p.cadence && typeof p.cadence === 'object') ? p.cadence : null,
-    stored_in: p.buffer_token ? 'kv (theirs to delete; prefer the worker secret)' : 'env',
+    stored_in: 'env (Worker secret only; KV storage was removed in v1.0.0)',
     missing: [] };
   if (!out.has_token) out.missing.push('PRESS_BUFFER_TOKEN');
   if (!Object.keys(channels).length) out.missing.push('a channel id per rail (Buffer: Channels, the 24-character id)');
   return out;
+}
+
+/** The direct senders (v1.0.0). `press.direct` is assembled by the Worker from env secrets named
+ *  per identity — never from KV — so this function only ever sees credentials for the identity
+ *  whose queue it is draining. Returns null when no credential matches the item's channel, which
+ *  is how the caller knows to leave the item queued and say so. A post is `sent` only when the
+ *  platform answered 2xx, the same bar the Buffer path keeps. */
+async function meshDirectSend(it, press, fetcher, dry, now) {
+  const d = (press && press.direct) || {};
+  const asJson = async (r) => {
+    try { if (r && typeof r.json === 'function') return await r.json(); } catch (e) { void e; }
+    try { return JSON.parse(await r.text()); } catch (e) { return null; }
+  };
+  if (it.channel === 'bluesky' && d.bluesky && d.bluesky.handle && d.bluesky.app_password) {
+    const url = 'https://bsky.social/xrpc/com.atproto.repo.createRecord';
+    if (dry) return { status: 'dry', url, due: it.due, chars: String(it.text).length, verified: false };
+    if (!fetcher) return { status: 'queued', sent: false, verified: false, err: 'no fetch in this runtime' };
+    try {
+      const s = await fetcher('https://bsky.social/xrpc/com.atproto.server.createSession', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ identifier: String(d.bluesky.handle), password: String(d.bluesky.app_password) }) });
+      const sj = await asJson(s);
+      if (!sj || !sj.accessJwt || !sj.did) return { status: 'failed', sent: false, verified: false, err: 'bluesky refused the session (handle or app password)' };
+      const r = await fetcher(url, {
+        method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + sj.accessJwt },
+        body: JSON.stringify({ repo: sj.did, collection: 'app.bsky.feed.post',
+          record: { $type: 'app.bsky.feed.post', text: String(it.text).slice(0, 300), createdAt: new Date(now).toISOString() } }) });
+      const ok = r.status >= 200 && r.status < 300;
+      return { status: ok ? 'sent' : 'failed', sent: ok, verified: ok, http: r.status, note: ok ? 'accepted by Bluesky' : 'bluesky refused the post' };
+    } catch (e) { return { status: 'failed', sent: false, verified: false, err: String(e && e.message || e).slice(0, 160) }; }
+  }
+  if (it.channel === 'telegram' && d.telegram && d.telegram.bot_token && d.telegram.chat_id) {
+    const url = 'https://api.telegram.org/bot' + String(d.telegram.bot_token).slice(0, 120) + '/sendMessage';
+    if (dry) return { status: 'dry', url: 'https://api.telegram.org/bot…/sendMessage', due: it.due, chars: String(it.text).length, verified: false };
+    if (!fetcher) return { status: 'queued', sent: false, verified: false, err: 'no fetch in this runtime' };
+    try {
+      const r = await fetcher(url, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ chat_id: String(d.telegram.chat_id), text: String(it.text).slice(0, 1024) }) });
+      const j = await asJson(r);
+      const ok = r.status >= 200 && r.status < 300 && !(j && j.ok === false);
+      return { status: ok ? 'sent' : 'failed', sent: ok, verified: ok, http: r.status, note: ok ? 'accepted by Telegram' : 'telegram refused the post' };
+    } catch (e) { return { status: 'failed', sent: false, verified: false, err: String(e && e.message || e).slice(0, 160) }; }
+  }
+  return null;
 }
 
 /** Send what is due. `dry` returns exactly what would be sent and calls nothing; a real send records
@@ -3479,13 +3529,21 @@ export async function meshPressFlush(items, press, opt) {
   const results = [];
   for (const it of (Array.isArray(items) ? items : [])) {
     if (Date.parse(it.due) > now) { results.push({ id: it.id, channel: it.channel, status: 'waiting', due: it.due }); continue; }
-    // Buffer is only for the rails Buffer can hold. A direct rail is a script with the shop's own key,
-    // an assist surface is a person with a phone, and neither is our call to make or to claim.
+    // Buffer is only for the rails Buffer can hold. An assist surface is a person with a phone,
+    // and that one is not our call to make or to claim.
     if (it.via === 'none') { results.push({ id: it.id, channel: it.channel, status: 'queued', sent: false, verified: false,
       err: 'no API exists for ' + it.channel + ': the item is prepared for a person, and nothing is called posted until they do it' }); continue; }
-    if (it.via === 'direct' || it.via === 'own') { results.push({ id: it.id, channel: it.channel, status: 'queued', sent: false, verified: false,
-      err: it.via === 'own' ? 'published on our own node: the feed is the post'
-        : "a direct rail is sent by the script that holds the key, in the shop's own repo or the owner's box" }); continue; }
+    if (it.via === 'direct' || it.via === 'own') {
+      // v1.0.0: direct rails send from here when the identity's credentials are bound as Worker
+      // secrets — a sender that lives "on the owner's box" is an owner dependency with a power
+      // supply. Unbound, the item stays honestly queued and names the missing secret.
+      const direct = it.via === 'direct' ? await meshDirectSend(it, press, fetcher, dry, now) : null;
+      if (direct) { results.push({ id: it.id, channel: it.channel, due: it.due, ...direct }); continue; }
+      results.push({ id: it.id, channel: it.channel, status: 'queued', sent: false, verified: false,
+        err: it.via === 'own' ? 'published on our own node: the feed is the post'
+          : 'no direct credential bound for ' + it.channel + ' (bind the identity secret, e.g. PRESS_<ID>_' + String(it.channel).toUpperCase() + '_…, and the cron sends it — nobody taps anything)' });
+      continue;
+    }
     const call = meshBufferCall(press, it);
     if (call.err) { results.push({ id: it.id, channel: it.channel, status: 'queued', sent: false, err: call.err, verified: false }); continue; }
     if (dry) { results.push({ id: it.id, channel: it.channel, status: 'dry', url: call.call.url, due: it.due, chars: String(it.text).length, verified: false }); continue; }
@@ -3621,4 +3679,179 @@ export function meshIdentityPlan(identity, storePlan, facts, opt) {
   const comp = meshCompanyBeats(e, facts, o);
   return Object.assign({}, comp, { source: 'company', fallback_from: (storePlan && e.source && e.source.store) ? String(e.source.store) : '',
     blocked: (comp.blocked || []).concat((storePlan && storePlan.blocked) || []) });
+}
+
+/* ── v1.0.0: sellers and leads — the people who sell Tapstall, as data ─────────────────────────
+ * Three kinds of user, and the words now mean one thing everywhere: the OWNER runs the platform,
+ * a SELLER sells Tapstall on the owner's behalf, an OPERATOR sells with it (a shop). A seller is
+ * attributed once, at registration, from the link they shared — never approved per sale, never
+ * tapped per batch. Commission is arithmetic on a recorded payment, and a lead is allocated by
+ * a hash, because round-robin needs a shared counter and a counter is a write somebody can fight
+ * over. Two sellers must never work the same lead: the transition refuses, in one pure function,
+ * so every door that moves a lead refuses the same way. */
+export const SELLER_DEFAULT_PCT = 30;
+export const LEAD_SEGMENTS = ['social_merchants', 'catalog_pdfs', 'dues_collectors', 'directories', 'other'];
+export const LEAD_STATUSES = ['research_hold', 'queued', 'claimed', 'contacted', 'replied', 'trial', 'closed', 'dnc'];
+
+/** A seller code is the bit of a link a person can read aloud: lowercase, short, no tricks. */
+export function cleanSellerCode(x) {
+  const s = String(x || '').toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/-+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24);
+  return /^[a-z0-9][a-z0-9-]{1,23}$/.test(s) ? s : '';
+}
+
+export function commissionFor(amount, pct) {
+  const a = Number(amount) || 0, p = Math.min(90, Math.max(0, Number(pct) || 0));
+  return round2(a * p / 100);
+}
+
+function fnv1a(s) {
+  let h = 2166136261;
+  const t = String(s || '');
+  for (let i = 0; i < t.length; i++) { h ^= t.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  return h >>> 0;
+}
+
+/** Deterministic allocation: the same lead lands with the same seller on every machine, forever,
+ *  with no shared counter to write and no race to lose. Sorted first so the order the codes were
+ *  registered in cannot move a lead between sellers. */
+export function allocateSeller(key, codes) {
+  const list = (Array.isArray(codes) ? codes : []).map(cleanSellerCode).filter(Boolean).sort();
+  if (!list.length) return '';
+  return list[fnv1a(key) % list.length];
+}
+
+const LEAD_PAY_WORDS = /(ecocash|innbucks|one ?money|mukuru|m-?pesa|payshap|payfast|ozow|price list|catalog|catalogue|proof of payment|school fees|membership fee|registration fee)/i;
+const LEAD_SELL_WORDS = /(wa\.me|whatsapp|dm to order|dm for|order on|chat to order|inbox to order)/i;
+
+/** What a lead can prove about itself before a person spends a conversation on it. A signal is a
+ *  fact in the row (a number exists, a source exists, the source itself shows WhatsApp selling or
+ *  payment friction) — never a model's opinion. Two signals is the door out of research_hold. */
+export function leadSignalsOf(input) {
+  const o = input || {};
+  const out = new Set();
+  const phone = digits(o.phone || o.whatsapp || '');
+  if (phone) out.add('phone');
+  if (isEmail(o.email || '')) out.add('email');
+  if (/^https?:\/\//.test(String(o.source_url || o.url || ''))) out.add('source_url');
+  const words = String((o.note || '') + ' ' + (o.source || '') + ' ' + (o.source_url || o.url || ''));
+  if (LEAD_SELL_WORDS.test(words)) out.add('whatsapp_selling');
+  if (LEAD_PAY_WORDS.test(words)) out.add('payment_friction');
+  for (const s of (Array.isArray(o.signals) ? o.signals : [])) {
+    const k = String(s).toLowerCase().replace(/[^a-z_]/g, '').slice(0, 24);
+    if (k) out.add(k);
+  }
+  return [...out].sort();
+}
+
+export function leadScoreOf(lead) {
+  const l = lead || {};
+  const segBonus = { social_merchants: 20, catalog_pdfs: 15, dues_collectors: 15, directories: 10, other: 0 }[l.segment] || 0;
+  let score = Math.min(60, 12 * ((l.signals || []).length)) + segBonus;
+  if (l.business) score += 10;
+  if (/^(ZW|ZA)$/i.test(String(l.country || ''))) score += 10;
+  return Math.min(100, score);
+}
+
+/** One lead, cleaned once, with an id that is a fact about the lead (email, else number, else
+ *  business name) — so the same prospect hunted twice is the same KV key twice, not two rows two
+ *  sellers can both chase. */
+export function cleanLead(input, opt) {
+  const o = input || {}, k = opt || {};
+  const business = meshClip(o.business || o.company || o.shop || '', 80);
+  const email = isEmail(o.email || '') ? String(o.email).toLowerCase().slice(0, 120) : '';
+  const phone = digits(o.phone || o.whatsapp || '').replace(/^\+/, '').slice(0, 15);
+  const segment = LEAD_SEGMENTS.includes(String(o.segment || '')) ? String(o.segment) : 'other';
+  const lead = {
+    business, name: meshClip(o.name || o.contact || '', 60), email, phone,
+    whatsapp: phone, country: meshClip(o.country || '', 40), segment,
+    source: meshClip(o.source || '', 80),
+    source_url: /^https?:\/\//.test(String(o.source_url || o.url || '')) ? String(o.source_url || o.url).slice(0, 300) : '',
+    note: meshClip(o.note || '', 300),
+    seller_code: cleanSellerCode(o.seller_code || o.seller || ''),
+    status: 'research_hold', claimed_by: '', touches: 0, shop: '',
+    created_at: new Date(k.now || Date.now()).toISOString(),
+  };
+  lead.signals = leadSignalsOf({ ...o, ...lead });
+  lead.score = leadScoreOf(lead);
+  lead.status = lead.signals.length >= 2 ? 'queued' : 'research_hold';
+  const dedupe = email || phone || slug(business);
+  lead.id = dedupe ? 'ld-' + fnv1a(dedupe).toString(36) + fnv1a(dedupe + '#tapstall').toString(36) : '';
+  lead.dedupe = dedupe;
+  return lead;
+}
+
+const LEAD_TERMINAL = new Set(['closed', 'dnc']);
+
+/** The anti-collision rule, pure: a lead claimed by one seller cannot be claimed, contacted or
+ *  closed by another (the owner, actor 'owner', is the one exception, because somebody has to be
+ *  able to unstick a departed seller's book). KV has no compare-and-swap on the free plan, so the
+ *  guard is judged here on the document as read, and the window it leaves is seconds wide — the
+ *  same honesty the limiter keeps about isolates. */
+export function leadTransition(lead, action, actor, opt) {
+  const o = opt || {}, now = o.now || Date.now();
+  const who = String(actor || ''), act = String(action || '');
+  const cur = (lead && typeof lead === 'object') ? { ...lead } : null;
+  if (!cur || !cur.id) return { ok: false, error: 'no such lead' };
+  const mine = !cur.claimed_by || cur.claimed_by === who || who === 'owner';
+  const conflict = () => ({ ok: false, conflict: true, error: 'lead is ' + cur.status + ' by ' + (cur.claimed_by || 'another seller') + ' — one prospect, one voice' });
+  if (LEAD_TERMINAL.has(cur.status) && act !== 'reopen') return { ok: false, error: 'lead is ' + cur.status + '; reopen it first' };
+  const stamp = (next) => ({ ok: true, lead: { ...cur, ...next, updated_at: new Date(now).toISOString() } });
+  if (act === 'claim') {
+    if (!mine && ['claimed', 'contacted', 'replied', 'trial'].includes(cur.status)) return conflict();
+    return stamp({ status: 'claimed', claimed_by: who });
+  }
+  if (act === 'release') { if (!mine) return conflict(); return stamp({ status: cur.signals && cur.signals.length >= 2 ? 'queued' : 'research_hold', claimed_by: '' }); }
+  if (act === 'contacted') {
+    if (!mine) return conflict();
+    const days = Math.min(30, Math.max(1, Number(o.follow_days) || 3));
+    return stamp({ status: 'contacted', claimed_by: cur.claimed_by || who, touches: (Number(cur.touches) || 0) + 1,
+      last_touch_at: new Date(now).toISOString(), next_follow_at: new Date(now + days * 864e5).toISOString() });
+  }
+  if (act === 'replied') { if (!mine) return conflict(); return stamp({ status: 'replied', claimed_by: cur.claimed_by || who }); }
+  if (act === 'trial') { if (!mine) return conflict(); return stamp({ status: 'trial', claimed_by: cur.claimed_by || who, shop: slug(String(o.shop || cur.shop || '')).slice(0, 30) }); }
+  if (act === 'closed') { if (!mine) return conflict(); return stamp({ status: 'closed', shop: slug(String(o.shop || cur.shop || '')).slice(0, 30) }); }
+  if (act === 'dnc') { if (!mine) return conflict(); return stamp({ status: 'dnc' }); }
+  if (act === 'follow') {
+    if (!mine) return conflict();
+    const days = Math.min(60, Math.max(1, Number(o.follow_days) || 2));
+    return stamp({ next_follow_at: new Date(now + days * 864e5).toISOString() });
+  }
+  if (act === 'reopen') {
+    if (who !== 'owner' && !mine) return conflict();
+    return stamp({ status: 'queued', claimed_by: '' });
+  }
+  return { ok: false, error: 'unknown lead action', actions: ['claim', 'release', 'contacted', 'replied', 'trial', 'closed', 'dnc', 'follow', 'reopen'] };
+}
+
+/** The scoreboard, derived at read time from the same rows everything else reads: sellers, the
+ *  shops attributed to them, and recorded sales. Nothing here is stored, so a number cannot drift
+ *  from the ledger that produced it. Unattributed shops and sales land in the house row, so the
+ *  column totals always reconcile with the platform's. */
+export function sellerBoard(sellers, stores, sales, opt) {
+  const o = opt || {}, now = o.now || Date.now();
+  const rows = new Map();
+  const row = (code) => {
+    if (!rows.has(code)) rows.set(code, { code, name: code ? '' : 'Direct / house', active: !!code, pct: 0, clicks: 0,
+      shops: 0, live: 0, trials: 0, paying: 0, expiring_14d: 0, sales_count: 0, revenue: 0, commission: 0 });
+    return rows.get(code);
+  };
+  for (const s of (Array.isArray(sellers) ? sellers : [])) {
+    const r = row(cleanSellerCode(s.code || ''));
+    r.name = String(s.name || r.name || s.code || ''); r.active = s.active !== false;
+    r.pct = Number(s.commission_pct ?? s.pct ?? SELLER_DEFAULT_PCT) || 0;
+    r.clicks = Number(s.clicks) || 0;
+  }
+  row('');
+  for (const st of (Array.isArray(stores) ? stores : [])) {
+    const r = row(cleanSellerCode(st.seller_code || ''));
+    const left = ((Number(st.paid_until) || 0) - now) / 864e5;
+    r.shops++;
+    if (left > 0 && !st.suspended) { r.live++; if (st.plan === 'free60') r.trials++; else r.paying++; if (left <= 14) r.expiring_14d++; }
+  }
+  for (const s of (Array.isArray(sales) ? sales : [])) {
+    const r = row(cleanSellerCode(s.seller_code || ''));
+    r.sales_count++; r.revenue = round2(r.revenue + (Number(s.amount) || 0));
+    r.commission = round2(r.commission + (Number(s.commission) || 0));
+  }
+  return [...rows.values()].sort((a, b) => (b.commission - a.commission) || (b.shops - a.shops) || String(a.code).localeCompare(String(b.code)));
 }

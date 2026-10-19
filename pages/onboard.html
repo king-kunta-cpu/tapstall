@@ -475,7 +475,10 @@ q('#w').onsubmit = function (e) {
     zig_rate: Number(val('zig_rate')) || 0, surcharge_mode: q('#surcharge_mode').value,
     delivery_fee: Number(val('delivery_fee')) || 0, free_over: Number(val('free_over')) || 0,
     unique_change: q('#unique_change').checked, require_optin: q('#require_optin').checked,
-    owner_email: val('owner_email')
+    owner_email: val('owner_email'),
+    // Who brought this shop here is a fact about the link, captured once and judged by the
+    // Worker against the seller registry — a code nobody owns attributes nothing.
+    ref: (function () { try { var qq = new URLSearchParams(location.search); var r = (qq.get('ref') || qq.get('a') || sessionStorage.getItem('ts_ref') || '').replace(/[^a-zA-Z0-9-]/g, '').slice(0, 24); if (r) sessionStorage.setItem('ts_ref', r); return r; } catch (e) { return ''; } })()
   };
   var b = q('#go'); b.disabled = true; b.textContent = 'Opening…';
   fetch('/api/register', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })

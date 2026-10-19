@@ -36,6 +36,7 @@ import {
   meshQueueItem, meshQueueMerge, meshPress, meshPressFlush, MESH_QUEUE_DEFAULTS, MESH_BUFFER_CHANNEL,
   meshRegister, meshCompanyIdentities, meshCompanyBeats, meshPressLedger, MESH_ID_CLASSES, MESH_ID_RAIL_DEFAULTS,
   meshIdentityPlan,
+  cleanSellerCode, allocateSeller, cleanLead, leadTransition, sellerBoard, commissionFor, SELLER_DEFAULT_PCT,
   MESH_PUBLISH, MESH_BUFFER_FREE, MESH_DRIP, meshRailsTotal, meshRailHealth, meshDrip,
   MESH_RAILS, MESH_BUDGET,
   orderRow, packRow, unpackRow, mergeRows, MAX_ORDERS_KEPT,   // the ledger row, and the cap on it
@@ -44,7 +45,7 @@ import {
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '0.9.14';
+const VERSION = '1.0.0';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
@@ -315,6 +316,16 @@ async function route(req, url, env, ctx) {
   if (p === '/api/press/accounts' && req.method === 'POST') return pressAccounts(req, env);
   if (p === '/api/press/run' && req.method === 'POST') return pressRun(req, env);
   if (p === '/api/mesh/publish' && req.method === 'POST') return meshPublish(req, env);
+  // v1.0.0: sellers — the people who sell Tapstall. A tracked link attributes a shop to the
+  // seller whose link brought it, once, at birth; the seller's own view is read-only and carries
+  // no buyer data and no shop credentials. Leads are worked by sellers, allocated by hash, and
+  // the anti-collision rule lives in core so every door refuses the same way.
+  if ((m = p.match(/^\/(?:r|g)\/([a-z0-9][a-z0-9-]{1,23})$/))) return sellerRedirect(url, env, m[1]);
+  if (p === '/api/seller') return sellerView(url, env);
+  if (p === '/api/leads/ingest' && req.method === 'POST') return leadsIngest(req, env);
+  if (p === '/api/leads' && req.method === 'GET') return leadsListSeller(url, env);
+  if (p === '/api/leads/act' && req.method === 'POST') return leadsAct(req, env);
+  if (p === '/api/leads/sheets-feed') return sheetsFeed(url, env);
 
   // The one-tap confirm link: GET renders an inert page, the browser posts.
   if ((m = p.match(/^\/c\/([A-Za-z0-9._-]{20,400})$/))) return confirmPage(env, m[1]);
@@ -362,6 +373,13 @@ async function route(req, url, env, ctx) {
     if (req.method === 'POST') return opsGate(req, env, () => opsRailsWrite(req, env));
     return opsGate(req, env, () => opsRailsRead(env));
   }
+  if (p === '/ops/api/sellers') return opsGate(req, env, () => opsSellers(req, env));
+  if (p === '/ops/api/leads') return opsGate(req, env, async () => {
+    const leads = await listLeads(env, { limit: 500 });
+    const by_status = {};
+    for (const l of leads) by_status[l.status] = (by_status[l.status] || 0) + 1;
+    return json({ ok: true, leads, by_status, count: leads.length }, 200, NOSTORE);
+  });
   if (p === '/ops/api/link') return json({ ok: false, retired: true, error: 'Retired with link sign-in: reset a merchant’s PIN with action “reset_pin” on /ops/api/store.' }, 410);
   if ((m = p.match(/^\/renew\/([A-Za-z0-9_-]{6,40})$/))) return renewPage(env, m[1]);
   if (p === '/api/admin-put' && req.method === 'POST') return adminPut(req, env);
@@ -1195,6 +1213,16 @@ async function register(req, url, env) {
   if (!digits(b.whatsapp || b.phone || '')) return json({ ok: false, error: 'WhatsApp number required (with country code)' }, 422);
   if (await getStore(env, handle)) return json({ ok: false, error: 'handle already taken — try another, or use your renew link' }, 409);
 
+  // Seller attribution is a fact about the link the merchant arrived on, judged once, here at
+  // birth: a code that names no active seller attributes nothing, and no later edit can move a
+  // shop between sellers (a shop's seller is history, not a setting). One read, only when a
+  // code arrived at all, so the common door costs what it always cost.
+  let sellerCode = cleanSellerCode(b.ref || b.a || b.seller || b.seller_code || '');
+  if (sellerCode) {
+    const sd = await sellerDoc(env, sellerCode);
+    if (!sd || sd.active === false) sellerCode = '';
+  }
+
   const adminKey = randomKey(16);
   const renewToken = alnumToken(14);   // path-safe: base64url -/_ would break the /renew/ route
   const st = {
@@ -1242,6 +1270,8 @@ async function register(req, url, env) {
     paid_until: Date.now() + FREE_DAYS * 864e5,
     plan: 'free60',
     term_days: FREE_DAYS,
+    seller_code: sellerCode || undefined,
+    seller_at: sellerCode ? new Date().toISOString() : undefined,
   };
   st.renew_url = `${url.origin}/renew/${renewToken}`;
   /* The merchant's whole way in, created here and shown once: a key (their store
@@ -1265,6 +1295,7 @@ async function register(req, url, env) {
   }
   return json({
     ok: true, handle,
+    ...(st.seller_code ? { seller_code: st.seller_code } : {}),
     store_url: `${url.origin}/s/${handle}`,
     key: handle, pin, renew_url: st.renew_url,
     pin_note: 'Show this PIN to nobody. Change it inside the dashboard any time; if it is lost, “I lost my PIN” on the sign-in screen resets it from the store’s own details — no operator, no waiting.',
@@ -1476,6 +1507,7 @@ async function hookFlutterwave(req, url, env, ctx) {
   await writeStore(env, st);
   await env.STORES.delete('tx:' + txRef);
   await env.STORES.delete('term:' + st.handle);
+  await recordSale(env, st, { amount: tx.amount, currency: tx.currency, provider: 'flutterwave', ref: txRef, days: tx.days });
   return say({ ok: true, activated: st.handle, paid_until: new Date(st.paid_until).toISOString() });
 }
 
@@ -1530,6 +1562,7 @@ async function hookPayfast(req, url, env, ctx) {
   await env.STORES.delete('tx:' + ref);
   await writeStore(env, st);
   await env.STORES.delete('term:' + st.handle);
+  await recordSale(env, st, { amount: tx.amount, currency: tx.currency, provider: 'payfast', ref, days: tx.days });
   return say({ ok: true, activated: st.handle, paid_until: new Date(st.paid_until).toISOString(), days: tx.days });
 }
 
@@ -1852,6 +1885,21 @@ async function runCron(env) {
       out.crypto.errors += (s.errors ? s.errors.length : 0);
       if (nightly) { const n = await cryptoNightly(env, st); if (n) out.crypto.reports++; }
     } catch (e) { out.crypto.errors++; }
+  }
+  /* v1.0.0: the scheduler. One Cloudflare cron is the only clock in the system; everything
+   * periodic hangs off it in slots, each slot claimed in one write so a retried tick cannot
+   * double-fire. Nothing here waits for a person: the press composes and sends under standing
+   * policy (caps, provenance, rail health judge it), the lead hunt is dispatched to Actions
+   * when a scoped token is bound, and the nightly digest records the exceptions — expiries,
+   * unrecognised payment references, dead rails — which are the only lines a human is for.
+   * A slot that fails says so in the return value and never takes the expiry sweep down with it. */
+  try { out.press = await pressTick(env); }
+  catch (e) { out.press = { error: String(e && e.message || e).slice(0, 160) }; }
+  try { out.dispatch = await dispatchTick(env); }
+  catch (e) { out.dispatch = { error: String(e && e.message || e).slice(0, 160) }; }
+  if (nightly) {
+    try { out.digest = await writeDigest(env); }
+    catch (e) { out.digest = { error: String(e && e.message || e).slice(0, 160) }; }
   }
   return out;
 }
@@ -2850,19 +2898,40 @@ async function pressAccounts(req, env) {
   return json({ ok: true, action: 'register', id: res.id, identity: { class: res.identity.class, token_env: res.identity.token_env,
     rails: Object.keys(res.identity.rails), has_token_in_env: !!env[res.identity.token_env] }, count: res.count });
 }
-async function pressRun(req, env) {
-  const denied = await pressAdmin(req, env); if (denied) return denied;
-  const b = await readBody(req).catch(() => ({}));
-  const dry = b.dry === true;
+/** The env names a direct credential answers to, per identity: PRESS_<TAG>_BLUESKY_APP_PASSWORD,
+ *  PRESS_<TAG>_TELEGRAM_BOT_TOKEN, … where TAG is the identity id upper-cased and stripped
+ *  (owner → OWNER, seller:a → SELLERA). The registry keeps only handles and channel ids; the
+ *  secrets themselves live where secrets live, so offboarding a seller is deleting their secret. */
+function directCredsFor(env, e, id) {
+  const tag = String(id || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const rails = (e && e.rails) || {};
+  const out = {};
+  const bskyPw = env['PRESS_' + tag + '_BLUESKY_APP_PASSWORD'] || env.PRESS_BLUESKY_APP_PASSWORD || '';
+  const bskyHandle = env['PRESS_' + tag + '_BLUESKY_HANDLE'] || (rails.bluesky && rails.bluesky.handle) || env.PRESS_BLUESKY_HANDLE || '';
+  if (bskyHandle || bskyPw) out.bluesky = { handle: String(bskyHandle), app_password: String(bskyPw) };
+  const tgTok = env['PRESS_' + tag + '_TELEGRAM_BOT_TOKEN'] || env.PRESS_TELEGRAM_BOT_TOKEN || '';
+  const tgChat = env['PRESS_' + tag + '_TELEGRAM_CHAT_ID'] || (rails.telegram && rails.telegram.channel_id) || '';
+  if (tgTok || tgChat) out.telegram = { bot_token: String(tgTok), chat_id: String(tgChat) };
+  return out;
+}
+
+/** One press window, callable by the clock as readily as by a person: compose for each identity,
+ *  queue in the pipeline's own format, send what is due, write the outcome where rail health is
+ *  judged from. This is the function the cron runs (v1.0.0) — the HTTP door below is an override
+ *  and a diagnostic, never the trigger, because a batch that waits for a tap is a queue that
+ *  grows behind one person's attention. */
+async function runPress(env, origin, opt) {
+  const o = opt || {};
+  const dry = !!o.dry;
   const reg = await pressRegistry(env);
-  const only = b.id ? [String(b.id).toLowerCase()] : null;
-  const origin = new URL(req.url).origin;
+  const only = o.id ? [String(o.id).toLowerCase()] : null;
   const out = [];
   for (const id of (only || Object.keys(reg))) {
     const e = reg[id];
     if (!e) { out.push({ id, ok: false, error: 'not registered' }); continue; }
     const press = { channels: Object.fromEntries(Object.entries(e.rails || {}).map(([k, v]) => [v.channel || k, v.channel_id || ''])),
-      buffer_token: env[e.token_env] || '', board: (e.rails && e.rails.pinterest && e.rails.pinterest.board) || '' };
+      buffer_token: env[e.token_env] || '', board: (e.rails && e.rails.pinterest && e.rails.pinterest.board) || '',
+      direct: directCredsFor(env, e, id) };
     let plan;
     if (e.source && e.source.store) {
       const doc = await env.STORES.get('store:' + e.source.store, 'json').catch(() => null) || {};
@@ -2873,8 +2942,6 @@ async function pressRun(req, env) {
     } else {
       plan = meshCompanyBeats(e, { price_usd: PRICE_USD, free_days: FREE_DAYS, feed_ok: true, price_ok: true }, { origin: origin, now: Date.now() });
     }
-    // the identity's own rails, not the drafting surface and not the shop's channels: an item addressed
-    // to whatsapp_status from a seller run would sit in the queue forever, since nothing sends there
     const idRails = Object.keys(e.rails || {});
     const items = (plan.beats || []).map((beat, i) => meshQueueItem(Object.assign({}, beat, { seq: i, to: idRails.length ? idRails : (beat.to || []) }), { landing: origin + '/fees', store: id, now: Date.now(),
       channel_id: ((e.rails || {})[beat.rail] || {}).channel_id || press.channels[beat.rail] || '', board: press.board }));
@@ -2890,9 +2957,17 @@ async function pressRun(req, env) {
       results: flush.results.map((r) => ({ channel: r.channel, status: r.status, due: r.due, err: r.err || r.note || '' })),
       material: plan.source, fallback_from: plan.fallback_from || '', rail_health: meshRailHealth(ledger) });
   }
+  return out;
+}
+
+async function pressRun(req, env) {
+  const denied = await pressAdmin(req, env); if (denied) return denied;
+  const b = await readBody(req).catch(() => ({}));
+  const dry = b.dry === true;
+  const out = await runPress(env, new URL(req.url).origin, { dry, id: b.id });
   return json({ ok: true, dry: dry, identities: out.length, ran: out,
     note: dry ? 'dry: the exact items and the exact Buffer call, sent to nobody'
-      : 'sent where the env secret existed, queued where it did not; nothing is counted as posted unless the platform answered' });
+      : 'sent where the env secret existed, queued where it did not; nothing is counted as posted unless the platform answered. The cron window runs this on its own — this door is an override, never the trigger.' });
 }
 
 async function meshPressSet(req, env) {
@@ -2911,7 +2986,8 @@ async function meshPressSet(req, env) {
     }
   }
   for (const k of ['board', 'image_base', 'landing']) if (typeof b[k] === 'string') next[k] = b[k].slice(0, 120);
-  if ('buffer_token' in b) next.buffer_token = (b.buffer_token === null || b.buffer_token === '') ? '' : String(b.buffer_token).slice(0, 200);
+  if ('buffer_token' in b) return json({ ok: false, error: 'secrets are never stored in KV: bind PRESS_BUFFER_TOKEN as a Worker secret (or the identity secret in the press registry) and this wiring uses it without holding it' }, 400);
+  delete next.buffer_token;   // clear one saved by the old shape, so a stale credential cannot linger in a document every handler can read
   if (b.cadence && typeof b.cadence === 'object') next.cadence = b.cadence;
   doc.press = next;
   try { await env.STORES.put('store:' + handle, JSON.stringify(doc)); }
@@ -3709,6 +3785,7 @@ function opsSummarise(st, rows) {
   const today = rows.filter(r => String(r.at || '').slice(0, 10) === new Date(now).toISOString().slice(0, 10));
   return {
     handle: st.handle, shop_name: st.shop_name, currency: st.currency || 'USD', rail: st.rail,
+    seller: st.seller_code || '',
     plan: st.plan || 'free60', left, suspended: !!st.suspended, created_at: st.created_at,
     paid_until: st.paid_until || 0, feed_products: st.feed_cache ? (st.feed_cache.count || 0) : 0,
     feed_error: st.feed_cache ? (st.feed_cache.error || null) : 'never fetched',
@@ -3831,7 +3908,24 @@ async function opsHealth(env) {
     }
     hooks.hours.sort();
   } catch (e) { hooks.error = String((e && e.message) || e).slice(0, 120); }
-  return json({ ok: true, selftest: t, pages, ci, cron: t.cron_heartbeat || null, version: VERSION, templates: OPS_TPL_NAMES, hooks },
+  // The pipeline at a glance, for the one question that matters at 07:00: what needs a person,
+  // and what is merely unarmed? Arming is a one-time policy act (bind a secret); after that the
+  // slots run themselves and this block is how the owner can tell.
+  const pipeline = { digest: null, press_last: null, armed: {}, sellers_active: 0, press_identities: [] };
+  try {
+    pipeline.digest = await env.ORDERS.get('digest:last', 'json').catch(() => null);
+    pipeline.press_last = await env.ORDERS.get('press:last', 'json').catch(() => null);
+    const reg = await pressRegistry(env);
+    pipeline.press_identities = Object.entries(reg).map(([id, e]) => ({ id, class: e.class,
+      token_env: e.token_env, token_present: !!env[e.token_env],
+      direct_bound: Object.keys(directCredsFor(env, e, id)) }));
+    pipeline.armed = {
+      flutterwave: !!env.FW_SECRET, payfast: !!env.PAYFAST_PASSPHRASE, email: !!env.EMAIL,
+      gh_dispatch: !!env.GH_DISPATCH_TOKEN, trongrid_key: !!env.TRONGRID_KEY,
+    };
+    pipeline.sellers_active = (await listSellers(env)).filter((s) => s.active !== false).length;
+  } catch (e) { pipeline.error = String((e && e.message) || e).slice(0, 120); }
+  return json({ ok: true, selftest: t, pages, ci, cron: t.cron_heartbeat || null, version: VERSION, templates: OPS_TPL_NAMES, hooks, pipeline },
     200, { 'Cache-Control': 'no-store' });
 }
 
@@ -3938,6 +4032,40 @@ async function opsStoreAction(req, env) {
     return json({ ok: true, handle, key: handle, pin,
       note: 'Read the PIN out once; after that it exists nowhere but in their phone. They can change it themselves inside the dashboard.' });
   }
+  if (act === 'recognise_ref') {
+    // A manual payment (cash, EcoCash to the owner's number) has no webhook to believe, so
+    // recognising it is the one money judgement that stays with a person — they can see the
+    // money in their own wallet. Everything after that judgement is the machine's: the plan
+    // extends, the filed reference is consumed (never recognisable twice), the sale and the
+    // seller's commission land on the ledger, and both logs say who did it. Before this lever
+    // the same job took grant_year plus clear_refs and recorded no sale at all.
+    const key = 'ref:' + handle;
+    const refs = (await env.STORES.get(key, 'json').catch(() => null)) || [];
+    if (!refs.length) return json({ ok: false, error: 'no filed payment reference for this store' }, 404);
+    const want = String(b.ref || '');
+    const idx = want ? refs.findIndex((r) => String(r.ref || '') === want) : 0;
+    if (idx < 0) return json({ ok: false, error: 'that reference is not on file for this store', filed: refs.map((r) => r.ref) }, 404);
+    const pick = refs[idx];
+    const days = Math.min(1460, Math.max(30, Number(b.days) || 365));
+    const amount = Math.min(100000, Math.max(0, Number(b.amount) || Number(pick.amount) || round2(PRICE_USD * days / 365)));
+    const before = { plan: st.plan, paid_until: st.paid_until, suspended: !!st.suspended };
+    st.paid_until = Math.max(Date.now(), st.paid_until || 0) + days * 864e5;
+    st.plan = days >= 300 ? 'annual' : 'term';
+    st.suspended = false; st.warned_at = null;
+    const rest = refs.filter((_, i) => i !== idx);
+    if (rest.length) await env.STORES.put(key, JSON.stringify(rest), { expirationTtl: 30 * 86400 });
+    else await env.STORES.delete(key);
+    await env.STORES.delete('term:' + handle);
+    await writeStore(env, st);
+    const sale = await recordSale(env, st, { amount, provider: 'manual_ref', ref: String(pick.ref || ''), days });
+    await pushOpsLog(env, { act: 'recognise_ref', handle, note: String(pick.ref || '') + ' -> +' + days + 'd, ' + amount + ' USD' + (sale && sale.seller_code ? ', commission ' + sale.commission + ' to ' + sale.seller_code : ''), ip: ipOf(req) });
+    const logged = await pushAudit(env, st, { act: 'operator:recognise_ref', via: 'ops', fields: ['paid_until', 'plan'], before: opsMaskTerm(before), after: opsMaskTerm({ plan: st.plan, paid_until: st.paid_until, suspended: false }) });
+    return json({ ok: true, handle, action: 'recognise_ref', recognised: pick.ref, days, amount,
+      paid_until: new Date(st.paid_until).toISOString(), plan: st.plan,
+      commission: sale ? { seller: sale.seller_code || null, amount: sale.commission } : null,
+      refs_left: rest.length, logged,
+      note: 'Plan extended and the reference consumed — it cannot be recognised twice. The sale is on the ledger' + (sale && sale.seller_code ? ' with commission to ' + sale.seller_code : '') + '.' });
+  }
 
   // An operator fixing a price or a sold-out tick must not be able to say anything the merchant
   // cannot say about their own shop, so this lever does not have its own edit path: the payload
@@ -4007,7 +4135,7 @@ async function opsStoreAction(req, env) {
   else if (act === 'clear_pending') { delete st.pending; done = 'reverted a queued settings change'; }
   else if (act === 'clear_refs') { await env.STORES.delete('ref:' + handle); delete st.pending_ref_note; done = 'cleared the payment references the merchant filed'; }
   else if (act === 'revoke') { st.auth_gen = Date.now().toString(36); st.admin_token = randomKey(16); delete st.pending; await rotateRenewLink(env, st); done = 'revoked every link, key and cookie, including the renew link'; }
-  else return json({ ok: false, error: 'unknown action', actions: ['suspend', 'reinstate', 'extend7', 'extend30', 'grant_year', 'reset_free', 'clear_pending', 'clear_refs', 'revoke', 'notify', 'reset_pin', 'menu', 'menu_revert'] }, 422);
+  else return json({ ok: false, error: 'unknown action', actions: ['suspend', 'reinstate', 'extend7', 'extend30', 'grant_year', 'reset_free', 'clear_pending', 'clear_refs', 'revoke', 'notify', 'reset_pin', 'menu', 'menu_revert', 'recognise_ref'] }, 422);
 
   await writeStore(env, st);
   const after = { plan: st.plan, paid_until: st.paid_until, suspended: !!st.suspended };
@@ -4280,3 +4408,369 @@ async function opsTemplateWrite(req, env) {
   return json({ ok: true, name, bytes: now.length, was: was ? was.length : 0, matches: now === html, hot: 'no redeploy needed — this is the live copy', note: name === 'sample-menu' ? 'CSV published.' : 'Live for the next request.' });
 }
 
+
+/* ── v1.0.0: sellers, leads and the scheduler slots ─────────────────────────────────────────────
+ * The people layer the doctrine names. OWNER sets policy once (registers a seller, binds a
+ * secret, reads the exception digest). SELLERS work their own links, leads and conversations.
+ * OPERATORS never meet any of this. Nothing below asks anybody to approve a batch: attribution
+ * is judged at registration, leads are allocated by hash, commission is arithmetic on a recorded
+ * payment, and the counters a human would have to babysit are derived at read time. */
+
+async function listKeys(ns, prefix, cap = 1000) {
+  const out = [];
+  if (!ns) return out;
+  let cursor, loops = 0;
+  do {
+    const l = await ns.list({ prefix, limit: 1000, cursor });
+    for (const k of (l.keys || [])) out.push(String(k.name));
+    cursor = l.list_complete ? null : l.cursor;
+  } while (cursor && loops++ < 5 && out.length < cap);
+  return out.slice(0, cap);
+}
+
+/* ---- sellers ---- */
+async function sellerDoc(env, code) {
+  const c = cleanSellerCode(code);
+  if (!c || !env.STORES) return null;
+  try { return await env.STORES.get('seller:' + c, 'json'); } catch (e) { return null; }
+}
+async function listSellers(env) {
+  const keys = await listKeys(env.STORES, 'seller:', 500);
+  const out = [];
+  for (const k of keys) {
+    try { const d = await env.STORES.get(k, 'json'); if (d && d.code) out.push(d); } catch (e) { void e; }
+  }
+  return out.sort((a, b) => String(a.code).localeCompare(String(b.code)));
+}
+function publicSeller(d) {
+  if (!d) return null;
+  return { code: d.code, name: d.name || '', active: d.active !== false,
+    commission_pct: Number(d.commission_pct ?? SELLER_DEFAULT_PCT) || 0,
+    whop: d.whop || '', clicks: Number(d.clicks) || 0, created_at: d.created_at || null,
+    link_path: '/r/' + d.code, onboard_path: '/onboard?ref=' + d.code };
+}
+async function sellerAuth(env, codeIn, keyIn) {
+  const code = cleanSellerCode(codeIn);
+  const key = String(keyIn || '');
+  if (!code || !key) return null;
+  const doc = await sellerDoc(env, code);
+  if (!doc || doc.active === false || !doc.key_hash) return null;
+  const h = await hash(code + ':' + key);
+  return timingSafeEq(h, String(doc.key_hash)) ? doc : null;
+}
+/** Owner-as-seller for the sheets feed and lead doors: code `owner` with the platform secret.
+ *  Returns a sentinel doc so callers can tell "sees everything" from "sees their own book". */
+async function leadActor(env, codeIn, keyIn) {
+  if (String(codeIn || '') === 'owner' && env.ADMIN_SECRET && keyIn && timingSafeEq(String(keyIn), String(env.ADMIN_SECRET))) {
+    return { code: 'owner', owner: true, active: true };
+  }
+  return sellerAuth(env, codeIn, keyIn);
+}
+async function listSales(env) {
+  const keys = await listKeys(env.STORES, 'sale:', 2000);
+  const out = [];
+  for (const k of keys) {
+    try { const s = await env.STORES.get(k, 'json'); if (s) out.push(s); } catch (e) { void e; }
+  }
+  return out.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+}
+/** One payment, one sale row, commission attached at the seller's standing rate. Best-effort by
+ *  design: a spent write budget must never un-activate a shop that really paid — the activation
+ *  already happened on the store document, and this row is the bookkeeping that follows it. */
+async function recordSale(env, st, sale) {
+  try {
+    if (!env.STORES || !st || !st.handle) return null;
+    const code = cleanSellerCode(st.seller_code || '');
+    let pct = 0;
+    if (code) {
+      const sd = await sellerDoc(env, code);
+      pct = sd ? (Number(sd.commission_pct ?? SELLER_DEFAULT_PCT) || 0) : 0;
+    }
+    const amount = round2(Number(sale && sale.amount) || 0);
+    const row = { handle: st.handle, seller_code: code, amount,
+      currency: String((sale && sale.currency) || 'USD').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3) || 'USD',
+      days: Number(sale && sale.days) || 365, pct, commission: commissionFor(amount, pct),
+      provider: String((sale && sale.provider) || ''), ref: String((sale && sale.ref) || '').slice(0, 80),
+      at: new Date().toISOString() };
+    await env.STORES.put('sale:' + st.handle + ':' + Date.now().toString(36) + alnumToken(6), JSON.stringify(row));
+    return row;
+  } catch (e) { return null; }
+}
+async function boardInputs(env) {
+  const sellers = await listSellers(env);
+  const handles = (await listKeys(env.STORES, 'store:', 1000)).map((k) => k.slice('store:'.length)).filter(Boolean);
+  const stores = [];
+  for (const h of handles) {
+    try { const st = await env.STORES.get('store:' + h, 'json'); if (st) stores.push(st); } catch (e) { void e; }
+  }
+  const sales = await listSales(env);
+  return { sellers, stores, sales };
+}
+const sellerClickBuf = new Map();
+async function sellerRedirect(url, env, codeIn) {
+  const code = cleanSellerCode(codeIn);
+  const doc = code ? await sellerDoc(env, code) : null;
+  if (!doc || doc.active === false) return redirect(url.origin + '/onboard');
+  // A click is telemetry, not money: count in the isolate and flush every tenth, so a shared
+  // link cannot spend the account's 1,000 daily writes one redirect at a time. Attribution —
+  // the number money hangs off — is judged exactly, at registration.
+  const n = (sellerClickBuf.get(code) || 0) + 1;
+  if (n >= 10) {
+    sellerClickBuf.set(code, 0);
+    try { doc.clicks = (Number(doc.clicks) || 0) + n; await env.STORES.put('seller:' + code, JSON.stringify(doc)); } catch (e) { void e; }
+  } else sellerClickBuf.set(code, n);
+  return redirect(url.origin + '/onboard?ref=' + code);
+}
+async function opsSellers(req, env) {
+  if (req.method !== 'POST') {
+    const { sellers, stores, sales } = await boardInputs(env);
+    return json({ ok: true, sellers: sellers.map(publicSeller), board: sellerBoard(sellers, stores, sales),
+      note: 'Registering a seller is a policy act, done once per person. After that their link attributes shops by itself, their leads allocate by hash, and commission is arithmetic on recorded payments — nothing routes through the owner per sale.' }, 200, { 'Cache-Control': 'no-store' });
+  }
+  if ((reqHeader(req, 'x-tapstall-confirm') || '') !== '1') return json({ ok: false, error: 'missing x-tapstall-confirm header' }, 403);
+  const b = await readBody(req).catch(() => ({}));
+  const act = String(b.action || 'register');
+  const code = cleanSellerCode(b.code || '');
+  if (!code) return json({ ok: false, error: 'code: 2-24 chars, lowercase a-z 0-9 and dashes (it is the bit of the link a person reads aloud)' }, 422);
+  const existing = await sellerDoc(env, code);
+  if (act === 'deactivate' || act === 'activate') {
+    if (!existing) return json({ ok: false, error: 'no such seller' }, 404);
+    existing.active = act === 'activate';
+    await env.STORES.put('seller:' + code, JSON.stringify(existing));
+    await pushOpsLog(env, { act: 'seller_' + act, handle: code, note: existing.name || '', ip: ipOf(req) });
+    return json({ ok: true, seller: publicSeller(existing), note: act === 'deactivate'
+      ? 'Deactivated: their links land on plain onboarding and no new leads allocate to them. Shops already attributed stay attributed — history is not edited.'
+      : 'Active again: links and allocation resume.' });
+  }
+  if (act === 'rotate_key') {
+    if (!existing) return json({ ok: false, error: 'no such seller' }, 404);
+    const key = randomKey(18);
+    existing.key_hash = await hash(code + ':' + key);
+    await env.STORES.put('seller:' + code, JSON.stringify(existing));
+    await pushOpsLog(env, { act: 'seller_rotate_key', handle: code, note: '', ip: ipOf(req) });
+    return json({ ok: true, seller: publicSeller(existing), seller_key: key, note: 'Shown once. The old key is dead everywhere (seller view, leads, sheets feed).' });
+  }
+  if (act !== 'register') return json({ ok: false, error: 'unknown action', actions: ['register', 'activate', 'deactivate', 'rotate_key'] }, 422);
+  const name = String(b.name || '').trim().slice(0, 60);
+  if (!name && !existing) return json({ ok: false, error: 'name required (the person, not the code)' }, 422);
+  const doc = { ...(existing || {}), code, name: name || existing.name,
+    email: isEmail(b.email || '') ? String(b.email).toLowerCase() : (existing && existing.email) || '',
+    whatsapp: digits(b.whatsapp || '').replace(/^\+/, '').slice(0, 15) || (existing && existing.whatsapp) || '',
+    whop: String(b.whop || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40) || (existing && existing.whop) || '',
+    commission_pct: Math.min(90, Math.max(0, Number(b.commission_pct ?? ((existing && existing.commission_pct) ?? SELLER_DEFAULT_PCT)) || 0)),
+    active: existing ? existing.active !== false : true,
+    clicks: (existing && Number(existing.clicks)) || 0,
+    created_at: (existing && existing.created_at) || new Date().toISOString() };
+  let key = null;
+  if (!doc.key_hash) { key = randomKey(18); doc.key_hash = await hash(code + ':' + key); }
+  await env.STORES.put('seller:' + code, JSON.stringify(doc));
+  await pushOpsLog(env, { act: existing ? 'seller_update' : 'seller_register', handle: code, note: doc.name + ' · ' + doc.commission_pct + '%', ip: ipOf(req) });
+  return json({ ok: true, seller: publicSeller(doc), ...(key ? { seller_key: key } : {}),
+    links: { short: '/r/' + code, onboard: '/onboard?ref=' + code, whop_hint: doc.whop ? '?a=' + doc.whop : null },
+    note: key ? 'Seller live. Give them their key once; it opens their read-only scoreboard, their lead queue and their sheets feed — never a shop dashboard.'
+      : 'Updated. Key unchanged; rotate it with action "rotate_key" if it ever leaks.' });
+}
+async function sellerView(url, env) {
+  const doc = await leadActor(env, url.searchParams.get('code') || '', url.searchParams.get('key') || '');
+  if (!doc) return json({ ok: false, error: 'seller code + key required' }, 401);
+  const { sellers, stores, sales } = await boardInputs(env);
+  const board = sellerBoard(sellers, stores, sales);
+  const mine = doc.owner ? null : board.find((r) => r.code === doc.code) || null;
+  const mineStores = stores.filter((st) => doc.owner || cleanSellerCode(st.seller_code || '') === doc.code)
+    .map((st) => ({ handle: st.handle, shop_name: st.shop_name, plan: st.plan || 'free60',
+      left_days: Math.ceil(((st.paid_until || 0) - Date.now()) / 864e5), suspended: !!st.suspended, created_at: st.created_at }));
+  const mineSales = sales.filter((s) => doc.owner || s.seller_code === doc.code)
+    .map((s) => ({ handle: s.handle, amount: s.amount, currency: s.currency, commission: s.commission, provider: s.provider, at: s.at }));
+  const leads = await listLeads(env, doc.owner ? {} : { seller: doc.code });
+  const by_status = {};
+  for (const l of leads) by_status[l.status] = (by_status[l.status] || 0) + 1;
+  return json({ ok: true, seller: doc.owner ? { code: 'owner' } : publicSeller(doc),
+    board: doc.owner ? board : [mine].filter(Boolean), shops: mineStores, sales: mineSales,
+    leads: { total: leads.length, by_status },
+    note: 'Read-only by construction: no buyer data, no shop credentials, nothing here moves money.' }, 200, { 'Cache-Control': 'no-store' });
+}
+
+/* ---- leads ---- */
+async function listLeads(env, filter) {
+  const f = filter || {};
+  if (!env.ORDERS) return [];
+  const keys = await listKeys(env.ORDERS, 'lead:', 2000);
+  const out = [];
+  for (const k of keys) {
+    try { const l = await env.ORDERS.get(k, 'json'); if (l && l.id) out.push(l); } catch (e) { void e; }
+  }
+  const rows = out.filter((l) => (!f.seller || l.seller_code === f.seller) && (!f.status || l.status === f.status));
+  rows.sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0)
+    || String(a.next_follow_at || '9999').localeCompare(String(b.next_follow_at || '9999')));
+  return rows.slice(0, Math.min(2000, Number(f.limit) || 500));
+}
+async function leadsIngest(req, env) {
+  const denied = await pressAdmin(req, env); if (denied) return denied;
+  const b = await readBody(req).catch(() => ({}));
+  const raw = Array.isArray(b.leads) ? b.leads.slice(0, 100) : (b.business || b.email || b.phone ? [b] : []);
+  if (!raw.length) return json({ ok: false, error: 'send {leads:[…]} (max 100 per call)' }, 422);
+  const activeCodes = (await listSellers(env)).filter((s) => s.active !== false).map((s) => s.code);
+  const counts = { received: raw.length, added: 0, updated: 0, duplicate: 0, dnc_skipped: 0, invalid: 0, research_hold: 0 };
+  const added = [];
+  for (const item of raw) {
+    const lead = cleanLead(item, { now: Date.now() });
+    if (!lead.id) { counts.invalid++; continue; }
+    const dncHit = (lead.email && await env.STORES.get('Lead:' + lead.email).catch(() => null))
+      || (lead.phone && await env.STORES.get('Lead:' + lead.phone).catch(() => null));
+    if (dncHit) { counts.dnc_skipped++; continue; }
+    const existing = await env.ORDERS.get('lead:' + lead.id, 'json').catch(() => null);
+    if (existing) {
+      if (existing.status === 'dnc') { counts.dnc_skipped++; continue; }
+      const merged = [...new Set([].concat(existing.signals || [], lead.signals || []))].sort();
+      const before = JSON.stringify([existing.signals || [], existing.status, existing.score]);
+      existing.signals = merged;
+      existing.score = Math.max(Number(existing.score) || 0, lead.score);
+      if (existing.status === 'research_hold' && merged.length >= 2) existing.status = 'queued';
+      if (!existing.source_url && lead.source_url) existing.source_url = lead.source_url;
+      if (JSON.stringify([existing.signals, existing.status, existing.score]) !== before) {
+        await env.ORDERS.put('lead:' + lead.id, JSON.stringify(existing)); counts.updated++;
+      } else counts.duplicate++;
+      continue;
+    }
+    lead.seller_code = (lead.seller_code && activeCodes.includes(lead.seller_code))
+      ? lead.seller_code : allocateSeller(lead.dedupe, activeCodes);
+    await env.ORDERS.put('lead:' + lead.id, JSON.stringify(lead));
+    counts.added++; if (lead.status === 'research_hold') counts.research_hold++;
+    if (added.length < 100) added.push(lead.id);
+  }
+  return json({ ok: true, counts, added_ids: added,
+    note: 'Two signals is the door out of research_hold; allocation is by hash across active sellers; dnc is checked before anything is stored. No outreach is sent here — this fills the queue sellers work.' });
+}
+async function leadsListSeller(url, env) {
+  const doc = await leadActor(env, url.searchParams.get('code') || '', url.searchParams.get('key') || '');
+  if (!doc) return json({ ok: false, error: 'seller code + key required' }, 401);
+  const leads = await listLeads(env, { ...(doc.owner ? {} : { seller: doc.code }), status: url.searchParams.get('status') || '' });
+  return json({ ok: true, seller: doc.code, leads, count: leads.length }, 200, { 'Cache-Control': 'no-store' });
+}
+async function leadsAct(req, env) {
+  const b = await readBody(req).catch(() => ({}));
+  const doc = await leadActor(env, b.code || '', b.key || '');
+  if (!doc) return json({ ok: false, error: 'seller code + key required' }, 401);
+  const id = String(b.id || '').replace(/[^a-z0-9-]/gi, '').slice(0, 40);
+  const lead = id ? await env.ORDERS.get('lead:' + id, 'json').catch(() => null) : null;
+  if (!lead) return json({ ok: false, error: 'no such lead' }, 404);
+  if (!doc.owner && lead.seller_code && lead.seller_code !== doc.code) {
+    return json({ ok: false, conflict: true, error: 'allocated to ' + lead.seller_code + ' — one prospect, one voice' }, 409);
+  }
+  const t = leadTransition(lead, b.action, doc.owner ? 'owner' : doc.code, { shop: b.shop, follow_days: b.follow_days, now: Date.now() });
+  if (!t.ok) return json({ ok: false, conflict: !!t.conflict, error: t.error, ...(t.actions ? { actions: t.actions } : {}) }, t.conflict ? 409 : 422);
+  if (b.note) t.lead.note = String(b.note).slice(0, 300);
+  await env.ORDERS.put('lead:' + id, JSON.stringify(t.lead));
+  if (b.action === 'dnc') {
+    try {
+      if (t.lead.email) await env.STORES.put('Lead:' + t.lead.email, JSON.stringify({ at: new Date().toISOString(), by: doc.code }));
+      if (t.lead.phone) await env.STORES.put('Lead:' + t.lead.phone, JSON.stringify({ at: new Date().toISOString(), by: doc.code }));
+    } catch (e) { void e; }
+  }
+  return json({ ok: true, lead: t.lead });
+}
+async function sheetsFeed(url, env) {
+  const doc = await leadActor(env, url.searchParams.get('code') || '', url.searchParams.get('key') || '');
+  if (!doc) return json({ ok: false, error: 'seller code + key required' }, 401);
+  const leads = await listLeads(env, { ...(doc.owner ? {} : { seller: doc.code }), limit: 1000 });
+  if ((url.searchParams.get('fmt') || 'tsv') === 'json') {
+    return json({ ok: true, seller: doc.code, leads }, 200, { 'Cache-Control': 'no-store' });
+  }
+  const cols = ['id', 'business', 'name', 'email', 'phone', 'country', 'segment', 'score', 'signals', 'seller_code', 'status', 'source', 'source_url', 'next_follow_at', 'shop', 'note', 'updated_at'];
+  const cell = (v) => String(Array.isArray(v) ? v.join(',') : (v ?? '')).replace(/[\t\r\n]/g, ' ');
+  const lines = [cols.join('\t')].concat(leads.map((l) => cols.map((c) => cell(c === 'updated_at' ? (l.updated_at || l.created_at) : l[c])).join('\t')));
+  return new Response(lines.join('\n') + '\n', { headers: { 'content-type': 'text/tab-separated-values; charset=utf-8', 'cache-control': 'no-store' } });
+}
+
+/* ---- scheduler slots ---- */
+const PRESS_ORIGIN_FALLBACK = 'https://tapstall.zlnew.workers.dev';
+async function pressTick(env) {
+  if (!env.ORDERS) return { ran: 0, why: 'no ORDERS binding' };
+  const reg = await pressRegistry(env);
+  if (!Object.keys(reg).length) return { ran: 0, why: 'no press identities registered' };
+  const slot = new Date().toISOString().slice(0, 13);
+  const last = await env.ORDERS.get('press:last', 'json').catch(() => null);
+  if (last && last.slot === slot) return { skipped: 'this hour already ran', slot };
+  const ran = await runPress(env, env.PUBLIC_ORIGIN || PRESS_ORIGIN_FALLBACK, { dry: false });
+  const statuses = {};
+  for (const r of ran) for (const x of (r.results || [])) statuses[x.status] = (statuses[x.status] || 0) + 1;
+  const sum = { slot, at: new Date().toISOString(), triggered_by: 'cron', identities: ran.length,
+    composed: ran.reduce((a, r) => a + (r.composed || 0), 0), sent: ran.reduce((a, r) => a + (r.sent || 0), 0),
+    waiting: ran.reduce((a, r) => a + (r.waiting || 0), 0), statuses,
+    ran: ran.map((r) => ({ id: r.id, ok: r.ok, composed: r.composed || 0, sent: r.sent || 0, waiting: r.waiting || 0, token_present: !!r.token_present, error: r.error || '' })) };
+  try { await env.ORDERS.put('press:last', JSON.stringify(sum)); } catch (e) { void e; }
+  return sum;
+}
+async function dispatchTick(env) {
+  const day = new Date().getUTCDay();
+  if (day === 0 || day === 6) return { skipped: 'weekend' };
+  if (!env.ORDERS) return { ran: 0 };
+  const stamp = new Date().toISOString().slice(0, 10);
+  const last = await env.ORDERS.get('dispatch:last', 'json').catch(() => null);
+  if (last && last.day === stamp) return { skipped: 'today already dispatched', day: stamp };
+  const out = { day: stamp, at: new Date().toISOString(), leads_hunt: 'skipped_no_token' };
+  if (env.GH_DISPATCH_TOKEN && env.GH_REPO) {
+    try {
+      const r = await fetch('https://api.github.com/repos/' + env.GH_REPO + '/actions/workflows/leads-hunt.yml/dispatches', {
+        method: 'POST', headers: { authorization: 'Bearer ' + env.GH_DISPATCH_TOKEN, accept: 'application/vnd.github+json',
+          'content-type': 'application/json', 'user-agent': 'tapstall/1 (scheduler)' },
+        body: JSON.stringify({ ref: env.GH_REF || 'main', inputs: { post: 'true' } }) });
+      out.leads_hunt = r.status === 204 ? 'dispatched' : 'http ' + r.status;
+    } catch (e) { out.leads_hunt = 'error'; out.error = String(e && e.message || e).slice(0, 120); }
+  }
+  try { await env.ORDERS.put('dispatch:last', JSON.stringify(out)); } catch (e) { void e; }
+  return out;
+}
+/** The nightly exception digest: derived from the same rows everything else reads, stored once,
+ *  and surfaced by /ops/api/health. It exists so the owner's morning question — "what needs a
+ *  person?" — has one answer with numbers, instead of an approval queue with opinions. */
+async function writeDigest(env) {
+  const now = Date.now();
+  const handles = (await listKeys(env.STORES, 'store:', 1000)).map((k) => k.slice('store:'.length)).filter(Boolean);
+  let live = 0, suspended = 0; const expiring = [];
+  for (const h of handles) {
+    try {
+      const st = await env.STORES.get('store:' + h, 'json');
+      if (!st) continue;
+      const left = ((st.paid_until || 0) - now) / 864e5;
+      if (st.suspended) suspended++;
+      else if (left > 0) { live++; if (left <= 14) expiring.push({ handle: h, left_days: Math.ceil(left) }); }
+    } catch (e) { void e; }
+  }
+  let refCount = 0; const refHandles = [];
+  for (const k of await listKeys(env.STORES, 'ref:', 200)) {
+    try { const rows = await env.STORES.get(k, 'json'); const n = Array.isArray(rows) ? rows.length : 0; if (n) { refCount += n; refHandles.push(k.slice('ref:'.length)); } } catch (e) { void e; }
+  }
+  const reg = await pressRegistry(env);
+  let queuedItems = 0, overdueItems = 0;
+  for (const id of Object.keys(reg)) {
+    try {
+      const q = await env.ORDERS.get('press:queue:' + id, 'json');
+      for (const it of ((q && q.items) || [])) { queuedItems++; if (Date.parse(it.due || '') < now) overdueItems++; }
+    } catch (e) { void e; }
+  }
+  const pressLast = await env.ORDERS.get('press:last', 'json').catch(() => null);
+  const leads = await listLeads(env, { limit: 2000 });
+  const by_status = {}; let followups_due = 0;
+  for (const l of leads) {
+    by_status[l.status] = (by_status[l.status] || 0) + 1;
+    if (l.next_follow_at && Date.parse(l.next_follow_at) <= now && !['closed', 'dnc'].includes(l.status)) followups_due++;
+  }
+  const sales30 = (await listSales(env)).filter((s) => now - Date.parse(s.at || '') <= 30 * 864e5);
+  const digest = { at: new Date(now).toISOString(), version: VERSION,
+    stores: { total: handles.length, live, suspended, expiring_14d: expiring },
+    awaiting_refs: { count: refCount, handles: refHandles },
+    press: { identities: Object.keys(reg).length, queued_items: queuedItems, overdue_items: overdueItems,
+      last_run: pressLast ? { at: pressLast.at, sent: pressLast.sent, statuses: pressLast.statuses } : null },
+    leads: { total: leads.length, by_status, followups_due },
+    sales_30d: { count: sales30.length, revenue: round2(sales30.reduce((a, s) => a + (Number(s.amount) || 0), 0)),
+      commission: round2(sales30.reduce((a, s) => a + (Number(s.commission) || 0), 0)) },
+    needs_a_person: [
+      ...(refCount ? [refCount + ' payment reference(s) to recognise (' + refHandles.join(', ') + ')'] : []),
+      ...(expiring.length ? [expiring.length + ' shop(s) inside 14 days of expiry'] : []),
+      ...(overdueItems ? [overdueItems + ' press item(s) overdue in queue (credential or rail missing — bind the secret, the cron does the rest)'] : []),
+      ...(followups_due ? [followups_due + ' lead follow-up(s) due for sellers'] : []),
+    ] };
+  try { await env.ORDERS.put('digest:last', JSON.stringify(digest)); } catch (e) { void e; }
+  return { written: true, needs_a_person: digest.needs_a_person.length, stores_live: live, leads_total: leads.length };
+}

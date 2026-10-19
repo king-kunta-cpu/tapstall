@@ -1,4 +1,46 @@
 # Tapstall — status
+## v1.0.0: the pipeline runs itself (2026-10-19)
+
+A full-infrastructure audit found a product whose enforcement half was autonomous and whose growth
+half was not: the press composed beats only when a person POSTed, direct rails queued forever, the
+scheduled "night check" skipped itself into green five-second runs, `prod_check.sh` pointed at the
+previous account's KV and probed a real shop, there were no sellers anywhere in the system, and a
+merchant-filed payment reference could be displayed and cleared but never recognised. v1.0.0 closes
+each of those, under one rule: **standing policy + scheduled execution + an exception report —
+people handle exceptions, never batches.** Registration is the approval; caps, medians and
+provenance are software; the kill switch is revoking a grant or a credential.
+
+- **One clock.** `runCron` now runs slots: the press window every slot (claimed once per hour in
+  `press:last`), a weekday lead-hunt dispatch to Actions (when `GH_DISPATCH_TOKEN` exists), and a
+  nightly exception digest (`digest:last`) — refs awaiting recognition, shops expiring ≤14 days,
+  overdue unsent press, due lead follow-ups — surfaced in ops health as `pipeline`. The deploy
+  workflow's daily schedule is gone; `monitor.yml` is the weekly outside witness. `prod_check.sh`
+  resolves KV namespaces by title and probes the sandbox store `logintest`.
+- **The press actually presses.** `runPress` (the old route body, now cron-callable) assembles
+  per-identity env-named Buffer tokens as before, and direct rails — Bluesky and Telegram — send
+  from the Worker via `meshDirectSend` with credentials assembled from env secrets only. A Buffer
+  token can no longer be stored in KV (refused; any stored one is deleted on write). An unbound
+  direct rail stays queued and names the missing secret. `CONTENT-MESH.md` and the core comments
+  no longer say a person taps anything; the doc's policy and the plumbing finally agree.
+- **Sellers exist.** Codes, hashed one-time-shown keys, `/r/<code>` and `/g/<code>` links,
+  attribution judged at shop birth against the registry (an invented code attributes nothing),
+  `sale:` rows from both webhooks and from the new **`recognise_ref`** owner action (term extends,
+  reference consumed, sale + 30% commission recorded in one judgement), and `sellerBoard`
+  reconciling the whole chain at read time — no recomputed counters spending the write budget.
+- **Leads exist.** `lead_hunt.py` + `leads-hunt.yml` gather facts; the Worker judges the 2-signal
+  rule at ingest, dedupes, allocates by hash to exactly one seller, anti-collision claims, `Lead:`
+  do-not-contact markers consulted before storage, and a Sheets surface (`leads/apps-script`) that
+  proposes actions the Worker judges.
+- Version is 1.0.0 in the Worker, `package.json` agrees, and `wrangler.toml` in the repo is the
+  canonical `tapstall` worker again. 346 tests, 9 new, including one that walks the whole
+  seller→lead→recognised-sale→cron-press journey against the real bundle.
+
+Still owed, none of it code: press credentials (Buffer token / direct-rail secrets), payment
+webhook secrets (the doors stay shut at 503 until armed), `GH_DISPATCH_TOKEN` for self-dispatching
+hunts, `ADMIN_SECRET` as an Actions secret, and a domain for the EMAIL binding. `BRICK-MAP.md` maps
+all of it against the master blueprint; `docs/SELLER-GUIDE.md` and `docs/OPERATOR-GUIDE.md` are the
+human documents.
+
 ## The shop with no sheet, and the money that needs no permission (2026-10-15, v0.9.9 → v0.9.14)
 
 Three related honesty fixes shipped together, because they share a sentence: *a shop is allowed to

@@ -664,3 +664,37 @@ What an armed door may conclude lives in `core.js`, so it can be read and tested
 
 Both hooks are rate-limited by IP like an order, and everything they refuse writes
 nothing — so a probe, a replay and a guess all cost the same: nothing.
+
+## Who sells TapStall, and who watches the clock (1.0.0)
+
+Three words, used exactly: the **owner** runs the platform, **sellers** are the owner's people who
+sell subscriptions, **operators** sell through shops (older code says "merchants").
+
+**Sellers.** Registered once (owner console `POST /ops/api/sellers`, or `scripts/seller_add.sh`);
+the seller key hashes at rest and is shown once. Links: `/r/<code>` (straight to onboarding),
+`/g/<code>` (homepage first), or any URL carrying `?ref=` / `?a=` — attribution sticks at shop birth
+only if the code names an active seller. Every renewal the system records — webhook or a recognised
+payment reference — writes a `sale:` row, and `sellerBoard` (core) reconciles clicks → shops →
+trials → paying → revenue → commission (30% default) from documents at read time. The seller reads
+their own book at `GET /api/seller?code=&key=`. See `docs/SELLER-GUIDE.md`.
+
+**Leads.** `scripts/lead_hunt.py` (stdlib; Bing RSS + DuckDuckGo + OSM Overpass with `out center;`)
+gathers facts only and files them at `POST /api/leads/ingest`. The Worker derives five signals from
+the facts and demands **two** before outreach (`research_hold` below that), dedupes on
+email→phone→business, allocates each prospect to exactly one seller by hash, and refuses anything on
+the `Lead:` do-not-contact ledger. Claims are anti-collision: a second seller gets a 409, not a
+double pitch. Sellers work the queue through `/api/leads/act` or the Google Sheets surface in
+`leads/apps-script/Code.gs`, fed by `/api/leads/sheets-feed`.
+
+**One clock.** The Worker's cron slots now run the press windows (`pressTick` → `runPress`, once per
+hour claimed in `press:last`), the weekday lead-hunt dispatch (when `GH_DISPATCH_TOKEN` is set), and
+a nightly exception digest (`digest:last`, surfaced in `/ops/api/health` as `pipeline`) whose
+`needs_a_person` list is the owner's whole recurring job. Nobody approves batches: registration is
+policy, caps and provenance are software, the kill switch is revoking the grant or the credential.
+Direct press rails (Bluesky, Telegram) send from the Worker with credentials assembled from env
+secrets only — nothing press-related is stored in KV any more; a pasted Buffer token is refused.
+`deploy.yml` no longer runs on a schedule; `monitor.yml` is the weekly outside witness, running
+`prod_check.sh` against the sandbox store. A filed renewal reference can be **recognised** in the
+owner console (`recognise_ref`): the term extends, the reference is consumed, and the sale and
+commission land in the same action. The full brick-by-brick mapping against the household blueprint
+is `BRICK-MAP.md`; operator onboarding is `docs/OPERATOR-GUIDE.md`.

@@ -1,0 +1,52 @@
+name: leads-hunt
+# The hunter, run where fetching the open web is cheap and time is free: GitHub Actions.
+# The Worker (single clock) may dispatch this on weekday mornings when GH_DISPATCH_TOKEN is
+# configured on it; a person can also run it by hand. It never emails anyone — it only files
+# prospects into the Worker, which scores them by evidence (two signals before outreach),
+# allocates each to exactly one seller, and drops anything on the do-not-contact ledger.
+on:
+  workflow_dispatch:
+    inputs:
+      post:
+        description: 'POST results into the Worker (true) or dry-run print only'
+        required: false
+        default: 'true'
+      limit:
+        description: 'Max leads to file'
+        required: false
+        default: '60'
+      countries:
+        description: 'Country codes, comma-separated'
+        required: false
+        default: 'ZA,ZW'
+  repository_dispatch:
+    types: [leads-hunt]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: leads-hunt
+  cancel-in-progress: false
+
+jobs:
+  hunt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: hunt
+        env:
+          TAPSTALL_ORIGIN: https://tapstall.zlnew.workers.dev
+          ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+        run: |
+          POST_FLAG="--dry-run"
+          [ "${{ github.event.inputs.post || 'true' }}" = "true" ] && POST_FLAG="--post"
+          python3 scripts/lead_hunt.py $POST_FLAG \
+            --limit "${{ github.event.inputs.limit || '60' }}" \
+            --countries "${{ github.event.inputs.countries || 'ZA,ZW' }}"
+      - name: summary
+        if: always()
+        run: echo "Lead hunt finished. Results land in the Worker (POST /api/leads/ingest); see the hunt step log for counts." >> "$GITHUB_STEP_SUMMARY"

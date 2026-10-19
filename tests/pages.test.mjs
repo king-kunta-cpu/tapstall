@@ -732,16 +732,21 @@ test('a page cannot stick, so the night is a check and not a retry', () => {
   // scheduled runs. v0.9.1 removes the failure mode instead of scheduling around it — a page is a
   // bundle constant, published by the same upload as the code that reads it — so what has to be
   // true now is narrower and stronger: nothing in the pipeline spends a write on a page, the check
-  // that a page is current is local and runs before anything ships, and the night still looks.
+  // that a page is current is local and runs before anything ships, and something still looks.
+  // v1.0.0 moves the looking out of the deploy workflow entirely: the old scheduled run
+  // redeployed identical code daily while its check job skipped itself on an hour gate GitHub's
+  // delivery never met (five-second green runs, checks never executed). Now there is one clock —
+  // the Worker's cron — and one outside witness, monitor.yml, which only looks.
   const wf = readFileSync(join(root, '.github', 'workflows', 'deploy.yml'), 'utf8');
-  const sched = wf.slice(wf.indexOf('schedule:'), wf.indexOf('jobs:'));
-  const fields = sched.match(/- cron: '([0-9]+) ([0-9,]+) \* \* \*'/) || [];
-  assert.equal(fields[1], '20', 'one slot a day, twenty minutes in so it lands after the budget turns over: ' + JSON.stringify(fields.slice(1)));
-  assert.equal(fields[2], '0', 'at the start of the UTC day, the only hour the free plan guarantees');
+  assert.ok(!/^ {2}schedule:/m.test(wf), 'the deploy workflow has no schedule: a cron that redeploys identical code is cost dressed as care');
+  assert.ok(!/night-check/.test(wf), 'and no self-skipping check job to paint a skipped hour green');
   assert.ok(!/--templates/.test(wf), 'and the workflow no longer re-publishes pages: there is nothing left to retry');
-  const job = wf.slice(wf.indexOf('night-check:'), wf.indexOf('\n  worker:'));
-  assert.match(job, /prod_check\.sh > \/tmp\/prodcheck\.log/, 'the night runs the live check, so a broken product is seen without anybody typing');
-  assert.match(job, /exit \$code/, 'and a red line fails the run — a warning with exit 0 is how a stale page looked green');
+  const mon = readFileSync(join(root, '.github', 'workflows', 'monitor.yml'), 'utf8');
+  assert.match(mon, /- cron: '20 5 \* \* 1'/, 'the witness runs weekly, before the week’s traffic');
+  assert.match(mon, /prod_check\.sh/, 'the witness runs the live check, so a broken product is seen without anybody typing');
+  assert.match(mon, /HANDLE: logintest/, 'against the sandbox store, never a trading operator’s shop');
+  assert.match(mon, /exit \$rc/, 'and a red line fails the run — a warning with exit 0 is how a stale page looked green');
+  assert.ok(!/wrangler|deploy\.sh/.test(mon), 'the witness deploys nothing: looking and shipping are different jobs');
 
   const dep = readFileSync(join(root, 'scripts', 'deploy.sh'), 'utf8');
   assert.match(dep, /check_pages_in_bundle \.build/, 'a deploy proves the bundle carries every page before it uploads');

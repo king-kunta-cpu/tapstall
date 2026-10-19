@@ -68,12 +68,13 @@ lets a zero-yield night retarget the aim rather than blame the parser.
 
 ## The edges — who pushes to whom, and on what clock
 
-1. **Shop → mesh.json → everything downstream.** A merchant approves beats in ops; `meshPack` renders
-   them into the JSON feed. Nothing else reads the merchant's mind, and no node composes a claim the shop
-   did not approve. This is the origin rule: **facts are authored once, at the shop, and mirrored.**
-2. **mesh.json → the Copy surface.** The hunta bible and the guide pages carry Copy buttons, which makes
-   WhatsApp/Bluesky/forum distribution a *human* action with a machine-prepared artefact. It is the
-   cheapest edge in the graph and it is the one that keeps the human on the trigger.
+1. **Shop → mesh.json → everything downstream.** Beats are composed from the shop's rows under the
+   standing policy (witness, budget, ratio); `meshPack` renders them into the JSON feed. Nothing else
+   reads the merchant's mind, and no node composes a claim the shop's data does not witness. This is
+   the origin rule: **facts are authored once, at the shop, and mirrored.**
+2. **mesh.json → the Copy surface.** For assist surfaces that have no posting API, the hunta bible and
+   the guide pages carry Copy buttons: the *account holder* pastes a machine-prepared artefact on
+   their own surface. It is the cheapest edge in the graph and the only one a hand is FORCED to touch.
 3. **dev.to → Nostr → the small boards**, on a fixed window: `04:00` local for the nightly walk, publishing
    in the windows the audience is in (`devto-2026-10-01-fixed-windows-beat-the-feed.md` is that claim, and
    the boards' own rhythm is in `boards-publish-on-a-rhythm-set-alerts-to-it.md`). Freshness beats fit:
@@ -102,9 +103,11 @@ lets a zero-yield night retarget the aim rather than blame the parser.
    a person's name in front of one employer and one bad line costs an interview. Here the autonomous
    half is confined to value beats drawn from the shop's own words, with no price, no link and no offer
    in any of them (`MESH_AUTONOMY.pitch = 'never'`, refused by `meshIsPitch`), which is the class of
-   sentence that cannot embarrass a shop; the promo half stays exactly where it was, a tap in ops. The
-   two kinds of statement get two different gates, and the difference is written down instead of
-   pretending one rule fits both.
+   sentence that cannot embarrass a shop. (v1.0.0 closed the loop this paragraph used to leave open:
+   the promo half no longer waits on a tap in ops either — for owner and seller identities both kinds
+   are composed, queued and sent by the cron window under the same provenance and caps, and what is
+   left to a person is the reply. An operator's own socials are still never posted to: they get the
+   platform's own nodes and copy for assist surfaces.)
 3. **Caps are software.** `MESH_BUDGET = { per_day: 3, value: 2, promo: 1, item_cooldown_days: 7 }`, plus
    the account's own write budget. "Runaway is not representable" is the standard, so a bug cannot make us
    a spammer.
@@ -146,9 +149,14 @@ Two kinds of account, and they do not start the same way:
 
 The cadence is the pipeline's, not a mood: X ≥3 a day, LinkedIn ≥3, dev.to 3, daily pins, daily Bluesky and
 Nostr, ratio two value to one shop facts, weekends included. Replies are a human's, at a human pace —
-four a day, questions first. Cold outreach is composed at 08:21 on weekdays into one batch that a single
-owner tap sends, mailbox ramped 20 → 100 over five working days: the machine writes, one action fires the
-set, nobody approves eighty messages.
+four a day, questions first. Cold outreach is composed at 08:21 on weekdays and the scheduled window
+sends the batch under standing policy, mailbox ramped 20 → 100 over five working days: the machine
+writes AND fires, nobody approves eighty messages, and nobody taps the batch either — the controls are
+the ramp, the daily cap, drip-and-park, and the kill switch (revoke the grant / the credential), each
+of them software that holds at 3 a.m. A design that needs the owner's thumb on every batch has made the
+owner the bottleneck and the single point of failure at once. The plumbing matches the words since
+v1.0.0: `pressTick` runs `runPress` inside the Worker's own cron slots, and `POST /api/press/run`
+survives only as a manual override and diagnostic.
 
 ## Who it posts as: identities, not shops
 
@@ -193,7 +201,7 @@ posts itself by API    x (write-only free tier, 1,500 posts a month) · linkedin
                         home of the value beats) · pinterest (the photo rails are the ones that sell food) ·
                         bluesky · nostr (an nsec we generate per shop: no signup, no cost, nobody to approve it) ·
                         mastodon · telegram · our own Pages mirror
-queued for one tap     WhatsApp status and groups · Facebook groups · Instagram personal · the paper by the till
+account-holder posted  WhatsApp status and groups · Facebook groups · Instagram personal · the paper by the till
 first touch, per shop   a DM or an email to a number already on that shop's ledger — warm only, capped at eight a
                         day, and sent from the shop's own credentials: there is no legitimate API for a personal
                         WhatsApp account, and a bulk send from that number gets the number restricted
@@ -201,8 +209,9 @@ replies                 never sent by the machine: the console shows them and wa
 ```
 
 A shop with no authorised API channel still gets the whole pack, and `schedule.beats[].auto_send` is
-`false` for it — the plan says out loud that a tap is owed, rather than reporting a post that never
-happened. Credentials stay the merchant's, on their own store document, revocable at their provider.
+`false` for it — the plan says out loud that a credential is missing, rather than reporting a post
+that never happened. Credentials are never stored on a store document (v1.0.0 removed that door):
+theirs live at their provider, ours in Worker secrets, revocable in one change.
 
 ## The growth mechanics, borrowed from the pipeline rather than invented
 
@@ -257,7 +266,7 @@ problem from one brand posting for itself, and the differences are the design:
 carrying an `auto` section so the state of a shop's voice is visible to the world that reads it; and
 `meshGrowth` in the ops view, which is the outreach queue with nothing automated in it.
 
-**Now, cheap, and mostly wiring.** (a) A `mirror` step: take one approved beat and emit the three shapes
+**Now, cheap, and mostly wiring.** (a) A `mirror` step: take one composed beat and emit the three shapes
 it needs — 280-character, a board post with the price line, and a WhatsApp paragraph with the deep link —
 from the *same* `meshPack` render, so a channel never rewrites a claim. (b) An RSS/Atom feed per shop at
 `/s/<handle>/feed.xml`, because it costs nothing and every aggregator already speaks it. (c) Nostr

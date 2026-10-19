@@ -19,11 +19,29 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 ORIGIN="${ORIGIN:-https://tapstall.zlnew.workers.dev}"
-HANDLE="${HANDLE:-mamatoe}"
-TOK=$(cat /home/user/.secrets/cf_token 2>/dev/null || echo "${CLOUDFLARE_API_TOKEN:-}")
-ACCT=$(cat /home/user/.secrets/cf_account 2>/dev/null || echo "${CLOUDFLARE_ACCOUNT_ID:-}")
-KV=${KV_NS:-b5c1c89d95114092ae91bbafc5a2d76c}     # tapstall-stores (was zimlink-stores): store docs, templates
-ORD_KV=${ORDERS_NS:-4f4ac94a66db4b859b61668a3c160819}   # tapstall-orders (was zimlink-orders): order docs, lists
+HANDLE="${HANDLE:-logintest}"   # the internal sandbox store — probes create real orders, so the
+                                # default is never a trading operator's shop (it used to be)
+TOK="${CLOUDFLARE_API_TOKEN:-$(cat "$HOME/.secrets/cf_token" 2>/dev/null || true)}"
+ACCT="${CLOUDFLARE_ACCOUNT_ID:-$(cat "$HOME/.secrets/cf_account" 2>/dev/null || true)}"
+# KV namespace ids are resolved by title from the live account — they used to be hardcoded to the
+# previous account's namespaces, so the KV-backed checks silently queried the wrong account while
+# the HTTP checks passed against the right one. Resolving by title cannot go stale the same way.
+resolve_ns(){ TOK="$TOK" ACCT="$ACCT" python3 - "$1" <<'NSEOF'
+import json, os, sys, urllib.request
+req = urllib.request.Request(
+    f"https://api.cloudflare.com/client/v4/accounts/{os.environ.get('ACCT','')}/storage/kv/namespaces?per_page=100",
+    headers={"Authorization": f"Bearer {os.environ.get('TOK','')}"})
+try:
+    data = json.load(urllib.request.urlopen(req, timeout=20))
+    hits = [n["id"] for n in (data.get("result") or []) if n.get("title") == sys.argv[1]]
+    print(hits[0] if hits else "")
+except Exception:
+    print("")
+NSEOF
+}
+KV=${KV_NS:-$(resolve_ns tapstall-stores)}         # store docs, templates
+ORD_KV=${ORDERS_NS:-$(resolve_ns tapstall-orders)} # order docs, lists
+[[ -n "$KV" && -n "$ORD_KV" ]] || echo "  ! KV namespaces unresolved (need CLOUDFLARE_API_TOKEN/ACCOUNT_ID or KV_NS/ORDERS_NS) — KV-backed checks will skip"
 pass=0 fail=0
 blocked=0
 
@@ -689,7 +707,7 @@ echo "  · cleared the persisted PIN freeze the probes may have left (the counti
 echo "[7] one store's credentials never open another store"
 OTHER="${OTHER_HANDLE:-}"
 if [[ -z "$OTHER" ]]; then
-  for cand in kotaking mamatoe; do [[ "$cand" != "$HANDLE" ]] && OTHER=$cand && break; done
+  for cand in mamatoe kotaking logintest; do [[ "$cand" != "$HANDLE" ]] && OTHER=$cand && break; done
 fi
 ONE=$(printf '%s' "$STORE" | python3 -c "import sys,json;print(json.load(sys.stdin).get('renew_url',''))" 2>/dev/null)
 OTH_DOC=$(curl -s -m 30 -H "Authorization: Bearer $TOK" "https://api.cloudflare.com/client/v4/accounts/$ACCT/storage/kv/namespaces/$KV/values/store:$OTHER")

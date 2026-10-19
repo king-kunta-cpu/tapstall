@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="robots" content="noindex,nofollow">
 <meta name="theme-color" content="#0b0f14">
-<title>Tapstall · operator</title>
+<title>Tapstall · owner</title>
 <style>
 /*__KIT__*/
 main { background: var(--bg) }
@@ -406,7 +406,7 @@ function detail(h) {
       + '<button data-act="extend7">+7 days</button><button data-act="extend30">+30 days</button>'
       + '<button data-act="grant_year">Grant a year</button><button data-act="reset_free">Reset to free 60</button>'
       + (r.j.queued ? '<button data-act="clear_pending">Clear queued change</button>' : '')
-      + ((s.awaiting_reference || []).length ? '<button data-act="clear_refs">Clear references</button>' : '')
+      + ((s.awaiting_reference || []).length ? '<button data-act="recognise_ref">Recognise payment (+1 year)</button><button data-act="clear_refs">Clear references</button>' : '')
       + '<button data-act="reset_pin">New sign-in PIN</button><button class="d" data-act="revoke">Revoke key &amp; sign out</button>'
       + '</div>'
       + '<div class="bar" style="margin-top:.4rem"><input id="noteBox" placeholder="optional message for the notify lever" style="flex:1"><button class="sm" data-act="notify">Notify store</button></div>'

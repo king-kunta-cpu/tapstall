@@ -1,0 +1,42 @@
+name: monitor
+# The outside witness. The Worker's cron is the system's only clock (press windows, term sweep,
+# chain watcher, nightly exception digest all run in its slots), but a dead Worker cannot report
+# its own death — so something outside Cloudflare looks in once a week and fails loudly when the
+# live system stops behaving. This file deploys nothing and writes nothing to production except
+# the sandbox store's own probe orders, which prod_check creates and cancels itself.
+on:
+  schedule:
+    - cron: '20 5 * * 1'   # Mondays 05:20 UTC — before the week's traffic, never gated by hour
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: monitor
+  cancel-in-progress: false
+
+jobs:
+  prod-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: prod_check against the sandbox store
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ORIGIN: https://tapstall.zlnew.workers.dev
+          HANDLE: logintest        # the internal test store, never a real operator's shop
+        run: |
+          bash scripts/prod_check.sh > /tmp/prod.out 2>/tmp/prod.err; rc=$?
+          cat /tmp/prod.out
+          tail -c 600 /tmp/prod.err
+          {
+            echo "## prod_check (weekly outside witness)"
+            grep -E "^(W/F|L=|BEAT |VERSION|HEARTBEAT|PING-)" /tmp/prod.out | tail -n 8
+            grep -cE "^  \+ ✓" /tmp/prod.out | sed 's/^/passed checks: /'
+            echo "failed checks:"
+            grep -E "^  \+ ✗" /tmp/prod.out || echo none
+            grep -E "not ok|beat .*never" /tmp/prod.out || echo "beats ok"
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $rc

@@ -4459,3 +4459,117 @@ test('0.9.12 the one open door that writes is metered per address', async () => 
     env.REG_RL = savedH; env.REG_RL_DAY = savedD;
   }
 });
+
+/* v1.0.0 — the people layer end to end on the real bundle: a seller is registered once (policy),
+   their link attributes a shop at birth with nobody approving anything, their leads cannot be
+   worked by a second seller, a filed payment reference becomes a sale with commission in one
+   judgement, and the cron — not a person's POST — runs the press window. */
+test('1.0.0 sellers, leads, recognised sales, and a press the clock runs by itself', async () => {
+  const good = await call('/ops/login', { method: 'POST', body: { secret: SECRET } });
+  const line = (good.cookies || []).find((c) => c.startsWith('tp_ops='));
+  const ck = 'tp_ops=' + line.match(/tp_ops=([^;]+)/)[1];
+
+  // policy, once per person: two sellers exist from here on with no further owner action
+  const s1 = await call('/ops/api/sellers', { method: 'POST', cookie: ck, confirm: true,
+    body: { action: 'register', code: 'tino-sells', name: 'Tino', commission_pct: 30 } });
+  assert.equal(s1.status, 200, s1.text);
+  assert.ok(s1.json.seller_key, 'the seller key is shown exactly once, at registration');
+  assert.equal(s1.json.links.short, '/r/tino-sells');
+  const s2 = await call('/ops/api/sellers', { method: 'POST', cookie: ck, confirm: true,
+    body: { action: 'register', code: 'ruva-sells', name: 'Ruva', commission_pct: 30 } });
+  assert.equal(s2.status, 200, s2.text);
+  const keys = { 'tino-sells': s1.json.seller_key, 'ruva-sells': s2.json.seller_key };
+  const other = (c) => (c === 'tino-sells' ? 'ruva-sells' : 'tino-sells');
+
+  const locked = await call('/api/seller?code=tino-sells');
+  assert.equal(locked.status, 401, 'the seller view fails closed without its key');
+
+  const redir = await call('/r/tino-sells');
+  assert.equal(redir.status, 302);
+  assert.match(redir.headers.get('location') || '', /\/onboard\?ref=tino-sells$/, 'the short link lands on onboarding carrying the code');
+
+  // attribution is judged at birth: a real seller's code sticks, an invented one attributes nothing
+  const reg = (handle, ref) => call('/api/register', { method: 'POST',
+    body: { shop_name: 'Seller Shop ' + handle, handle, whatsapp: '263770000777', currency: 'USD',
+      rail: 'ecocash_usd', pay_account: '0770007777', ref } });
+  const ra = await reg('seller-shop-a', 'tino-sells');
+  assert.equal(ra.status, 201, ra.text);
+  assert.equal(ra.json.seller_code, 'tino-sells');
+  const rb = await reg('seller-shop-b', 'ghost-code');
+  assert.equal(rb.status, 201, rb.text);
+  assert.equal(rb.json.seller_code, undefined, 'a code nobody owns cannot manufacture attribution');
+
+  const view = await call('/api/seller?code=tino-sells&key=' + encodeURIComponent(keys['tino-sells']));
+  assert.equal(view.status, 200, view.text);
+  assert.deepEqual(view.json.shops.map((s) => s.handle), ['seller-shop-a'], 'a seller sees their own book and nobody else’s');
+  assert.ok(!JSON.stringify(view.json).includes('admin_token'), 'and no shop credential rides along');
+
+  // leads: hunted in bulk, gated by evidence, allocated by hash, claimable exactly once
+  const ingest = (leads) => call('/api/leads/ingest', { method: 'POST', confirm: true,
+    headers: { 'x-tapstall-admin': SECRET }, body: { leads } });
+  const strong = { business: 'Kota Queen', email: 'hi@kotaqueen.example', phone: '+27 82 555 0100',
+    source_url: 'https://instagram.com/kotaqueen', note: 'WhatsApp to order, PayShap', segment: 'social_merchants', country: 'ZA' };
+  const weak = { business: 'Maybe A Shop' };
+  const ing = await ingest([strong, weak, strong]);
+  assert.equal(ing.status, 200, ing.text);
+  assert.equal(ing.json.counts.added, 2, JSON.stringify(ing.json.counts));
+  assert.equal(ing.json.counts.duplicate, 1, 'the same prospect hunted twice is the same row once');
+  assert.equal(ing.json.counts.research_hold, 1, 'a name alone waits for evidence');
+  const all = await call('/api/leads?code=owner&key=' + encodeURIComponent(SECRET));
+  const lead = all.json.leads.find((l) => l.business === 'Kota Queen');
+  assert.ok(lead && lead.status === 'queued', 'two signals open the queue: ' + JSON.stringify(lead));
+  assert.ok(['tino-sells', 'ruva-sells'].includes(lead.seller_code), 'allocated on arrival, to exactly one seller');
+  const mine = lead.seller_code, theirs = other(mine);
+  const collide = await call('/api/leads/act', { method: 'POST',
+    body: { code: theirs, key: keys[theirs], id: lead.id, action: 'claim' } });
+  assert.equal(collide.status, 409, 'a second voice on one prospect is refused, loudly: ' + collide.text);
+  const claim = await call('/api/leads/act', { method: 'POST',
+    body: { code: mine, key: keys[mine], id: lead.id, action: 'claim' } });
+  assert.equal(claim.status, 200, claim.text);
+  const feed = await call('/api/leads/sheets-feed?code=' + mine + '&key=' + encodeURIComponent(keys[mine]));
+  assert.match(feed.text, /Kota Queen/, 'the sheets feed carries the seller’s queue as TSV');
+  assert.match(feed.text.split('\n')[0], /seller_code/, 'with the CRM columns in row one');
+  const weakLead = all.json.leads.find((l) => l.business === 'Maybe A Shop');
+  const dncAct = await call('/api/leads/act', { method: 'POST',
+    body: { code: 'owner', key: SECRET, id: weakLead.id, action: 'dnc' } });
+  assert.equal(dncAct.status, 200, dncAct.text);
+  const reing = await ingest([weak]);
+  assert.ok(reing.json.counts.dnc_skipped >= 1, 'a dnc prospect is never resurrected by a re-hunt');
+
+  // money with no webhook: the merchant files a reference, one human judgement recognises it,
+  // and the extension, the consumed ref and the 30% commission all follow in the same action
+  const token = String(ra.json.renew_url).split('/renew/')[1];
+  const filed = await call('/api/renew-ref', { method: 'POST', ip: '196.55.55.55', body: { token, reference: 'ECO-TEST-100', amount: 60 } });
+  assert.equal(filed.json.ok, true, filed.text);
+  const rec = await call('/ops/api/store', { method: 'POST', cookie: ck, confirm: true,
+    body: { handle: 'seller-shop-a', action: 'recognise_ref', ref: 'ECO-TEST-100' } });
+  assert.equal(rec.status, 200, rec.text);
+  assert.equal(rec.json.plan, 'annual');
+  assert.equal(rec.json.refs_left, 0);
+  assert.deepEqual(rec.json.commission, { seller: 'tino-sells', amount: 18 }, '30% of the recorded payment, on the ledger, unnamed by nobody’s spreadsheet');
+  const twice = await call('/ops/api/store', { method: 'POST', cookie: ck, confirm: true,
+    body: { handle: 'seller-shop-a', action: 'recognise_ref', ref: 'ECO-TEST-100' } });
+  assert.equal(twice.status, 404, 'a consumed reference cannot be recognised twice');
+  const board = await call('/ops/api/sellers', { cookie: ck });
+  const tinoRow = board.json.board.find((r) => r.code === 'tino-sells');
+  assert.equal(tinoRow.paying, 1, JSON.stringify(tinoRow));
+  assert.equal(tinoRow.commission, 18);
+
+  // the press: registered once, then the clock composes and queues with no POST from anyone
+  const preg = await call('/api/press/accounts', { method: 'POST', confirm: true,
+    headers: { 'x-tapstall-admin': SECRET },
+    body: { action: 'register', id: 'owner', class: 'owner', token_env: 'PRESS_BUFFER_TOKEN',
+      rails: { bluesky: { handle: 'house.bsky.social' } } } });
+  assert.equal(preg.status, 200, preg.text);
+  env.ORDERS._map.delete('press:last');   // a fresh slot, whatever earlier sweeps claimed this hour
+  const tick1 = await call('/__selftest?scheduled=1');
+  const press = tick1.json.scheduled.press;
+  assert.ok(press && press.identities >= 1, 'the cron ran the press window itself: ' + JSON.stringify(tick1.json.scheduled));
+  assert.ok(press.composed >= 1, 'and composed beats in it');
+  assert.ok(env.ORDERS._map.has('press:queue:owner'), 'the queue exists because the clock made it, not because a person called /api/press/run');
+  const tick2 = await call('/__selftest?scheduled=1');
+  assert.ok(tick2.json.scheduled.press.skipped, 'the same hour never double-fires a window: ' + JSON.stringify(tick2.json.scheduled.press));
+  const health = await call('/ops/api/health', { cookie: ck });
+  assert.ok(health.json.pipeline && typeof health.json.pipeline.armed.flutterwave === 'boolean',
+    'health says what is armed and what merely exists');
+});

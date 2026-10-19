@@ -29,4 +29,10 @@ footer{color:#5b6c7d;font-size:.72rem;margin-top:2.5rem;text-align:center}
 <a class="ghost" href="fees.html">Or see what your current setup is costing you →</a>
 <footer><p>Guides, for the questions the shop cannot answer for itself: <a href="/guide/whatsapp-shop-payments">taking payment for a WhatsApp shop</a> · <a href="/guide/payment-reference-matching">matching a payment to an order</a>.</p>
 <footer>Independent. Not affiliated with take.app, Meta, Econet or Ozow. Data lives in your own Google Sheet and your own account.</footer>
-</div></body></html>
+</div>
+<script>
+// A seller's code survives the hop from this page to onboarding, the same way it survives
+// checkout links elsewhere: read once, kept for the session, appended to the doors that count.
+(function(){try{var q=new URLSearchParams(location.search),r=(q.get("ref")||q.get("a")||sessionStorage.getItem("ts_ref")||"").replace(/[^a-zA-Z0-9-]/g,"").slice(0,24);if(r){sessionStorage.setItem("ts_ref",r);document.querySelectorAll('a[href="/onboard"],a[href="fees.html"]').forEach(function(el){var h=el.getAttribute("href");if(h&&h.indexOf("ref=")===-1)el.setAttribute("href",h+(h.indexOf("?")===-1?"?":"&")+"ref="+encodeURIComponent(r));});}}catch(e){}})();
+</script>
+</body></html>

@@ -1607,3 +1607,77 @@ test('0.9.10 a client delete keeps the row restorable and never falls on a stran
   const bare = C.applyMenu([], { extra: [{ id: 'e1', name: 'Kota', price: 5 }], del: ['e1'] }, 'shop');
   assert.equal(bare.length, 0, 'the bare-id form deletes too — it just cannot be restored from');
 });
+
+/* ---------- v1.0.0 sellers & leads ---------- */
+test('cleanSellerCode: a code a person can read aloud, nothing else', () => {
+  assert.equal(C.cleanSellerCode('Tino-Sells'), 'tino-sells');
+  assert.equal(C.cleanSellerCode('  tino sells! '), 'tino-sells');
+  assert.equal(C.cleanSellerCode('x'), '', 'one character is a typo, not a seller');
+  assert.equal(C.cleanSellerCode('../../etc'), 'etc', 'path tricks collapse to an inert code — and a code attributes nothing until a seller is registered under it');
+  assert.equal(C.cleanSellerCode(''), '');
+});
+
+test('allocateSeller: deterministic, order-independent, nobody outside the list', () => {
+  const a = C.allocateSeller('shop@example.com', ['ruva-sells', 'tino-sells']);
+  const b = C.allocateSeller('shop@example.com', ['tino-sells', 'ruva-sells']);
+  assert.equal(a, b, 'registration order cannot move a lead between sellers');
+  assert.ok(['ruva-sells', 'tino-sells'].includes(a));
+  assert.equal(C.allocateSeller('x', []), '', 'no sellers, no allocation, no invented owner');
+});
+
+test('commissionFor: standing rate arithmetic, clamped', () => {
+  assert.equal(C.commissionFor(60, 30), 18);
+  assert.equal(C.commissionFor(59.99, 30), 18);
+  assert.equal(C.commissionFor(100, 500), 90, 'a fat-fingered rate cannot pay out more than the cap');
+  assert.equal(C.commissionFor(0, 30), 0);
+});
+
+test('cleanLead: two signals open the queue, one holds for research, the id dedupes a person', () => {
+  const strong = C.cleanLead({ business: 'Kota Queen', email: 'Hi@Example.com', phone: '+27 82 555 0100',
+    source_url: 'https://instagram.com/kotaqueen', note: 'WhatsApp to order, PayShap accepted', segment: 'social_merchants', country: 'ZA' });
+  assert.equal(strong.status, 'queued');
+  assert.ok(strong.signals.includes('whatsapp_selling') && strong.signals.includes('payment_friction'), strong.signals.join(','));
+  assert.ok(strong.score >= 80, 'a WhatsApp seller with payment friction and a number is the top of the queue: ' + strong.score);
+  const again = C.cleanLead({ email: 'hi@example.com', business: 'Kota Queen (Pty) Ltd' });
+  assert.equal(again.id, strong.id, 'the same email is the same lead, whatever the hunt called the business');
+  const weak = C.cleanLead({ business: 'Maybe A Shop' });
+  assert.equal(weak.status, 'research_hold', 'a name alone is research, not a conversation a seller should spend');
+  assert.ok(weak.id, 'even a weak lead has a stable id from its name');
+});
+
+test('leadTransition: one prospect, one voice — and the owner can unstick a book', () => {
+  const lead = C.cleanLead({ business: 'Kota Queen', phone: '27825550100', source_url: 'https://example.com' });
+  lead.seller_code = 'tino-sells';
+  const claimed = C.leadTransition(lead, 'claim', 'tino-sells');
+  assert.equal(claimed.ok, true, JSON.stringify(claimed));
+  const stolen = C.leadTransition(claimed.lead, 'contacted', 'ruva-sells');
+  assert.equal(stolen.ok, false);
+  assert.equal(stolen.conflict, true, 'a second seller working the same prospect is the spam this exists to prevent');
+  const touched = C.leadTransition(claimed.lead, 'contacted', 'tino-sells', { follow_days: 2 });
+  assert.equal(touched.ok, true);
+  assert.equal(touched.lead.touches, 1);
+  assert.ok(touched.lead.next_follow_at > touched.lead.last_touch_at, 'every touch schedules its own follow-up');
+  const unstick = C.leadTransition(touched.lead, 'release', 'owner');
+  assert.equal(unstick.ok, true, 'the owner can release a departed seller’s claim');
+  assert.equal(unstick.lead.status, 'queued');
+  const done = C.leadTransition(unstick.lead, 'dnc', 'ruva-sells');
+  assert.equal(done.ok, true);
+  assert.equal(C.leadTransition(done.lead, 'claim', 'tino-sells').ok, false, 'dnc is terminal until an explicit reopen');
+});
+
+test('sellerBoard: derived totals reconcile, including the house row', () => {
+  const now = Date.now();
+  const board = C.sellerBoard(
+    [{ code: 'tino-sells', name: 'Tino', commission_pct: 30, clicks: 41, active: true }],
+    [{ seller_code: 'tino-sells', plan: 'annual', paid_until: now + 10 * 864e5 },
+     { seller_code: 'tino-sells', plan: 'free60', paid_until: now + 40 * 864e5 },
+     { plan: 'annual', paid_until: now + 90 * 864e5 }],
+    [{ seller_code: 'tino-sells', amount: 60, commission: 18 }, { amount: 60, commission: 0 }],
+    { now });
+  const tino = board.find((r) => r.code === 'tino-sells');
+  const house = board.find((r) => r.code === '');
+  assert.equal(tino.shops, 2); assert.equal(tino.paying, 1); assert.equal(tino.trials, 1);
+  assert.equal(tino.expiring_14d, 1); assert.equal(tino.commission, 18); assert.equal(tino.clicks, 41);
+  assert.equal(house.shops, 1, 'unattributed shops are counted, not dropped');
+  assert.equal(board.reduce((a, r) => a + r.revenue, 0), 120, 'board revenue reconciles with the sales rows');
+});

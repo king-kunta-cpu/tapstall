@@ -531,3 +531,42 @@ test('0.9.12 the login form asks once — a second time has a reason, and the sh
   const src = read('pages/src/admin.html');
   assert.ok(src.indexOf('S.loadRetry') > src.indexOf('function load'), 'the retry lives in load(), which every refresher calls');
 });
+
+/* v1.0.0 — the tap is gone: the clock is the trigger, credentials are env-only, and the direct
+   rails send from the Worker instead of "a script on the owner's box". */
+test('1.0.0 the press runs on the cron, and no design surface asks the owner to tap send', async () => {
+  assert.match(worker, /out\.press = await pressTick\(env\)/, 'runCron runs the press window itself');
+  assert.match(worker, /async function runPress\(env, origin, opt\)/, 'compose+send exists as a clock-callable function, not only behind an HTTP door');
+  assert.match(worker, /press:last/, 'the slot is claimed in KV so a retried tick cannot double-send a window');
+  assert.doesNotMatch(doc, /single owner tap sends|one owner tap sends/, 'the owner-tap sentence is gone from the design doc');
+  assert.doesNotMatch(core, /one owner tap sending|one tap sends the batch/, 'and from the code comments that taught it');
+  const C = await import('file://' + join(root, 'worker', 'core.js'));
+  const pr = C.meshPress({ press: { buffer_token: 'a-credential-in-the-wrong-place', channels: { twitter: 'abc' } } }, {});
+  assert.equal(pr.has_token, false, 'a Buffer token sitting in a KV shop document is ignored, never used');
+  assert.equal(pr.token_from, 'nowhere');
+  assert.match(pr.stored_in, /Worker secret only/);
+});
+
+test('1.0.0 direct rails send from the Worker when the identity secret is bound — and queue honestly when it is not', async () => {
+  const C = await import('file://' + join(root, 'worker', 'core.js'));
+  const item = { id: 'b1', channel: 'bluesky', via: 'direct', due: new Date(Date.now() - 1000).toISOString(), text: 'A value line about stock sheets, no pitch in it.' };
+  const seen = [];
+  const stub = async (url, init) => {
+    seen.push(String(url));
+    if (String(url).includes('createSession')) return { status: 200, json: async () => ({ accessJwt: 'jwt', did: 'did:plc:x' }), text: async () => '{}' };
+    return { status: 200, json: async () => ({ uri: 'at://did:plc:x/app.bsky.feed.post/1' }), text: async () => '{}' };
+  };
+  const sent = await C.meshPressFlush([item], { direct: { bluesky: { handle: 'house.bsky.social', app_password: 'pw' } } }, { fetch: stub, now: Date.now() });
+  assert.equal(sent.sent, 1, JSON.stringify(sent.results));
+  assert.equal(sent.results[0].verified, true, 'sent means the platform accepted it, on direct rails too');
+  assert.equal(seen.length, 2, 'session then record — the ATProto shape, in order');
+  const queued = await C.meshPressFlush([item], {}, { now: Date.now() });
+  assert.equal(queued.results[0].status, 'queued');
+  assert.match(queued.results[0].err, /no direct credential bound/, 'unbound is a named missing secret, not a silent skip and not a tap owed');
+  const tg = { id: 't1', channel: 'telegram', via: 'direct', due: item.due, text: 'value line' };
+  const tgSent = await C.meshPressFlush([tg], { direct: { telegram: { bot_token: 'tok', chat_id: '-1001' } } },
+    { fetch: async () => ({ status: 200, json: async () => ({ ok: true }), text: async () => '{"ok":true}' }), now: Date.now() });
+  assert.equal(tgSent.sent, 1, JSON.stringify(tgSent.results));
+  const dry = await C.meshPressFlush([item], { direct: { bluesky: { handle: 'h', app_password: 'pw' } } }, { dry: true, fetch: async () => { throw new Error('dry must not call'); }, now: Date.now() });
+  assert.equal(dry.results[0].status, 'dry', 'a dry run still calls nothing');
+});

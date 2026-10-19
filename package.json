@@ -13,5 +13,5 @@
     "quota": "bash scripts/quota.sh"
   },
   "type": "module",
-  "version": "0.9.14"
+  "version": "1.0.0"
 }
