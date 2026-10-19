@@ -640,20 +640,25 @@ echo "[6] the front door: a store name and six digits, and nothing else"
 # measured the same way the served one is. Comparing a $(cat file) count against a
 # curl count is a one-byte lie, and it was: this check failed while the product was fine.
 DEPLOYED_A=$(printf '%s' "$(cat pages/admin.html)" | wc -c | tr -d ' ')
+# Bytes on both sides. This used to compare wc -c (bytes) against ${#var} (characters),
+# which in a UTF-8 locale undercounts every multi-byte glyph on the page — the check
+# reported a phantom 897-byte shrinkage of a dashboard that was byte-identical.
+bytes_of() { printf '%s' "$1" | wc -c | tr -d ' '; }
 fetch_a() {  # fetch_a <path> — retries a stale read, prints whatever the last try gave
   local out i
   for i in 1 2 3 4 5; do
     out=$(curl -sL -m 30 "$ORIGIN$1")
-    [[ "${#out}" -eq "$DEPLOYED_A" ]] && break
+    [[ "$(bytes_of "$out")" -eq "$DEPLOYED_A" ]] && break
     sleep 3
   done
   printf '%s' "$out"
 }
 PAGE_A=$(fetch_a "/a?v=$RANDOM")
-if [[ "${#PAGE_A}" -ne "$DEPLOYED_A" ]]; then
-  echo "      served ${#PAGE_A} bytes instead; first line: $(printf '%s' "$PAGE_A" | head -c 90)"
+SERVED_A=$(bytes_of "$PAGE_A")
+if [[ "$SERVED_A" -ne "$DEPLOYED_A" ]]; then
+  echo "      served $SERVED_A bytes instead; first line: $(printf '%s' "$PAGE_A" | head -c 90)"
 fi
-ckw "the served dashboard is the deployed one ($DEPLOYED_A bytes)" "^${#PAGE_A}$" "$DEPLOYED_A"
+ckw "the served dashboard is the deployed one ($DEPLOYED_A bytes)" "^$SERVED_A$" "$DEPLOYED_A"
 ck "an old ?token= link lands on the sign-in card, not a blank page" 'id="login"' "$(fetch_a "/a?handle=$HANDLE&token=$ADMIN_KEY")"
 ck "  · same when a mailer escaped the &" 'retired' "$(fetch_a "/a?handle=$HANDLE&amp;token=$ADMIN_KEY")"
 ck "  · and the query repair still works where a query is read" '"ok":true' "$(curl -s -m 30 "$ORIGIN/api/lookup?handle=$HANDLE&amp;x=1")"
@@ -1092,9 +1097,9 @@ cks "  · text/csv, not a page to look at" 'text/csv' "$CSVD"
 CSV=$(curl -s -m 30 -b "$JAR" "$ORIGIN/api/books?handle=$HANDLE&fmt=csv")
 cks "  · and the pack opens with its own notes" '^# tapstall books pack' "$CSV"
 cks "  · nothing in it is quoted from the shop's settings" '^0$' "$(grep -cE 'admin_token' <<<"$CSV")"
-ckw "a receipt prints for the order this run placed" 'Receipt|TAX INVOICE' "$(curl -s -m 30 -b "$JAR" "$ORIGIN/api/receipt?handle=$HANDLE&order=$ID&fmt=txt")"
-ckw "  · the printable one is noindex and never cached" 'noindex' "$(curl -s -m 30 -b "$JAR" -D - -o /dev/null "$ORIGIN/api/receipt?handle=$HANDLE&order=$ID" | tr -d '\r')"
-ckw "  · a shop with no number says so instead of inventing one" '^0$' "$(curl -s -m 30 -b "$JAR" "$ORIGIN/api/receipt?handle=$HANDLE&order=$ID&fmt=txt" | grep -c 'VAT No')"
+ckws "a receipt prints for the order this run placed" 'Receipt|TAX INVOICE' "$(curl -s -m 30 -b "$JAR" "$ORIGIN/api/receipt?handle=$HANDLE&order=$ID&fmt=txt")"
+ckws "  · the printable one is noindex and never cached" 'noindex' "$(curl -s -m 30 -b "$JAR" -D - -o /dev/null "$ORIGIN/api/receipt?handle=$HANDLE&order=$ID" | tr -d '\r')"
+ckws "  · a shop with no number says so instead of inventing one" '^0$' "$(curl -s -m 30 -b "$JAR" "$ORIGIN/api/receipt?handle=$HANDLE&order=$ID&fmt=txt" | grep -c 'VAT No')"
 ckw "  · and the order it is printed from carries its VAT profile frozen" '"vat"' "$ORD"
 NOAUTH2=$(curl -s -m 30 -o /dev/null -w '%{http_code}' "$ORIGIN/api/receipt?handle=$HANDLE&order=x")
 ck "nobody else's receipt, on no session" '^401$' "$NOAUTH2"

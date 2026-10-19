@@ -11,11 +11,11 @@ workers_dev = true
 # self-contained and needs no module rules, and git's bytes are the deployed bytes.
 [[kv_namespaces]]
 binding = "STORES"
-id = "a9016473b79f485bbd0fd7b2d3f0ea79"
+id = "a9016473abef4a66bcba6f200d7d4af3"
 
 [[kv_namespaces]]
 binding = "ORDERS"
-id = "7dd531986d0d4ced812d0d080d0d7f5c"
+id = "7dd531983a814ff5bb693598b93714d6"
 
 [triggers]
 crons = ["15 6,12,18,0 * * *"]
