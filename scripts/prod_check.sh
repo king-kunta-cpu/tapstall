@@ -356,7 +356,10 @@ ckw "the page posts itself when a browser runs it" 'method="post" action="/api/m
 # verify step refused would render a refusal instead of state:confirm, and a sweep that broke the
 # binding would tell a buyer the shop closed its links on a link minted seconds ago.
 ckw "  · as a live confirm state, which the binding has to permit" '"state":"confirm"' "$PAGE"
-nkw "and a seconds-old link is never told the shop closed its links" 'closed its payment links' "$PAGE"
+ckw "and a seconds-old link is never told the shop closed its links" '"state":"confirm"' "$PAGE"
+nkw "  · nor stamped revoked in its state blob" '"revoked":true' "$PAGE"
+# (the closed sentence itself lives in the page JS behind S.revoked — the state the
+#  Worker stamps is the thing to judge, not the vocabulary the template carries)
 ck "and says what it will do" 'from ' "$PAGE"
 # Ground truth is the order document itself. The dashboard list is a separate KV
 # key and is eventually consistent, so it can lag a write by up to a minute.
@@ -558,8 +561,14 @@ ckw "  · while the new one writes, on the buyer's side of the counter" '"change
 # a spent link is refused for being spent before the body is read, which would prove nothing
 # about the verb — so take the link the order honours right now and offer it an empty box
 LIVE4=$(curl -s -m 30 -H "x-tapstall-admin: $ADMIN_KEY" "$ORIGIN/api/admin?handle=$HANDLE" | python3 -c "import sys,json;d=json.load(sys.stdin);print(next((o.get('proof_url','') for o in d.get('orders',[]) if o.get('id')=='$ID2' and o.get('proof_url')), ''))" 2>/dev/null)
-ckw "  · and void is not the buyer's word, whatever they put in the json" 'Type the code your app printed|already filed' \
-  "$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"${LIVE4#/p/}"'","proof":"","void":1}' "$ORIGIN/api/proof")"
+VOIDRESP=""
+for try in 1 2 3 4 5 6; do
+  LIVE4=$(curl -s -m 30 -H "x-tapstall-admin: $ADMIN_KEY" "$ORIGIN/api/admin?handle=$HANDLE" | python3 -c "import sys,json;d=json.load(sys.stdin);print(next((o.get('proof_url','') for o in d.get('orders',[]) if o.get('id')=='$ID2' and o.get('proof_url')), ''))" 2>/dev/null)
+  VOIDRESP=$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"${LIVE4#/p/}"'","proof":"","void":1}' "$ORIGIN/api/proof")
+  printf '%s' "$VOIDRESP" | grep -q '"why":"cap"' || break   # KV lag can mint against the generation the last write replaced
+  sleep 5
+done
+ckw "  · and void is not the buyer's word, whatever they put in the json" 'Type the code your app printed|already filed' "$VOIDRESP"
 echo "[5] settings: cosmetic instant, money held 15 minutes, cancellable"
 HOURS=$(printf '%s' "$STORE" | python3 -c "import sys,json;print(json.load(sys.stdin).get('hours','') or 'open')" 2>/dev/null)
 PROBE="ZZ-PROBE-$(date +%s | tail -c 6)"
@@ -701,7 +710,12 @@ import sys,json
 d=json.load(sys.stdin)
 a=[x for x in (d.get('audit') or []) if x.get('act')=='pin' or x.get('act')=='login']
 print(json.dumps(a[0]) if a else '{}')" 2>/dev/null)
-ck "the sign-in is in the merchant's own log, recorded as a PIN sign-in" '"via": ?"pin"' "$AUD"
+if [[ -n "${PIN:-}" ]]; then
+  ck "the sign-in is in the merchant's own log, recorded as a PIN sign-in" '"via": ?"pin"' "$AUD"
+else
+  printf '  \033[33m!\033[0m %s \033[2m— not verifiable today: PIN= not set, so no sign-in happened to be logged\033[0m\n' "the sign-in is in the merchant's own log, recorded as a PIN sign-in"
+  blocked=$((blocked + 1))
+fi
 nk "  · and the log line holds no PIN, only the field name" '"pin": ?"[0-9]' "$AUD"
 ck "a login credential cannot be spent to confirm an order" '"link_expired"' "$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"v1.9999999999.eyJhIjoibG9naW4ifQ.deadbeef"}' "$ORIGIN/api/mark")"
 ck "a guessed legacy token is refused, not honoured" '^405$' "$(code "$ORIGIN/api/mark?handle=$HANDLE&token=not-the-key&id=x&status=paid")"
@@ -837,7 +851,9 @@ TRY=$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"secret":"n
 ck "  · dead-cookie probes did not lock anybody out" '^([6-9]|1[0-2])$' "$TRY"
 # and the guess this check just made is wiped from the counter, so running
 # prod_check a dozen times can never freeze the operator's own console
-curl -s -m 30 -o /dev/null -X POST -H 'content-type: application/json' --data-binary "@$BODY" "$ORIGIN/ops/login"
+NEWHDR=$(curl -s -m 30 -D - -o /dev/null -X POST -H 'content-type: application/json' --data-binary "@$BODY" "$ORIGIN/ops/login" | tr -d '\r')
+NEWOC=$(printf '%s' "$NEWHDR" | sed -n 's/^[Ss]et-[Cc]ookie: tp_ops=\([^;]*\).*/\1/p' | head -1)
+[[ -n "$NEWOC" ]] && OC="$NEWOC"   # [8]'s logout test revoked every ops session; later sections still need one
 rm -f "$BODY"
 fi
 rm -f "$HDR"
@@ -935,7 +951,13 @@ fi
 ckw "  · it answers the field empty rather than inventing one" '"proof":[[:space:]]*""' "$ORD"
 ckw "  · and an ask-only rail never scolds a buyer for it" '^0$' "$(printf '%s' "$ORD" | grep -cE 'ask them before sending')"
 ckw "the merchant's ledger sees the field on the order document" '"proof":[[:space:]]*""' "$DASH"
-ckw "  · a row that owes a code arrives with the words to ask for it" '^yes$' "$(printf '%s' "$DASH" | python3 -c "
+DASHFRESH="$DASH"
+for try in 1 2 3 4 5 6; do
+  printf '%s' "$DASHFRESH" | grep -q '"ask":' && break
+  sleep 5
+  DASHFRESH=$(curl -s -m 30 -H "x-tapstall-admin: $ADMIN_KEY" "$ORIGIN/api/admin?handle=$HANDLE")
+done
+ckw "  · a row that owes a code arrives with the words to ask for it" '^yes$' "$(printf '%s' "$DASHFRESH" | python3 -c "
 import json,sys
 d = json.load(sys.stdin)
 print('yes' if any((o or {}).get('ask') for o in d.get('orders', [])) else 'no')" 2>/dev/null)"
