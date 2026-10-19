@@ -3832,7 +3832,8 @@ export function sellerBoard(sellers, stores, sales, opt) {
   const rows = new Map();
   const row = (code) => {
     if (!rows.has(code)) rows.set(code, { code, name: code ? '' : 'Direct / house', active: !!code, pct: 0, clicks: 0,
-      shops: 0, live: 0, trials: 0, paying: 0, expiring_14d: 0, sales_count: 0, revenue: 0, commission: 0 });
+      shops: 0, live: 0, trials: 0, paying: 0, expiring_14d: 0, sales_count: 0, revenue: 0, commission: 0,
+      commission_due: 0, commission_whop: 0 });
     return rows.get(code);
   };
   for (const s of (Array.isArray(sellers) ? sellers : [])) {
@@ -3852,6 +3853,151 @@ export function sellerBoard(sellers, stores, sales, opt) {
     const r = row(cleanSellerCode(s.seller_code || ''));
     r.sales_count++; r.revenue = round2(r.revenue + (Number(s.amount) || 0));
     r.commission = round2(r.commission + (Number(s.commission) || 0));
+    // A Whop affiliate sale is paid by Whop (after its 30-day hold), not out of the owner's
+    // pocket a second time: `commission` stays total earned so old readers reconcile, while
+    // commission_due is what the owner still owes and commission_whop what Whop carries.
+    if (s.commission_via === 'whop') r.commission_whop = round2(r.commission_whop + (Number(s.commission) || 0));
+    else r.commission_due = round2(r.commission_due + (Number(s.commission) || 0));
   }
   return [...rows.values()].sort((a, b) => (b.commission - a.commission) || (b.shops - a.shops) || String(a.code).localeCompare(String(b.code)));
+}
+
+/* ==================== v1.1.0 — Whop: the card rail, judged in the open ==================== */
+/* The owner collects card money on Whop; Tapstall's job is the other half of that sentence:
+ * when Whop says a payment cleared, the right shop switches on, for the right number of days,
+ * once. Everything decidable about a Whop payload is decided here, in pure functions the tests
+ * can hold: what kind of event it is, whose it is, and what term it bought. The Worker only
+ * verifies the signature, finds the shop, and writes the conclusion.
+ *
+ * The event routing carries the scar tissue from the sister product's mint, where every Whop
+ * event used to be treated as a fresh sale: a renewal minted a second client while the paying
+ * tenant expired, and a cancellation was booked as revenue. So: failed ≠ grant, invalid ≠ grant,
+ * a test ping grants nothing, and only a succeeded/valid signal may move a paid_until. */
+
+/** The subscription catalogue this platform sells. Annual is the founding price ($60 = $5/mo,
+ *  one payment, no foreign-card subscription); monthly exists because a micro-merchant's cash
+ *  arrives monthly even when our bill would rather not. Monthly buys 31 days for a 30-day Whop
+ *  cycle — one day of slack so a late renewal never darkens a trading shop. */
+export const SUBSCRIPTION_PLANS = {
+  annual: { days: 365, usd: 60, zar: 999, label: 'Tapstall Annual' },
+  monthly: { days: 31, usd: 7, zar: 129, label: 'Tapstall Monthly' },
+};
+
+/** What kind of Whop event is this? Route on the action string the way the mint learned to:
+ *  refusals and endings are checked before grants, because "payment.failed" and
+ *  "membership.went_invalid" both contain the grant words. */
+export function whopEventKind(action) {
+  const a = String(action || '').toLowerCase();
+  if (!a || /test|ping|sample/.test(a)) return 'test';
+  if (/payment\.failed|payment_failed|invoice\.past_due/.test(a)) return 'failed';
+  if (/refund|dispute|chargeback/.test(a)) return 'refund';
+  if (/went_invalid|deactivated|cancel|expired|unsubscribe/.test(a)) return 'invalid';
+  if (/succeeded|went_valid|invoice\.paid|payment\.captured/.test(a)) return 'grant';
+  if (/membership|payment/.test(a)) return 'grant';
+  return 'ignore';
+}
+
+function whopCustomMap(b) {
+  const d = (b && b.data) || {};
+  const lists = [d.custom_fields, d.custom_field_responses, d.checkout_custom_field_responses,
+    d.membership && d.membership.custom_field_responses, d.membership && d.membership.custom_fields,
+    d.plan && d.plan.custom_fields].filter(Array.isArray);
+  const map = {};
+  for (const f of lists.flat()) {
+    if (!f) continue;
+    const val = f.value != null ? f.value : (f.answer != null ? f.answer : f.response);
+    if (val == null || val === '') continue;
+    const label = (f.question && typeof f.question === 'object') ? (f.question.title || f.question.name || f.question.id) : f.question;
+    const k = String(f.name || label || f.label || f.title || f.key || f.id || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (k) map[k] = String(val);
+  }
+  const metas = [d.metadata, d.membership && d.membership.metadata,
+    d.checkout_configuration && d.checkout_configuration.metadata, d.plan && d.plan.metadata,
+    d.product && d.product.metadata].filter((m) => m && typeof m === 'object');
+  for (const m of metas) {
+    for (const [k, v] of Object.entries(m)) {
+      const nk = String(k).toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (nk && v != null && v !== '') map[nk] = String(v);
+    }
+  }
+  return map;
+}
+
+/** Who paid, for which shop, under which membership — read from every shape Whop has used.
+ *  The shop handle is a *candidate*: the Worker credits it only if a store by that handle
+ *  exists, so a buyer typing their shop *name* still lands (register slugs the name into the
+ *  handle) and a typo goes to the exception list instead of a stranger's shop. */
+export function whopBuyer(b) {
+  const d = (b && b.data) || {};
+  const u = d.user || {};
+  const email = String(u.email || d.email || (b && b.email) || '').trim().toLowerCase();
+  const membership_id = String(d.membership_id || (d.membership && d.membership.id)
+    || (String(d.id || '').startsWith('mem_') ? d.id : '') || '').slice(0, 64);
+  const payment_id = String((String(d.id || '').startsWith('pay_') ? d.id : '')
+    || (d.payment && d.payment.id) || d.last_payment_id || d.receipt_id || '').slice(0, 64);
+  const cf = whopCustomMap(b || {});
+  // Any question *ending* in "handle" counts ("Your Tapstall shop handle" is the wording we
+  // tell the owner to put on the checkout) — an exact-key list here is how a matched payment
+  // ends up unmatched over a "Your".
+  const handleKey = Object.keys(cf).find((k) => /handle$/.test(k) || k === 'shop' || /^(tapstall)?(shop|store)name$/.test(k));
+  const handleRaw = (handleKey && cf[handleKey]) || cf.shopname || cf.storename || cf.shop || '';
+  const affiliate = String((d.affiliate && (d.affiliate.username || d.affiliate.id))
+    || d.affiliate_username || cf.affiliate || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40);
+  return {
+    email: isEmail(email) ? email : '',
+    name: String(u.name || u.username || d.name || '').slice(0, 80),
+    membership_id, payment_id, affiliate,
+    handle: slug(String(handleRaw || '')).slice(0, 30),
+    plan_id: String((d.plan && d.plan.id) || d.plan_id || (d.membership && d.membership.plan_id) || '').slice(0, 64),
+  };
+}
+
+/** Money on a Whop payload, in major units. Whop's API speaks integer cents (a $60 payment is
+ *  6000); a value that can only be cents is read as cents, and anything unreadable is 0 — the
+ *  amount is a fallback witness for the term, never the only one, so a misread costs days on
+ *  the exception list, not money from a stranger. */
+export function whopMoney(b) {
+  const d = (b && b.data) || {};
+  const cands = [d.total, d.amount, d.amount_after_fees, d.final_amount,
+    d.payment && d.payment.amount, d.plan && d.plan.initial_price, d.plan && d.plan.renewal_price];
+  let n = 0;
+  for (const c of cands) { const v = Number(c); if (Number.isFinite(v) && v > 0) { n = v; break; } }
+  if (n >= 1000) n = n / 100;                       // cents — no Tapstall plan costs four figures
+  else if (n >= 200 && Number.isInteger(n)) n = n / 100;
+  const currency = String(d.currency || (d.plan && d.plan.currency) || 'USD').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3) || 'USD';
+  return { amount: round2(n), currency };
+}
+
+/** What term did this payment buy? Order of trust, same as the mint's catalogue: the owner's
+ *  own plan map (env WHOP_PLANS_JSON: {"plan_…":{days,usd}}) beats everything; then checkout
+ *  metadata days; then the amount against the catalogue; then period words in titles; and the
+ *  final default is the *short* plan — under-granting lands on the digest where a person tops
+ *  it up, over-granting silently gives a year away for $7. */
+export function whopTerm(b, catalog) {
+  const d = (b && b.data) || {};
+  const buyer = whopBuyer(b || {});
+  const cat = (catalog && typeof catalog === 'object') ? catalog : {};
+  const planIds = [buyer.plan_id, d.plan_id, d.membership && d.membership.plan_id,
+    typeof d.plan === 'string' ? d.plan : '', d.product_id, d.product && d.product.id,
+    d.access_pass_id, d.access_pass && d.access_pass.id].filter(Boolean);
+  for (const id of planIds) {
+    const hit = cat[id];
+    if (hit && Number(hit.days) > 0) return { days: Math.min(1460, Math.max(7, Number(hit.days))),
+      amount: round2(Number(hit.usd ?? hit.amount) || whopMoney(b).amount), currency: String(hit.currency || whopMoney(b).currency).toUpperCase(), from: 'catalog', plan_id: id };
+  }
+  const cf = whopCustomMap(b || {});
+  const metaDays = Number(cf.days || cf.term || cf.termdays);
+  const money = whopMoney(b || {});
+  if (Number.isFinite(metaDays) && metaDays >= 7) return { days: Math.min(1460, metaDays), amount: money.amount, currency: money.currency, from: 'metadata', plan_id: buyer.plan_id };
+  const text = [d.plan && (d.plan.title || d.plan.name), d.product && (d.product.title || d.product.name),
+    d.plan_title, d.product_title, d.access_pass && d.access_pass.title].filter(Boolean).join(' ').toLowerCase();
+  const zar = money.currency === 'ZAR';
+  const annualAt = zar ? SUBSCRIPTION_PLANS.annual.zar : SUBSCRIPTION_PLANS.annual.usd;
+  const monthlyAt = zar ? SUBSCRIPTION_PLANS.monthly.zar : SUBSCRIPTION_PLANS.monthly.usd;
+  if (money.amount >= annualAt * 0.9) return { days: SUBSCRIPTION_PLANS.annual.days, amount: money.amount, currency: money.currency, from: 'amount-annual', plan_id: buyer.plan_id };
+  if (money.amount > 0 && money.amount <= monthlyAt * 1.6) return { days: SUBSCRIPTION_PLANS.monthly.days, amount: money.amount, currency: money.currency, from: 'amount-monthly', plan_id: buyer.plan_id };
+  if (/annual|year|365/.test(text) || Number(d.plan && d.plan.billing_period) >= 300 || Number(d.plan && d.plan.expiration_days) >= 300)
+    return { days: SUBSCRIPTION_PLANS.annual.days, amount: money.amount || annualAt, currency: money.currency, from: 'title-annual', plan_id: buyer.plan_id };
+  if (money.amount > monthlyAt * 1.6) return { days: Math.min(1460, Math.max(31, Math.round(money.amount / annualAt * 365))), amount: money.amount, currency: money.currency, from: 'amount-prorata', plan_id: buyer.plan_id };
+  return { days: SUBSCRIPTION_PLANS.monthly.days, amount: money.amount || monthlyAt, currency: money.currency, from: 'default-monthly', plan_id: buyer.plan_id };
 }

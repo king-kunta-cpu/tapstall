@@ -82,29 +82,38 @@ posted to; operators get the platform's nodes. When Brick 4 lands, `provider` is
 
 ## Brick 6 — subscriptions + commission
 
-Implemented as **sellers**, which is what this platform needed instead of Whop affiliates: $60/year
-(`PRICE_USD`), 60 free days, 30% default commission (per-seller, set once at registration).
+v1.1.0 makes Whop the card rail (the owner's standing collection route) *and* keeps sellers:
+$60/year annual + $7/month monthly (`SUBSCRIPTION_PLANS`; the pricing case is `docs/PRICING.md`),
+60 free days, 30% default commission. The renew checkout carries the attributed seller's Whop
+`?a=<username>` so Whop settles their 30% directly; the ledger records `commission_via` and the
+board splits `commission_whop` (Whop pays it) from `commission_due` (owner still owes it —
+manual-rail sales), so nobody is paid twice.
 Attribution is judged at birth: `/r/<code>` (or `?ref=` / `?a=`) sticks only if the code names a
 registered, active seller — an invented code manufactures nothing. Sales rows (`sale:…`) are written
 by both payment webhooks and by manual recognition (`recognise_ref`), and `sellerBoard` reconciles
 clicks → shops → trials → paying → revenue → commission → leads from documents at read time, with a
 house row so direct sales are visible. Seller keys hash at rest and are shown exactly once.
-Remaining for a person to configure (not code): the payment webhook secrets themselves
-(`FW_SECRET`/`FLW_API_KEY`, `PAYFAST_PASSPHRASE`) — until they exist, the doors answer 503 and the
-recognised-reference path is the money rail. Commission payouts are paid externally against the
-board; the ledger is the source of truth.
+Automated activation is `POST /api/hook/whop` (setup: `docs/WHOP-SETUP.md`): Standard Webhooks
+HMAC verified the mint's way, fail-closed 503 until `WHOP_WEBHOOK_SECRET` exists, events routed in
+the core (failed/invalid/refund never grant), shop matched by checkout handle → membership →
+email, unmatched filed to the digest, idempotent on webhook + payment ids with the 3-day companion
+rule. The Flutterwave/PayFast doors remain as unarmed fallbacks (503), and the recognised-reference
+path remains the manual money rail (bank/EcoCash/Mukuru/ZIPIT/USDT).
 
 ## Brick 7 — storefront
 
 `pages/index.html` (the authored landing) propagates a seller code from hash, query or
-`sessionStorage` into the onboarding and fees links, and `/g/<code>` lands there too. No Whop
-storefront; the shop itself is the storefront.
+`sessionStorage` into the onboarding and fees links, and `/g/<code>` lands there too. The Whop
+storefront is the card checkout (product + covers from `brand/`); the shop itself remains the
+storefront for trading.
 
 ## Brick 8 — landing pages + brand
 
 Pages are bundle constants (inlined at build; deploy fails if any is missing). `ui_kit.py`
 regenerates `/pages` from `pages/src` and the test suite enforces they match byte-for-byte.
-Brand: the ops console is now titled "owner", matching the role words.
+Brand: the ops console is titled "owner", matching the role words; v1.1.0 adds the brand system
+in `brand/` (stall-and-tap mark, lockups, Whop cover, avatar, palette extending the UI kit's
+green/chrome), wired into the landing page as inline SVG + favicon so the single-file rule holds.
 
 ## Brick 9 — onboarding + guides
 
@@ -127,14 +136,16 @@ dispatch it weekday mornings. It sends nothing to anyone.
 
 ## Brick 11 — outreach sending
 
-The *pipeline* exists (claim → contacted → replied → trial/closed, follow-up dates, per-seller
-queues, Sheets feed); automated cold *sending does not, yet, and should not be faked: there is no email binding on the
-Worker and cold WhatsApp sending from shared numbers is how numbers die. What the press module
-already composes (provenance-checked copy under caps) is the honest internet-facing voice; personal
-outreach is a seller action from their own device, recorded via `contacted`. An `EMAIL` binding
-(registration emails, inbound classification per Brick 12) is the next infra step when the owner
-attaches a domain; the leads pipeline's statuses were shaped so a 6-class inbox classifier can land
-behind `contacted`/`replied` without changing them.
+Implemented in v1.1.0 the STPi way — **seller-owned Gmail by default**: `scripts/mail_outreach.py`
+(stdlib SMTP/IMAP, run by `outreach.yml`, dispatched by the Worker's weekday slot alongside the
+hunt) sends only to Worker-eligible leads (queued = 2+ signals, or a follow-up due under the
+3-touch cap), from the allocated seller's own mailbox connected by Gmail **app password**, and files
+every outcome back through `/api/leads/act` acting *as that seller*. App passwords live as Worker
+secrets `GMAIL_<TAG>_*` and reach the runner only through the admin-gated
+`GET /api/outreach/mailboxes` (the mint's /hook/settings shape); no `EMAIL` binding and no custom
+domain are involved. Replies are polled over IMAP: STOP → the DNC ledger, any human answer →
+`replied` and the machine stops. WhatsApp-only leads are counted, never auto-messaged — they wait
+for the seller's own tap, because cold WhatsApp sending from shared numbers is how numbers die.
 
 ## Brick 12 — anti-spam engagement engine
 

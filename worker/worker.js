@@ -37,6 +37,7 @@ import {
   meshRegister, meshCompanyIdentities, meshCompanyBeats, meshPressLedger, MESH_ID_CLASSES, MESH_ID_RAIL_DEFAULTS,
   meshIdentityPlan,
   cleanSellerCode, allocateSeller, cleanLead, leadTransition, sellerBoard, commissionFor, SELLER_DEFAULT_PCT,
+  whopEventKind, whopBuyer, whopMoney, whopTerm, SUBSCRIPTION_PLANS,
   MESH_PUBLISH, MESH_BUFFER_FREE, MESH_DRIP, meshRailsTotal, meshRailHealth, meshDrip,
   MESH_RAILS, MESH_BUDGET,
   orderRow, packRow, unpackRow, mergeRows, MAX_ORDERS_KEPT,   // the ledger row, and the cap on it
@@ -45,7 +46,7 @@ import {
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
@@ -326,6 +327,7 @@ async function route(req, url, env, ctx) {
   if (p === '/api/leads' && req.method === 'GET') return leadsListSeller(url, env);
   if (p === '/api/leads/act' && req.method === 'POST') return leadsAct(req, env);
   if (p === '/api/leads/sheets-feed') return sheetsFeed(url, env);
+  if (p === '/api/outreach/mailboxes') return outreachMailboxes(req, env);
 
   // The one-tap confirm link: GET renders an inert page, the browser posts.
   if ((m = p.match(/^\/c\/([A-Za-z0-9._-]{20,400})$/))) return confirmPage(env, m[1]);
@@ -386,6 +388,7 @@ async function route(req, url, env, ctx) {
 
   if (p === '/api/checkout' && req.method === 'POST') return checkout(req, url, env);
   if (p === '/api/renew-ref' && req.method === 'POST') return renewRef(req, env);
+  if (p === '/api/hook/whop' && req.method === 'POST') return hookWhop(req, url, env, ctx);
   if (p === '/api/hook/flutterwave' && req.method === 'POST') return hookFlutterwave(req, url, env, ctx);
   if (p === '/api/hook/payfast' && req.method === 'POST') return hookPayfast(req, url, env, ctx);
 
@@ -1402,8 +1405,28 @@ async function checkout(req, url, env) {
   if (!cSt) return json({ ok: false, error: 'store not found' }, 404);
   if (!renewOk(rec, cSt))
     return json({ ok: false, error: 'links_revoked', final: true, why: RENEW_CLOSED_WHY }, 410);
-  const days = clamp(Number(b.days) || 365, 30, 1460);
-  const amount = round2(PRICE_USD * (days / 365));
+  let days = clamp(Number(b.days) || 365, 30, 1460);
+  let amount = round2(PRICE_USD * (days / 365));
+  // The card rail is Whop — that is the owner's standing instruction, and the page must not
+  // send a Zimbabwean merchant to an unconfigured gateway slug when the business collects
+  // somewhere else. A Whop checkout is a fixed plan, not a days slider: a year ask goes to
+  // the annual checkout, a short ask to the monthly one when it exists, and the intent still
+  // records the terms THIS Worker chose. The seller's Whop affiliate name rides along as
+  // ?a= so Whop settles their 30% — the same preservation the sister stack pins end-to-end.
+  const whopAnnual = String(env.WHOP_CHECKOUT_URL_ANNUAL || env.WHOP_CHECKOUT_URL || '');
+  const whopMonthly = String(env.WHOP_CHECKOUT_URL_MONTHLY || '');
+  const whopPlan = days >= 300 ? { key: 'annual', url: whopAnnual } : (whopMonthly ? { key: 'monthly', url: whopMonthly } : null);
+  let whopUrl = '';
+  if (whopPlan && whopPlan.url) {
+    days = SUBSCRIPTION_PLANS[whopPlan.key].days;
+    amount = SUBSCRIPTION_PLANS[whopPlan.key].usd;
+    whopUrl = whopPlan.url;
+    const code = cleanSellerCode(cSt.seller_code || '');
+    if (code) {
+      const sd = await sellerDoc(env, code).catch(() => null);
+      if (sd && sd.whop) whopUrl += (whopUrl.includes('?') ? '&' : '?') + 'a=' + encodeURIComponent(sd.whop);
+    }
+  }
   // The reference is random and the record carries the terms: a ref built from the
   // clock is one a stranger can walk, and anything the caller may repeat is something
   // a caller can change. The window is why an old link says "start again" rather than
@@ -1416,11 +1439,14 @@ async function checkout(req, url, env) {
     // what a payment button has to echo back as custom_str1: the only thread that
     // ties a notice to terms this Worker chose, instead of terms the sender typed
     custom_str1: txRef,
-    // the slug of the Flutterwave *payment link* in whoever's account is
-    // receiving money; it is external configuration, so it is a secret and not a
-    // string in the source — the brand can change without breaking payouts
-    pay_url: `https://flutterwave.com/pay/${env.FW_PAY_SLUG || 'tapstall'}?tx_ref=${txRef}&amount=${amount}&currency=USD&customer_email=${encodeURIComponent(b.email || '')}&redirect_url=${encodeURIComponent(url.origin + '/api/hook/flutterwave?done=1&tx_ref=' + txRef)}`,
-    manual: `Or send ${amount} USD / local equivalent and paste the payment reference to the operator's WhatsApp — activation is automatic on the webhook, manual only if you pay cash.`,
+    provider: whopUrl ? 'whop' : 'flutterwave',
+    // Whop first (it is where the card money actually goes); the Flutterwave payment link
+    // remains the fallback for a platform that arms it. The shop handle is the thread either
+    // way: on Whop it is the checkout's custom field, answered with exactly this handle.
+    pay_url: whopUrl || `https://flutterwave.com/pay/${env.FW_PAY_SLUG || 'tapstall'}?tx_ref=${txRef}&amount=${amount}&currency=USD&customer_email=${encodeURIComponent(b.email || '')}&redirect_url=${encodeURIComponent(url.origin + '/api/hook/flutterwave?done=1&tx_ref=' + txRef)}`,
+    shop_handle: rec.handle,
+    manual_details: String(env.PLATFORM_PAY_DETAILS || ''),
+    manual: `Or send ${amount} USD / local equivalent (bank, EcoCash, Mukuru, ZIPIT or USDT) and paste the payment reference below — a card payment on Whop switches the store on by itself; a manual reference is recognised from the owner's exception list.`,
   });
 }
 
@@ -1937,7 +1963,10 @@ async function renewPage(env, token) {
       left: st ? Math.ceil(((st.paid_until || 0) - Date.now()) / 864e5) : 0,
       suspended: st ? !!st.suspended : false,
       orders: rows.length, gmv: Math.round(rows.reduce((a, r) => a + (Number(r.total) || 0), 0) * 100) / 100,
-      price: PRICE_USD, store_url: st ? '/s/' + st.handle : '/onboard',
+      price: PRICE_USD, price_monthly: SUBSCRIPTION_PLANS.monthly.usd,
+      pay_whop: !!(env.WHOP_CHECKOUT_URL || env.WHOP_CHECKOUT_URL_ANNUAL),
+      pay_manual: String(env.PLATFORM_PAY_DETAILS || ''),
+      store_url: st ? '/s/' + st.handle : '/onboard',
       pay_url: st ? '/a' : '/onboard',
     };
     return html(fillPage(custom, [['TAPSTALL_RENEW', data]]));
@@ -3920,6 +3949,7 @@ async function opsHealth(env) {
       token_env: e.token_env, token_present: !!env[e.token_env],
       direct_bound: Object.keys(directCredsFor(env, e, id)) }));
     pipeline.armed = {
+      whop: !!env.WHOP_WEBHOOK_SECRET, whop_checkout: !!(env.WHOP_CHECKOUT_URL || env.WHOP_CHECKOUT_URL_ANNUAL),
       flutterwave: !!env.FW_SECRET, payfast: !!env.PAYFAST_PASSPHRASE, email: !!env.EMAIL,
       gh_dispatch: !!env.GH_DISPATCH_TOKEN, trongrid_key: !!env.TRONGRID_KEY,
     };
@@ -4481,15 +4511,20 @@ async function recordSale(env, st, sale) {
   try {
     if (!env.STORES || !st || !st.handle) return null;
     const code = cleanSellerCode(st.seller_code || '');
-    let pct = 0;
+    let pct = 0, sd = null;
     if (code) {
-      const sd = await sellerDoc(env, code);
+      sd = await sellerDoc(env, code);
       pct = sd ? (Number(sd.commission_pct ?? SELLER_DEFAULT_PCT) || 0) : 0;
     }
+    // Who carries the commission is a fact about the door the money came through: a Whop
+    // affiliate sale is settled by Whop to the seller's Whop balance (30-day hold), so the
+    // owner must not owe it again out of pocket. The handler says so explicitly; anything
+    // else with a seller on it is owed internally, as before.
+    const via = (sale && sale.commission_via === 'whop') ? 'whop' : (code ? 'internal' : '');
     const amount = round2(Number(sale && sale.amount) || 0);
     const row = { handle: st.handle, seller_code: code, amount,
       currency: String((sale && sale.currency) || 'USD').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3) || 'USD',
-      days: Number(sale && sale.days) || 365, pct, commission: commissionFor(amount, pct),
+      days: Number(sale && sale.days) || 365, pct, commission: commissionFor(amount, pct), commission_via: via,
       provider: String((sale && sale.provider) || ''), ref: String((sale && sale.ref) || '').slice(0, 80),
       at: new Date().toISOString() };
     await env.STORES.put('sale:' + st.handle + ':' + Date.now().toString(36) + alnumToken(6), JSON.stringify(row));
@@ -4660,9 +4695,21 @@ async function leadsAct(req, env) {
   if (!doc.owner && lead.seller_code && lead.seller_code !== doc.code) {
     return json({ ok: false, conflict: true, error: 'allocated to ' + lead.seller_code + ' — one prospect, one voice' }, 409);
   }
-  const t = leadTransition(lead, b.action, doc.owner ? 'owner' : doc.code, { shop: b.shop, follow_days: b.follow_days, now: Date.now() });
+  // The outreach runner holds no seller keys (they hash at rest and are shown once), so the
+  // owner credential may name the allocated seller it is acting for — and ONLY that seller:
+  // an as_seller that does not match the allocation is the same 409 as any other collision.
+  let actor = doc.owner ? 'owner' : doc.code;
+  if (doc.owner && b.as_seller) {
+    const as = cleanSellerCode(String(b.as_seller));
+    if (as && lead.seller_code && lead.seller_code !== as) {
+      return json({ ok: false, conflict: true, error: 'allocated to ' + lead.seller_code + ' — one prospect, one voice' }, 409);
+    }
+    if (as) actor = as;
+  }
+  const t = leadTransition(lead, b.action, actor, { shop: b.shop, follow_days: b.follow_days, now: Date.now() });
   if (!t.ok) return json({ ok: false, conflict: !!t.conflict, error: t.error, ...(t.actions ? { actions: t.actions } : {}) }, t.conflict ? 409 : 422);
   if (b.note) t.lead.note = String(b.note).slice(0, 300);
+  if (b.sender && isEmail(String(b.sender))) t.lead.last_sender = String(b.sender).toLowerCase().slice(0, 80);
   await env.ORDERS.put('lead:' + id, JSON.stringify(t.lead));
   if (b.action === 'dnc') {
     try {
@@ -4711,15 +4758,19 @@ async function dispatchTick(env) {
   const stamp = new Date().toISOString().slice(0, 10);
   const last = await env.ORDERS.get('dispatch:last', 'json').catch(() => null);
   if (last && last.day === stamp) return { skipped: 'today already dispatched', day: stamp };
-  const out = { day: stamp, at: new Date().toISOString(), leads_hunt: 'skipped_no_token' };
+  const out = { day: stamp, at: new Date().toISOString(), leads_hunt: 'skipped_no_token', outreach: 'skipped_no_token' };
   if (env.GH_DISPATCH_TOKEN && env.GH_REPO) {
-    try {
-      const r = await fetch('https://api.github.com/repos/' + env.GH_REPO + '/actions/workflows/leads-hunt.yml/dispatches', {
+    const fire = async (wf, inputs) => {
+      const r = await fetch('https://api.github.com/repos/' + env.GH_REPO + '/actions/workflows/' + wf + '/dispatches', {
         method: 'POST', headers: { authorization: 'Bearer ' + env.GH_DISPATCH_TOKEN, accept: 'application/vnd.github+json',
           'content-type': 'application/json', 'user-agent': 'tapstall/1 (scheduler)' },
-        body: JSON.stringify({ ref: env.GH_REF || 'main', inputs: { post: 'true' } }) });
-      out.leads_hunt = r.status === 204 ? 'dispatched' : 'http ' + r.status;
-    } catch (e) { out.leads_hunt = 'error'; out.error = String(e && e.message || e).slice(0, 120); }
+        body: JSON.stringify({ ref: env.GH_REF || 'main', inputs }) });
+      return r.status === 204 ? 'dispatched' : 'http ' + r.status;
+    };
+    try { out.leads_hunt = await fire('leads-hunt.yml', { post: 'true' }); }
+    catch (e) { out.leads_hunt = 'error'; out.error = String(e && e.message || e).slice(0, 120); }
+    try { out.outreach = await fire('outreach.yml', { mode: 'send_and_poll' }); }
+    catch (e) { out.outreach = 'error'; out.outreach_error = String(e && e.message || e).slice(0, 120); }
   }
   try { await env.ORDERS.put('dispatch:last', JSON.stringify(out)); } catch (e) { void e; }
   return out;
@@ -4760,12 +4811,15 @@ async function writeDigest(env) {
     if (l.next_follow_at && Date.parse(l.next_follow_at) <= now && !['closed', 'dnc'].includes(l.status)) followups_due++;
   }
   const sales30 = (await listSales(env)).filter((s) => now - Date.parse(s.at || '') <= 30 * 864e5);
+  const whopUnmatched = (await listKeys(env.ORDERS, 'whop:unmatched:', 200)).length;
+  const whopRefunds = (await listKeys(env.ORDERS, 'whop:refund:', 200)).length;
   const digest = { at: new Date(now).toISOString(), version: VERSION,
     stores: { total: handles.length, live, suspended, expiring_14d: expiring },
     awaiting_refs: { count: refCount, handles: refHandles },
     press: { identities: Object.keys(reg).length, queued_items: queuedItems, overdue_items: overdueItems,
       last_run: pressLast ? { at: pressLast.at, sent: pressLast.sent, statuses: pressLast.statuses } : null },
     leads: { total: leads.length, by_status, followups_due },
+    whop: { unmatched_payments: whopUnmatched, refunds_to_review: whopRefunds },
     sales_30d: { count: sales30.length, revenue: round2(sales30.reduce((a, s) => a + (Number(s.amount) || 0), 0)),
       commission: round2(sales30.reduce((a, s) => a + (Number(s.commission) || 0), 0)) },
     needs_a_person: [
@@ -4773,7 +4827,154 @@ async function writeDigest(env) {
       ...(expiring.length ? [expiring.length + ' shop(s) inside 14 days of expiry'] : []),
       ...(overdueItems ? [overdueItems + ' press item(s) overdue in queue (credential or rail missing — bind the secret, the cron does the rest)'] : []),
       ...(followups_due ? [followups_due + ' lead follow-up(s) due for sellers'] : []),
+      ...(whopUnmatched ? [whopUnmatched + ' Whop payment(s) could not be matched to a shop (wrong handle at checkout?) — match by hand, the money is already in Whop'] : []),
+      ...(whopRefunds ? [whopRefunds + ' Whop refund/dispute(s) to review before any term is clawed back'] : []),
     ] };
   try { await env.ORDERS.put('digest:last', JSON.stringify(digest)); } catch (e) { void e; }
   return { written: true, needs_a_person: digest.needs_a_person.length, stores_live: live, leads_total: leads.length };
+}
+
+/* ==================== v1.1.0 — Whop automated activation ====================
+ * The card money lives on Whop; this door is how a cleared Whop payment becomes a switched-on
+ * shop with no person in between. It refuses everything until WHOP_WEBHOOK_SECRET exists
+ * (fail-closed like every money door here), verifies the Standard Webhooks signature exactly
+ * the way the sister product's mint verifies it live, routes the event in the core (failed and
+ * invalid are not sales), matches the shop by the checkout's own handle answer — then the
+ * stored membership, then the buyer's email — and never guesses: an unmatched *payment* is
+ * money already taken, so it is filed for the owner's exception digest, not bounced at Whop
+ * and not credited to a stranger. A purchase fires companion events (membership valid +
+ * payment succeeded); the mint's rule applies — a second grant signal inside 3 days for the
+ * same shop is the companion, not a second year. Refunds move nothing automatically: they are
+ * flagged for a human, because clawing back a trading shop's term is a judgement. */
+async function hmacB64(secret, msg) {
+  const k = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = await crypto.subtle.sign('HMAC', k, new TextEncoder().encode(msg));
+  return btoa(String.fromCharCode(...new Uint8Array(sig)));
+}
+async function verifyWhopSig(headers, rawBody, secret) {
+  if (!secret) return { ok: false, reason: 'no secret' };
+  const id = headers['webhook-id'] || '', ts = headers['webhook-timestamp'] || '', provided = headers['webhook-signature'] || '';
+  if (!id || !ts || !provided) return { ok: false, reason: 'missing headers' };
+  const t = parseInt(ts, 10);
+  if (!t || Math.abs(Date.now() / 1000 - t) > 300) return { ok: false, reason: 'stale timestamp' };
+  const expected = await hmacB64(secret, id + '.' + ts + '.' + rawBody);
+  for (const part of String(provided).split(/\s+/)) {
+    const bare = part.slice(0, 3) === 'v1,' ? part.slice(3) : part;
+    if (bare.length === expected.length) {
+      let same = 0; for (let i = 0; i < expected.length; i++) same |= expected.charCodeAt(i) ^ bare.charCodeAt(i);
+      if (same === 0) return { ok: true };
+    }
+  }
+  return { ok: false, reason: 'signature mismatch' };
+}
+function whopCatalog(env) {
+  try { const c = JSON.parse(String(env.WHOP_PLANS_JSON || '{}')); return (c && typeof c === 'object') ? c : {}; }
+  catch (e) { return {}; }
+}
+async function hookWhop(req, url, env, ctx) {
+  const say = (obj, code = 200) => {
+    const kind = code === 200 ? (obj.already ? 'already' : obj.activated ? 'activated' : 'ignored') : 'refused';
+    auditHook(env, ctx, kind, obj.error || obj.ignored || obj.note || '');
+    return json(obj, code);
+  };
+  if (!env.WHOP_WEBHOOK_SECRET) return say({ ok: false, error: 'the Whop webhook is not armed — set WHOP_WEBHOOK_SECRET on this Worker (Whop dashboard → Developer → Webhooks), then payments will activate shops by themselves' }, 503);
+  const raw = await req.text().catch(() => '');
+  const headers = {};
+  req.headers.forEach((v, k) => { headers[String(k).toLowerCase()] = v; });
+  const v = await verifyWhopSig(headers, raw, String(env.WHOP_WEBHOOK_SECRET));
+  if (!v.ok) return say({ ok: false, error: 'webhook verification failed: ' + v.reason }, 401);
+  let b = null;
+  try { b = JSON.parse(raw); } catch (e) { return say({ ok: false, error: 'bad json' }, 400); }
+  const webhookId = String(headers['webhook-id'] || '').slice(0, 80);
+  const seenKey = webhookId ? 'paid:whop:' + webhookId : '';
+  if (seenKey && await env.STORES.get(seenKey, 'json').catch(() => null)) return say({ ok: true, already: true });
+  const markSeen = async (extra) => { if (seenKey) { try { await env.STORES.put(seenKey, JSON.stringify({ at: new Date().toISOString(), ...(extra || {}) }), { expirationTtl: 40 * 86400 }); } catch (e) { void e; } } };
+  const action = String(b.action || b.type || '');
+  const kind = whopEventKind(action);
+  const buyer = whopBuyer(b);
+  if (kind === 'test' || kind === 'ignore') { await markSeen({ kind }); return say({ ok: true, ignored: kind }); }
+
+  let st = buyer.handle ? await getStore(env, buyer.handle) : null;
+  if (!st && buyer.membership_id) {
+    const idx = await env.STORES.get('whopmem:' + buyer.membership_id, 'json').catch(() => null);
+    if (idx && idx.handle) st = await getStore(env, idx.handle);
+  }
+  if (!st && buyer.email) {
+    for (const k of await listKeys(env.STORES, 'store:', 1000)) {
+      try {
+        const cand = await env.STORES.get(k, 'json');
+        if (cand && [cand.owner_email, cand.notify_email].some((e) => String(e || '').toLowerCase() === buyer.email)) { st = await getStore(env, cand.handle); break; }
+      } catch (e) { void e; }
+    }
+  }
+
+  if (kind !== 'grant') {
+    if (st) {
+      st.whop_status = action.slice(0, 60);
+      if (buyer.membership_id) st.whop_membership_id = buyer.membership_id;
+      try { await writeStore(env, st); } catch (e) { void e; }
+      if (kind === 'refund') {
+        try { await env.ORDERS.put('whop:refund:' + (buyer.payment_id || webhookId || Date.now()),
+          JSON.stringify({ at: new Date().toISOString(), handle: st.handle, action, payment_id: buyer.payment_id })); } catch (e) { void e; }
+      }
+    }
+    await markSeen({ kind });
+    return say({ ok: true, ignored: kind, matched: st ? st.handle : null });
+  }
+
+  if (!st) {
+    try { await env.ORDERS.put('whop:unmatched:' + (webhookId || buyer.payment_id || String(Date.now())),
+      JSON.stringify({ at: new Date().toISOString(), action, email: buyer.email, name: buyer.name,
+        membership_id: buyer.membership_id, payment_id: buyer.payment_id, handle_said: buyer.handle,
+        money: whopMoney(b), note: 'Whop was paid; no shop matched. Match by hand (ops → extend), then delete this key.' })); } catch (e) { void e; }
+    await markSeen({ kind, unmatched: true });
+    return say({ ok: true, unmatched: true, note: 'filed for the owner digest — never credited to a guessed shop' });
+  }
+
+  if (buyer.payment_id && await env.STORES.get('paid:whop:pay:' + buyer.payment_id, 'json').catch(() => null)) {
+    await markSeen({ kind, already: 'payment' }); return say({ ok: true, already: true, activated: st.handle });
+  }
+  const last = st.whop_last_grant;
+  if (last && Date.now() - Date.parse(last.at || '') < 3 * 864e5) {
+    await markSeen({ kind, companion: true });
+    return say({ ok: true, already: true, companion: true, activated: st.handle });
+  }
+
+  const term = whopTerm(b, whopCatalog(env));
+  const amount = term.amount || (term.days >= 300
+    ? (term.currency === 'ZAR' ? SUBSCRIPTION_PLANS.annual.zar : SUBSCRIPTION_PLANS.annual.usd)
+    : (term.currency === 'ZAR' ? SUBSCRIPTION_PLANS.monthly.zar : SUBSCRIPTION_PLANS.monthly.usd));
+  st.paid_until = Math.max(Date.now(), st.paid_until || 0) + term.days * 864e5;
+  st.plan = term.days >= 300 ? 'annual' : 'term';
+  st.suspended = false; st.warned_at = null;
+  if (buyer.membership_id) st.whop_membership_id = buyer.membership_id;
+  st.whop_status = 'valid';
+  st.whop_last_grant = { at: new Date().toISOString(), ref: buyer.payment_id || webhookId, days: term.days, from: term.from };
+  await writeStore(env, st);
+  await env.STORES.delete('term:' + st.handle).catch(() => {});
+  if (buyer.membership_id) { try { await env.STORES.put('whopmem:' + buyer.membership_id, JSON.stringify({ handle: st.handle, at: new Date().toISOString() })); } catch (e) { void e; } }
+  if (buyer.payment_id) { try { await env.STORES.put('paid:whop:pay:' + buyer.payment_id, JSON.stringify({ handle: st.handle, at: new Date().toISOString() }), { expirationTtl: 40 * 86400 }); } catch (e) { void e; } }
+  const code = cleanSellerCode(st.seller_code || '');
+  const sd = code ? await sellerDoc(env, code).catch(() => null) : null;
+  const sale = await recordSale(env, st, { amount, currency: term.currency, days: term.days, provider: 'whop',
+    ref: buyer.payment_id || buyer.membership_id || webhookId,
+    commission_via: (buyer.affiliate || (sd && sd.whop)) ? 'whop' : 'internal' });
+  await markSeen({ kind, handle: st.handle });
+  return say({ ok: true, activated: st.handle, days: term.days, term_from: term.from,
+    paid_until: new Date(st.paid_until).toISOString(), commission: sale ? { seller: sale.seller_code, amount: sale.commission, via: sale.commission_via } : null });
+}
+
+/** The outreach runner's key ring, the STPi /hook/settings shape: Gmail app passwords live as
+ *  Worker secrets named GMAIL_<TAG>_USER / GMAIL_<TAG>_APP_PASSWORD (tag = seller code
+ *  uppercased with non-letters stripped, OWNER for the house mailbox), and the one caller who
+ *  may read them back is the admin-gated runner. They are never in KV, never in git, and this
+ *  answer is never cached. */
+async function outreachMailboxes(req, env) {
+  const denied = await pressAdmin(req, env); if (denied) return denied;
+  const out = [];
+  for (const k of Object.keys(env || {})) {
+    const m = k.match(/^GMAIL_([A-Z0-9]+)_USER$/);
+    if (m && env['GMAIL_' + m[1] + '_APP_PASSWORD']) out.push({ tag: m[1], user: String(env[k]), app_password: String(env['GMAIL_' + m[1] + '_APP_PASSWORD']) });
+  }
+  return json({ ok: true, mailboxes: out }, 200, { 'Cache-Control': 'no-store' });
 }

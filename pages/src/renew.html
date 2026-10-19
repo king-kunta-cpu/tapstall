@@ -32,7 +32,7 @@ input[type=number] { max-width: 8rem }
   <div class="card" id="buy">
     <h3 id="buyHead">Renew for a year</h3>
     <p class="price" id="price">—</p>
-    <p class="muted" style="margin-top:.1rem">Once a year. No monthly billing, no card-on-file with a foreign processor — in Zimbabwe that path costs 15% DST + 2% IMTT before it even reaches them, which is why the plan is bought in one go or not at all.</p>
+    <p class="muted" style="margin-top:.1rem">A year in one go, or a month at a time if your cash comes monthly. Pay by card (taken securely on Whop — the store switches on by itself when Whop confirms), or by bank, EcoCash, Mukuru, ZIPIT or USDT using the reference box below.</p>
     <div class="row" style="margin-top:.6rem">
       <button id="payBtn" style="flex:1 1 12rem">Pay and switch on</button>
       <button class="sec" id="daysBtn" title="Choose another length">Custom</button>
@@ -42,12 +42,13 @@ input[type=number] { max-width: 8rem }
       <div class="row"><input id="days" type="number" value="365" min="30" max="1460"><button class="sec" id="daysGo">Price it</button></div>
     </div>
     <div class="big">
-      <b style="font-size:.85rem">Paid by EcoCash, ZIPIT or cash instead?</b>
+      <b style="font-size:.85rem">Paid by bank, EcoCash, Mukuru, ZIPIT, cash or USDT instead?</b>
+      <pre id="payDetails" class="hide" style="white-space:pre-wrap;font:inherit;font-size:.85rem;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:.6rem;margin:.5rem 0"></pre>
       <p class="muted" style="margin:.25rem 0 .5rem">Send the amount, then paste the payment reference here. The store is extended as soon as the payment lands — an activation is not waiting on a person reading this page.</p>
       <input id="ref" placeholder="your payment reference, e.g. EcoCash 0771234567 → ABC123" autocomplete="off">
       <div class="row" style="margin-top:.4rem"><button class="sec" id="refBtn">Send reference</button><span class="muted" id="refOut"></span></div>
     </div>
-    <p class="muted" id="note">If a payment gateway is configured on this platform, the button above goes straight to it; the webhook does the rest. If it is not yet, this page tells you what to send and where, and the renewal rides on the reference.</p>
+    <p class="muted" id="note">The button above opens the card checkout; activation is automatic when the payment clears — no person approves it. Paid another way? The reference box above is the door, and it lands on the owner's list the same day.</p>
   </div>
 
   <div class="card flat" id="receipts">
@@ -101,18 +102,22 @@ function stat(b, s, cls) { return '<div class="stat ' + (cls || '') + '"><b>' + 
     : (left <= 7 ? '<p class="notice warn" style="margin-top:.6rem">Seven days or fewer. Nothing breaks at midnight: the storefront keeps working until the next scheduled check, and reinstating is automatic the moment payment clears.</p>' : ''))
     + (R.plan && R.plan !== 'free60' ? '<p class="muted" style="margin-top:.5rem">Current plan: <b>' + esc(R.plan) + '</b>.</p>' : '<p class="muted" style="margin-top:.5rem">You are on the free launch period. Keep it running for a year, or let it sleep — your orders and menu stay put either way, and nothing is deleted behind your back.</p>');
   q('#price').textContent = Number(R.price || 60).toFixed(2) + ' USD';
+  if (R.pay_manual) { var pd = q('#payDetails'); pd.textContent = R.pay_manual; pd.classList.remove('hide'); }
+  if (R.pay_whop) q('#note').textContent = 'Card payments are taken on Whop. When it asks for your Tapstall shop handle, type exactly: ' + (R.handle || '') + ' — that answer is how the payment finds this store and switches it on by itself.';
   payFor(365);
 })();
 
 function payFor(days) {
   var price = Math.round(((Number(R.price || 60)) * days / 365) * 100) / 100;
-  q('#buyHead').textContent = days === 365 ? 'Renew for a year' : 'Buy ' + days + ' days';
+  if (R.pay_whop) { price = days >= 300 ? Number(R.price || 60) : Number(R.price_monthly || 7); }
+  q('#buyHead').textContent = days >= 300 ? 'Renew for a year' : (R.pay_whop ? 'Renew for a month' : 'Buy ' + days + ' days');
   q('#price').textContent = price.toFixed(2) + ' USD';
   q('#payBtn').dataset.days = days;
 }
 q('#daysBtn').onclick = function () { q('#daysRow').classList.toggle('hide'); };
 q('#daysGo').onclick = function () {
   var d = Math.max(30, Math.min(1460, Number(q('#days').value) || 365));
+  if (R.pay_whop && d < 300) d = 31;   // a Whop checkout is a fixed plan, not a days slider
   q('#days').value = d; payFor(d);
 };
 q('#payBtn').onclick = function () {

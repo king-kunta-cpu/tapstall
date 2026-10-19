@@ -1,4 +1,25 @@
 # Tapstall — status
+## v1.1.0 (built 2026-10-19, pending deploy): Whop activates, sellers send, one brand
+
+The owner's collection rail is Whop, so now the product says so. **Automated activation**:
+`POST /api/hook/whop` verifies Whop's Standard Webhooks signature exactly as the sister mint does
+live (fail-closed 503 until `WHOP_WEBHOOK_SECRET` is set), routes events in the core — a failed or
+ended membership is never a sale — finds the shop by the handle typed at checkout (then membership,
+then email), extends the term, and books the sale with its commission channel: Whop settles a
+seller's 30% when their `?a=` made the sale, so the board splits `commission_whop` from
+`commission_due` and nobody is paid twice. Replays and the purchase's companion event cannot double
+a term; unmatched money is filed to the nightly digest, never guessed; refunds flag a human and
+claw nothing back automatically. The renew button now opens the Whop checkout (annual $60 /
+monthly $7, ZAR R999/R129 — `docs/PRICING.md` has the case; $60 was always the codebase's price,
+the monthly door beside it is new) and prints the owner's manual-rail details when configured.
+**Outreach**: `mail_outreach.py` + `outreach.yml`, dispatched by the same weekday cron slot as the
+hunt, sends from each seller's own Gmail via app password (Worker-secret key ring behind
+`/api/outreach/mailboxes`), three touches maximum under the existing caps, IMAP replies stop the
+machine (STOP → DNC). **Brand**: `brand/` — stall-and-tap mark, lockups, Whop cover, palette grown
+from the UI kit, on the landing page. 350 tests. NOT YET DEPLOYED: built and committed locally;
+the session's deploy tokens were shredded at v1.0.0, so this lands on the next push (see
+`docs/WHOP-SETUP.md` for the owner's ten minutes in the Whop + GitHub dashboards).
+
 ## v1.0.0: the pipeline runs itself (2026-10-19)
 
 A full-infrastructure audit found a product whose enforcement half was autonomous and whose growth

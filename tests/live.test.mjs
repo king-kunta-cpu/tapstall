@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { unpackRow, packRow, orderRow, ROW_META_CAP } from '../worker/core.js';
+import { createHmac } from 'node:crypto';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const dir = mkdtempSync(join(tmpdir(), 'zl-'));
@@ -4574,4 +4575,84 @@ test('1.0.0 sellers, leads, recognised sales, and a press the clock runs by itse
   const health = await call('/ops/api/health', { cookie: ck });
   assert.ok(health.json.pipeline && typeof health.json.pipeline.armed.flutterwave === 'boolean',
     'health says what is armed and what merely exists');
+});
+
+/* v1.1.0 — a card payment on Whop switches the shop on by itself: checkout carries the
+   seller's ?a=, the signed webhook finds the shop by the handle the buyer typed, extends
+   the term, books the commission as Whop-paid (not owed twice), and neither a replay, a
+   companion event, a forgery nor a failed payment can move a paid_until. */
+test('1.1.0 Whop: signed payment activates, forgery/replay/companion/failure do not', async () => {
+  const WHOP_SECRET = 'ws_test_secret';
+  env.WHOP_WEBHOOK_SECRET = WHOP_SECRET;
+  env.WHOP_CHECKOUT_URL = 'https://whop.com/checkout/tapstall-annual/';
+  try {
+    const good = await call('/ops/login', { method: 'POST', body: { secret: SECRET } });
+    const line = (good.cookies || []).find((c) => c.startsWith('tp_ops='));
+    const ck = 'tp_ops=' + line.match(/tp_ops=([^;]+)/)[1];
+    const s1 = await call('/ops/api/sellers', { method: 'POST', cookie: ck, confirm: true,
+      body: { action: 'register', code: 'whop-seller', name: 'Whop Seller', commission_pct: 30, whop: 'whopseller' } });
+    assert.equal(s1.status, 200, s1.text);
+    const reg = await call('/api/register', { method: 'POST', ip: '196.77.77.77',
+      body: { shop_name: 'Whop Shop', handle: 'whop-shop', whatsapp: '263770000888', currency: 'USD',
+        rail: 'ecocash_usd', pay_account: '0770008888', owner_email: 'whop-buyer@example.com', ref: 'whop-seller' } });
+    assert.equal(reg.status, 201, reg.text);
+    const token = String(reg.json.renew_url).split('/renew/')[1];
+    const co = await call('/api/checkout', { method: 'POST', body: { token, days: 365 } });
+    assert.equal(co.json.provider, 'whop', co.text);
+    assert.match(co.json.pay_url, /whop\.com\/checkout\/tapstall-annual\/\?a=whopseller$/, 'the seller’s Whop affiliate rides to checkout: ' + co.json.pay_url);
+
+    const sign = (id, raw) => {
+      const ts = String(Math.floor(Date.now() / 1000));
+      const sig = createHmac('sha256', WHOP_SECRET).update(id + '.' + ts + '.' + raw).digest('base64');
+      return { 'webhook-id': id, 'webhook-timestamp': ts, 'webhook-signature': 'v1,' + sig, 'content-type': 'application/json' };
+    };
+    const post = (id, payload, headers) => call('/api/hook/whop', { method: 'POST', ip: '196.77.77.78',
+      headers: headers || sign(id, JSON.stringify(payload)), body: JSON.stringify(payload) });
+    const pay = { action: 'payment.succeeded', data: { id: 'pay_999', membership_id: 'mem_999', total: 6000, currency: 'usd',
+      user: { email: 'whop-buyer@example.com' },
+      custom_field_responses: [{ question: { title: 'Your Tapstall shop handle' }, answer: 'whop-shop' }] } };
+
+    const forged = await post('msg_forge', pay, { 'webhook-id': 'msg_forge', 'webhook-timestamp': String(Math.floor(Date.now() / 1000)), 'webhook-signature': 'v1,AAAA', 'content-type': 'application/json' });
+    assert.equal(forged.status, 401, 'an unsigned claim of payment is worth nothing: ' + forged.text);
+
+    const before = (await env.STORES.get('store:whop-shop', 'json')).paid_until;
+    const ok = await post('msg_1', pay);
+    assert.equal(ok.status, 200, ok.text);
+    assert.equal(ok.json.activated, 'whop-shop');
+    assert.equal(ok.json.commission.via, 'whop', 'Whop pays this seller — the owner must not owe it again: ' + JSON.stringify(ok.json.commission));
+    const after = (await env.STORES.get('store:whop-shop', 'json'));
+    assert.ok(after.paid_until > before + 300 * 864e5, 'the term actually moved a year');
+    assert.equal(after.plan, 'annual');
+
+    const replay = await post('msg_1', pay);
+    assert.equal(replay.json.already, true, 'the same delivery retried is the same payment once');
+    const companion = await post('msg_2', { action: 'membership.went_valid', data: { id: 'mem_999', user: { email: 'whop-buyer@example.com' } } });
+    assert.equal(companion.json.companion, true, 'the companion event of one purchase is not a second year: ' + companion.text);
+    assert.equal((await env.STORES.get('store:whop-shop', 'json')).paid_until, after.paid_until, 'neither replay nor companion moved the term');
+
+    const failed = await post('msg_3', { action: 'payment.failed', data: { id: 'pay_x', membership_id: 'mem_999' } });
+    assert.equal(failed.json.ignored, 'failed');
+    assert.equal((await env.STORES.get('store:whop-shop', 'json')).paid_until, after.paid_until);
+    const board = await call('/ops/api/sellers', { cookie: ck });
+    const row = board.json.board.find((r) => r.code === 'whop-seller');
+    assert.equal(row.commission_whop, 18, JSON.stringify(row));
+    assert.equal(row.commission_due, 0);
+
+    const stray = await post('msg_4', { action: 'payment.succeeded', data: { id: 'pay_1000', total: 6000, currency: 'usd', user: { email: 'nobody@example.com' },
+      custom_field_responses: [{ question: { title: 'Your Tapstall shop handle' }, answer: 'no-such-shop' }] } });
+    assert.equal(stray.json.unmatched, true, 'money that matches no shop is filed, never guessed: ' + stray.text);
+    assert.ok([...env.ORDERS._map.keys()].some((k) => k.startsWith('whop:unmatched:')), 'and the digest will name it');
+
+    // the outreach runner's doors: mailboxes only behind the admin gate, and an owner may
+    // act AS the allocated seller (never for a different one)
+    env.GMAIL_OWNER_USER = 'Tapstall@gmail.com'; env.GMAIL_OWNER_APP_PASSWORD = 'aaaa bbbb cccc dddd';
+    const mbLocked = await call('/api/outreach/mailboxes');
+    assert.equal(mbLocked.status, 401, 'mailbox credentials fail closed');
+    const mb = await call('/api/outreach/mailboxes', { confirm: true, headers: { 'x-tapstall-admin': SECRET } });
+    assert.equal(mb.status, 200, mb.text);
+    assert.deepEqual(mb.json.mailboxes.map((m) => m.tag), ['OWNER']);
+  } finally {
+    delete env.WHOP_WEBHOOK_SECRET; delete env.WHOP_CHECKOUT_URL;
+    delete env.GMAIL_OWNER_USER; delete env.GMAIL_OWNER_APP_PASSWORD;
+  }
 });

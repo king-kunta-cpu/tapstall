@@ -1681,3 +1681,47 @@ test('sellerBoard: derived totals reconcile, including the house row', () => {
   assert.equal(house.shops, 1, 'unattributed shops are counted, not dropped');
   assert.equal(board.reduce((a, r) => a + r.revenue, 0), 120, 'board revenue reconciles with the sales rows');
 });
+
+/* v1.1.0 — Whop events are routed the way the sister product's mint learned to route them:
+   a failure is not a sale, an ending is not a sale, and the term a payment bought is read
+   from the catalogue before it is read from the amount. */
+test('1.1.0 whopEventKind: only a success may grant', () => {
+  assert.equal(C.whopEventKind('payment.succeeded'), 'grant');
+  assert.equal(C.whopEventKind('membership.went_valid'), 'grant');
+  assert.equal(C.whopEventKind('payment.failed'), 'failed', 'a failed card must never read as a payment');
+  assert.equal(C.whopEventKind('membership.went_invalid'), 'invalid');
+  assert.equal(C.whopEventKind('refund.created'), 'refund');
+  assert.equal(C.whopEventKind('app_ping'), 'test', 'a test event grants nothing');
+  assert.equal(C.whopEventKind('some.future.thing'), 'ignore');
+});
+
+test('1.1.0 whopBuyer + whopTerm: handle from the checkout answer, term from catalogue then amount', () => {
+  const annual = { action: 'payment.succeeded', data: { id: 'pay_1', membership_id: 'mem_1', total: 6000, currency: 'usd',
+    user: { email: 'Owner@Example.com' },
+    custom_field_responses: [{ question: { title: 'Your Tapstall shop handle' }, answer: 'Kota King' }] } };
+  const buyer = C.whopBuyer(annual);
+  assert.equal(buyer.handle, 'kota-king', 'the exact wording on the checkout still finds the handle');
+  assert.equal(buyer.email, 'owner@example.com');
+  assert.equal(buyer.payment_id, 'pay_1');
+  assert.deepEqual(C.whopMoney(annual), { amount: 60, currency: 'USD' }, 'integer cents read as cents');
+  assert.equal(C.whopTerm(annual, {}).days, 365);
+  const monthly = { data: { id: 'mem_2', amount: 700, currency: 'USD', plan: { title: 'Tapstall Monthly' } } };
+  assert.equal(C.whopTerm(monthly, {}).days, 31, 'monthly buys 31 — one day of slack over a 30-day cycle');
+  const catalogued = C.whopTerm({ data: { plan: { id: 'plan_X' }, amount: 700 } }, { plan_X: { days: 365, usd: 60 } });
+  assert.equal(catalogued.days, 365, 'the owner’s plan map outranks the amount');
+  assert.equal(catalogued.from, 'catalog');
+  const zar = C.whopTerm({ data: { amount: 99900, currency: 'ZAR' } }, {});
+  assert.equal(zar.days, 365, 'R999 reads as the annual ZAR plan, not 999 dollars');
+});
+
+test('1.1.0 sellerBoard: Whop-paid commission is earned, not owed twice', () => {
+  const now = Date.now();
+  const board = C.sellerBoard(
+    [{ code: 'tino-sells', name: 'Tino', commission_pct: 30, clicks: 0, active: true }], [],
+    [{ seller_code: 'tino-sells', amount: 60, commission: 18, commission_via: 'whop' },
+     { seller_code: 'tino-sells', amount: 60, commission: 18, commission_via: 'internal' }], { now });
+  const tino = board.find((r) => r.code === 'tino-sells');
+  assert.equal(tino.commission, 36, 'total earned still reconciles for old readers');
+  assert.equal(tino.commission_whop, 18, 'Whop settles this half to the seller directly');
+  assert.equal(tino.commission_due, 18, 'and only the internal half is still owed by the owner');
+});

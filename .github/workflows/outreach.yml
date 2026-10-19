@@ -1,0 +1,56 @@
+name: outreach
+# Email outreach, run where SMTP/IMAP is boring and free: GitHub Actions. The Worker's cron is
+# the only clock — its weekday dispatch slot fires this (dispatchTick), exactly like leads-hunt;
+# there is deliberately no schedule here. Sellers send from their OWN Gmail via app password:
+# credentials are Worker secrets (GMAIL_<TAG>_USER / GMAIL_<TAG>_APP_PASSWORD) that the runner
+# fetches at runtime behind the admin gate — they are never in this repo or in KV.
+# The Worker stays the judge: this script only sends to leads the Worker calls eligible
+# (2+ signals, under the touch cap, follow-up due) and files every outcome back through
+# POST /api/leads/act, including STOP -> the do-not-contact ledger.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'send_and_poll | dry_run | poll_only | send_only'
+        required: false
+        default: 'dry_run'
+      per_mailbox_cap:
+        description: 'Max sends per mailbox this run (warm-up ramp: 20 -> 100 over a week)'
+        required: false
+        default: '20'
+  repository_dispatch:
+    types: [outreach]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: outreach
+  cancel-in-progress: false
+
+jobs:
+  outreach:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: outreach
+        env:
+          TAPSTALL_ORIGIN: https://tapstall.zlnew.workers.dev
+          ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+          OWNER_NOTIFY_EMAIL: ${{ secrets.OWNER_NOTIFY_EMAIL }}
+          OUTREACH_FROM_NAME: ${{ secrets.OUTREACH_FROM_NAME }}
+        run: |
+          MODE="${{ github.event.inputs.mode || 'send_and_poll' }}"
+          CAP="${{ github.event.inputs.per_mailbox_cap || '20' }}"
+          case "$MODE" in
+            send_and_poll) python3 scripts/mail_outreach.py --send --per-mailbox-cap "$CAP" ;;
+            send_only)     python3 scripts/mail_outreach.py --send --send-only --per-mailbox-cap "$CAP" ;;
+            poll_only)     python3 scripts/mail_outreach.py --send --poll-only ;;
+            *)             python3 scripts/mail_outreach.py --dry-run --per-mailbox-cap "$CAP" ;;
+          esac
+      - name: summary
+        if: always()
+        run: echo "Outreach finished. Counts are in the step log (no addresses or message bodies are ever logged)." >> "$GITHUB_STEP_SUMMARY"

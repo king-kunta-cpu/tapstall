@@ -206,6 +206,16 @@ put_secret ADMIN_SECRET "$ADMIN_SECRET"
 # the slug of the Flutterwave payment link in the receiving account: a brand
 # change must not silently break payouts, so it is configuration, not a literal
 [[ -n "${FW_PAY_SLUG:-}" ]] && put_secret FW_PAY_SLUG "$FW_PAY_SLUG" || true
+# Whop is the card rail (owner decision): the webhook secret arms automated activation, the
+# checkout URLs are where the renew button goes, the plans JSON maps real Whop plan ids to
+# terms, and PLATFORM_PAY_DETAILS is the public bank/EcoCash/Mukuru/USDT text the renew page
+# prints. All optional, all survive as Worker secrets once set; unset in CI never wipes them.
+[[ -n "${WHOP_WEBHOOK_SECRET:-}" ]] && put_secret WHOP_WEBHOOK_SECRET "$WHOP_WEBHOOK_SECRET" || true
+[[ -n "${WHOP_CHECKOUT_URL:-}" ]] && put_secret WHOP_CHECKOUT_URL "$WHOP_CHECKOUT_URL" || true
+[[ -n "${WHOP_CHECKOUT_URL_ANNUAL:-}" ]] && put_secret WHOP_CHECKOUT_URL_ANNUAL "$WHOP_CHECKOUT_URL_ANNUAL" || true
+[[ -n "${WHOP_CHECKOUT_URL_MONTHLY:-}" ]] && put_secret WHOP_CHECKOUT_URL_MONTHLY "$WHOP_CHECKOUT_URL_MONTHLY" || true
+[[ -n "${WHOP_PLANS_JSON:-}" ]] && put_secret WHOP_PLANS_JSON "$WHOP_PLANS_JSON" || true
+[[ -n "${PLATFORM_PAY_DETAILS:-}" ]] && put_secret PLATFORM_PAY_DETAILS "$PLATFORM_PAY_DETAILS" || true
 
 rm -rf .build
 
