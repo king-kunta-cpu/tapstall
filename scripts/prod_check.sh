@@ -1083,6 +1083,17 @@ cks() {
   fi
   ck "$@"
 }
+# ckws: needs BOTH the day's write budget (the probe order) and a merchant session (the
+# JAR). The receipt lines below were plain ckw, so a CI run without PIN= failed them for
+# a missing cookie instead of reporting them blocked — a witness that cries wolf about
+# its own credentials teaches people to ignore it on the day it matters.
+ckws() {
+  if [[ "$NOSESS" == 1 ]]; then
+    printf '  \033[33m!\033[0m %s \033[2m— not verifiable today: no merchant session (PIN= not set, or its write had no budget)\033[0m\n' "$1"
+    blocked=$((blocked + 1)); return
+  fi
+  ckw "$@"
+}
 NOAUTH=$(curl -s -m 30 -o /dev/null -w '%{http_code}' "$ORIGIN/api/books?handle=$HANDLE")
 ck "  · no session, no ledger" '^401$' "$NOAUTH"
 BOOKS=$(curl -s -m 30 -b "$JAR" "$ORIGIN/api/books?handle=$HANDLE&basis=cash")
