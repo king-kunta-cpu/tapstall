@@ -13,33 +13,40 @@ No person approves a batch and nobody tops up shops by hand: registration of the
 the policy action, taken once below. Manual rails (bank / EcoCash / Mukuru / ZIPIT / USDT) keep
 working through the renew page's reference box → `recognise_ref`.
 
-## 1. In the Whop dashboard (owner, once)
+## 1. The live Whop store (redone 2026-10-19)
 
-1. **Create the product** "Tapstall" under your Whop company (same store as STPi is fine —
-   a separate product keeps the money readable). Cover art: `brand/whop-cover.png`,
-   avatar: `brand/tapstall-avatar.png`.
-2. **Plans** (prices per `docs/PRICING.md`):
-   - Annual — **$60 one-time**, and a ZAR twin **R999 one-time**
-   - Monthly — **$7/month recurring**, and **R129/month**
-3. **Checkout custom field (required, all plans):** label it exactly
-   **"Your Tapstall shop handle"**, placeholder `e.g. mama-toe (the bit after /s/ in your shop link)`.
-   This answer is how the webhook finds the shop. No field → activation still works via the
-   buyer's account email matching the shop's owner email, but the field is the sure path.
-4. **Affiliates (Marketing → Affiliates):** set 30% to match the seller promise. ⚠️ Listed
-   products are open to Whop's *global* affiliate network at that rate by default — keep it if
-   you want strangers selling for the same 30%, or restrict it to your own sellers.
-   Each seller needs a Whop username; store it on their seller record (`whop` field) and
-   Tapstall appends `?a=<username>` to their shops' checkout links automatically.
-5. Copy each plan's **checkout URL** and **plan ID** (`plan_…`) for step 3.
+The former Forge store is now the Tapstall store. Do not recreate these objects; if a value
+below disagrees with Whop, re-read Whop first and update this file in the same change.
 
-## 2. The webhook (owner, once — after the v1.1.0 deploy)
+- **Company:** `biz_dUYhC6sMZONDgB` — title **Tapstall**, route `tapstall`
+- **Store:** https://whop.com/tapstall/
+- **Product:** `prod_d31gep8HxEW24` — https://whop.com/tapstall/tapstall/
+- **Brand on Whop:** Tapstall logo + cover/social art from `brand/`; card descriptor
+  `WHOP*TAPSTALL`; global affiliates **30% enabled**, member affiliates disabled.
+- Old Community Content Autopilot product is hidden/retired and its plans are archived;
+  its ContentOps webhook is disabled, so Tapstall payments cannot route to the old Worker.
 
-Whop dashboard → Developer → Webhooks → Create webhook:
+| Plan | Price / term | Plan ID | Checkout |
+|---|---:|---|---|
+| Annual USD | $60 one-time, 365 days | `plan_LOEvoldSgFUUI` | https://whop.com/checkout/plan_LOEvoldSgFUUI |
+| Monthly USD | $7 every 30 days, grants 31 days | `plan_jWquFledgoz6B` | https://whop.com/checkout/plan_jWquFledgoz6B |
+| Annual ZAR | R999 one-time, 365 days | `plan_wlkFLUdonWAPN` | https://whop.com/checkout/plan_wlkFLUdonWAPN |
+| Monthly ZAR | R129 every 30 days, grants 31 days | `plan_VzCVd0ycxGSJg` | https://whop.com/checkout/plan_VzCVd0ycxGSJg |
+
+Every plan has the required checkout field **“Your Tapstall shop handle”** with placeholder
+`e.g. mama-toe (the bit after /s/ in your shop link)`. That answer is the sure activation
+path. Each seller still needs a Whop username on their seller record (`whop` field);
+Tapstall appends `?a=<username>` to their shops' checkout links automatically.
+
+## 2. The webhook (created disabled — enable only after the v1.1.0 deploy)
+
+Tapstall webhook `hook_lo2v5QyNxqenn` already exists and is **disabled**:
 
 - **Endpoint URL:** `https://tapstall.zlnew.workers.dev/api/hook/whop`
-- **Events:** payments and memberships (succeeded / went valid / went invalid / failed / refund —
-  the Worker routes each kind; endings and failures never book as sales).
-- Whop shows the signing secret (`ws_…`) **once**. Keep it whole, prefix included.
+- **API version:** v1; **events:** `payment.succeeded`, `payment.failed`,
+  `membership.activated`, `membership.deactivated`, `refund.created`.
+- After deploying v1.1.0, copy this webhook's signing secret into `WHOP_WEBHOOK_SECRET`,
+  redeploy/confirm the Worker health flag, then enable the webhook. Never commit the secret.
 
 ## 3. Configuration (GitHub repo secrets → deploy sets Worker secrets)
 
@@ -48,12 +55,16 @@ Add these under GitHub → tapstall repo → Settings → Secrets and variables 
 
 | Secret | Value |
 |---|---|
-| `WHOP_WEBHOOK_SECRET` | The `ws_…` secret from step 2. Until this exists the endpoint answers **503 — refused**, by design |
-| `WHOP_CHECKOUT_URL_ANNUAL` | Annual checkout URL (USD) |
-| `WHOP_CHECKOUT_URL_MONTHLY` | Monthly checkout URL (USD), optional |
-| `WHOP_CHECKOUT_URL` | Fallback single checkout URL if you only make one |
-| `WHOP_PLANS_JSON` | e.g. `{"plan_AnnualUSD":{"days":365,"usd":60},"plan_MonthlyUSD":{"days":31,"usd":7},"plan_AnnualZAR":{"days":365,"usd":999,"currency":"ZAR"}}` — real plan IDs remove all term guesswork |
+| `WHOP_WEBHOOK_SECRET` | Signing secret for webhook `hook_lo2v5QyNxqenn` from step 2. Until this exists the endpoint answers **503 — refused**, by design |
+| `WHOP_CHECKOUT_URL_ANNUAL` | `https://whop.com/checkout/plan_LOEvoldSgFUUI` |
+| `WHOP_CHECKOUT_URL_MONTHLY` | `https://whop.com/checkout/plan_jWquFledgoz6B` |
+| `WHOP_CHECKOUT_URL` | Fallback only; leave unset now that annual/monthly are set |
+| `WHOP_PLANS_JSON` | `{"plan_LOEvoldSgFUUI":{"days":365,"usd":60,"currency":"USD"},"plan_jWquFledgoz6B":{"days":31,"usd":7,"currency":"USD"},"plan_wlkFLUdonWAPN":{"days":365,"usd":999,"currency":"ZAR"},"plan_VzCVd0ycxGSJg":{"days":31,"usd":129,"currency":"ZAR"}}` |
 | `PLATFORM_PAY_DETAILS` | The public text the renew page prints for manual payment, e.g. `EcoCash USD: 077… (Name) · Bank: … · Mukuru: … · USDT (TRC-20): T…` |
+
+The ZAR plans are live on the Whop product page and at the direct checkout links above.
+The current Worker renew page consumes the USD annual/monthly env vars; do not invent ZAR
+env names unless the Worker is changed to read them.
 
 Then any push to `main` (or a manual deploy run) arms it. Verify in the owner console →
 health → `pipeline.armed.whop: true`, and send Whop's **test event**: it must answer 200
