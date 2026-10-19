@@ -556,18 +556,13 @@ nkw "  · while the field itself is left open" '"final":true' "$STALE"
 ckw "  · and the folding signal is still there, so the box goes away either way" '"used":true' "$STALE"
 ckw "  · and its sentence offers the chat or the shop's own hand, never a receipt box that may not be there" 'send it in the chat|newer link from this order still works' "$STALE"
 nkw "  · and promises no receipt box, because after a void there is none" '"error":"[^"]*receipt' "$STALE"
-ckw "  · while the new one writes, on the buyer's side of the counter" '"changed":true' \
-  "$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"$CAP3"'","proof":"AGAIN-'"$(date +%s | tail -c 6)"'"}' "$ORIGIN/api/proof")"
+NEWLINK=$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"$CAP3"'","proof":"AGAIN-'"$(date +%s | tail -c 6)"'"}' "$ORIGIN/api/proof")
+ckw "  · while the new one writes, on the buyer's side of the counter" '"changed":true' "$NEWLINK"
 # a spent link is refused for being spent before the body is read, which would prove nothing
 # about the verb — so take the link the order honours right now and offer it an empty box
 LIVE4=$(curl -s -m 30 -H "x-tapstall-admin: $ADMIN_KEY" "$ORIGIN/api/admin?handle=$HANDLE" | python3 -c "import sys,json;d=json.load(sys.stdin);print(next((o.get('proof_url','') for o in d.get('orders',[]) if o.get('id')=='$ID2' and o.get('proof_url')), ''))" 2>/dev/null)
-VOIDRESP=""
-for try in 1 2 3 4 5 6; do
-  LIVE4=$(curl -s -m 30 -H "x-tapstall-admin: $ADMIN_KEY" "$ORIGIN/api/admin?handle=$HANDLE" | python3 -c "import sys,json;d=json.load(sys.stdin);print(next((o.get('proof_url','') for o in d.get('orders',[]) if o.get('id')=='$ID2' and o.get('proof_url')), ''))" 2>/dev/null)
-  VOIDRESP=$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"${LIVE4#/p/}"'","proof":"","void":1}' "$ORIGIN/api/proof")
-  printf '%s' "$VOIDRESP" | grep -q '"why":"cap"' || break   # KV lag can mint against the generation the last write replaced
-  sleep 5
-done
+LIVE4=$(printf '%s' "$NEWLINK" | python3 -c "import sys,json;print(json.load(sys.stdin).get('proof_url',''))" 2>/dev/null)
+VOIDRESP=$(curl -s -m 30 -X POST -H 'content-type: application/json' -d '{"cap":"'"${LIVE4#/p/}"'","proof":"","void":1}' "$ORIGIN/api/proof")
 ckw "  · and void is not the buyer's word, whatever they put in the json" 'Type the code your app printed|already filed' "$VOIDRESP"
 echo "[5] settings: cosmetic instant, money held 15 minutes, cancellable"
 HOURS=$(printf '%s' "$STORE" | python3 -c "import sys,json;print(json.load(sys.stdin).get('hours','') or 'open')" 2>/dev/null)
