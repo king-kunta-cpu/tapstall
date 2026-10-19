@@ -736,7 +736,7 @@ export function normalizeFeedUrl(u) {
 /**
  * Is this feed_url "no sheet at all"? Every shop that arrived without a real one holds
  * either nothing or a pointer to our own sample (`/data/sample-menu.csv`, or the file in
- * the zimlink/tapstall repos) — and the sample is a fixture, not a source: fetching it
+ * the tapstall repo) — and the sample is a fixture, not a source: fetching it
  * back over a shop's own edits is what v0.9.9 stopped offering, and a shop of four fake
  * items is what this stops being. Said once, in core, because three surfaces must agree:
  * the storefront's loader, the dashboard's rows, and the SEO head. A merchant who hosts
@@ -747,7 +747,7 @@ export function isPlaceholderFeed(u) {
   const s = String(u == null ? '' : u).trim();
   if (!s) return true;
   return /\/(data|pages)\/sample-menu\.csv(\?|$)/.test(s)
-    || (/raw\.githubusercontent\.com\/[^/]+\/(zimlink|tapstall)\//.test(s) && /sample-menu\.csv/.test(s));
+    || (/raw\.githubusercontent\.com\/[^/]+\/tapstall\//.test(s) && /sample-menu\.csv/.test(s));
 }
 
 /** A Tron address is `T` plus 33 base58 characters, and the alphabet is missing

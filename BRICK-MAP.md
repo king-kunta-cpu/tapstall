@@ -56,7 +56,7 @@ reference, which is a judgement **about money**, not an approval of machine outp
 
 ## Brick 3 — edge control plane
 
-One codebase, two Workers (`tapstall` canonical, `zimlink` a 301), shared KV, no D1. D1 was not
+One codebase, one `tapstall` Worker, shared KV, no D1. D1 was not
 adopted: the current Cloudflare token has no D1 scope, KV already fits the write budget, and the
 1,000-write/day free cap is the architecture's known governor — every v1.0.0 feature was designed
 under it (seller clicks buffer in-isolate and flush every 10th; boards and digests are derived at

@@ -547,7 +547,7 @@ function fph0(u) {
   u = String(u || '');
   if (!u) return true;
   return /\/(data|pages)\/sample-menu\.csv(\?|$)/.test(u)
-    || (/raw\.githubusercontent\.com\/[^/]+\/(zimlink|tapstall)\//.test(u) && /sample-menu\.csv/.test(u));
+    || (/raw\.githubusercontent\.com\/[^/]+\/tapstall\//.test(u) && /sample-menu\.csv/.test(u));
 }
 function menuRows() {
   var box = q('#menuEdit'); if (!box || !q('#detMenu').open) return;

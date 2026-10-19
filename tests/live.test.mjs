@@ -846,8 +846,8 @@ test('/ops is a locked door to everyone but the operator, and never a credential
   const sessLine = (good.cookies || []).find((c) => c.startsWith('tp_ops='));
   assert.ok(sessLine, 'a cookie, not a token in a URL: ' + good.cookie);
   assert.ok(!/Max-Age=0/.test(sessLine) && /HttpOnly/.test(sessLine) && /SameSite=Strict/.test(sessLine), sessLine);
-  assert.ok((good.cookies || []).some((c) => c.startsWith('zl_ops=;') && /Max-Age=0/.test(c)),
-    'signing in also clears the old brand cookie, or a browser holding it stays signed in after a sign-out');
+  assert.ok((good.cookies || []).every((c) => c.startsWith('tp_ops=')),
+    'signing in emits the Tapstall cookie and no other brand spelling');
   opsCookie = sessLine.match(/tp_ops=([^;]+)/)[1];
   const afterGood = await call('/ops/login', { method: 'POST', body: { secret: 'hunter2' } });
   assert.equal(afterGood.json.tries_left, LOCKMAX - 1, 'a success resets the counter, so a typo spiral cannot lock the operator out');
@@ -1231,114 +1231,19 @@ test('the store page is frameable by the dashboard and by nobody else', async ()
   assert.match(src, /SEC_HEADERS\['Content-Security-Policy'\]\.replace\(/);
 });
 
-test('an alias origin does not sweep the same KV twice a day', async () => {
-  // Cloudflare would not let this token delete the schedule the old hostname kept
-  // (PUT /schedules -> success:false), so the guard is in the code: a Worker
-  // deployed with REDIRECT_TO returns from scheduled() before runCron. The
-  // selftest reports which kind of origin it is, so the deploy can check that
-  // rather than assume a dashboard click happened.
-  const w = await load();
-  const had = Object.prototype.hasOwnProperty.call(env, 'REDIRECT_TO');
-  const before = env.REDIRECT_TO;
-  env.REDIRECT_TO = 'https://tapstall.test';
-  const ctx = { waitUntil: (p) => p };
-  let wrote = false;
-  const put = env.STORES.put.bind(env.STORES);
-  env.STORES.put = async (k, v, o) => { if (String(k).startsWith('cron:')) wrote = true; return put(k, v, o); };
-  try {
-    await w.scheduled({ scheduledTime: Date.now() }, env, ctx);
-    await new Promise((r) => setTimeout(r, 20));
-    assert.equal(wrote, false, 'the alias wrote no heartbeat, so it wrote nothing at all');
-    const asAlias = await call('/__selftest');
-    assert.equal(asAlias.json.cron_owner, false, 'and it admits it');
-    assert.equal(asAlias.json.ok, true, 'without that making the health verdict red');
-  } finally {
-    env.STORES.put = put;
-    if (had) env.REDIRECT_TO = before; else delete env.REDIRECT_TO;
-  }
-  const owner = await call('/__selftest');
-  assert.equal(owner.json.cron_owner, true, 'the canonical origin owns the daily sweep');
-});
-
-test('the previous brand’s hostname is an alias that moves people, not data', async () => {
+test('one Tapstall Worker: no redirect-alias mode remains', async () => {
   const had = Object.prototype.hasOwnProperty.call(env, 'REDIRECT_TO');
   const before = env.REDIRECT_TO;
   env.REDIRECT_TO = 'https://tapstall.test';
   try {
     const shop = await call('/s/mamatoe');
-    assert.equal(shop.status, 301, 'a storefront link a buyer saved in WhatsApp follows the rename: ' + shop.text.slice(0, 120));
-    assert.equal(shop.headers.get('location'), 'https://tapstall.test/s/mamatoe');
-    const dash = await call('/a?code=abc123');
-    assert.equal(dash.status, 301, 'so does a dashboard link');
-    assert.match(dash.headers.get('location'), /\/a\?code=abc123$/, 'and the query is carried across, or the code is lost');
-    assert.equal((await call('/fees')).status, 301, 'the calculator too');
-    assert.equal((await call('/ops')).status, 301, 'and the console');
-    assert.equal((await call('/api/lookup?handle=mamatoe')).status, 200, 'a machine endpoint is still served here, not bounced');
-    const post = await call('/api/order', { method: 'POST', ip: '41.9.9.1',
-      body: { handle: 'mamatoe', buyer: { name: 'P', phone: '263700000001' }, items: [{ name: 'x', price: 5, qty: 1 }] } });
-    assert.ok(post.status !== 301, 'a POST is never redirected: a 301 drops the body and the order with it (got ' + post.status + ')');
-    const ping = await call('/__ping');
-    assert.equal(ping.status, 200, 'health checks keep answering on the alias, or the monitor reads an outage');
+    assert.equal(shop.status, 200, 'a stray redirect variable cannot turn this Worker into an alias');
+    assert.equal(shop.headers.get('location'), null);
+    const self = await call('/__selftest');
+    assert.equal(self.json.cron_owner, true, 'the one Worker always owns its scheduled work');
   } finally {
     if (had) env.REDIRECT_TO = before; else delete env.REDIRECT_TO;
   }
-  assert.equal((await call('/s/mamatoe')).status, 200, 'and with no REDIRECT_TO set, this Worker serves the shop itself');
-});
-
-test('the old brand still works everywhere it was already written down', async () => {
-  // The rename changed what a page says, never what a browser or a KV namespace
-  // already holds. Four things carry the old spelling into the future, and each
-  // one is only correct if a *specific* thing keeps working:
-  //   1. a template published before the rename (KV is republished on its own
-  //      schedule, and not at all on a day the write budget is spent)
-  //   2. a merchant's or operator's existing cookie (they must not be logged out)
-  //   3. an old page still cached in a phone, posting the old confirm header
-  //   4. a merchant tooling integration reading the old admin header
-  const opsTpl = await env.STORES.get('tpl:ops', 'text');
-  const legacyOps = opsTpl.replace('/*__TAPSTALL_OPS__*/null', '/*__ZIMLINK_OPS__*/null');
-  assert.ok(legacyOps.includes('/*__ZIMLINK_OPS__*/null'), 'the fixture is really the old spelling');
-  await env.STORES.put('tpl:ops', legacyOps);
-  const old = await call('/ops');
-  assert.equal(old.status, 200);
-  assert.ok(!old.text.includes('__ZIMLINK_OPS__*/null'), 'a page from yesterday still gets its data hook filled');
-  assert.match(old.text, /"signed_in":false/);
-  await env.STORES.put('tpl:ops', opsTpl);
-
-  const storeTpl = await env.STORES.get('tpl:store', 'text');
-  await env.STORES.put('tpl:store', storeTpl
-    .replace('/*__TAPSTALL_CONFIG__*/null', '/*__ZIMLINK_CONFIG__*/null')
-    .replace('/*__TAPSTALL_TERM__*/null', '/*__ZIMLINK_TERM__*/null'));
-  const shop = await call('/s/mamatoe');
-  assert.equal(shop.status, 200);
-  assert.ok(!shop.text.includes('__TAPSTALL_CONFIG__*/null') && !shop.text.includes('__ZIMLINK_CONFIG__*/null'),
-    'neither spelling is left unfilled on a storefront rendered from the old template');
-  assert.ok(shop.text.includes('"mamatoe"'), 'and the store really was injected');
-  await env.STORES.put('tpl:store', storeTpl);
-
-  // a session minted before the rename lives under zl_ops; the value is the same
-  // signed cap, so accepting the name costs nothing that trust did not already
-  const good = await call('/ops/login', { method: 'POST', body: { secret: SECRET } });
-  const cap = (good.cookies.find((c) => c.startsWith('tp_ops=')) || '').match(/tp_ops=([^;]+)/)[1];
-  const viaLegacy = await call('/ops/api/state', { cookie: 'zl_ops=' + cap });
-  assert.equal(viaLegacy.status, 200, 'the old cookie name still opens the console: ' + viaLegacy.text.slice(0, 120));
-  assert.equal((await call('/ops/api/state', { cookie: 'tp_ops=' + cap })).status, 200, 'and so does the new one');
-
-  const c = 'tp_ops=' + cap;
-  const oldHeader = await call('/ops/api/rails', { method: 'POST', cookie: c, headers: { 'x-zimlink-confirm': '1' },
-    body: { rails: { oldpage: { label: 'Old Cached Page Rail', pct: 0.01 } } } });
-  assert.equal(oldHeader.status, 200, 'a cached page posting the old confirm header is obeyed, not refused: ' + oldHeader.text.slice(0, 160));
-  const yank = await call('/ops/api/rails', { method: 'POST', cookie: c, confirm: true, body: { rails: {} } });
-  assert.equal(yank.status, 200, yank.text.slice(0, 120));
-  const byAdmin = await call('/api/lookup?handle=mamatoe');
-  assert.equal(byAdmin.status, 200);
-  const keyed = await call('/api/admin?handle=mamatoe', { headers: { 'x-zimlink-admin': JSON.parse(env.STORES._map.get('store:mamatoe').value).admin_token } });
-  assert.equal(keyed.status, 200, 'and an integration still sending x-zimlink-admin keeps working');
-  assert.equal(keyed.json.via, 'key');
-
-  const pre = await call('/api/settings', { method: 'POST', cookie: store.cookie,
-    headers: { 'x-zimlink-confirm': '1' }, body: { handle: 'mamatoe', hours: 'Mon-Fri 8-5' } });
-  assert.equal(pre.status, 200, pre.text.slice(0, 160));
-  await call('/api/settings', { method: 'POST', cookie: store.cookie, confirm: true, body: { handle: 'mamatoe', hours: 'daily' } });
 });
 
 test('selftest grades itself with one verdict an operator can grep', async () => {
@@ -4194,7 +4099,7 @@ test('0.9.10 a legacy shop whose menu WAS the sample keeps its rows, as its own,
   // empties the cache; the one after proves the shelf belongs to the shop now.
   await env.STORES.put('store:demoleg', JSON.stringify({
     handle: 'demoleg', shop_name: 'Demo Legacy', currency: 'USD',
-    feed_url: 'https://raw.githubusercontent.com/zimlink/tapstall/main/pages/sample-menu.csv',
+    feed_url: 'https://raw.githubusercontent.com/king-kunta-cpu/tapstall/main/pages/sample-menu.csv',
     whatsapp: '263771234567', paid_until: Date.now() + 30 * 864e5,
     feed_cache: { at: Date.now(), count: 2, error: null, products: [
       { id: '1', name: 'Chicken kota', price: 11, cur: 'USD', available: true },

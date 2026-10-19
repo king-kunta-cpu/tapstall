@@ -4,25 +4,11 @@
 # reproducible on a phone with termux if you ever need to.
 
 WORKER_NAME="${WORKER_NAME:-tapstall}"
-# The old brand's Worker is deployed alongside this one and does nothing but
-# redirect page visits, so every link already sent to a merchant keeps working.
-# Retire it by deleting LEGACY_WORKER_NAME here and in the workflow, once nobody
-# is arriving from the old hostname any more (watch it in the deploy log).
-LEGACY_WORKER_NAME="${LEGACY_WORKER_NAME:-zimlink}"
-# The KV namespaces keep their original titles: they are looked up by title and a
-# miss would *create an empty namespace*, which is how a rename would silently
-# orphan every store. kv_id therefore searches the new title, then the old one,
-# and only creates when neither exists.
-# The KV namespaces keep the titles they were created under and will keep them
-# forever: Cloudflare answers 405 / code 7001 to a namespace title rename
-# (measured today), and a title is invisible to a merchant and to the Worker,
-# which binds by id. If a namespace is ever recreated under the new title, put it
-# here and the lookup below prefers it, with the old one as a fallback and nothing
-# created until both miss.
-KV_STORES="${KV_STORES:-zimlink-stores}"
-KV_ORDERS="${KV_ORDERS:-zimlink-orders}"
-KV_STORES_LEGACY="${KV_STORES_LEGACY:-tapstall-stores}"
-KV_ORDERS_LEGACY="${KV_ORDERS_LEGACY:-tapstall-orders}"
+# One Worker, one pair of KV namespaces, Tapstall titles only. A title miss would
+# create an empty namespace, so deploy.sh also refuses a resolved id that does
+# not match the last recorded deploy.
+KV_STORES="${KV_STORES:-tapstall-stores}"
+KV_ORDERS="${KV_ORDERS:-tapstall-orders}"
 GH_REPO="${GH_REPO:-tapstall}"
 GH_OWNER="${GH_OWNER:-}"
 CF_API="https://api.cloudflare.com/client/v4"
@@ -80,20 +66,9 @@ cf() { # cf GET|POST|PUT|DELETE /accounts-relative-path [json]
 
 workers_subdomain() { cf GET "/workers/subdomain" | jq -r '.result.subdomain // "main"'; }
 
-kv_id() { # kv_id <title> <binding> [legacy title...] -> namespace id (creates only when none exist)
-  # Every title given is searched, newest first, before anything is created: a
-  # namespace lookup that misses does not fail loudly — it makes an EMPTY new
-  # namespace, and the deploy then "succeeds" against a store list with nothing in
-  # it. That is the one way a rename could delete a business by accident.
-  local title="$1" binding="$2" id="" t
-  shift 2
-  for t in "$title" "$@"; do
-    [[ -n "$id" && "$id" != "null" ]] && break
-    id=$(cf GET "/storage/kv/namespaces?per_page=100" | jq -r --arg t "$t" '.result[]|select(.title==$t)|.id' | head -1)
-    if [[ -n "$id" && "$id" != "null" && "$t" != "$title" ]]; then
-      say "KV namespace '$t' still carries the old title; using it (id $id)"
-    fi
-  done
+kv_id() { # kv_id <title> <binding> -> namespace id (creates only when the title does not exist)
+  local title="$1" binding="$2" id=""
+  id=$(cf GET "/storage/kv/namespaces?per_page=100" | jq -r --arg t "$title" '.result[]|select(.title==$t)|.id' | head -1)
   if [[ -z "$id" || "$id" == "null" ]]; then
     id=$(cf POST "/storage/kv/namespaces" "{\"title\":\"$title\",\"binding\":\"$binding\"}" | jq -r '.result.id')
     [[ -n "$id" && "$id" != "null" ]] || die "could not create KV namespace '$title'"

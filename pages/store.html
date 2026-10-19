@@ -140,15 +140,9 @@ var TERM = /*__TAPSTALL_TERM__*/null;
   var ZIG = Number(CFG.zig_rate) || 0;
   var $ = function (id) { return document.getElementById(id); };
   var cart = [];
-  /* The rename moved this key (zl_cart_* -> tp_cart_*). Read the new one, fall
-     back to the old one and move it forward, because a buyer with six items in a
-     basket must not arrive at an empty cart because the platform changed its
-     shirt. The old key is removed only once the new one holds the same list. */
   try {
-    var CK = 'tp_cart_' + CFG.handle, OK = 'zl_cart_' + CFG.handle;
-    var rawCart = localStorage.getItem(CK);
-    if (!rawCart && localStorage.getItem(OK)) { rawCart = localStorage.getItem(OK); localStorage.setItem(CK, rawCart); localStorage.removeItem(OK); }
-    cart = JSON.parse(rawCart || '[]') || [];
+    var CK = 'tp_cart_' + CFG.handle;
+    cart = JSON.parse(localStorage.getItem(CK) || '[]') || [];
   } catch (e) { cart = []; }
 
   /* A door is only worth handing out if the person it was handed to can find it

@@ -3,12 +3,8 @@ main = ".build/worker.js"
 compatibility_date = "2025-06-01"
 workers_dev = true
 
-# main points at the BUILT bundle, not the source, and that is the whole difference between a deploy
-# and a lie. The suites run .build/worker.js; while this line said worker/worker.js, production was
-# shipping a different file than the one 294 tests had just read - which is how v0.9.1 went out with
-# INLINED_PAGES empty (pages_inlined: 0 in /__selftest) while the build log cheerfully reported eleven
-# pages inlined. build_bundle.sh inlines core.js and fills the page map, so the artifact is
-# self-contained and needs no module rules, and git's bytes are the deployed bytes.
+# main points at the BUILT bundle, not the source: the suites run .build/worker.js,
+# and production must ship the same bytes they just read.
 [[kv_namespaces]]
 binding = "STORES"
 id = "a9016473abef4a66bcba6f200d7d4af3"

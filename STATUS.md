@@ -16,9 +16,17 @@ the monthly door beside it is new) and prints the owner's manual-rail details wh
 hunt, sends from each seller's own Gmail via app password (Worker-secret key ring behind
 `/api/outreach/mailboxes`), three touches maximum under the existing caps, IMAP replies stop the
 machine (STOP → DNC). **Brand**: `brand/` — stall-and-tap mark, lockups, Whop cover, palette grown
-from the UI kit, on the landing page. 350 tests. NOT YET DEPLOYED: built and committed locally;
+from the UI kit, on the landing page. 348 tests. NOT YET DEPLOYED: built and committed locally;
 the session's deploy tokens were shredded at v1.0.0, so this lands on the next push (see
 `docs/WHOP-SETUP.md` for the owner's ten minutes in the Whop + GitHub dashboards).
+
+**Retired-brand removal (same unreleased build, owner instruction):** the executable codebase is
+Tapstall-only now. Gone: legacy cookie/header/template-marker spellings, browser cart/onboarding/
+theme migrations, the second alias Worker's redirect/cron-suppression mode, its deploy and
+prod-check branches, and the old KV-title fallbacks (the deploy resolves `tapstall-stores` /
+`tapstall-orders` only). Clients must use `tp_*`, `x-tapstall-*` and TAPSTALL template markers.
+Dated entries below are historical evidence of what was true when written; they are not current
+operating instructions.
 
 ## v1.0.0: the pipeline runs itself (2026-10-19)
 

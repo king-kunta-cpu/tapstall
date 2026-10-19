@@ -90,13 +90,10 @@ def main():
         if res.get("success") and (after or "").strip() == want.strip():
             print(f"  cron {'cleared' if clearing else 'repaired'}: {got!r} -> {after!r}")
         else:
-            # not fatal, and deliberately so: the alarm may be one a Worker ignores
-            # in code (an alias origin returns from scheduled() when REDIRECT_TO is
-            # set), and this script cannot see that config. /__selftest can: it
-            # answers cron_owner true only for the Worker that actually sweeps.
-            print("  note cron unchanged (PUT success=%s, schedule now %r): if this Worker is a"
-                  " redirect alias, its schedule is inert by design; otherwise clear it in the"
-                  " dashboard and confirm with GET /__selftest -> cron_owner"
+            # Not fatal: this verifier reports the mismatch; the schedule itself
+            # is declared in wrangler.toml and proven by the cron heartbeat.
+            print("  note cron unchanged (PUT success=%s, schedule now %r): clear or repair it in the"
+                  " dashboard and confirm with GET /__selftest -> cron heartbeat"
                   % (res.get("success"), after))
 
     # The schedule is declared in wrangler.toml (the primary deploy path). This

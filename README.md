@@ -13,10 +13,7 @@ that is where the incumbent refuses to work. The product is not limited to
 those two: a payment method or a country we have not priced is a config entry,
 not a release. See *Markets are data, not code*.
 
-**Live:** `https://tapstall.zlnew.workers.dev/onboard`  (the previous origin, `tapstall.simalidudu.workers.dev`, 301s here per path — old receipts still reach the shop they name)
-(storefront `…/s/<handle>` and every link minted before the rename still work: the
-previous hostname `zimlink.simalidudu.workers.dev` is deployed as an alias and
-answers with a redirect for page visits)
+**Live:** `https://tapstall.zlnew.workers.dev/onboard`
 Storefront `…/s/<handle>` · dashboard `…/a` · rate calculator `…/fees`
 
 ---
@@ -515,18 +512,11 @@ see and cancel, and because revoking takes one press.
 | Re-run a failed deploy | `POST /repos/king-kunta-cpu/tapstall/actions/runs/<id>/rerun-failed-jobs` with the repo PAT — the one Actions call that works (job *logs* are not readable with it, which is why `ci-deploy.log` and step annotations exist). `deploy-pages` fails on GitHub's side from time to time — "Fetching artifact metadata failed… re-run the deployment at a later time" — and a rerun is the whole fix; the Worker job is unaffected, so the product stays live and current while the mirror lags a run |
 
 `STATUS.md` records what has been proven on production and the deliberate limits.
-One measurement worth knowing before you trust it: `cron:last` lives in KV, so
-*both* origins report the same heartbeat — the value cannot tell you who swept. The
-field that does is `/__selftest`'s `cron_owner` (`true` on `tapstall`, `false` on the
-alias), which is what `deploy.sh` checks and what the test suite proves by watching
-every `cron:*` write while `REDIRECT_TO` is set. That var is the alias's *only*
-behaviour, so both publishers have to carry it: the day the dependency-free one
-(`cf_publish.py`, used when `node_modules` is absent) built its bindings from its
-arguments alone, it shipped the alias without it — the old hostname started serving
-the app itself and the sweep ran from two origins, four times a day, quietly. Both
-paths pass it now, `deploy.sh` refuses to call an alias healthy on a `200`, and
-`prod_check.sh` asserts the `301` and the `cron_owner:false` in its ordinary run, so
-this cannot regress between two people noticing.
+One measurement worth knowing before you trust it: `cron:last` lives in KV and
+`/__selftest` reports `cron_owner: true` for the one Tapstall Worker. There is
+no second/alias Worker in this codebase and no redirect mode for a publisher
+to drop: the canonical Worker is the only thing that serves pages or runs the
+scheduled sweep.
 
 ## Verified
 
@@ -579,7 +569,7 @@ still works, and the fallback is removed only when a real title replaces it).
 | `<title>` = shop, place, brand | `shop_name`, `location` | a hard-coded brand line |
 | `description` | `tagline` + the top three priced items + "Open until 21:00" | a template sentence when the merchant wrote one |
 | `og:image`, `twitter:image` | `logo`, else the first item picture, served by `/i/…` | a promise with no file behind it: no picture, no tag |
-| `canonical` | the host that answered | the alias, which 301s before this runs |
+| `canonical` | the host that answered | not applicable: there is no alias Worker |
 | `LocalBusiness` + `Menu` JSON-LD | `whatsapp`, `week`, `menu`/cached shelf, `currency` | hours nobody typed, a cuisine nobody claimed |
 | `robots.txt`, `sitemap.xml` | the app paths to shut, three pages to open | **a list of every store** |
 

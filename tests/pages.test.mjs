@@ -759,7 +759,7 @@ test('a page cannot stick, so the night is a check and not a retry', () => {
     'the emergency door is a real mode, for the case that is left: a wrong page at 22:00');
   assert.match(dep, /case " \$TPL_NAMES sample-menu " in .*die "\$PAGE_T is not a page this pipeline publishes/,
     'and it takes only names that are actually pages, so a typo cannot publish a blank over a live screen');
-  assert.match(dep, /check_pages_in_bundle \/tmp\/zl-pages-check/, 'and --templates still answers the question it was always asked, locally');
+  assert.match(dep, /check_pages_in_bundle \/tmp\/tapstall-pages-check/, 'and --templates still answers the question it was always asked, locally');
 });
 
 /* The receipt keeps the door on the device only when the response says the budget, under

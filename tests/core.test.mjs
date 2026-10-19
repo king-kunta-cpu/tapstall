@@ -1555,11 +1555,11 @@ test('0.9.10 the placeholder rule is exact — it decides a UI now, not just a w
   assert.equal(C.isPlaceholderFeed(undefined), true);
   assert.equal(C.isPlaceholderFeed(null), true);
   assert.equal(C.isPlaceholderFeed('https://tapstall.dev/data/sample-menu.csv'), true, 'the onboarding default');
-  assert.equal(C.isPlaceholderFeed('https://zimlink.simalidudu.co.zw/pages/sample-menu.csv'), true, 'the Pages one, at either path');
+  assert.equal(C.isPlaceholderFeed('https://pages.example.test/pages/sample-menu.csv'), true, 'the Pages one, at either path');
   assert.equal(C.isPlaceholderFeed('https://x.test/data/sample-menu.csv?v=3'), true, 'a query does not launder a sample');
-  assert.equal(C.isPlaceholderFeed('https://raw.githubusercontent.com/zimlink/tapstall/main/pages/sample-menu.csv'), true);
+  assert.equal(C.isPlaceholderFeed('https://raw.githubusercontent.com/king-kunta-cpu/tapstall/main/pages/sample-menu.csv'), true);
   assert.equal(C.isPlaceholderFeed('https://raw.githubusercontent.com/mari/menus/main/sample-menu.csv'), false, 'somebody else’s repo, our filename: their menu. The rule is the sample’s path, not the host');
-  assert.equal(C.isPlaceholderFeed('https://raw.githubusercontent.com/zimlink/tapstall/main/pages/README.md'), false, 'our own repo, not the file: not ours to call a placeholder');
+  assert.equal(C.isPlaceholderFeed('https://raw.githubusercontent.com/king-kunta-cpu/tapstall/main/pages/README.md'), false, 'our own repo, not the file: not ours to call a placeholder');
   assert.equal(C.isPlaceholderFeed('https://docs.google.com/spreadsheets/d/abc/edit#gid=0'), false);
   assert.equal(C.isPlaceholderFeed('sample-menu.csv'), false, 'a bare filename somebody typed is not ours to call a sample — the rule is our path or nothing');
 });
@@ -1570,7 +1570,7 @@ test('0.9.10 no real feed means the cache describes nothing — the head cannot 
   // the old loose rule could make a crawler describe rows no page ever showed.
   const rows = [{ id: 'a', name: 'Chicken kota', price: 22.5, cur: 'ZAR' }];
   const stale = { shop_name: 'S', currency: 'ZAR',
-    feed_url: 'https://raw.githubusercontent.com/zimlink/tapstall/main/pages/sample-menu.csv',
+    feed_url: 'https://raw.githubusercontent.com/king-kunta-cpu/tapstall/main/pages/sample-menu.csv',
     feed_cache: { ts: 1, products: rows } };
   assert.doesNotMatch(C.seoFacts(stale, ORIGIN, MON_10).desc, /Chicken kota/, 'the demo rows are not this shop’s shelf, cached or not');
   assert.match(C.seoFacts({ ...stale, feed_url: 'https://docs.google.com/spreadsheets/d/abc/edit' }, ORIGIN, MON_10).desc,

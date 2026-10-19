@@ -509,7 +509,7 @@ test("the client dashboard is honest about where a shop's items live", () => {
   // hosts its own CSV on GitHub raw has a feed; ours is the sample path and nothing else —
   // and it is one rule with the worker, which `isPlaceholderFeed` pins from the other side.
   assert.match(shop, /data\|pages\).*sample-menu/, 'our own placeholder is recognised as a placeholder');
-  assert.match(shop, /zimlink\|tapstall/, 'and only from our own repos, not from anybody who uses GitHub');
+  assert.match(shop, /raw.*tapstall/, 'and only from our own repos, not from anybody who uses GitHub');
   assert.match(shop, /var fph = fph0\(fsheet\)/, 'the placeholder is decided once, before either control is drawn');
   assert.match(shop, /q\('#menuReload'\)\.style\.display = fph \? 'none' : ''/, 'and the button that would fetch it back over their edits is removed, not warned about');
 });

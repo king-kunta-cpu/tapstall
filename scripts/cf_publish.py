@@ -16,10 +16,7 @@ import urllib.error
 import urllib.request
 
 API = "https://api.cloudflare.com/client/v4"
-# An empty TAPSTALL_CRON means "this Worker must not be scheduled" — the alias
-# deploy uses it, and clearing an inherited schedule is attempted right after the
-# upload rather than left to a var that only makes scheduled() return early.
-CRON = os.environ.get("TAPSTALL_CRON", "15 6,12,18,0 * * *").strip()
+CRON = "15 6,12,18,0 * * *"
 COMPAT_DATE = os.environ.get("COMPAT_DATE", "2025-06-01")
 CT = {
     ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript",
@@ -60,7 +57,7 @@ def api(method, path, data=None, headers=None, token=None):
 
 
 def form(fields, files):
-    b = "----zl" + os.urandom(8).hex()
+    b = "----tapstall" + os.urandom(8).hex()
     out = b""
     for k, v in fields.items():
         out += f'--{b}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'.encode()
@@ -108,15 +105,9 @@ def main():
         kind, binding, nsid = spec.split(":")
         if kind == "kv":
             bindings.append({"type": "kv_namespace", "name": binding, "namespace_id": nsid})
-    # A plain-text var is the difference between an alias and a second copy of the
-    # app: REDIRECT_TO is what makes the old hostname answer redirects and skip the
-    # sweep, and a publisher that only knows KV bindings silently drops it. That is
-    # how the alias ended up serving stores and scheduling the daily work twice.
-    redir = os.environ.get("REDIRECT_TO", "").strip()
-    if redir:
-        bindings.append({"type": "plain_text", "name": "REDIRECT_TO", "text": redir})
-    # and the canonical origin rides the same rule: a publisher that only knows KV
-    # bindings silently dropped both, and every mail built from "today's" host lost it
+    # The canonical origin is a plain-text binding too: a publisher that only
+    # knows KV bindings would silently drop it, and mail built from "today's"
+    # host would lose the public URL.
     origin = os.environ.get("PUBLIC_ORIGIN", "").strip()
     if origin:
         bindings.append({"type": "plain_text", "name": "PUBLIC_ORIGIN", "text": origin})
@@ -127,7 +118,7 @@ def main():
         "compatibility_date": COMPAT_DATE,
         "compatibility_flags": ["nodejs_compat"],
         "main_module": "worker.js",
-        **({"triggers": {"crons": [CRON]}} if CRON else {}),   # empty CRON = say nothing, not "no crons"
+        "triggers": {"crons": [CRON]},
         "bindings": bindings,
         "observability": {"enabled": True, "head_sampling_rate": 1},
     }
@@ -146,18 +137,6 @@ def main():
               {"Content-Type": f"multipart/form-data; boundary={boundary}"}, token)
     ver = (res.get("result") or {}).get("version_id", "?")
     print("deployed %s (version %s, %d binding(s), no assets binding)" % (name, ver, len(bindings)))
-
-    if not CRON:
-        # Try to take the schedule away rather than rely on the var making
-        # scheduled() return early. This endpoint has refused this token before, so
-        # a refusal is printed, not fatal: the var is the guarantee, this is tidiness.
-        try:
-            rq = urllib.request.Request(f"{API}/accounts/{acct}/workers/scripts/{name}/schedules",
-                                         method="DELETE", headers={"Authorization": f"Bearer {token}"})
-            j = json.loads(urllib.request.urlopen(rq, timeout=60).read().decode())
-            print("alias schedule cleared: %s" % ("yes" if j.get("success") else json.dumps(j.get("errors"))[:120]))
-        except Exception as e:                       # noqa: BLE001 - a nicety must never fail a release
-            print("alias schedule left alone (%s) — REDIRECT_TO keeps it inert" % type(e).__name__)
 
     # The schedule ships inside the upload above: PUT .../cron_triggers rejects
     # both JSON and metadata-only multipart for an API-token deploy (it insists on

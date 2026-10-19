@@ -52,55 +52,23 @@ const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
 const RL = { windowSec: 60, max: 8 };
 
-/* ---- rename compatibility: ZimLink -> Tapstall, 2026-10-10 -----------------
-   A rename may change what a person reads. It must not change what a person has
-   already been sent, what sits in their browser, or what an integration already
-   posts. So every spelling the old brand wrote is still accepted, and only the
-   new one is ever written out. These aliases are load-bearing until the last KV
-   template has been republished — deleting one logs merchants out, drops buyer
-   carts in progress, or renders a page whose data hook never filled.
-   Revocation does NOT depend on the old names: both cookies carry the store's
-   `auth_gen` (or the platform's `ops_gen`) inside the signed payload, so one KV
-   write still invalidates every link, key and cookie under either spelling. */
-const LEGACY_COOKIE = { tp_sess: 'zl_sess', tp_ops: 'zl_ops' };
-const LEGACY_HEADER = {
-  'x-tapstall-confirm': 'x-zimlink-confirm',
-  'x-tapstall-admin': 'x-zimlink-admin',
-};
-function reqHeader(req, name) {
-  const v = req.headers.get(name);
-  if (v !== null && v !== '') return v;
-  const alt = LEGACY_HEADER[name];
-  return alt ? req.headers.get(alt) : v;
-}
+/* ---- Tapstall is the only spelling this Worker speaks ----------------------
+   One cookie name, one header name, one template marker, one Worker. The retired
+   brand's spellings are not read, not emitted and not migrated: clients and tools
+   use `tp_*`, `x-tapstall-*` and TAPSTALL template markers, or they are not talking to
+   this platform. */
+function reqHeader(req, name) { return req.headers.get(name); }
 function cookieVal(req, name) {
   const raw = req.headers.get('cookie') || '';
-  for (const n of [name, LEGACY_COOKIE[name]].filter(Boolean)) {
-    const m = raw.match(new RegExp('(?:^|;\\s*)' + n + '=([^;]*)'));
-    if (m && m[1]) return decodeURIComponent(m[1]);
-  }
-  return '';
+  const m = raw.match(new RegExp('(?:^|;\s*)' + name + '=([^;]*)'));
+  return m && m[1] ? decodeURIComponent(m[1]) : '';
 }
-/** Both cookie names, cleared: an old one left in a browser would still read as
- *  a valid session here, because we accept it. Signing out means both. */
 function killCookies(names) {
-  const extra = names.map((n) => LEGACY_COOKIE[n]).filter(Boolean);
-  return names.concat(extra)
-    .map((n) => n + '=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict; Secure');
+  return names.map((n) => n + '=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict; Secure');
 }
-/** Fill a page's data hook under either brand. The templates in KV are republished
- *  on their own schedule (and cannot be written at all on a spent-quota day), so
- *  the Worker has to speak both spellings for as long as any old copy is live. */
 function fillPage(html, pairs) {
-  // `marker` is the whole brand-bearing name, e.g. `TAPSTALL_CONFIG`: the pages
-  // are written with `/*__TAPSTALL_CONFIG__*/null` and yesterday's KV copy with
-  // `/*__ZIMLINK_CONFIG__*/null`, and both must land in one pass
   let out = String(html || '');
-  for (const [marker, value] of pairs) {
-    const txt = JSON.stringify(value);
-    out = out.replace('/*__' + marker + '__*/null', txt)
-             .replace('/*__' + marker.replace('TAPSTALL', 'ZIMLINK') + '__*/null', txt);
-  }
+  for (const [marker, value] of pairs) out = out.replace('/*__' + marker + '__*/null', JSON.stringify(value));
   return out;
 }
 
@@ -131,14 +99,6 @@ export default {
     }
   },
   async scheduled(event, env, ctx) {
-    // An alias origin never owns the sweep. Cloudflare's API would not let this
-    // token remove the schedule that the previous hostname kept when it was
-    // deployed as a second Worker (PUT /schedules answers success:false), and
-    // deleting it from a dashboard is a manual step — so the guard lives here
-    // instead, where forgetting it costs something: two Workers on one KV running
-    // the same daily job means double writes on a 1,000/day plan and two expiry
-    // notices where the merchant expected one.
-    if (env.REDIRECT_TO) return;
     ctx.waitUntil(runCron(env));
   },
 };
@@ -149,21 +109,10 @@ async function route(req, url, env, ctx) {
   // `&amp;`. That silently renames the *second* parameter: `&token=` becomes
   // `&amp;token=`, so the page loads, sees no credential, and asks you to paste
   // the link you are already holding. Repaired once, here, because every reader
-  // of the query is downstream of it — the alias redirect included.
+  // of the query is downstream of it.
   if (/(?:&|&#0*38;)(?:amp|#0*38);/i.test(url.search)) url = unescapeQuery(url);
   const p = url.pathname;
   const NOSTORE = { 'Cache-Control': 'no-store' };
-
-  /* The previous brand's hostname is kept alive as an alias of this Worker and
-     answers nothing but a redirect (env.REDIRECT_TO is set only on that deploy).
-     Only page GETs: a request with a body — placing an order, tapping confirm,
-     saving a setting — is served here as normal, because a 301 loses a POST and
-     a browser that is mid-action must not lose the order. Nothing a customer
-     already saved dies when the name changes. */
-  if (env.REDIRECT_TO && req.method === 'GET' && LEGACY_PAGES_RE.test(p)) {
-    const to = env.REDIRECT_TO.replace(/\/+$/, '') + p + (url.search || '');
-    return redirect(to, 301);
-  }
 
   if (p === '/__ping') return json({ ok: true, version: VERSION, ts: Date.now() });
   if (p === '/__selftest') {
@@ -768,8 +717,6 @@ async function notify(env, st, order) {
         // credential in a header here: their webhook target is third-party
         // software that logs what it receives.
         'x-tapstall-body': await sign(env.ADMIN_SECRET || 'dev-secret', body),
-        // same signature under the old name, for whoever already wired it up
-        'x-zimlink-body': await sign(env.ADMIN_SECRET || 'dev-secret', body),
         // workers.dev bot rules reject requests without a browser-ish UA, which
         // would silently swallow a merchant's order notification
         'user-agent': 'tapstall/1 (order notification)',
@@ -2129,7 +2076,7 @@ async function selftest(env) {
   const t = { version: VERSION, kv_stores: !!env.STORES, kv_orders: !!env.ORDERS, email: !!env.EMAIL,
     // whose cron is this? an alias answers redirects and skips the sweep, and the
     // deploy check reads this instead of trusting that the schedule was deleted
-    cron_owner: !env.REDIRECT_TO };
+    cron_owner: true };
   /* Login is one PBKDF2 comparison, so the runtime having WebCrypto's deriveBits
      is a health question, not a detail: without it every merchant in the country
      fails to sign in and every status page says green. */
@@ -2480,17 +2427,12 @@ const FRAMEABLE = {
     "frame-ancestors 'none'", "frame-ancestors 'self'"),
 };
 
-const LEGACY_PAGES_RE = /^\/$|^\/s\/|^\/a$|^\/c\/|^\/renew\/|^\/fees\b|^\/onboard\b|^\/rails\b|^\/data\/|^\/ops$/;
 const OPEN_RE = /^\/s\/|^\/rails\b|^\/fees\b|^\/data\/|^\/onboard\b|^\/__ping\b|^\/api\/(order|register|lookup|hook\/)|^\/renew\//;
 function isOpenPath(pathname) { return OPEN_RE.test(pathname); }
 const SESS_COOKIE = 'tp_sess';
 const KILL_COOKIES = killCookies([SESS_COOKIE]);
-/** The session cookie, plus the clearing of the old brand's spelling: a browser
- *  that still holds `zl_sess` would otherwise keep a signed-in tab alive after
- *  "sign out", because this Worker accepts that name on purpose. */
 function sessCookie(value) {
-  return [`${SESS_COOKIE}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=${SESS_TTL}`,
-    'zl_sess=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict; Secure'];
+  return [`${SESS_COOKIE}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=${SESS_TTL}`];
 }
 
 /** Merge per-route headers over the defaults, lower-cased, so callers that
@@ -2509,15 +2451,13 @@ function text(s, status = 200, type = 'text/plain; charset=utf-8') {
   return new Response(s, { status, headers: { 'content-type': type, 'cache-control': 'public, max-age=3600' } });
 }
 function hdr(extra) {
-  // both spellings for one release: a cached page or a script an operator wrote
-  // against the old header should keep working while it is still in use
   // Everything is folded into one lower-cased table on purpose. Spreading
   // SEC_HEADERS first leaves `X-Frame-Options` and `Content-Security-Policy` in
   // their original casing, and a per-route override then *adds* a second key that
   // differs only in case — a Headers object keeps both and joins them, so the
   // response read `DENY, SAMEORIGIN` (and two CSPs, which a browser intersects:
   // the stricter one wins). Lower-case both sides and an override replaces.
-  const h = { 'cache-control': 'no-store', 'x-tapstall': VERSION, 'x-zimlink': VERSION };
+  const h = { 'cache-control': 'no-store', 'x-tapstall': VERSION };
   for (const k of Object.keys(SEC_HEADERS)) h[k.toLowerCase()] = SEC_HEADERS[k];
   for (const k of Object.keys(extra || {})) h[k.toLowerCase()] = extra[k];
   return h;
@@ -2541,7 +2481,7 @@ function withCookie(res, ...cookies) { for (const c of cookies) if (c) res.heade
 function openCors(r) {
   r.headers.set('Access-Control-Allow-Origin', '*');
   r.headers.set('Access-Control-Allow-Headers',
-    'content-type, x-tapstall-confirm, x-zimlink-confirm, x-tapstall-admin, x-zimlink-admin');
+    'content-type, x-tapstall-confirm, x-tapstall-admin');
   r.headers.set('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   r.headers.set('X-Tapstall', VERSION);
   return r;
@@ -3794,8 +3734,7 @@ async function opsLogin(req, env) {
     const cap = await opsIssue(env);
     await pushOpsLog(env, { act: 'login', ip: ipOf(req) });
     return withCookie(json({ ok: true, valid_for_sec: SESS_TTL, note: 'This console is oversight only — no customer flow waits on it.' }),
-      `${OPS_COOKIE}=${encodeURIComponent(cap)}; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=${SESS_TTL}`,
-      'zl_ops=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict; Secure');
+      `${OPS_COOKIE}=${encodeURIComponent(cap)}; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=${SESS_TTL}`);
   }
   const n = await authFail(env, '__ops');
   return json({ ok: false, error: 'not the platform secret', tries_left: Math.max(0, LOCK_MAX - n) }, 403);

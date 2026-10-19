@@ -376,13 +376,6 @@ function poster(url, name) {
   w.document.close();
 }
 var OB_KEY = 'tp_onboard';
-try {
-  // the draft a half-finished sign-up keeps in the tab: same key rename, same
-  // reason — a merchant who typed a menu and hit a reload must not start again
-  if (!sessionStorage.getItem(OB_KEY) && sessionStorage.getItem('zl_onboard')) {
-    sessionStorage.setItem(OB_KEY, sessionStorage.getItem('zl_onboard')); sessionStorage.removeItem('zl_onboard');
-  }
-} catch (e) {}
 try { var saved = JSON.parse(sessionStorage.getItem(OB_KEY) || 'null'); if (saved) { Object.keys(saved).forEach(function (k) { var e = q('[name="' + k + '"]'); if (e) e.value = saved[k]; }); } } catch (e) { }
 setInterval(function () { try { var o = {}; qa('input[name],select[name]').forEach(function (i) { o[i.getAttribute('name')] = i.value; }); sessionStorage.setItem('tp_onboard', JSON.stringify(o)); } catch (e) { } }, 4000);
 paint();

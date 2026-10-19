@@ -24,7 +24,7 @@ if [[ "$MODE" == "--check" ]]; then
   check_workflows
   run_tests
   python3 scripts/ui_kit.py check
-  bash scripts/build_bundle.sh /tmp/zl-dryrun >/dev/null && ok "dry run: tests pass, ui kit inlined, bundle builds"
+  bash scripts/build_bundle.sh /tmp/tapstall-dryrun >/dev/null && ok "dry run: tests pass, ui kit inlined, bundle builds"
   exit 0
 fi
 load_secrets
@@ -49,8 +49,8 @@ print("  CI workflow YAML validates")
 PYEOF
 
 say "KV namespaces"
-STORES_ID=$(kv_id "$KV_STORES" STORES "$KV_STORES_LEGACY" | tail -1 | tr -dc "a-f0-9")
-ORDERS_ID=$(kv_id "$KV_ORDERS" ORDERS "$KV_ORDERS_LEGACY" | tail -1 | tr -dc "a-f0-9")
+STORES_ID=$(kv_id "$KV_STORES" STORES | tail -1 | tr -dc "a-f0-9")
+ORDERS_ID=$(kv_id "$KV_ORDERS" ORDERS | tail -1 | tr -dc "a-f0-9")
 say "stores=$STORES_ID  orders=$ORDERS_ID"
 
 # The one accident a rename can cause that looks like success: kv_id creates an
@@ -61,7 +61,7 @@ say "stores=$STORES_ID  orders=$ORDERS_ID"
 if [[ -f .deploy/state.json ]]; then
   PREVIOUS=$(jq -r '.kv_stores // empty' .deploy/state.json)
   if [[ -n "$PREVIOUS" && "$PREVIOUS" != "$STORES_ID" && "${DEPLOY_ACCOUNT_MOVE:-0}" != 1 ]]; then
-    die "STORES resolved to $STORES_ID but the last deploy used $PREVIOUS. Refusing to publish against a namespace that is not the one with the stores in it — check KV_STORES/KV_STORES_LEGACY before anything else; for a deliberate move to another account, say so with DEPLOY_ACCOUNT_MOVE=1."
+    die "STORES resolved to $STORES_ID but the last deploy used $PREVIOUS. Refusing to publish against a namespace that is not the one with the stores in it — check KV_STORES before anything else; for a deliberate move to another account, say so with DEPLOY_ACCOUNT_MOVE=1."
   fi
 fi
 KEYS=$(cf GET "/storage/kv/namespaces/$STORES_ID/keys?per_page=1" | jq -r '.result_info.count // 0')
@@ -108,8 +108,8 @@ if [[ "$MODE" == "--templates" ]]; then
   # question — build, compare, report. No KV read, no KV write, and it works on a day the account
   # has spent its budget, which is the only day anyone ever reached for this command.
   say "templates: pages ride in the bundle now — checking the bundle instead of publishing to KV"
-  bash scripts/build_bundle.sh /tmp/zl-pages-check >/dev/null
-  check_pages_in_bundle /tmp/zl-pages-check $TPL_NAMES sample-menu
+  bash scripts/build_bundle.sh /tmp/tapstall-pages-check >/dev/null
+  check_pages_in_bundle /tmp/tapstall-pages-check $TPL_NAMES sample-menu
   ok "every page in git is in the bundle a deploy uploads: nothing to publish, nothing to retry tonight"
   exit 0
 fi
@@ -134,7 +134,7 @@ fi
 # verifies it: PUBLIC_ORIGIN travels with the deployment, so a cron mail written at
 # 00:15 on a host nobody is looking at still names a URL that exists.
 BASE="https://$WORKER_NAME.$(workers_subdomain | tail -1).workers.dev"
-NAME="$WORKER_NAME" STORES_ID="$STORES_ID" ORDERS_ID="$ORDERS_ID" WITH_CRON=1 REDIRECT_TO="" \
+NAME="$WORKER_NAME" STORES_ID="$STORES_ID" ORDERS_ID="$ORDERS_ID" \
   PUBLIC_ORIGIN="$BASE" \
   python3 scripts/gen_wrangler_toml.py
 
@@ -269,73 +269,6 @@ echo "--- routes ---"
 for r in / /onboard /fees /rails /ops /data/sample-menu.csv; do
   printf '  %-9s %s\n' "$r" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$BASE$r")"
 done
-# ------------------------------------------------- the old hostname, kept alive
-# Links already sent to merchants are absolute and were minted on the previous
-# brand's hostname. Deleting that Worker would 404 a storefront a buyer has saved
-# in WhatsApp, so the old name is deployed too: same code, same KV, and the one
-# env var that makes it answer redirects for page visits. A failure here is a
-# warning, never a red release: the alias is what was already running until now.
-if [[ -n "${LEGACY_WORKER_NAME:-}" && "$LEGACY_WORKER_NAME" != "$WORKER_NAME" ]]; then
-  say "alias worker $LEGACY_WORKER_NAME -> redirects to $BASE"
-  NAME="$LEGACY_WORKER_NAME" STORES_ID="$STORES_ID" ORDERS_ID="$ORDERS_ID" WITH_CRON=0 REDIRECT_TO="$BASE" \
-    PUBLIC_ORIGIN="$BASE" \
-    python3 scripts/gen_wrangler_toml.py || warn "alias config not written"
-  # The main publish cleans `.build` up *before* this block, and until v0.9.10 the
-  # wrangler branch took that missing entry-point as the end of the story: every run
-  # warned `alias deploy failed` and the old hostname kept serving whatever it last
-  # had, which is how an alias loses REDIRECT_TO and runs the sweep from two origins.
-  # The bundle is cheap to rebuild and byte-identical to the one just published, so
-  # rebuild first, and let a failed wrangler fall through to the dependency-free
-  # publisher instead of falling through to silence.
-  [[ -f .build/worker.js ]] || bash scripts/build_bundle.sh .build
-  ALIAS_DEPLOYED=0
-  if [[ -x node_modules/.bin/wrangler ]]; then
-    if CLOUDFLARE_API_TOKEN="$CF_TOKEN" CLOUDFLARE_ACCOUNT_ID="$CF_ACCOUNT" \
-      node_modules/.bin/wrangler deploy --config wrangler.toml 2>&1 | grep -Ev "^$" | tail -3; then ALIAS_DEPLOYED=1; fi
-  fi
-  if [[ "$ALIAS_DEPLOYED" != 1 ]]; then
-    # the bundle is normally cleaned up above; the dependency-free publisher needs
-    # it, so rebuild rather than "succeed" at publishing nothing
-    [[ -d .build ]] || bash scripts/build_bundle.sh .build
-    # TAPSTALL_CRON="" says "not scheduled", and REDIRECT_TO has to be passed here
-    # too: this publisher builds its bindings from its arguments, and the day it
-    # silently dropped that var the old hostname started serving the app itself and
-    # running the sweep a second time — which is also how a $0 account burns half
-    # its daily KV writes on nothing.
-    CF_TOKEN="$CF_TOKEN" CF_ACCOUNT="$CF_ACCOUNT" WORKER_NAME="$LEGACY_WORKER_NAME" \
-      REDIRECT_TO="$BASE" TAPSTALL_CRON="" PUBLIC_ORIGIN="$BASE" \
-      python3 scripts/cf_publish.py "$LEGACY_WORKER_NAME" .build "kv:STORES:$STORES_ID" "kv:ORDERS:$ORDERS_ID" \
-      || warn "alias publish failed"
-  fi
-  WORKER_NAME="$LEGACY_WORKER_NAME" put_secret ADMIN_SECRET "$ADMIN_SECRET" || warn "alias secret not set"
-  OLD="https://$LEGACY_WORKER_NAME.$(workers_subdomain | tail -1).workers.dev"
-  # A deploy's own probes race the edge: every run this month said "404" here for a
-  # Worker that answered "200 / 301" when curled a minute later, and a warning that
-  # is usually transient is a warning that gets ignored. Re-probe before crying, and
-  # say which answer was a lap behind. (An assertion, not a log line: `200 ->` used
-  # to print here as a fact and the regression it described went by twice.)
-  ALINK=''; APING=''
-  for _try in 1 2 3 4; do
-    APING=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$OLD/__ping")
-    ALINK=$(curl -s -o /dev/null -w '%{http_code} -> %{redirect_url}' --max-time 20 "$OLD/s/mamatoe")
-    [[ "$ALINK" == 301* ]] && break
-    say "alias probe $_try: __ping=$APING link=$ALINK (propagation?)"
-    sleep 15
-  done
-  say "alias answers $OLD/__ping -> $APING"
-  if [[ "$ALINK" == 301* ]]; then say "alias redirects a saved store link: $ALINK"
-  else warn "alias is NOT redirecting after 4 probes (got: $ALINK) — the old hostname is serving the app itself, so it lost REDIRECT_TO and the daily sweep runs from two origins"; fi
-  # The alias inherited a cron schedule from the day it was the only Worker, and
-  # this token cannot delete it (PUT /schedules -> success:false). That is safe
-  # rather than sloppy: a Worker deployed with REDIRECT_TO returns from
-  # scheduled() without touching KV, which the alias's own selftest reports as
-  # cron_owner:false — so the sweep still runs once a day, from one origin.
-  # guarded for the same reason as the selftest print above: a 504 here is a shrug,
-  # not a red release, and the alias is not what a merchant's money runs through
-  say "alias cron is inert: $( { curl -s --max-time 20 "$OLD/__selftest" || true; } | jq -c '{cron_owner, version}' 2>/dev/null || printf 'not readable right now')"
-  CF_TOKEN="$CF_TOKEN" CF_ACCOUNT="$CF_ACCOUNT" python3 scripts/set_triggers.py "$WORKER_NAME" "15 6,12,18,0 * * *" || warn "cron check failed on $WORKER_NAME"
-fi
-
 [[ "$MODE" == "--push" ]] && push_github
 echo
 ok "done. Give merchants this one link: $BASE/onboard"

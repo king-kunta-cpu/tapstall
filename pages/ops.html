@@ -378,7 +378,7 @@ function toast(msg, bad) {
   q('#secret').onkeydown = function (e) { if (e.key === 'Enter') signIn(); };
   q('#outBtn').onclick = function (e) { e.preventDefault(); api('/ops/logout', {}).then(function () { location.href = '/ops'; }); };
   q('#darkBtn').onclick = function (e) { e.preventDefault(); var on = document.body.classList.toggle('dark'); localStorage.setItem('tp_ops_dark', on ? '1' : ''); this.textContent = on ? 'light' : 'dark'; };
-  var darkPref = localStorage.getItem('tp_ops_dark') || localStorage.getItem('zl_ops_dark');
+  var darkPref = localStorage.getItem('tp_ops_dark');
   if (darkPref) { document.body.classList.add('dark'); q('#darkBtn').textContent = 'light'; }
   q('#tabs').onclick = function (e) {
     var b = e.target.closest('button[data-v]'); if (!b) return;
