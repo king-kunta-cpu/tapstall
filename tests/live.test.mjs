@@ -4487,6 +4487,8 @@ test('1.0.0 sellers, leads, recognised sales, and a press the clock runs by itse
   const redir = await call('/r/tino-sells');
   assert.equal(redir.status, 302);
   assert.match(redir.headers.get('location') || '', /\/onboard\?ref=tino-sells$/, 'the short link lands on onboarding carrying the code');
+  const story = await call('/g/tino-sells');
+  assert.match(story.headers.get('location') || '', /\/?\?ref=tino-sells$/, 'the story link tells it first — the homepage, carrying the same code');
 
   // attribution is judged at birth: a real seller's code sticks, an invented one attributes nothing
   const reg = (handle, ref) => call('/api/register', { method: 'POST',

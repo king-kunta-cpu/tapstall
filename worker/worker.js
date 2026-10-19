@@ -320,7 +320,7 @@ async function route(req, url, env, ctx) {
   // seller whose link brought it, once, at birth; the seller's own view is read-only and carries
   // no buyer data and no shop credentials. Leads are worked by sellers, allocated by hash, and
   // the anti-collision rule lives in core so every door refuses the same way.
-  if ((m = p.match(/^\/(?:r|g)\/([a-z0-9][a-z0-9-]{1,23})$/))) return sellerRedirect(url, env, m[1]);
+  if ((m = p.match(/^\/(r|g)\/([a-z0-9][a-z0-9-]{1,23})$/))) return sellerRedirect(url, env, m[2], m[1]);
   if (p === '/api/seller') return sellerView(url, env);
   if (p === '/api/leads/ingest' && req.method === 'POST') return leadsIngest(req, env);
   if (p === '/api/leads' && req.method === 'GET') return leadsListSeller(url, env);
@@ -4507,10 +4507,13 @@ async function boardInputs(env) {
   return { sellers, stores, sales };
 }
 const sellerClickBuf = new Map();
-async function sellerRedirect(url, env, codeIn) {
+async function sellerRedirect(url, env, codeIn, mode) {
+  // /r/<code> goes straight to sign-up; /g/<code> tells the story first (the landing page
+  // carries the code forward into every joining link). Both count the same click.
   const code = cleanSellerCode(codeIn);
+  const landing = mode === 'g' ? '/' : '/onboard';
   const doc = code ? await sellerDoc(env, code) : null;
-  if (!doc || doc.active === false) return redirect(url.origin + '/onboard');
+  if (!doc || doc.active === false) return redirect(url.origin + landing);
   // A click is telemetry, not money: count in the isolate and flush every tenth, so a shared
   // link cannot spend the account's 1,000 daily writes one redirect at a time. Attribution —
   // the number money hangs off — is judged exactly, at registration.
@@ -4519,7 +4522,7 @@ async function sellerRedirect(url, env, codeIn) {
     sellerClickBuf.set(code, 0);
     try { doc.clicks = (Number(doc.clicks) || 0) + n; await env.STORES.put('seller:' + code, JSON.stringify(doc)); } catch (e) { void e; }
   } else sellerClickBuf.set(code, n);
-  return redirect(url.origin + '/onboard?ref=' + code);
+  return redirect(url.origin + landing + '?ref=' + code);
 }
 async function opsSellers(req, env) {
   if (req.method !== 'POST') {
