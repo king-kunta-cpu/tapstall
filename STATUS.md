@@ -1,16 +1,22 @@
 # Tapstall — status
 ## v1.4.0 (deployed 2026-10-20): brand everywhere, professional storefront shelf
 
-Pipeline activation, checked live the same day: the **lead hunter is not on
-autopilot** (workflow exists and ran green by hand on 2026-10-19, but the
-Worker has no `GH_DISPATCH_TOKEN`/`GH_REPO` bound, health reports
-`gh_dispatch:false`, and the digest holds 0 leads) and **outreach has never
-run** (no workflow runs, no `GMAIL_*` mailbox secrets bound, 0 active
-sellers). The press cron *is* running — it composes every slot — but sends
-nothing: both registered identities are waiting with no press token present.
-Activating the trio needs exactly three owner-supplied credentials and
-nothing else: a scoped GitHub dispatch token (+ repo), seller/owner Gmail
-app passwords as Worker secrets, and a press rail token.
+Pipeline activation, checked live the same day and then armed with the
+owner's credentials: at first check the **lead hunter was not on autopilot**
+(no dispatch token bound, 0 leads) and **outreach had never run** (no
+mailboxes bound). The owner then supplied the three credentials and the trio
+was switched on: `GH_DISPATCH_TOKEN`/`GH_REPO`/`GH_REF` bound on the Worker
+(health: `gh_dispatch:true`); a legacy confirm-header bug in
+`lead_hunt.py`/`seller_add.sh` was fixed (`14c1add`), after which hunt run
+`39461129586` filed **39 leads** (17 queued, 22 research-hold). The owner
+Gmail mailbox (`GMAIL_OWNER_*`) was bound and verified by IMAP+SMTP login;
+outreach dry run `39463651075` counted 2 eligible, and the first live
+send-and-poll run `39463798014` **sent those 2** (both now `contacted` with
+follow-ups due). The owner press identity was trimmed to the one bound rail
+(Bluesky direct: handle + app password as Worker secrets, session verified),
+its stale Buffer/Twitter queue cleared, and a dry run composes 3 Bluesky
+items on the cadence grid for the cron to send when due. Credential values
+live only in GitHub/Cloudflare secret stores — none are recorded here.
 
 Branding is now one system on every surface: the full mark as an inlined SVG
 favicon on all 21 shipped/mirror pages (a shop's own logo becomes its
