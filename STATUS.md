@@ -1,4 +1,19 @@
 # Tapstall — status
+## Login recovery (2026-10-20, after v1.3.0)
+
+Owner reported both UIs looping to sign-in. Server-side login was proven first
+(ops-health run `39436548865` green with the then-current secret), so this was
+lost credentials, not a v1.3.0 auth break. With the owner's explicit go-ahead,
+`ADMIN_SECRET` was **rotated** in both GitHub Actions secrets and the Worker
+secret (values are write-only in both stores and are not recorded here), then
+verified end-to-end: owner login + `/ops/api/state` 200 with the new secret,
+and ops-health run `39437749175` green proving the GitHub copy matches.
+Rotation signed out every session and invalidated outstanding signed links by
+design. `mamatoe`'s tenant PIN was reset through the self-service
+`/api/pin/reset` door (owner_email + pay_account from its own record) and
+verified: PIN login + `/api/admin` 200 (40 orders), including again after the
+secret rotation. New credential values were handed to the owner in chat only.
+
 ## v1.3.0 (deployed 2026-10-20): the quota-first pipeline
 
 Owner instruction: redesign the entire pipeline to use the least quota while
