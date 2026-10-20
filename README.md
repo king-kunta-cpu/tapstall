@@ -568,7 +568,7 @@ still works, and the fallback is removed only when a real title replaces it).
 |---|---|---|
 | `<title>` = shop, place, brand | `shop_name`, `location` | a hard-coded brand line |
 | `description` | `tagline` + the top three priced items + "Open until 21:00" | a template sentence when the merchant wrote one |
-| `og:image`, `twitter:image` | `logo`, else the first item picture, served by `/i/…` | a promise with no file behind it: no picture, no tag |
+| `og:image`, `twitter:image` | `cover_image`, else `logo`, else the first item picture, served by `/i/…` | a promise with no file behind it: no picture, no tag |
 | `canonical` | the host that answered | not applicable: there is no alias Worker |
 | `LocalBusiness` + `Menu` JSON-LD | `whatsapp`, `week`, `menu`/cached shelf, `currency` | hours nobody typed, a cuisine nobody claimed |
 | `robots.txt`, `sitemap.xml` | the app paths to shut, three pages to open | **a list of every store** |
@@ -632,6 +632,28 @@ applied to *our* webhook. If a crypto rail is ever added, the piece to take from
 `OPENRAIL` is its tolerance policy — 1% on stablecoins, 2% volatile, under-payment
 flagged not refused, and a nightly underpayment report — because an exact-cent match
 is the right rule for a fixed plan price and the wrong one for a chain.
+
+## Storefront outfits
+
+A shop chooses a business type at sign-up and can change it in **Shop →
+Change what buyers see and where they pay → Storefront design**. The catalogue
+lives in `STOREFRONT_TEMPLATES` in `core.js`: general retail, food/bakery,
+fashion/beauty, groceries/essentials, phones/electronics, home/handmade/gifts,
+and services/bookings. A template is a resolved design over the one tested
+storefront — accent, header/cover treatment, card rhythm, button and popular
+words, empty-state title and starter category suggestions — not a second HTML
+page with its own checkout arithmetic. Operators can then personalise the cover
+picture, accent colour, layout, hero style, welcome/about copy, button word,
+item order, and whether search, categories, descriptions and a WhatsApp chat
+button show. Those fields are soft settings: closed-world enums and hex-only
+colours, applied instantly, and never raw CSS or HTML. Stores created before
+templates resolve as general retail at read time; no migration writes to old
+documents.
+
+The owner's `/ops` drawer shows subscription, order and feed-health facts, not
+an operator's product/item list. Operators manage their rows in their own
+dashboard; the authenticated ops API keeps its patch/revert actions for scripted
+support, but they have no list or editor in the owner UI.
 
 ## How a payment is believed
 

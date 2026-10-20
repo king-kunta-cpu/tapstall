@@ -209,16 +209,8 @@ input[type=search] { max-width: 16rem }
 .wrap { max-width: 78rem }
 .tabs { margin: .1rem 0 .7rem }
 .bar { display: flex; gap: .4rem; align-items: center; flex-wrap: wrap }
-/* one row, two things about it: the order list, the log, and the menu editor below all use this */
+/* one row, two things about it: the order list and the log below use this */
 .menuRow { display: grid; grid-template-columns: 1fr auto; gap: .5rem; align-items: center; padding: .26rem 0; border-bottom: 1px solid var(--line) }
-.menuRow.edit { grid-template-columns: 1fr 5.4rem 5.6rem 4.6rem }
-.menuRow.edit .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
-.menuRow.edit .nm em { display: block; font-style: normal }
-.menuRow.edit input[type=text], .menuRow.edit input:not([type]) { width: 100%; min-height: 1.9rem; padding: .1rem .3rem; font-size: .78rem }
-.menuHead { display: grid; grid-template-columns: 1fr 5.4rem 5.6rem 4.6rem; gap: .5rem; align-items: center; text-transform: uppercase; letter-spacing: .05em; font-size: .66rem }
-.menuHead span:nth-child(n+2) { text-align: center }
-.menuRow.edit > span:nth-child(n+2), .menuRow.edit > input:not(.pr) { justify-self: center }
-@media (max-width: 46rem) { .menuRow.edit, .menuHead { grid-template-columns: 1fr 4.4rem 4.4rem 3.6rem } }
 .spin { display: inline-block; width: .8rem; height: .8rem; border: 2px solid rgba(255,255,255,.35); border-top-color: #fff; border-radius: 50%; animation: s .8s linear infinite; vertical-align: -1px }
 @keyframes s { to { transform: rotate(1turn) } }
 </style>
@@ -563,7 +555,7 @@ function detail(h) {
   q('#drawer').innerHTML = '<p class="muted">loading ' + esc(h) + '…</p>';
   api('/ops/api/store?handle=' + encodeURIComponent(h)).then(function (r) {
     if (!r.j || !r.j.ok) { q('#drawer').innerHTML = '<p class="notice bad">' + esc((r.j || {}).error || 'failed') + '</p>'; return; }
-    var s = r.j.summary, st = r.j.store || {}, o = r.j.orders || [];
+    var s = r.j.summary, o = r.j.orders || [];
     q('#drawer').innerHTML =
       '<div class="row between" style="align-items:baseline"><h3 style="margin:0">' + esc(s.shop_name) + '</h3><a class="sm" style="text-decoration:none" href="/s/' + esc(s.handle) + '" target="_blank">open store</a></div>'
       + '<p class="small mono" style="margin:.2rem 0 .5rem">' + esc(s.handle) + ' · ' + esc(s.rail) + ' · ' + esc(s.currency) + (s.owner_email ? ' · ' + esc(s.owner_email) : ' · no email on file')
@@ -586,12 +578,6 @@ function detail(h) {
       + '</div>'
       + '<div class="bar" style="margin-top:.4rem"><input id="noteBox" placeholder="optional message for the notify lever" style="flex:1"><button class="sm" data-act="notify">Notify store</button></div>'
       + '<div id="leverOut"></div>'
-      // The merchant's own editor, on the operator's side of the glass. The rows come from
-      // /s/<h>/feed.json — the same bytes a buyer's storefront is priced from, overrides and all —
-      // and the save goes to the same sanitizer, so nothing an operator can type here is something
-      // a merchant could not have typed, and everything here is reversible by them.
-      + '<h3 style="margin:.9rem 0 .3rem">Menu <span class="tiny muted">the rows as buyers see them</span></h3>'
-      + '<div id="menuBox" class="small muted">loading rows…</div>'
       + '<h3 style="margin:.9rem 0 .3rem">Last ' + Math.min(6, o.length) + ' orders</h3>'
       + (o.length ? o.slice(0, 6).map(function (x) {
         return '<div class="menuRow"><span><b class="mono">' + esc(x.code) + '</b> ' + esc((x.buyer || {}).name || '') + ' · ' + esc(x.status) + (x.flags && x.flags.length ? ' ⚠' : '') + '</span><b>' + Number(x.pay_now || 0).toFixed(2) + '</b></div>';
@@ -622,52 +608,12 @@ function detail(h) {
       q('#xsPin').onclick = function () { q('#leverOut').innerHTML = ''; };
       LEVER_PIN = null;
     }
-    (function (hh) {
-      fetch('/s/' + encodeURIComponent(hh) + '/feed.json').then(function (r) { return r.json(); }).then(function (j) {
-        var ps = (j && j.products) || [];
-        var box = q('#menuBox'); if (!box) return;
-        if (!ps.length) { box.innerHTML = '<p class="muted">no rows to edit' + (j && j.error ? ' — ' + esc(String(j.error)) : '') + '. The store prices from its sheet; if the sheet is unreadable there is nothing here to change.</p>'; return; }
-        var edits = (r.j.store && r.j.store.menu && r.j.store.menu.over) || {};
-        box.innerHTML = '<div class="menuHead tiny muted"><span>item</span><span>price</span><span>on the shelf</span><span>popular</span></div>'
-          + ps.slice(0, 60).map(function (p) {
-            var o = edits[p.id] || {};
-            var pr = (o.price != null ? o.price : p.price);
-            var av = (typeof o.available === 'boolean') ? o.available : p.available !== false;
-            var po = (typeof o.popular === 'boolean') ? o.popular : !!p.popular;
-            return '<div class="menuRow edit" data-id="' + esc(String(p.id || '')) + '">'
-              + '<span class="nm">' + esc(String(p.name || '')) + '<em class="tiny muted"> from ' + (p.edited ? 'an override' : 'the sheet') + '</em></span>'
-              + '<input class="pr mono" inputmode="decimal" value="' + esc(String(pr)) + '" style="width:5.2rem">'
-              + '<input type="checkbox" class="av"' + (av ? ' checked' : '') + '>'
-              + '<input type="checkbox" class="po"' + (po ? ' checked' : '') + '></div>';
-          }).join('')
-          + '<div class="row" style="gap:.35rem;margin-top:.4rem;flex-wrap:wrap">'
-          + '<button class="sm" data-act="menu" id="menuSave">Save these rows</button>'
-          + '<button class="sm sec" data-act="menu_revert">Revert every override</button>'
-          + '<span class="tiny muted">a row you save here keeps this value until the merchant reverts it — the sheet is never written to</span></div>';
-      }).catch(function () { var b2 = q('#menuBox'); if (b2) b2.innerHTML = '<p class="muted">the rows could not be read from /s/' + esc(hh) + '/feed.json, so there is nothing to edit here yet.</p>'; });
-    })(h);
     q('#drawer').onclick = function (e) {
       var b = e.target.closest('[data-act]'); if (!b) return;
       var act = b.getAttribute('data-act');
       if (act === 'revoke' && !confirm('Revoke ' + h + '’s API key and sign out every device they have open? Their PIN still works — revoking a key is not meant to lock the owner out of their own shop. The store keeps taking orders either way.')) return;
       if (act === 'reset_pin' && !confirm('Give ' + h + ' a new 6-digit PIN and sign out every device that has the old one? You will read the new PIN out once. It is not stored anywhere you can get it back afterwards — if they lose it, “I lost my PIN” on their sign-in screen resets it from their own store details, with nobody in the middle.')) return;
       var payload = { handle: h, action: act, message: (q('#noteBox') || {}).value || '' };
-      if (act === 'menu' || act === 'menu_revert') {
-        if (act === 'menu_revert' && !confirm('Clear every menu override for ' + h + ' and hand the shelf back to their sheet? Their own edits in the dashboard go too, which is what a revert is for.')) return;
-        if (act === 'menu') {
-          var over = {};
-          [].forEach.call(document.querySelectorAll('#menuBox .menuRow.edit'), function (rw) {
-            var id = rw.getAttribute('data-id'); if (!id) return;
-            var pr = rw.querySelector('.pr'), av = rw.querySelector('.av'), po = rw.querySelector('.po');
-            var v = { available: !!(av && av.checked), popular: !!(po && po.checked) };
-            if (pr && String(pr.value).trim() !== '') v.price = pr.value;
-            over[id] = v;
-          });
-          if (!Object.keys(over).length) { toast('No rows to save — the list above is empty or unreadable.', true); return; }
-          if (!confirm('Set ' + Object.keys(over).length + ' row(s) on ' + h + '? Buyers see it on their next load and the merchant can revert it.')) return;
-          payload.menu = { over: over };
-        } else payload.revert = true;
-      }
       b.disabled = true; var old = b.textContent; b.textContent = '…';
       api('/ops/api/store', payload).then(function (r2) {
         b.disabled = false; b.textContent = old;

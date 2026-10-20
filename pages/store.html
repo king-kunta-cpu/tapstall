@@ -8,9 +8,19 @@
 <meta name="theme-color" content="#0b0f14">
 <style>
 *{box-sizing:border-box}
+:root{--accent:#0a6b33;--accent-dark:#0b0f14;--accent-soft:#e8f7ef;--on-accent:#fff;--radius:16px}
 body{margin:0;font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f4f6f8;color:#101418;-webkit-text-size-adjust:100%}
 .wrap{max-width:34rem;margin:0 auto;padding:0 0 6.5rem}
-header{position:sticky;top:0;z-index:5;background:#0b0f14;color:#fff;padding:.9rem 1rem .8rem}
+header{position:sticky;top:0;z-index:5;background:linear-gradient(135deg,var(--accent-dark),#101820);color:#fff;padding:.9rem 1rem .8rem;box-shadow:0 1px 0 rgba(16,24,32,.08)}
+.hero{min-height:9.5rem;display:flex;align-items:flex-end;color:#fff;background:linear-gradient(135deg,var(--accent-dark),var(--accent));background-size:cover;background-position:center}
+.hero-in{padding:1rem;text-shadow:0 1px 10px rgba(0,0,0,.35)}
+.kicker{font-size:.68rem;font-weight:800;letter-spacing:.12em;text-transform:uppercase;opacity:.88}
+.hero-title{font-size:1.55rem;font-weight:800;line-height:1.08;margin-top:.25rem}
+.hero-in p{margin:.35rem 0 0;font-size:.9rem;max-width:26rem;color:#f3f7fb}
+body.hero-minimal header{background:#fff;color:#101418;border-bottom:1px solid #e6ebf0;box-shadow:none}
+body.hero-minimal .tag{color:#65788b}
+body.hero-minimal .chip{background:var(--accent-soft);color:#24313d}
+body.hero-minimal a.chip{border-color:#d7e2ea;color:#24313d}
 .brand{display:flex;gap:.7rem;align-items:center}
 .logo{width:44px;height:44px;border-radius:12px;object-fit:cover;background:#22303c;flex:0 0 auto}
 h1{font-size:1.05rem;margin:0;line-height:1.2}
@@ -19,6 +29,13 @@ h1{font-size:1.05rem;margin:0;line-height:1.2}
 .chip{background:#1a2530;border-radius:999px;padding:.15rem .5rem}
 a.chip{color:#dbe6f0;text-decoration:none;border:1px solid #2b3a48}
 a.chip:active,a.chip:hover{background:#243342}
+.welcome{margin:.75rem 1rem 0;background:#fff;border:1px solid #e6ebf0;border-left:4px solid var(--accent);border-radius:12px;padding:.65rem .75rem;font-size:.86rem;color:#33465a}
+.tools{padding:.7rem 1rem 0}
+.tools input{border-radius:999px;padding:.62rem .85rem;box-shadow:0 1px 8px rgba(16,24,32,.04)}
+.about{margin:1rem;background:#fff;border:1px solid #e6ebf0;border-radius:var(--radius);padding:.85rem}
+.about h2{font-size:.95rem;margin:0 0 .35rem}
+.about p{margin:0;font-size:.86rem;color:#54677a;white-space:pre-line}
+.waFloat{position:fixed;right:1rem;bottom:5.7rem;z-index:14;background:#128c4a;color:#fff;text-decoration:none;font-weight:700;font-size:.82rem;border-radius:999px;padding:.65rem .85rem;box-shadow:0 8px 24px rgba(16,24,32,.22)}
 .pfbar{margin:.6rem 1rem 0;background:#eef4fb;border:1px solid #cfdfeb;color:#18324c;font-size:.82rem;padding:.5rem .65rem;border-radius:10px;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
 .pfbar a{color:#0b4a86;font-weight:600}
 .pfbar .x{margin-left:auto;background:none;border:0;color:#65788b;font:inherit;padding:0 .15rem;cursor:pointer}
@@ -26,19 +43,30 @@ a.chip:active,a.chip:hover{background:#243342}
 .notice{margin:.7rem 1rem 0;background:#fff7e6;border:1px solid #f0d9a8;color:#6b4d09;font-size:.8rem;padding:.55rem .7rem;border-radius:10px}
 .cats{display:flex;gap:.4rem;overflow-x:auto;padding:.75rem 1rem .3rem;scrollbar-width:none}
 .cats::-webkit-scrollbar{display:none}
-.cat{white-space:nowrap;font-size:.82rem;padding:.35rem .7rem;border-radius:999px;background:#fff;border:1px solid #dde3e9}
-.cat.on{background:#101418;color:#fff;border-color:#101418}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:.6rem;padding:.5rem 1rem}
-.card{background:#fff;border-radius:14px;overflow:hidden;border:1px solid #e6ebf0;display:flex;flex-direction:column}
-.card img{width:100%;height:6.2rem;object-fit:cover;background:#eef2f6;display:block}
-.card .noimg{height:6.2rem;background:linear-gradient(135deg,#e9eff5,#dfe7ef)}
-.cb{padding:.5rem .55rem .6rem;display:flex;flex-direction:column;gap:.15rem;flex:1}
-.cn{font-size:.86rem;font-weight:600;line-height:1.25}
-.cd{font-size:.72rem;color:#65788b;line-height:1.3;max-height:2.6em;overflow:hidden}
+.cat{white-space:nowrap;font-size:.82rem;padding:.38rem .72rem;border-radius:999px;background:#fff;border:1px solid #dde3e9}
+.cat.on{background:var(--accent-dark);color:#fff;border-color:var(--accent-dark)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:.65rem;padding:.5rem 1rem}
+.card{background:#fff;border-radius:var(--radius);overflow:hidden;border:1px solid #e6ebf0;display:flex;flex-direction:column;box-shadow:0 1px 10px rgba(16,24,32,.045)}
+.card img{width:100%;height:6.4rem;object-fit:cover;background:#eef2f6;display:block}
+.card .noimg{height:6.4rem;background:linear-gradient(135deg,var(--accent-soft),#eef2f6)}
+.cb{padding:.55rem .6rem .65rem;display:flex;flex-direction:column;gap:.18rem;flex:1}
+.ck{font-size:.64rem;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:var(--accent-dark);opacity:.78}
+.pop{display:inline-flex;align-self:flex-start;background:var(--accent-soft);color:var(--accent-dark);border:1px solid rgba(16,24,32,.08);border-radius:999px;padding:.08rem .42rem;font-size:.64rem;font-weight:800}
+.cn{font-size:.88rem;font-weight:700;line-height:1.25}
+.cd{font-size:.73rem;color:#65788b;line-height:1.32;max-height:2.65em;overflow:hidden}
 .row{display:flex;justify-content:space-between;align-items:flex-end;margin-top:auto;gap:.4rem}
-.price{font-weight:700;font-size:.9rem;font-variant-numeric:tabular-nums}
+.price{font-weight:800;font-size:.92rem;font-variant-numeric:tabular-nums;color:var(--accent-dark)}
 .alt{font-size:.68rem;color:#7b8b9b;font-weight:500}
-.add{background:#0b0f14;color:#fff;border:0;border-radius:9px;font-size:.78rem;padding:.35rem .55rem;font-weight:600}
+.add{background:var(--accent);color:var(--on-accent);border:0;border-radius:999px;font-size:.78rem;padding:.42rem .62rem;font-weight:700;min-height:2rem}
+body.layout-compact .grid{gap:.45rem}
+body.layout-compact .card img,body.layout-compact .card .noimg{height:4.4rem}
+body.layout-compact .cb{padding:.42rem .48rem .5rem}
+body.layout-compact .cn{font-size:.8rem}
+body.layout-compact .cd{font-size:.68rem;max-height:2em}
+body.layout-list .grid{grid-template-columns:1fr}
+body.layout-list .card{flex-direction:row;min-height:6.8rem}
+body.layout-list .card img,body.layout-list .card .noimg{width:6.8rem;height:auto;min-height:6.8rem;flex:0 0 6.8rem}
+body.layout-list .cb{padding:.65rem .7rem}
 .add[disabled]{background:#c3ccd5;color:#fff}
 .soldout{font-size:.7rem;color:#b00020;font-weight:600}
 .sheet{position:fixed;left:0;right:0;bottom:0;background:#fff;border-radius:16px 16px 0 0;box-shadow:0 -8px 30px rgba(16,24,32,.18);z-index:20;max-height:88vh;overflow:auto;transform:translateY(102%);transition:transform .22s ease}
@@ -50,11 +78,11 @@ a.chip:active,a.chip:hover{background:#243342}
 h4{margin:.8rem 0 .35rem;font-size:.78rem;text-transform:uppercase;letter-spacing:.04em;color:#65788b}
 .opts{display:flex;gap:.4rem;flex-wrap:wrap}
 .opt{border:1px solid #dde3e9;background:#fff;border-radius:10px;padding:.4rem .6rem;font-size:.82rem}
-.opt.on{background:#0b0f14;color:#fff;border-color:#0b0f14}
+.opt.on{background:var(--accent-dark);color:#fff;border-color:var(--accent-dark)}
 .qty{display:flex;align-items:center;gap:.7rem;margin-top:.7rem}
 .qb{width:2.4rem;height:2.4rem;border-radius:10px;border:1px solid #dde3e9;background:#fff;font-size:1.1rem}
-.cta{width:100%;background:#0b0f14;color:#fff;border:0;border-radius:12px;padding:.85rem;font-size:.95rem;font-weight:600;margin-top:.8rem}
-.cta.ghost{background:#fff;color:#0b0f14;border:1px solid #cfd8e0}
+.cta{width:100%;background:var(--accent);color:var(--on-accent);border:0;border-radius:12px;padding:.85rem;font-size:.95rem;font-weight:700;margin-top:.8rem}
+.cta.ghost{background:#fff;color:var(--accent-dark);border:1px solid #cfd8e0}
 label{display:block;font-size:.78rem;color:#42566a;margin:.6rem 0 .2rem;font-weight:600}
 input,textarea,select{width:100%;padding:.65rem .7rem;border:1px solid #dde3e9;border-radius:10px;font:inherit;font-size:.92rem;background:#fff}
 textarea{min-height:3.5rem}
@@ -87,6 +115,13 @@ ol.steps li{margin:.25rem 0}
 </head>
 <body>
 <div class="wrap">
+  <div class="hero" id="hero" hidden>
+    <div class="hero-in">
+      <div class="kicker" id="heroKicker"></div>
+      <div class="hero-title" id="heroTitle"></div>
+      <p id="heroText"></p>
+    </div>
+  </div>
   <header>
     <div class="brand">
       <img class="logo" id="logo" alt="" hidden>
@@ -100,6 +135,7 @@ ol.steps li{margin:.25rem 0}
           <!-- relative on purpose: this page is /s/<handle>, so this is /s/<handle>/share.txt,
                and a link the merchant can forward from the shop itself needs no script -->
           <a class="chip" href="share.txt">Share this shop</a>
+          <a class="chip" id="waChip" href="#" hidden>WhatsApp us</a>
         </div>
       </div>
     </div>
@@ -109,15 +145,19 @@ ol.steps li{margin:.25rem 0}
   <!-- The buyer's own door, kept on their device for as long as one is valid. It
        offers a link; it never claims the order is still owed anything. -->
   <div class="pfbar" id="pfbar" hidden></div>
+  <div class="welcome" id="welcome" hidden></div>
+  <div class="tools" id="tools" hidden><input id="q" type="search" autocomplete="off" aria-label="Search this shop" placeholder="Search this shop…"></div>
   <div class="cats" id="cats" hidden></div>
   <div class="grid" id="grid"></div>
   <div class="empty" id="empty" hidden></div>
+  <section class="about" id="about" hidden><h2 id="aboutTitle">About this shop</h2><p id="aboutText"></p></section>
 
   <div class="foot">
     <span id="powered"></span>
   </div>
 </div>
 
+<a class="waFloat" id="waFloat" href="#" hidden>WhatsApp</a>
 <div class="bar" id="bar">
   <div style="flex:1.2">
     <div class="t" id="barTotal">0.00</div>
@@ -139,6 +179,29 @@ var TERM = /*__TAPSTALL_TERM__*/null;
   var CUR = CFG.currency || 'USD';
   var ZIG = Number(CFG.zig_rate) || 0;
   var $ = function (id) { return document.getElementById(id); };
+  /* The outfit arrives resolved: template defaults underneath, this shop's own
+     choices over them. The fallback object is for a page/config pair cached from
+     before templates existed — it must still look like the old general shop. */
+  var D = CFG.design || {};
+  D = {
+    template: D.template || CFG.business_type || 'general', label: D.label || 'Shop',
+    accent: D.accent || '#0a6b33', accent_dark: D.accent_dark || '#0b0f14', accent_soft: D.accent_soft || '#e8f7ef', on_accent: D.on_accent || '#fff',
+    layout: D.layout || CFG.store_layout || 'grid', hero: D.hero || CFG.hero_style || 'classic',
+    sort: D.sort || CFG.sort_mode || 'popular', cta: D.cta || CFG.cta_label || 'Add',
+    popular_label: D.popular_label || 'Popular', empty_title: D.empty_title || 'No products loaded yet',
+    cover_image: D.cover_image || CFG.cover_image || '', welcome_message: D.welcome_message || CFG.welcome_message || '',
+    about: D.about || CFG.about || '', search: D.search !== false && CFG.search_bar !== 'hide',
+    category_bar: D.category_bar !== false && CFG.category_bar !== 'hide',
+    descriptions: D.descriptions !== false && CFG.product_descriptions !== 'hide',
+    whatsapp_button: !!D.whatsapp_button || CFG.whatsapp_button === 'show'
+  };
+  document.body.className += ' tpl-' + D.template + ' layout-' + D.layout + ' hero-' + D.hero;
+  document.documentElement.style.setProperty('--accent', D.accent);
+  document.documentElement.style.setProperty('--accent-dark', D.accent_dark);
+  document.documentElement.style.setProperty('--accent-soft', D.accent_soft);
+  document.documentElement.style.setProperty('--on-accent', D.on_accent);
+  var themeMeta = document.querySelector('meta[name="theme-color"]');
+  if (themeMeta) themeMeta.setAttribute('content', D.hero === 'minimal' ? '#ffffff' : D.accent_dark);
   var cart = [];
   try {
     var CK = 'tp_cart_' + CFG.handle;
@@ -207,6 +270,27 @@ var TERM = /*__TAPSTALL_TERM__*/null;
   if (CFG.location) { $('cloc').textContent = CFG.location; $('cloc').hidden = false; }
   $('curnow').textContent = 'Prices in ' + CUR + (ZIG ? ' + ZiG' : '');
   $('powered').innerHTML = 'Runs on <a href="/onboard">Tapstall</a> — free store for your WhatsApp business, no monthly bill.';
+  if (D.hero === 'cover') {
+    var hero = $('hero');
+    hero.hidden = false;
+    $('heroKicker').textContent = D.label;
+    $('heroTitle').textContent = CFG.shop_name;
+    $('heroText').textContent = D.welcome_message || CFG.tagline || 'Order ahead on WhatsApp — no app, no login.';
+    if (D.cover_image) hero.style.backgroundImage = 'linear-gradient(90deg,rgba(5,10,16,.72),rgba(5,10,16,.22)),url("' + String(D.cover_image).replace(/["\\]/g, '') + '")';
+  } else if (D.welcome_message) {
+    $('welcome').textContent = D.welcome_message;
+    $('welcome').hidden = false;
+  }
+  if (D.about) {
+    $('aboutTitle').textContent = 'About ' + CFG.shop_name;
+    $('aboutText').textContent = D.about;
+    $('about').hidden = false;
+  }
+  if (D.whatsapp_button && CFG.whatsapp) {
+    var wa = 'https://wa.me/' + String(CFG.whatsapp).replace(/\D/g, '') + '?text=' + encodeURIComponent('Hi ' + CFG.shop_name + ', I have a question about your shop.');
+    $('waChip').href = wa; $('waChip').hidden = false;
+    $('waFloat').href = wa; $('waFloat').hidden = false;
+  }
   if (CFG.closed) note('Shop closed right now — you can still order and we will confirm when we open.');
   if (TERM && TERM.state === 'expired') note('This store is paused until the owner renews. Existing orders still reach us on WhatsApp.');
   if (CFG.rail === 'cash' && !CFG.pay_account) note('Cash / pickup payments: pay the runner or pay when you collect.');
@@ -223,17 +307,23 @@ var TERM = /*__TAPSTALL_TERM__*/null;
     .catch(function () { render(); });
 
   var activeCat = 'all';
+  var query = '';
   function render() {
     var g = $('grid');
     if (!PRODUCTS.length) {
       $('empty').hidden = false;
-      $('empty').innerHTML = 'No products loaded yet.<br>' + (CFG.feed_error ? '(' + CFG.feed_error + ')' : '') +
+      $('empty').innerHTML = '<b>' + esc(D.empty_title) + '.</b><br>' + (CFG.feed_error ? '(' + CFG.feed_error + ')' : '') +
         '<br><span style="font-size:.8rem">Owner: share your Google Sheet as “Anyone with the link”, then re-open this page — it refreshes itself in ~2 minutes.</span>';
       g.hidden = true; return;
     }
+    g.hidden = false;
+    if (D.search) {
+      $('tools').hidden = false;
+      $('q').oninput = function () { query = this.value.trim().toLowerCase(); renderCards(); };
+    }
     var cats = [];
     PRODUCTS.forEach(function (p) { if (p.cat && cats.indexOf(p.cat) < 0) cats.push(p.cat); });
-    if (cats.length > 1) {
+    if (D.category_bar && cats.length > 1) {
       $('cats').hidden = false;
       $('cats').innerHTML = ['<button class="cat on" data-c="all">All</button>'].concat(cats.map(function (c) {
         return '<button class="cat" data-c="' + esc(c) + '">' + esc(c) + '</button>';
@@ -245,25 +335,40 @@ var TERM = /*__TAPSTALL_TERM__*/null;
           renderCards();
         };
       });
+    } else {
+      activeCat = 'all';
+      $('cats').hidden = true;
     }
     renderCards();
   }
   function renderCards() {
-    var list = PRODUCTS.filter(function (p) { return activeCat === 'all' || p.cat === activeCat; });
-    list.sort(function (a, b) { return (b.popular ? 1 : 0) - (a.popular ? 1 : 0) || a.cat.localeCompare(b.cat); });
+    var list = PRODUCTS.filter(function (p) {
+      if (activeCat !== 'all' && p.cat !== activeCat) return false;
+      if (!query) return true;
+      return ((p.name || '') + ' ' + (p.desc || '') + ' ' + (p.cat || '')).toLowerCase().indexOf(query) >= 0;
+    });
+    if (D.sort === 'popular') list.sort(function (a, b) { return (b.popular ? 1 : 0) - (a.popular ? 1 : 0) || String(a.cat || '').localeCompare(String(b.cat || '')); });
+    else if (D.sort === 'price_low') list.sort(function (a, b) { return (Number(a.price) || 0) - (Number(b.price) || 0); });
+    else if (D.sort === 'price_high') list.sort(function (a, b) { return (Number(b.price) || 0) - (Number(a.price) || 0); });
+    else if (D.sort === 'name') list.sort(function (a, b) { return String(a.name || '').localeCompare(String(b.name || '')); });
+    $('empty').hidden = list.length > 0;
+    if (!list.length) $('empty').innerHTML = '<b>Nothing matches that here.</b><br><span style="font-size:.82rem">Try another word, or clear the search to see the whole shop.</span>';
     $('grid').innerHTML = list.map(function (p, i) {
       var idx = PRODUCTS.indexOf(p);
       var img = p.img ? '<img loading="lazy" decoding="async" src="' + esc(p.img) + '" alt="' + esc(p.name) + '">' : '<div class="noimg"></div>';
       var soldOut = p.available === false;
       var inCart = cart.filter(function (c) { return c.id === p.id; }).length;
+      var cta = soldOut ? '—' : ((p.opts.length || p.addons.length) ? 'Choose' : (inCart ? D.cta + ' +' : D.cta));
       return '<div class="card">' + img + '<div class="cb">' +
-        '<div class="cn">' + esc(p.name) + (p.popular ? ' <span style="font-size:.62rem;color:#b06a00">★</span>' : '') + '</div>' +
-        (p.desc ? '<div class="cd">' + esc(p.desc) + '</div>' : '') +
+        (p.cat ? '<div class="ck">' + esc(p.cat) + '</div>' : '') +
+        '<div class="cn">' + esc(p.name) + '</div>' +
+        (p.popular ? '<span class="pop">★ ' + esc(D.popular_label) + '</span>' : '') +
+        (D.descriptions && p.desc ? '<div class="cd">' + esc(p.desc) + '</div>' : '') +
         '<div class="row"><div><div class="price">' + money(p.price) + '</div>' +
         (ZIG ? '<div class="alt">' + alt(p.price) + '</div>' : '') +
         (soldOut ? '<div class="soldout">sold out</div>' : '') +
         '</div>' +
-        '<button class="add" data-i="' + idx + '"' + (soldOut ? ' disabled' : '') + '>' + (soldOut ? '—' : (inCart ? 'Add +' : (p.opts.length || p.addons.length ? 'Choose' : 'Add'))) + '</button>' +
+        '<button class="add" data-i="' + idx + '"' + (soldOut ? ' disabled' : '') + '>' + esc(cta) + '</button>' +
         '</div></div></div>';
     }).join('');
     Array.prototype.forEach.call($('grid').querySelectorAll('.add'), function (b) {
@@ -294,7 +399,7 @@ var TERM = /*__TAPSTALL_TERM__*/null;
     }
     h += '<div class="qty"><button class="qb" id="qm">−</button><b id="q">1</b><button class="qb" id="qp">+</button>' +
       '<div style="margin-left:auto;text-align:right"><div class="price" id="lu"></div><div class="alt" id="la"></div></div></div>' +
-      '<button class="cta" id="addBtn">Add to order</button>';
+      '<button class="cta" id="addBtn">' + (D.cta === 'Add' ? 'Add to order' : esc(D.cta) + ' this') + '</button>';
     $('shBody').innerHTML = h;
     Array.prototype.forEach.call($('shBody').querySelectorAll('.opts[data-oi] .opt'), function (b) {
       b.onclick = function () {

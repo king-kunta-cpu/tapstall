@@ -231,6 +231,15 @@ h1 small { display: block; font-size: .8rem; font-weight: 500; color: var(--ink-
     <div class="f" data-f="handle"><label for="handle">Your link</label>
       <div class="row"><input id="handle" name="handle" pattern="[a-z0-9-]{2,30}" autocomplete="off" spellcheck="false" placeholder="mamatoe" style="flex:1"><span class="mono" id="handleHost">tapstall…workers.dev/s/</span></div>
       <p class="help">2–30 characters, lowercase, digits and dashes. This is what you paste in your WhatsApp bio.</p><p class="msg">Taken, or not allowed — try another.</p></div>
+    <div class="f" data-f="business_type"><label for="business_type">What kind of shop is this?</label><select id="business_type" name="business_type">
+      <option value="general">General retail / market stall</option>
+      <option value="food">Food, bakery &amp; takeaway</option>
+      <option value="fashion">Fashion &amp; beauty</option>
+      <option value="grocery">Groceries &amp; essentials</option>
+      <option value="electronics">Phones &amp; electronics</option>
+      <option value="home">Home, handmade &amp; gifts</option>
+      <option value="services">Services &amp; bookings</option>
+    </select><p class="help">Pick the closest one — it sets your shop’s first colours, layout and button words. You can change the template and fine-tune the design later in the dashboard.</p></div>
     <div class="f" data-f="whatsapp"><label for="whatsapp">WhatsApp buyers reach you on</label><input id="whatsapp" name="whatsapp" inputmode="tel" autocomplete="tel" placeholder="263771234567"><p class="help">Country code, digits only. Order summaries are addressed to it.</p><p class="msg">Needs 9–15 digits including the country code.</p></div>
     <div class="grid c2">
       <div class="f" data-f="location"><label for="location">Where you are <span class="muted" style="font-weight:400">(optional)</span></label><input id="location" name="location" placeholder="Avondale, Harare"></div>
@@ -345,6 +354,7 @@ var q = function (s) { return document.querySelector(s); };
 var qa = function (s) { return Array.prototype.slice.call(document.querySelectorAll(s)); };
 function esc(x) { return String(x == null ? '' : x).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
 var RAILS = {}, step = 0, last = null;
+var TPL_ACCENT = { general: '#0a6b33', food: '#b33a1f', fashion: '#9d2c5a', grocery: '#15803d', electronics: '#2563eb', home: '#b45309', services: '#6d28d9' };
 
 fetch('/rails').then(function (r) { return r.json(); }).then(function (j) {
   RAILS = (j && j.rails) || {};
@@ -401,6 +411,7 @@ function paint() {
   q('#handleHost').textContent = location.host + '/s/';
   // live preview of the buyer card, so the money rules are not abstract
   q('#pvName').textContent = val('shop_name') || 'Your shop';
+  q('#pvName').style.background = TPL_ACCENT[val('business_type')] || TPL_ACCENT.general;
   q('#pvTag').textContent = val('tagline') || ((curRail() || {}).label || 'Order ahead') + ' · order ahead';
   var cur = (val('currency') || 'USD').toUpperCase();
   q('#pvCur').textContent = cur;
@@ -443,6 +454,7 @@ function paint2() {
 function summary() {
   var rows = [
     ['Link', location.host + '/s/' + (val('handle') || '…')],
+    ['Template', (q('#business_type').selectedOptions[0] || {}).textContent || 'General retail / market stall'],
     ['Menu', val('feed_url') ? 'from your sheet' : 'not set'],
     ['Rail', (curRail() || {}).label || '—'],
     ['Payout', val('pay_account') || 'not set — you can add it in the dashboard'],
@@ -467,7 +479,7 @@ q('#w').onsubmit = function (e) {
   if (!checkStep()) return;
   var body = {
     shop_name: val('shop_name'), handle: val('handle'), whatsapp: val('whatsapp').replace(/\D/g, ''),
-    location: val('location'), hours: val('hours'), tagline: val('tagline'), logo: val('logo'),
+    location: val('location'), hours: val('hours'), tagline: val('tagline'), logo: val('logo'), business_type: val('business_type') || 'general',
     feed_url: val('feed_url'), rail: q('#rail').value, pay_account: val('pay_account'),
     rail_def: q('#rail').value === 'custom' ? { label: val('own_label'), dial: val('own_dial'),
       pct: (Number(val('own_pct')) || 0) / 100, fixed: Number(val('own_fixed')) || 0, type: 'manual' } : null,

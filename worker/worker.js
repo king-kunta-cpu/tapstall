@@ -43,10 +43,11 @@ import {
   orderRow, packRow, unpackRow, mergeRows, MAX_ORDERS_KEPT,   // the ledger row, and the cap on it
   isPlaceholderFeed, isTronAddr, cryptoMatch, toUnits, fromUnits, railAcctOf,
   EDITABLE_FIELDS, SOFT_FIELDS, sign, adminStore, normaliseRail, resolveRail,
+  STOREFRONT_TEMPLATES, storefrontDesign,
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
@@ -1180,6 +1181,7 @@ async function register(req, url, env) {
     shop_name: String(b.shop_name).slice(0, 60),
     tagline: String(b.tagline || '').slice(0, 140),
     logo: cleanImg(b.logo, handle),   // a URL at sign-up; there is nothing stored to reference yet
+    business_type: STOREFRONT_TEMPLATES[String(b.business_type || '')] ? String(b.business_type) : 'general',
     whatsapp: digits(b.whatsapp || b.phone).replace(/\D/g, '').slice(0, 15),
     location: String(b.location || '').slice(0, 90),
     hours: String(b.hours || '').slice(0, 60),
@@ -1337,6 +1339,8 @@ async function adminView(req, url, env) {
     pending: st.pending ? { keys: Object.keys(st.pending.fields), apply_at: st.pending.apply_at, in_ms: Math.max(0, st.pending.apply_at - Date.now()), fields: st.pending.fields } : null,
     editable: EDITABLE_FIELDS,
     soft_fields: SOFT_FIELDS,
+    design: storefrontDesign(st),
+    templates: STOREFRONT_TEMPLATES,
     audit: await getAudit(env, handle),
     stats: { total: rows.length, cod: rows.filter(r => r.status === 'cod').length, flags: rows.filter(r => (r.flags || []).length).length },
   }, 200, { 'Cache-Control': 'no-store' });
@@ -3358,7 +3362,7 @@ async function settingsEdit(req, url, env) {
   }
   const before = {};
   for (const k of keys) before[k] = maskField(k, st[k]);
-  const refsBefore = referencedImages(st);       // the logo about to be replaced, if any
+  const refsBefore = referencedImages(st);       // the logo/cover about to be replaced, if any
   const { changed, staged } = stageSettings(st, v.soft, v.money, HOLD_MS, Date.now());
   const after = {};
   for (const k of keys) {
@@ -3366,9 +3370,9 @@ async function settingsEdit(req, url, env) {
     after[k] = maskField(k, held ? st.pending.fields[k] : st[k]);
   }
   if (changed || staged) await writeStore(env, st);
-  // Swapping or clearing the logo orphans its bytes: the store document holds a
-  // path, so the file itself has nobody left who points at it.
-  if (changed && v.soft.logo !== undefined) await pruneImages(env, st, refsBefore);
+  // Swapping or clearing the logo or cover orphans its bytes: the store document
+  // holds a path, so the file itself has nobody left who points at it.
+  if (changed && (v.soft.logo !== undefined || v.soft.cover_image !== undefined)) await pruneImages(env, st, refsBefore);
   const logged = (changed || staged) ? await pushAudit(env, st, { act: 'settings', via: who.via, changed, staged, before, after, ip: ipOf(req) }) : true;
   const held = Object.keys(v.money);
   return json({

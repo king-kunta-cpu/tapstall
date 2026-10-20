@@ -224,6 +224,58 @@ test('validateSettings splits cosmetic from money and names bad fields', () => {
   assert.deepEqual(Object.keys(bad.errors).sort(), ['feed_url', 'zig_rate']);
 });
 
+test('storefront templates cover the common shop shapes and resolve safely', () => {
+  assert.deepEqual(Object.keys(C.STOREFRONT_TEMPLATES).sort(),
+    ['electronics', 'fashion', 'food', 'general', 'grocery', 'home', 'services']);
+  for (const [k, t] of Object.entries(C.STOREFRONT_TEMPLATES)) {
+    assert.match(t.accent, /^#[0-9a-f]{6}$/i, k + ' has a usable accent');
+    assert.ok(C.STOREFRONT_LAYOUTS.includes(t.layout), k + ' layout is one the page can draw');
+    assert.ok(C.STOREFRONT_HEROES.includes(t.hero), k + ' hero is one the page can draw');
+    assert.ok(t.cta && t.popular_label && t.categories.length >= 4, k + ' carries its own words and starter groups');
+  }
+  const old = C.storefrontDesign({ handle: 'oldshop', shop_name: 'Old' });
+  assert.equal(old.template, 'general', 'a store from before templates is a general shop, with no migration');
+  assert.equal(old.search, true); assert.equal(old.descriptions, true); assert.equal(old.whatsapp_button, false);
+  const food = C.storefrontDesign({
+    handle: 'kota', business_type: 'food', accent_color: '#abc', store_layout: 'sideways',
+    hero_style: 'cover', cta_label: 'Order', search_bar: 'hide', whatsapp_button: 'show',
+    cover_image: '/i/other/cover1', welcome_message: 'Hot kotas from 10', about: 'By the rank',
+  });
+  assert.equal(food.accent, '#aabbcc', 'a short hex colour is expanded, never passed through as CSS text');
+  assert.equal(food.layout, 'grid', 'an unknown layout falls back to the food template, not to a broken class');
+  assert.equal(food.cta, 'Order'); assert.equal(food.popular_label, 'Most ordered');
+  assert.equal(food.search, false); assert.equal(food.whatsapp_button, true);
+  assert.equal(food.cover_image, '', 'another store’s uploaded cover is not this store’s cover');
+  assert.match(food.accent_dark, /^#[0-9a-f]{6}$/); assert.match(food.accent_soft, /^#[0-9a-f]{6}$/);
+  assert.equal(food.on_accent, '#101418', 'a light custom accent gets dark button text instead of white-on-pale');
+  assert.equal(C.cleanHexColor('red;}body{display:none}'), null, 'a colour is hex or it is refused');
+  assert.ok(C.referencedImages({ logo: '/i/x/logo1', cover_image: '/i/x/cover1' }).has('/i/x/cover1'),
+    'a cover upload is kept alive by the same reference sweep as the logo');
+});
+
+test('design settings are instant, closed-world, and cannot smuggle CSS', () => {
+  const v = C.validateSettings({
+    business_type: 'services', cover_image: '/i/shop/cover1', accent_color: 'abc', store_layout: 'list',
+    hero_style: 'minimal', welcome_message: 'Walk-ins welcome', about: 'Two chairs, no waiting around.',
+    cta_label: 'Reserve', sort_mode: 'name', search_bar: 'hide', category_bar: 'show',
+    product_descriptions: 'hide', whatsapp_button: 'show',
+  }, 5, { handle: 'shop' });
+  assert.equal(v.ok, true, JSON.stringify(v.errors));
+  assert.equal(Object.keys(v.money).length, 0, 'nothing about the outfit waits in the money queue');
+  assert.equal(v.soft.accent_color, '#aabbcc');
+  assert.equal(v.soft.business_type, 'services');
+  const bad = C.validateSettings({
+    business_type: 'spaceship', accent_color: 'url(javascript:alert(1))', store_layout: 'masonry',
+    hero_style: 'carousel', sort_mode: 'random', whatsapp_button: 'sometimes', cover_image: '/i/other/cover1',
+  }, 5, { handle: 'shop' });
+  assert.equal(bad.ok, false);
+  assert.deepEqual(Object.keys(bad.errors).sort(),
+    ['accent_color', 'business_type', 'cover_image', 'hero_style', 'sort_mode', 'store_layout', 'whatsapp_button']);
+  const pub = C.publicStore({ handle: 'shop', shop_name: 'Cuts', business_type: 'services', cta_label: 'Reserve', pending: { fields: { pay_account: 'EVIL' } } });
+  assert.equal(pub.design.template, 'services'); assert.equal(pub.design.cta, 'Reserve');
+  assert.ok(!JSON.stringify(pub).includes('EVIL'), 'publishing the outfit did not widen the allowlist');
+});
+
 test('a held change merges with an earlier one instead of overwriting it', () => {
   const st = { rail: 'cash', pay_account: 'A', whatsapp: '771', hours: 'x' };
   C.stageSettings(st, {}, { pay_account: 'B' }, 900e3, 1000);

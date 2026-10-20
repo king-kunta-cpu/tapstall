@@ -101,9 +101,32 @@ test('the operator console offers only levers the Worker implements', () => {
   const buttons = [...src('ops').matchAll(/data-act="([a-z_0-9]+)"/g)].map((m) => m[1]);
   assert.ok(buttons.length >= 8, 'the console lost its levers (' + buttons.length + ')');
   for (const b of buttons) assert.ok(actions.includes(b), 'console button "' + b + '" has no Worker action behind it');
-  // and the reverse: a lever that exists but has no button is dead weight in
-  // the 422 message and no way to press it
-  for (const a of actions) assert.ok(buttons.includes(a), 'Worker action "' + a + '" has no button in the console');
+  // The owner's console deliberately does not list or edit an operator's items:
+  // `menu`/`menu_revert` stay API-only support actions behind ops auth, while
+  // every visible owner lever still has to be a real button here.
+  const apiOnly = ['menu', 'menu_revert'];
+  for (const a of apiOnly) assert.ok(!buttons.includes(a), 'the owner console grew its item-list lever back: ' + a);
+  for (const a of actions.filter((x) => !apiOnly.includes(x))) assert.ok(buttons.includes(a), 'Worker action "' + a + '" has no button in the console');
+});
+
+test('the design surfaces all speak the same template list', () => {
+  const keys = Object.keys(CORE.STOREFRONT_TEMPLATES).sort();
+  const onboardKeys = [...src('onboard').matchAll(/<option value="([a-z]+)">[^<]*(?:General retail|Food|Fashion|Groceries|Phones|Home|Services)/g)].map((m) => m[1]).sort();
+  assert.deepEqual(onboardKeys, keys, 'sign-up offers exactly the templates core can resolve');
+  const admin = src('admin');
+  assert.match(admin, /S\.templates = j\.templates/, 'the dashboard takes its template list from the Worker, not a second copy');
+  assert.match(admin, /function designPanel\(\)/, 'the dashboard has one grouped outfit panel');
+  for (const k of ['business_type', 'cover_image', 'accent_color', 'store_layout', 'hero_style', 'welcome_message', 'about', 'cta_label', 'sort_mode', 'search_bar', 'category_bar', 'product_descriptions', 'whatsapp_button']) {
+    assert.ok(admin.includes('data-k="' + k + '"'), 'dashboard cannot save ' + k);
+    assert.ok(CORE.EDITABLE_FIELDS.includes(k), 'core will not accept ' + k);
+    assert.ok(CORE.SOFT_FIELDS.includes(k), k + ' is cosmetic and must not wait with money fields');
+  }
+  const store = page('store');
+  for (const needle of ['CFG.design', 'layout-list', 'layout-compact', "D.hero === 'cover'", 'id="q"', 'D.popular_label', 'D.cta', 'waFloat', 'aboutText']) {
+    assert.ok(store.includes(needle), 'storefront does not use ' + needle);
+  }
+  assert.match(worker, /business_type: STOREFRONT_TEMPLATES\[String\(b\.business_type/, 'registration stores only a known business type');
+  assert.match(worker, /templates: STOREFRONT_TEMPLATES/, 'the dashboard API carries the catalogue');
 });
 
 test('the pages that post money know what status the endpoint returns', () => {
@@ -988,14 +1011,13 @@ test('0.9.0 the storefront prices VAT the way the till will, in either direction
   assert.ok(!/vat_mode === 'incl'\s*\?\s*0/.test(st), 'inclusive mode is not modelled as "no tax"');
 });
 
-test('0.9.0 the operator console edits the rows the merchant sees, through the same door', () => {
+test('the owner console does not list or edit an operator shop’s items', () => {
   const o = src('ops');
-  assert.match(o, /\/s\/' \+ encodeURIComponent\(hh\) \+ '\/feed\.json'/, 'the list is the public shelf, overrides and all');
-  assert.match(o, /data-act="menu"/);
-  assert.match(o, /data-act="menu_revert"/);
-  assert.match(o, /payload\.menu = \{ over: over \}/, 'the save is a patch of named rows, not a re-submitted shelf');
-  assert.match(o, /if \(!Object\.keys\(over\)\.length\)/, 'an empty form is refused in the page before it can be mistaken for a clear');
-  assert.match(o, /confirm\(/, 'and both levers ask first');
+  assert.ok(!/id="menuBox"|Menu <span|the rows as buyers see them/.test(o), 'the drawer grew a product/item list back');
+  assert.ok(!/\/s\/' \+ encodeURIComponent\(hh\) \+ '\/feed\.json'/.test(o), 'the drawer fetches an operator shelf again');
+  assert.ok(!/data-act="menu"|data-act="menu_revert"|payload\.menu/.test(o), 'the drawer can save operator rows again');
+  // The API actions remain an authenticated support door, but they are not part
+  // of the owner's daily UI and no product names/prices are rendered there.
   const worker = readFileSync(join(root, 'worker', 'worker.js'), 'utf8');
   assert.match(worker, /act === 'menu' \|\| act === 'menu_revert'/);
   assert.match(worker, /mergeMenuPatch\(st\.menu, b\.menu, handle\)/, 'the worker merges, so a forgotten row survives');

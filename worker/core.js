@@ -670,6 +670,7 @@ export function referencedImages(st) {
   const s = st && typeof st === 'object' ? st : {};
   const add = (v) => { if (typeof v === 'string' && v.indexOf('/i/') === 0) out.add(v); };
   add(s.logo);
+  add(s.cover_image);
   const m = s.menu && typeof s.menu === 'object' ? s.menu : {};
   for (const k of Object.keys(m.over || {})) add((m.over[k] || {}).img);
   for (const x of (Array.isArray(m.extra) ? m.extra : [])) add(x && x.img);
@@ -1130,6 +1131,122 @@ export function notifyText(st, order = {}) {
   return `Buyer: ${(o.buyer || {}).name || ''} (${(o.buyer || {}).phone || ''})\n${waSummary(st, o)}\nFlags: ${flags}${line}\n`;
 }
 
+/* -------------------------------------------------------- storefront design
+ * One storefront, several good starting outfits. A template is deliberately not a
+ * second HTML file: the checkout arithmetic, proof door and payment slip stay in
+ * exactly one tested page, while the business type chooses the accent, first
+ * screen, card rhythm and the words on the buttons. An operator can then move the
+ * small levers that make it theirs — cover picture, accent, layout, sort and
+ * show/hide choices — without being handed raw CSS or a page builder.
+ */
+export const STOREFRONT_TEMPLATES = {
+  general: {
+    label: 'General retail / market stall', accent: '#0a6b33', layout: 'grid', hero: 'classic',
+    cta: 'Add', popular_label: 'Popular', empty_title: 'The shelf is being packed',
+    categories: ['New in', 'Essentials', 'Specials', 'Gifts'],
+    blurb: 'A clean all-rounder for mixed stock and everyday selling.',
+  },
+  food: {
+    label: 'Food, bakery & takeaway', accent: '#b33a1f', layout: 'grid', hero: 'cover',
+    cta: 'Add', popular_label: 'Most ordered', empty_title: 'The menu is being warmed up',
+    categories: ['Mains', 'Sides', 'Drinks', 'Desserts', 'Combos'],
+    blurb: 'Warm cover-first layout for menus people order from hungry.',
+  },
+  fashion: {
+    label: 'Fashion & beauty', accent: '#9d2c5a', layout: 'grid', hero: 'cover',
+    cta: 'Add', popular_label: 'Trending', empty_title: 'New pieces are on the way',
+    categories: ['New in', 'Clothing', 'Shoes', 'Beauty', 'Accessories'],
+    blurb: 'Picture-led cards for clothing, beauty and accessories.',
+  },
+  grocery: {
+    label: 'Groceries & essentials', accent: '#15803d', layout: 'compact', hero: 'classic',
+    cta: 'Add', popular_label: 'Everyday favourite', empty_title: 'The shelves are being stocked',
+    categories: ['Fresh', 'Pantry', 'Drinks', 'Household', 'Baby'],
+    blurb: 'Tighter cards and search up front for longer everyday lists.',
+  },
+  electronics: {
+    label: 'Phones & electronics', accent: '#2563eb', layout: 'list', hero: 'minimal',
+    cta: 'Add', popular_label: 'Hot deal', empty_title: 'Stock is being checked',
+    categories: ['Phones', 'Audio', 'Power', 'Accessories', 'Repairs'],
+    blurb: 'Spec-friendly list rows for gadgets, accessories and repairs.',
+  },
+  home: {
+    label: 'Home, handmade & gifts', accent: '#b45309', layout: 'grid', hero: 'cover',
+    cta: 'Add', popular_label: 'Handpicked', empty_title: 'The next batch is being made',
+    categories: ['Home', 'Decor', 'Handmade', 'Gifts', 'Furniture'],
+    blurb: 'Warm, browsable cards for homeware, craft and gift shops.',
+  },
+  services: {
+    label: 'Services & bookings', accent: '#6d28d9', layout: 'list', hero: 'classic',
+    cta: 'Book', popular_label: 'Popular service', empty_title: 'Bookings open soon',
+    categories: ['Popular', 'Packages', 'Add-ons', 'Gift vouchers'],
+    blurb: 'List layout and a Book button for salons, repairs and services.',
+  },
+};
+export const STOREFRONT_LAYOUTS = ['grid', 'list', 'compact'];
+export const STOREFRONT_HEROES = ['classic', 'cover', 'minimal'];
+export const STOREFRONT_SORTS = ['popular', 'menu', 'price_low', 'price_high', 'name'];
+
+/** A colour a browser can be handed without a second thought: blank means the
+ *  template's own accent, anything else has to be plain hex. Named colours and
+ *  CSS functions are refused because this value is printed into style variables. */
+export function cleanHexColor(v) {
+  const s = String(v == null ? '' : v).trim().toLowerCase();
+  if (!s) return '';
+  const m = s.match(/^#?([0-9a-f]{3}|[0-9a-f]{6})$/);
+  if (!m) return null;
+  const h = m[1].length === 3 ? m[1].split('').map((c) => c + c).join('') : m[1];
+  return '#' + h;
+}
+function mixHex(hex, other, weightOther) {
+  const a = cleanHexColor(hex) || '#0a6b33', b = cleanHexColor(other) || '#000000';
+  const pa = [1, 3, 5].map((i) => parseInt(a.slice(i, i + 2), 16));
+  const pb = [1, 3, 5].map((i) => parseInt(b.slice(i, i + 2), 16));
+  const w = Math.min(1, Math.max(0, Number(weightOther) || 0));
+  return '#' + pa.map((v, i) => Math.round(v * (1 - w) + pb[i] * w).toString(16).padStart(2, '0')).join('');
+}
+const designEnum = (v, allowed, fallback) => (allowed.indexOf(String(v || '')) >= 0 ? String(v) : fallback);
+function onHex(hex) {
+  const h = cleanHexColor(hex) || '#0a6b33';
+  const p = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
+  const lum = 0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2];
+  return lum > 0.62 ? '#101418' : '#ffffff';
+}
+
+/** The storefront's resolved outfit: template first, the operator's own choices
+ *  over it, and defaults that make every store created before templates existed
+ *  render exactly as a general shop. This is derived at read time, so choosing a
+ *  different business type needs no migration and no rewrite of old documents. */
+export function storefrontDesign(st) {
+  const s = st && typeof st === 'object' ? st : {};
+  const key = STOREFRONT_TEMPLATES[String(s.business_type || '')] ? String(s.business_type) : 'general';
+  const t = STOREFRONT_TEMPLATES[key];
+  const accent = cleanHexColor(s.accent_color) || t.accent;
+  return {
+    template: key,
+    label: t.label,
+    blurb: t.blurb,
+    accent,
+    accent_dark: mixHex(accent, '#07111f', 0.58),
+    accent_soft: mixHex(accent, '#ffffff', 0.88),
+    on_accent: onHex(accent),
+    layout: designEnum(s.store_layout, STOREFRONT_LAYOUTS, t.layout),
+    hero: designEnum(s.hero_style, STOREFRONT_HEROES, t.hero),
+    sort: designEnum(s.sort_mode, STOREFRONT_SORTS, 'popular'),
+    cta: String(s.cta_label || '').trim().slice(0, 18) || t.cta,
+    popular_label: t.popular_label,
+    empty_title: t.empty_title,
+    categories: t.categories.slice(),
+    cover_image: cleanImg(s.cover_image, s.handle),
+    welcome_message: String(s.welcome_message || '').trim().slice(0, 220),
+    about: String(s.about || '').trim().slice(0, 520),
+    search: s.search_bar !== 'hide',
+    category_bar: s.category_bar !== 'hide',
+    descriptions: s.product_descriptions !== 'hide',
+    whatsapp_button: s.whatsapp_button === 'show',
+  };
+}
+
 /**
  * What a stranger may learn about a store. An allowlist, on purpose: a denylist
  * leaks the day someone adds a field and forgets to list it here — which is
@@ -1138,6 +1255,10 @@ export function notifyText(st, order = {}) {
  */
 export const PUBLIC_KEYS = [
   'handle', 'shop_name', 'tagline', 'logo', 'location', 'hours', 'closed',
+  // The outfit is buyer-facing by definition: every field here changes only what
+  // the public page looks like or the words on it, never where money goes.
+  'business_type', 'cover_image', 'accent_color', 'store_layout', 'hero_style', 'welcome_message', 'about',
+  'cta_label', 'sort_mode', 'search_bar', 'category_bar', 'product_descriptions', 'whatsapp_button',
   'currency', 'zig_rate', 'tax_pct', 'rail', 'surcharge_mode', 'delivery_fee', 'free_over',
   // VAT fields ride in the public store on purpose: a buyer who is told a price includes VAT has
   // to be able to see that claim on the page they are looking at, and a tax invoice that omits the
@@ -1183,6 +1304,7 @@ export function publicStore(st, catalog, nowMs) {
   out.pay_holder = det.holder || '';
   out.pay_till = det.till || '';
   out.open = { known: true, ...openNow(st, nowMs) };
+  out.design = storefrontDesign(st);
   return out;
 }
 
@@ -1379,7 +1501,9 @@ export async function pinMiss(pin) { await pinOk(pin, PIN_GHOST); return false; 
 /* ------------------------------------------------------------ settings model */
 
 /** Fields a merchant may change instantly: nothing here moves money or PII. */
-export const SOFT_FIELDS = ['tagline', 'logo', 'location', 'hours', 'closed', 'week'];
+export const SOFT_FIELDS = ['tagline', 'logo', 'location', 'hours', 'closed', 'week',
+  'business_type', 'cover_image', 'accent_color', 'store_layout', 'hero_style', 'welcome_message', 'about',
+  'cta_label', 'sort_mode', 'search_bar', 'category_bar', 'product_descriptions', 'whatsapp_button'];
 
 /** Every editable field and its validator; null = rejected, undefined-safe. */
 const SET = {
@@ -1387,6 +1511,22 @@ const SET = {
   tagline: (v) => String(v || '').trim().slice(0, 140),
   // a URL from anywhere, or the store's own /i/ path after an upload
   logo: (v, opts) => { const s = cleanImg(v, opts && opts.handle); return (v && !s) ? null : s; },
+  // Storefront outfit. Every validator here is closed-world on purpose: an
+  // operator chooses from shapes the one storefront page knows how to draw, and
+  // free-form CSS/HTML never becomes a stored setting a buyer has to execute.
+  business_type: (v) => { const s = String(v || 'general'); return STOREFRONT_TEMPLATES[s] ? s : null; },
+  cover_image: (v, opts) => { const s = cleanImg(v, opts && opts.handle); return (v && !s) ? null : s; },
+  accent_color: (v) => cleanHexColor(v),
+  store_layout: (v) => { const s = String(v || 'grid'); return STOREFRONT_LAYOUTS.indexOf(s) >= 0 ? s : null; },
+  hero_style: (v) => { const s = String(v || 'classic'); return STOREFRONT_HEROES.indexOf(s) >= 0 ? s : null; },
+  welcome_message: (v) => String(v || '').trim().slice(0, 220),
+  about: (v) => String(v || '').trim().slice(0, 520),
+  cta_label: (v) => String(v || '').trim().replace(/\s+/g, ' ').slice(0, 18),
+  sort_mode: (v) => { const s = String(v || 'popular'); return STOREFRONT_SORTS.indexOf(s) >= 0 ? s : null; },
+  search_bar: (v) => (v === 'hide' || v === false || v === 0 || v === '0' || v === 'false' ? 'hide' : v === 'show' || v === true || v === 1 || v === '1' || v === 'true' || v === '' || v == null ? 'show' : null),
+  category_bar: (v) => (v === 'hide' || v === false || v === 0 || v === '0' || v === 'false' ? 'hide' : v === 'show' || v === true || v === 1 || v === '1' || v === 'true' || v === '' || v == null ? 'show' : null),
+  product_descriptions: (v) => (v === 'hide' || v === false || v === 0 || v === '0' || v === 'false' ? 'hide' : v === 'show' || v === true || v === 1 || v === '1' || v === 'true' || v === '' || v == null ? 'show' : null),
+  whatsapp_button: (v) => (v === 'show' || v === true || v === 1 || v === '1' || v === 'true' ? 'show' : v === 'hide' || v === false || v === 0 || v === '0' || v === 'false' || v === '' || v == null ? 'hide' : null),
   location: (v) => String(v || '').trim().slice(0, 90),
   hours: (v) => String(v || '').trim().slice(0, 60),
   // `false` is a legal stored answer meaning "this store has none", which is how a
@@ -1529,7 +1669,7 @@ export function maskField(k, v) {
   if (v === false) return '(cleared)';
   const s = String(v == null ? '' : v);
   if (!s) return '(blank)';
-  if (k === 'notify_webhook' || k === 'feed_url' || k === 'logo') {
+  if (k === 'notify_webhook' || k === 'feed_url' || k === 'logo' || k === 'cover_image') {
     try { return new URL(s).host; } catch (e) { return s.slice(0, 8) + '…'; }
   }
   if (k.indexOf('email') >= 0) return (s[0] || '') + '***@' + (s.split('@')[1] || '?');
@@ -2002,13 +2142,13 @@ export function seoFacts(st, origin, nowMs) {
   })();
   // `realPhoto`, not `p.img`: fallback art is a picture of nothing in particular, and a social
   // preview that shows it is a claim that somebody photographed this food.
-  const pic = (s.logo || realPhoto(rows.find(realPhoto)) || '').trim();
+  const pic = (s.cover_image || s.logo || realPhoto(rows.find(realPhoto)) || '').trim();
   const base = String(origin || '').replace(/\/+$/, '');
   const url = base + '/s/' + (s.handle || '');
   const prices = rows.map((p) => Number(p && p.price)).filter((n) => n > 0);
   return {
     handle: s.handle || '', title, desc, url,
-    image: pic ? base + pic : '',
+    image: pic ? (/^https?:\/\//i.test(pic) ? pic : base + pic) : '',
     // alt text belongs to a picture: with no image on file the answer is no alt and
     // no tag, because a preview that promises a photo and shows none is worse than
     // a preview that says nothing

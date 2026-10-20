@@ -1,4 +1,31 @@
 # Tapstall — status
+## v1.2.0 (built 2026-10-20, not yet deployed): shop outfits, owner UI stays out of the shelf
+
+The buyer page got its first deliberate outfit system. `STOREFRONT_TEMPLATES` in
+`core.js` carries the common WhatsApp-shop shapes — general retail, food/bakery,
+fashion/beauty, groceries/essentials, phones/electronics, home/handmade/gifts,
+and services/bookings — and `storefrontDesign` resolves template + operator
+choices at read time, so older shops render as general retail with no migration.
+Onboarding asks what kind of shop it is; the dashboard's new **Storefront
+design** panel lets the operator change template, cover picture, accent colour,
+layout (`grid`/`list`/`compact`), header (`classic`/`cover`/`minimal`), welcome
+and about copy, button word, item order, and the search/category/description/
+WhatsApp-button switches. It is still one storefront page and one checkout: the
+template changes CSS variables, classes and words, never pricing code. Design
+fields are soft settings with closed-world validators (hex-only colour, known
+enums, own-store cover paths), the cover joins the image-reference sweep, and a
+cover becomes the preferred link-preview image. The storefront itself gained a
+cover hero, search, template popular badges, category labels, list/compact
+rhythms, a welcome card, an about section and an optional WhatsApp chat button.
+
+Owner-console boundary, per owner instruction: the `/ops` drawer no longer
+fetches, lists or edits an operator shop's products/items. It keeps the health
+facts an owner needs (item count/feed error, orders, plan, logs and levers);
+operators manage rows in their own dashboard. The authenticated ops API's
+`menu`/`menu_revert` patch actions remain as scripted support doors, with no
+buttons or item list in the owner UI, and the pages suite pins that split.
+352 tests green locally; deployment still needs the usual push-to-`main` run.
+
 ## v1.1.0 (deployed 2026-10-20): Whop activates, sellers send, one brand
 
 The owner's collection rail is Whop, so now the product says so. **Automated activation**:

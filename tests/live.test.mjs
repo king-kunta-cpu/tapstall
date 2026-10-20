@@ -247,6 +247,59 @@ test('storefront and config render; no secrets leak to the public', async () => 
   assert.equal(missing.status, 404);
 });
 
+test('a shop is born in its template and can restyle itself without an operator', async () => {
+  const h = 'designfood';
+  let r = await call('/api/register', {
+    method: 'POST', ip: '196.51.100.21',
+    body: { handle: h, shop_name: 'Design Kotas', whatsapp: '263771234568', currency: 'USD', feed_url: 'https://stub/menu.csv', business_type: 'food' },
+  });
+  assert.equal(r.status, 201, r.text);
+  const key = () => JSON.parse(env.STORES._map.get('store:' + h).value).admin_token;
+  let cfg = await call('/s/' + h + '/config.json');
+  assert.equal(cfg.json.store.business_type, 'food');
+  assert.equal(cfg.json.store.design.template, 'food');
+  assert.equal(cfg.json.store.design.accent, '#b33a1f');
+  assert.equal(cfg.json.store.design.hero, 'cover');
+  assert.equal(cfg.json.store.design.popular_label, 'Most ordered');
+
+  r = await call('/api/settings', {
+    method: 'POST', confirm: true, ip: '196.51.100.22', headers: { 'x-tapstall-admin': key() },
+    body: {
+      handle: h, accent_color: 'abc', cover_image: 'https://example.test/cover.jpg', store_layout: 'list',
+      hero_style: 'minimal', cta_label: 'Reserve', sort_mode: 'price_low', search_bar: 'hide',
+      whatsapp_button: 'show', welcome_message: 'Hot from 10, while it lasts', about: 'By the rank, under the blue awning.',
+    },
+  });
+  assert.equal(r.status, 200, r.text);
+  assert.equal((r.json.held || []).length, 0, 'the outfit is cosmetic: it does not sit in the money hold');
+  assert.ok((r.json.applied_now || []).includes('accent_color'), 'and it says it landed now');
+
+  cfg = await call('/s/' + h + '/config.json');
+  assert.equal(cfg.json.store.design.accent, '#aabbcc');
+  assert.equal(cfg.json.store.design.layout, 'list');
+  assert.equal(cfg.json.store.design.hero, 'minimal');
+  assert.equal(cfg.json.store.design.cta, 'Reserve');
+  assert.equal(cfg.json.store.design.search, false);
+  assert.equal(cfg.json.store.design.whatsapp_button, true);
+  assert.equal(cfg.json.store.design.welcome_message, 'Hot from 10, while it lasts');
+
+  const page = await call('/s/' + h);
+  assert.match(page.text, /"template":"food"/, 'the buyer page is served the resolved outfit');
+  assert.match(page.text, /property="og:image" content="https:\/\/example\.test\/cover\.jpg"/, 'the cover is also the link-preview picture');
+
+  const adm = await call('/api/admin?handle=' + h, { headers: { 'x-tapstall-admin': key() } });
+  assert.equal(adm.status, 200, adm.text);
+  assert.equal(adm.json.design.template, 'food');
+  assert.equal(adm.json.templates.services.cta, 'Book', 'the dashboard is handed the same template catalogue core resolves');
+
+  r = await call('/api/settings', {
+    method: 'POST', confirm: true, ip: '196.51.100.23', headers: { 'x-tapstall-admin': key() },
+    body: { handle: h, accent_color: 'red; } body { display:none' },
+  });
+  assert.equal(r.status, 422, r.text);
+  assert.ok(r.json.fields.accent_color, 'a colour that is really CSS is named and refused');
+});
+
 test('menu comes from the feed and honours options, add-ons and stock', async () => {
   const feed = await call('/s/mamatoe/feed.json');   // force=true path
   assert.equal(feed.json.products.length > 0, true, 'feed fetched');

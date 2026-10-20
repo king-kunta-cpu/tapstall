@@ -190,7 +190,7 @@ details.box .in{padding:.5rem 0 .7rem}
             <div class="f"><label>price</label><input id="mPr" inputmode="decimal" placeholder="40"></div>
           </div>
           <div class="two">
-            <div class="f"><label>group</label><input id="mGp" placeholder="Specials"></div>
+            <div class="f"><label>group</label><input id="mGp" placeholder="Specials" list="catIdeas"><datalist id="catIdeas"></datalist></div>
             <div class="f"><label>photo (optional)</label><span class="pic" data-which="new"><span class="pv" title="drop a picture here, or click it to pick a file">+</span><input class="pu" id="mIm" placeholder="image link, or drop a file"><button class="sm" data-pk="pick">Browse</button><button class="sm sec" data-pk="off" style="display:none">Take off</button><input type="file" accept="image/*" style="display:none"><span class="st"></span></span></div>
           </div>
           <button class="sm" id="nGo">Add it to the list below</button>
@@ -426,6 +426,7 @@ function load() {
     S.store = j.store || {}; S.store.pending = j.pending || null;
     S.orders = j.orders || []; S.audit = j.audit || [];
     S.editable = j.editable || []; S.soft = j.soft_fields || [];
+    S.design = j.design || {}; S.templates = j.templates || {};
     S.handle = S.handle || (S.store.handle || '');
     var today = new Date().toDateString();
     S.todays = S.orders.filter(function (o) { return o && new Date(o.at).toDateString() === today; });
@@ -678,6 +679,9 @@ q('#menuClear').onclick = function () {
 /* --------------------------------------------------------------- settings */
 var LABEL = {
   shop_name: 'Shop name', tagline: 'Tagline', logo: 'Logo (image URL)', location: 'Location / address', hours: 'Opening hours', closed: 'Closed right now',
+  business_type: 'Shop template', cover_image: 'Cover picture', accent_color: 'Accent colour', store_layout: 'Item layout', hero_style: 'Top of shop',
+  welcome_message: 'Welcome line', about: 'About this shop', cta_label: 'Button word', sort_mode: 'Item order',
+  search_bar: 'Search box', category_bar: 'Category buttons', product_descriptions: 'Item descriptions', whatsapp_button: 'WhatsApp chat button',
   rail_def: 'Describe your own method',
   whatsapp: 'Your WhatsApp (buyers reach you)', pay_account: 'Default payment number (for methods with no number of their own)', rail: 'Payment rail', surcharge_mode: 'Who pays the payment cost',
   currency: 'Currency', zig_rate: 'ZiG exchange rate', tax_pct: 'Tax / VAT rate %', delivery_fee: 'Delivery fee', free_over: 'Free delivery over',
@@ -694,9 +698,81 @@ var ORDER = ['shop_name', 'tagline', 'logo', 'location', 'hours', 'closed', 'wha
   'vat_registered', 'vat_mode', 'vat_rate_pct', 'vat_number', 'vat_address', 'surcharge_mode',
   'delivery_fee', 'free_over', 'unique_change', 'order_prefix', 'reference_format', 'feed_url', 'cache_seconds', 'max_order_value', 'cod_review_above',
   'require_optin', 'notify_email', 'notify_webhook', 'owner_email'];
+/* The outfit panel is drawn as one group rather than scattered through the long
+ * settings form: template first, then the few levers that make it this shop's.
+ * The Worker sends the template catalogue and the resolved design, so this page
+ * does not keep a second list of business types that can drift from the page
+ * buyers actually get. Every control still ends as an ordinary settings field. */
+function designOpts(list, cur) {
+  return list.map(function (o) {
+    var v = Array.isArray(o) ? o[0] : o, t = Array.isArray(o) ? o[1] : o;
+    return '<option value="' + esc(v) + '"' + (String(cur) === String(v) ? ' selected' : '') + '>' + esc(t) + '</option>';
+  }).join('');
+}
+function designPanel() {
+  if ((S.editable || []).indexOf('business_type') < 0) return '';
+  var d = S.design || {}, templates = S.templates || {};
+  var keys = Object.keys(templates).length ? Object.keys(templates)
+    : ['general', 'food', 'fashion', 'grocery', 'electronics', 'home', 'services'];
+  var type = S.store.business_type || d.template || 'general';
+  var tpl = templates[type] || {};
+  var layout = S.store.store_layout || d.layout || tpl.layout || 'grid';
+  var hero = S.store.hero_style || d.hero || tpl.hero || 'classic';
+  var sort = S.store.sort_mode || d.sort || 'popular';
+  var show = function (k, resolved) { return S.store[k] || (resolved === false ? 'hide' : 'show'); };
+  var cats = (tpl.categories || d.categories || []).join(', ');
+  return '<div class="seclab">Storefront design</div>'
+    + '<p class="hint" style="margin-top:0">Pick the closest kind of shop, then make it yours. These changes are cosmetic, so they go live as soon as you save — open “What a buyer sees right now” below to check the result.</p>'
+    + '<div class="f"><label>' + esc(LABEL.business_type) + '</label><select data-k="business_type" data-default="' + esc(type) + '" id="tplSel">'
+    + keys.map(function (k) { return '<option value="' + esc(k) + '"' + (k === type ? ' selected' : '') + '>' + esc((templates[k] || {}).label || k) + '</option>'; }).join('')
+    + '</select><p class="hint" id="tplHint">' + esc(tpl.blurb || d.blurb || '') + (cats ? ' Suggested groups: ' + esc(cats) + '.' : '') + '</p></div>'
+    + '<div class="f"><label>' + esc(LABEL.cover_image) + ' <span class="n">used by cover-style templates and link previews</span></label>'
+    + picHtml(S.store.cover_image || '', 'cover image link, or drop a file', 'data-which="cover"', 'data-k="cover_image" data-default=""') + '</div>'
+    + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(10rem,1fr));gap:.5rem">'
+    + '<div class="f"><label>' + esc(LABEL.accent_color) + '</label><span style="display:flex;gap:.4rem;align-items:center"><input data-k="accent_color" data-default="" value="' + esc(S.store.accent_color || '') + '" placeholder="' + esc(d.accent || '#0a6b33') + '" style="flex:1"><input type="color" id="accentPick" value="' + esc(d.accent || '#0a6b33') + '" style="width:3rem;padding:.15rem"></span><p class="hint">Blank keeps the template colour.</p></div>'
+    + '<div class="f"><label>' + esc(LABEL.store_layout) + '</label><select data-k="store_layout" data-default="' + esc(layout) + '">' + designOpts([['grid', 'Cards, two across'], ['list', 'Rows, one by one'], ['compact', 'Compact cards']], layout) + '</select></div>'
+    + '<div class="f"><label>' + esc(LABEL.hero_style) + '</label><select data-k="hero_style" data-default="' + esc(hero) + '">' + designOpts([['classic', 'Dark header'], ['cover', 'Cover picture header'], ['minimal', 'Light minimal header']], hero) + '</select></div>'
+    + '<div class="f"><label>' + esc(LABEL.sort_mode) + '</label><select data-k="sort_mode" data-default="' + esc(sort) + '">' + designOpts([['popular', 'Popular first'], ['menu', 'My menu order'], ['price_low', 'Price: low to high'], ['price_high', 'Price: high to low'], ['name', 'Name A–Z']], sort) + '</select></div>'
+    + '<div class="f"><label>' + esc(LABEL.cta_label) + '</label><input data-k="cta_label" data-default="" value="' + esc(S.store.cta_label || '') + '" placeholder="' + esc(d.cta || 'Add') + '" maxlength="18"></div>'
+    + '<div class="f"><label>' + esc(LABEL.search_bar) + '</label><select data-k="search_bar" data-default="' + esc(show('search_bar', d.search)) + '">' + designOpts([['show', 'Show'], ['hide', 'Hide']], show('search_bar', d.search)) + '</select></div>'
+    + '<div class="f"><label>' + esc(LABEL.category_bar) + '</label><select data-k="category_bar" data-default="' + esc(show('category_bar', d.category_bar)) + '">' + designOpts([['show', 'Show'], ['hide', 'Hide']], show('category_bar', d.category_bar)) + '</select></div>'
+    + '<div class="f"><label>' + esc(LABEL.product_descriptions) + '</label><select data-k="product_descriptions" data-default="' + esc(show('product_descriptions', d.descriptions)) + '">' + designOpts([['show', 'Show'], ['hide', 'Hide']], show('product_descriptions', d.descriptions)) + '</select></div>'
+    + '<div class="f"><label>' + esc(LABEL.whatsapp_button) + '</label><select data-k="whatsapp_button" data-default="' + esc(S.store.whatsapp_button || (d.whatsapp_button ? 'show' : 'hide')) + '">' + designOpts([['hide', 'Hide'], ['show', 'Show']], S.store.whatsapp_button || (d.whatsapp_button ? 'show' : 'hide')) + '</select></div>'
+    + '</div>'
+    + '<div class="f"><label>' + esc(LABEL.welcome_message) + '</label><textarea data-k="welcome_message" data-default="" maxlength="220" placeholder="Fresh stock every Friday — order before 3pm for same-day pickup.">' + esc(S.store.welcome_message || '') + '</textarea></div>'
+    + '<div class="f"><label>' + esc(LABEL.about) + '</label><textarea data-k="about" data-default="" maxlength="520" placeholder="Tell buyers who you are, where to collect, delivery areas, or anything that builds trust.">' + esc(S.store.about || '') + '</textarea></div>';
+}
+function wireDesign() {
+  var sel = q('#tplSel');
+  var ideas = q('#catIdeas');
+  var fillIdeas = function (cats) { if (ideas) ideas.innerHTML = (cats || []).map(function (c) { return '<option value="' + esc(c) + '">'; }).join(''); };
+  fillIdeas(((S.templates || {})[(sel && sel.value) || (S.design || {}).template] || {}).categories || (S.design || {}).categories || []);
+  if (sel) sel.onchange = function () {
+    var t = (S.templates || {})[sel.value] || {};
+    fillIdeas(t.categories || []);
+    var hint = q('#tplHint');
+    if (hint) hint.textContent = (t.blurb || '') + ((t.categories || []).length ? ' Suggested groups: ' + t.categories.join(', ') + '.' : '');
+    var pick = q('#accentPick'), txt = q('[data-k="accent_color"]');
+    if (pick && t.accent) pick.value = t.accent;
+    if (txt && t.accent) txt.placeholder = t.accent;
+    // If layout/hero were only template defaults, show the new template's
+    // defaults as the defaults — so what the operator sees selected is what
+    // buyers get, while an explicit choice they made earlier is left alone.
+    [['store_layout', t.layout], ['hero_style', t.hero]].forEach(function (pair) {
+      var el = q('[data-k="' + pair[0] + '"]');
+      if (el && pair[1] && S.store[pair[0]] === undefined) { el.value = pair[1]; el.setAttribute('data-default', pair[1]); }
+    });
+    var cta = q('[data-k="cta_label"]'); if (cta && t.cta) cta.placeholder = t.cta;
+  };
+  var pick = q('#accentPick'), txt = q('[data-k="accent_color"]');
+  if (pick && txt) {
+    pick.oninput = function () { txt.value = pick.value; };
+    txt.oninput = function () { if (/^#[0-9a-fA-F]{6}$/.test(txt.value.trim())) pick.value = txt.value.trim(); };
+  }
+}
 function renderFields() {
   var fields = ORDER.filter(function (k) { return (S.editable || []).indexOf(k) >= 0; });
-  q('#fields').innerHTML = fields.map(function (k) {
+  q('#fields').innerHTML = designPanel() + fields.map(function (k) {
     var v = S.store[k], inst = S.soft.indexOf(k) >= 0, f = '';
     if (typeof v === 'boolean') {
       f = '<div class="f"><label>' + esc(LABEL[k] || k) + (inst ? '' : ' <span class="n">· 15-min hold</span>') + '</label>'
@@ -768,6 +844,7 @@ function renderFields() {
     }
     return f;
   }).join('');
+  wireDesign();
   renderAccts(); renderWeek();
   // rail names come from the public /rails list; fetch once, rebuild once
   if (!S.rails) api('/rails').then(function (r) {
@@ -1123,6 +1200,7 @@ function saveSettings() {
     var k = el.getAttribute('data-k'), cur = S.store[k], val = el.value;
     if (el.tagName === 'SELECT' && typeof cur === 'boolean') val = el.value === '1';
     if (typeof cur === 'number') val = val === '' ? 0 : Number(val);
+    if (cur === undefined && el.getAttribute('data-default') !== null && String(val) === el.getAttribute('data-default')) return;
     if (String(val) === String(cur)) return;
     body[k] = val;
   });
