@@ -14,6 +14,15 @@ design. `mamatoe`'s tenant PIN was reset through the self-service
 verified: PIN login + `/api/admin` 200 (40 orders), including again after the
 secret rotation. New credential values were handed to the owner in chat only.
 
+Follow-up fix **v1.3.1** (deploy run `39441983230`): the tenant dashboard
+could still answer “Dashboard not opened: unauthorised” in a real browser
+after a correct PIN. Two causes fixed: the Worker now tries *every*
+same-name session cookie the browser sends (a stale/empty copy in front no
+longer vetoes the signed one behind it — verified live with empty-first and
+stale-first duplicate headers), and the dashboard's cookie-landing retry now
+applies to the first load after sign-in, not only to a dashboard already on
+screen. 356 tests.
+
 ## v1.3.0 (deployed 2026-10-20): the quota-first pipeline
 
 Owner instruction: redesign the entire pipeline to use the least quota while
