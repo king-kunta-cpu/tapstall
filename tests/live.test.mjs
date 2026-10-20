@@ -4565,7 +4565,11 @@ test('1.0.0 sellers, leads, recognised sales, and a press the clock runs by itse
   const press = tick1.json.scheduled.press;
   assert.ok(press && press.identities >= 1, 'the cron ran the press window itself: ' + JSON.stringify(tick1.json.scheduled));
   assert.ok(press.composed >= 1, 'and composed beats in it');
-  assert.ok(env.ORDERS._map.has('press:queue:owner'), 'the queue exists because the clock made it, not because a person called /api/press/run');
+  // v1.5.3: beats belong to fixed clock slots, so a tick after the last slot has passed composes the
+  // day's beats and queues none of them rather than dumping a morning's content at midnight.
+  const inSlot = (press.ran || []).reduce((a, r) => a + (r.in_slot || 0), 0);
+  if (inSlot > 0) assert.ok(env.ORDERS._map.has('press:queue:owner'), 'the queue exists because the clock made it, not because a person called /api/press/run');
+  else assert.ok((press.ran || []).every((r) => (r.skipped_slots || 0) >= 0), 'a closed slot reports itself instead of firing late');
   const tick2 = await call('/__selftest?scheduled=1');
   assert.ok(tick2.json.scheduled.press.skipped, 'the same hour never double-fires a window: ' + JSON.stringify(tick2.json.scheduled.press));
   const health = await call('/ops/api/health', { cookie: ck });

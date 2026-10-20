@@ -17,6 +17,12 @@ it again. Fixed in three parts:
   `press:state`, so the stale item is not given one last repeat.
 - **One rail cannot take the batch down.** Each item is attempted in isolation:
   a sender that throws costs its own item, not the three behind it.
+- **Fixed clock slots, not "forty minutes from now".** Due times were computed from `now`, so every
+  tick recomposed the day's first beat as a brand-new item and sent it again — that is how one line
+  reached the feed five times in a morning. A day now has three slots (08:20 / 12:20 / 16:20 UTC =
+  10:20 / 14:20 / 18:20 in Harare), the same beat is the same item at every tick, and a slot missed
+  by more than 90 minutes is skipped rather than dumped late: stale queue items are retired instead
+  of fired at midnight.
 - **A deeper, better-mixed value pool.** Six pillars now carry five lines each
   (30 value lines, up from 18), dealt pillar-by-pillar so two different
   subjects a day, and the rotation walks the whole pool in order — a line
@@ -24,8 +30,11 @@ it again. Fixed in three parts:
   The live shop-math line reads its tariff from `RAILS` and now rotates three
   framings, so the same sentence does not arrive every third day.
 
-361 tests (new pins: no repeat inside the window, the mark ages out, a changed
-slot still posts, a throw is contained, pool depth and citation paths).
+363 tests (new pins: no repeat inside the window, the mark ages out, clock
+slots stable across ticks, a missed slot never fires late, a throw is
+contained, pool depth and citation paths). Deploy run `39511456089` (worker +
+pages), live `/__ping` = `1.5.3`; `GMAIL_OWNER_APP_PASSWORD` and
+`PRESS_OWNER_BLUESKY_APP_PASSWORD` rotated on the Worker the same hour.
 
 ## v1.4.0 (deployed 2026-10-20): brand everywhere, professional storefront shelf
 

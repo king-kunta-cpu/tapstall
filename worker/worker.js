@@ -35,7 +35,8 @@ import {
   MESH_AUTONOMY, MESH_AUTONOMY_V3, MESH_CHANNELS, MESH_OUTREACH, meshAccount, meshOutreachPlan,
   meshQueueItem, meshQueueMerge, meshPress, meshPressFlush, MESH_QUEUE_DEFAULTS, MESH_BUFFER_CHANNEL,
   meshRegister, meshCompanyIdentities, meshCompanyBeats, meshPressLedger, MESH_ID_CLASSES, MESH_ID_RAIL_DEFAULTS,
-  meshIdentityPlan, contentPostedPrune, contentFingerprint,
+  meshIdentityPlan, contentPostedPrune, contentFingerprint, contentPosted, contentPostKey,
+  contentSlotDue, contentSlotMissed, meshQueueExpire,
   cleanSellerCode, allocateSeller, cleanLead, leadTransition, sellerBoard, commissionFor, SELLER_DEFAULT_PCT,
   whopEventKind, whopBuyer, whopMoney, whopTerm, SUBSCRIPTION_PLANS,
   MESH_PUBLISH, MESH_BUFFER_FREE, MESH_DRIP, meshRailsTotal, meshRailHealth, meshDrip,
@@ -3262,10 +3263,14 @@ async function runPress(env, origin, opt) {
       plan = meshCompanyBeats(e, { price_usd: PRICE_USD, free_days: FREE_DAYS, feed_ok: true, price_ok: true }, { origin: origin, now: Date.now() });
     }
     const idRails = Object.keys(e.rails || {});
-    const items = (plan.beats || []).map((beat, i) => meshQueueItem(Object.assign({}, beat, { seq: i, to: idRails.length ? idRails : (beat.to || []) }), { landing: origin + '/fees', store: id, now: Date.now(),
-      channel_id: ((e.rails || {})[beat.rail] || {}).channel_id || press.channels[beat.rail] || '', board: press.board, no_links: e.class === 'seller' }));
+    // v1.5.3: a day's beats belong to fixed clock slots, so the same beat is the same item at every
+    // tick of the day — and a slot missed by more than the grace window is skipped, not dumped late.
+    const items = (plan.beats || []).filter((beat, i) => !contentSlotMissed(Date.now(), i)).map((beat, i) => meshQueueItem(Object.assign({}, beat, { seq: i, to: idRails.length ? idRails : (beat.to || []) }), { landing: origin + '/fees', store: id, now: Date.now(),
+      channel_id: ((e.rails || {})[beat.rail] || {}).channel_id || press.channels[beat.rail] || '', board: press.board, no_links: e.class === 'seller',
+      due_at: contentSlotDue(Date.now(), i) }));
     const prevQ = await env.ORDERS.get('press:queue:' + id, 'json').catch(() => null) || {};
-    if (Array.isArray(prevQ.items)) prevQ.items = prevQ.items.map((it) => applyContentLinkPolicy(it, e.class));
+    const expiredQ = Array.isArray(prevQ.items) ? meshQueueExpire(prevQ.items.map((it) => applyContentLinkPolicy(it, e.class)), { now: Date.now() }) : { items: [], expired: [] };
+    prevQ.items = expiredQ.items;
     const merged = meshQueueMerge(prevQ, items, { store: id, landing: origin + '/fees', cadence: e.cadence || MESH_QUEUE_DEFAULTS });
     // v1.5.3: the record of what actually went out, read before composing and written after
     // sending, so a queue write that lagged a good send can never post the same words twice.
@@ -3279,11 +3284,16 @@ async function runPress(env, origin, opt) {
         if (v && v.ok && v.id) seenLog[ch + '|' + v.id] = { at: v.at || new Date().toISOString(), channel: ch, id: v.id, seeded: true };
       }
     }
-    const flush = await meshPressFlush(merged.items, press, { dry: dry, now: Date.now(), posted: seenLog });
+    // a beat already marked as said today is not re-queued at all: the queue stays empty instead of
+    // being refilled and drained every twenty minutes
+    const fresh = merged.items.filter((it) => !contentPosted(seenLog, contentPostKey(it), { now: Date.now() }));
+    const settledEarlier = merged.items.length - fresh.length;
+    const flush = await meshPressFlush(fresh, press, { dry: dry, now: Date.now(), posted: seenLog });
     const settled = new Set(flush.results.filter((r) => r.status === 'sent' || r.status === 'duplicate').map((r) => r.id));
-    const keptItems = merged.items.filter((i) => !settled.has(i.id));
+    const keptItems = fresh.filter((i) => !settled.has(i.id));
+    const hadQueueDoc = Array.isArray(prevQ.items);
     const queueChanged = JSON.stringify(((prevQ && prevQ.items) || [])) !== JSON.stringify(keptItems);
-    if (!dry && queueChanged) {
+    if (!dry && (queueChanged || !hadQueueDoc)) {
       try { await governedPut(env.ORDERS, 'press:queue:' + id, JSON.stringify({ store: id, landing: origin + '/fees', at: new Date().toISOString(), items: keptItems }), null, 'automation'); } catch (e2) { /* a full queue is not worth failing the run for */ }
     }
     if (!dry && Array.isArray(flush.posted) && flush.posted.length) {
@@ -3297,8 +3307,10 @@ async function runPress(env, origin, opt) {
     if (!dry && stateChanged) {
       try { await governedPut(env.ORDERS, 'press:state:' + id, JSON.stringify(ledger), null, 'automation'); } catch (e2) { /* same */ }
     }
-    out.push({ id, class: e.class, ok: true, dry: dry, composed: items.length, queued_now: merged.added, dropped: merged.dropped.length,
-      sent: flush.sent, waiting: flush.waiting, duplicates: flush.duplicates || 0, token_env: e.token_env, token_present: !!press.buffer_token,
+    out.push({ id, class: e.class, ok: true, dry: dry, composed: (plan.beats || []).length, in_slot: items.length,
+      skipped_slots: (plan.beats || []).length - items.length, queued_now: merged.added, dropped: merged.dropped.length,
+      sent: flush.sent, waiting: flush.waiting, duplicates: (flush.duplicates || 0) + settledEarlier,
+      expired_slots: expiredQ.expired.length, token_env: e.token_env, token_present: !!press.buffer_token,
       results: flush.results.map((r) => ({ channel: r.channel, status: r.status, due: r.due, err: r.err || r.note || '' })),
       material: plan.source, fallback_from: plan.fallback_from || '', rail_health: meshRailHealth(ledger) });
   }
@@ -5132,7 +5144,9 @@ async function pressTick(env) {
     composed: ran.reduce((a, r) => a + (r.composed || 0), 0), sent: ran.reduce((a, r) => a + (r.sent || 0), 0),
     waiting: ran.reduce((a, r) => a + (r.waiting || 0), 0),
     duplicates: ran.reduce((a, r) => a + (r.duplicates || 0), 0), statuses,
-    ran: ran.map((r) => ({ id: r.id, ok: r.ok, composed: r.composed || 0, sent: r.sent || 0, waiting: r.waiting || 0, token_present: !!r.token_present, error: r.error || '' })) };
+    ran: ran.map((r) => ({ id: r.id, ok: r.ok, composed: r.composed || 0, in_slot: r.in_slot || 0, skipped_slots: r.skipped_slots || 0,
+      sent: r.sent || 0, waiting: r.waiting || 0, duplicates: r.duplicates || 0, expired_slots: r.expired_slots || 0,
+      token_present: !!r.token_present, error: r.error || '' })) };
   try { await env.ORDERS.put('press:last', JSON.stringify(sum)); } catch (e) { void e; }
   return sum;
 }

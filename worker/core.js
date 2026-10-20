@@ -3637,7 +3637,7 @@ export function meshQueueItem(beat, opt) {
   return {
     id: String((beat && (beat.item_key || beat.id)) || ('b' + n)).replace(/[^\w:-]/g, '').slice(0, 40) + '-' + Math.floor(now / 864e5),
     channel: chan, channel_id: String((o.channel_id || '') || '').slice(0, 40),
-    due: new Date(Math.ceil((now + 60000) / grid) * grid + n * grid).toISOString(),
+    due: new Date(o.due_at ? Date.parse(o.due_at) : Math.ceil((now + 60000) / grid) * grid + n * grid).toISOString(),
     text: String((beat && beat.text) || '').slice(0, Number(beat && beat.max) || 300),
     link: o.no_links ? '' : (beat && beat.kind === 'promo' ? String(beat.link || o.landing || '') : ''),
     ...contentMediaFor({ ...(beat || {}), image: (beat && beat.image) || o.image || '' }, { now, seq: n, media_base: o.media_base }),
@@ -3987,6 +3987,47 @@ export const CONTENT_MEDIA_BASE = 'https://king-kunta-cpu.github.io/tapstall/bra
  * feed cannot repeat itself.
  */
 export const CONTENT_REPEAT_WINDOW_DAYS = 21;
+
+/** When a day's beats go out: fixed clock slots, not "40 minutes from whenever the tick looked".
+ *  A due time computed from `now` moves forward every time the tick runs, so an item that already
+ *  said its piece is recomposed as a fresh item twenty minutes later — which is how one line ended
+ *  up on the feed five times in a morning. Fixed slots make a day's cadence a fact about the day.
+ *  08:20 / 12:20 / 16:20 UTC is 10:20 / 14:20 / 18:20 in Harare: a shop's morning, lunch and evening. */
+export const CONTENT_SLOT_HOURS_UTC = [8, 12, 16];
+export const CONTENT_SLOT_MINUTE = 20;
+
+/** A slot that was missed by more than this never fires late: a morning post going out at 23:00 is
+ *  not a cadence, it is a backlog, and three of them in one minute is a feed that looks broken. */
+export const CONTENT_SLOT_GRACE_MIN = 90;
+
+/** Drop queue items whose slot has been missed past the grace window. A value post is a cadence, not
+ *  an obligation: silence for one slot is honest, a burst of stale posts is not. */
+export function meshQueueExpire(items, opt) {
+  const o = opt || {}, now = o.now || Date.now(), grace = (Number(o.grace_min) || CONTENT_SLOT_GRACE_MIN) * 60000;
+  const keep = [], expired = [];
+  for (const it of (Array.isArray(items) ? items : [])) {
+    const due = Date.parse((it && it.due) || '');
+    if (!due || now - due <= grace) keep.push(it);
+    else expired.push({ id: String(it.id || ''), channel: String(it.channel || ''), due: it.due, kind: String(it.kind || '') });
+  }
+  return { items: keep, expired };
+}
+
+/** Is this slot already gone? Composing it would post the morning's line at night. */
+export function contentSlotMissed(now, seq, opt) {
+  const o = opt || {}, t = now || Date.now();
+  const due = Date.parse(contentSlotDue(t, seq));
+  return t - due > (Number(o.grace_min) || CONTENT_SLOT_GRACE_MIN) * 60000;
+}
+
+export function contentSlotDue(now, seq) {
+  const t = new Date(now || Date.now());
+  const n = Math.max(0, Number(seq) || 0);
+  const hours = CONTENT_SLOT_HOURS_UTC;
+  const h = hours[Math.min(n, hours.length - 1)];
+  const extra = n < hours.length ? 0 : (n - hours.length + 1) * 40;   // overflow slots step on the old grid
+  return new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate(), h, CONTENT_SLOT_MINUTE + extra, 0, 0)).toISOString();
+}
 
 /** The wire identity of a post: channel, the handle it would come from, its words, its media.
  *  Two ticks that compose the same thing produce the same fingerprint, which is the point. */

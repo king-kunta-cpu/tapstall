@@ -691,3 +691,41 @@ test('1.5.3 the value pool is deep enough to keep teaching for a fortnight, and 
   const repeats = pillars.filter((p, i) => i && p === pillars[i - 1]).length;
   assert.ok(repeats <= 5, 'two subjects a day: a pillar rarely follows itself (' + repeats + ' in 30 posts)');
 });
+
+test('1.5.3 a day has fixed clock slots, so the same beat is the same item at every tick', async () => {
+  const C = await import('file://' + join(root, 'worker', 'core.js'));
+  const morning = Date.parse('2026-10-20T08:05:00Z');
+  const evening = Date.parse('2026-10-20T22:55:00Z');
+  const dues = [0, 1, 2].map((i) => C.contentSlotDue(morning, i));
+  assert.deepEqual(dues, ['2026-10-20T08:20:00.000Z', '2026-10-20T12:20:00.000Z', '2026-10-20T16:20:00.000Z'],
+    'three slots a day, at hours a shop actually posts (10:20, 14:20 and 18:20 in Harare)');
+  assert.equal(C.contentSlotDue(morning, 0), C.contentSlotDue(Date.parse('2026-10-20T09:55:00Z'), 0),
+    'a due time is a fact about the day, not about when the tick looked');
+  assert.equal(C.contentSlotMissed(Date.parse('2026-10-20T08:40:00Z'), 0), false, 'a slot an hour past is still open');
+  assert.equal(C.contentSlotMissed(evening, 0), true, 'the morning slot is gone by night — it is not a backlog');
+  assert.equal(C.contentSlotMissed(evening, 2), true);
+  assert.equal(C.contentSlotMissed(Date.parse('2026-10-21T08:00:00Z'), 0), false, 'tomorrow morning is open again');
+
+  // the same day, composed at two different ticks: identical ids and identical dues, which is exactly
+  // what makes the "already said this" mark match instead of missing
+  const facts = { price_usd: 60, free_days: 60 };
+  const a = C.meshCompanyBeats({ id: 'owner', rails: { bluesky: {} } }, facts, { origin: 'https://x.test', now: morning });
+  const b = C.meshCompanyBeats({ id: 'owner', rails: { bluesky: {} } }, facts, { origin: 'https://x.test', now: evening });
+  assert.deepEqual(a.beats.map((x) => x.item_key), b.beats.map((x) => x.item_key), 'the day composes the same three beats all day');
+  const mk = (plan, i) => C.meshQueueItem({ ...plan.beats[i], seq: i }, { now: morning, due_at: C.contentSlotDue(morning, i), landing: 'https://x.test/fees' });
+  assert.equal(C.contentPostKey(mk(a, 0)), C.contentPostKey(mk(b, 0)), 'and the guard sees them as one post');
+});
+
+test('1.5.3 a queue item whose slot was missed never fires late, and an empty queue is not rewritten', async () => {
+  const C = await import('file://' + join(root, 'worker', 'core.js'));
+  const now = Date.parse('2026-10-20T23:05:00Z');
+  const items = [
+    { id: 'a', channel: 'bluesky', due: '2026-10-20T22:45:00.000Z' },
+    { id: 'stale', channel: 'bluesky', due: '2026-10-20T08:20:00.000Z' },
+    { id: 'future', channel: 'bluesky', due: '2026-10-21T08:20:00.000Z' },
+  ];
+  const r = C.meshQueueExpire(items, { now });
+  assert.deepEqual(r.items.map((i) => i.id), ['a', 'future'], 'the recent miss and the future stay; the stale one is retired');
+  assert.deepEqual(r.expired.map((e) => e.id), ['stale']);
+  assert.deepEqual(C.meshQueueExpire([], { now }), { items: [], expired: [] });
+});
