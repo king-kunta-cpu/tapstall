@@ -38,24 +38,30 @@ Every plan has the required checkout field **“Your Tapstall shop handle”** w
 path. Each seller still needs a Whop username on their seller record (`whop` field);
 Tapstall appends `?a=<username>` to their shops' checkout links automatically.
 
-## 2. The webhook (created disabled — enable only after the v1.1.0 deploy)
+## 2. The webhook (live and enabled 2026-10-20)
 
-Tapstall webhook `hook_lo2v5QyNxqenn` already exists and is **disabled**:
+Tapstall webhook `hook_lo2v5QyNxqenn` is **enabled**:
 
 - **Endpoint URL:** `https://tapstall.zlnew.workers.dev/api/hook/whop`
 - **API version:** v1; **events:** `payment.succeeded`, `payment.failed`,
   `membership.activated`, `membership.deactivated`, `refund.created`.
-- After deploying v1.1.0, copy this webhook's signing secret into `WHOP_WEBHOOK_SECRET`,
-  redeploy/confirm the Worker health flag, then enable the webhook. Never commit the secret.
+- Its signing secret is configured as the GitHub/Worker secret `WHOP_WEBHOOK_SECRET`.
+  Never commit or print the value.
+- **Deploy evidence:** GitHub deploy run `39408028831`; authenticated **ops-health** run
+  `39409217262` read version `1.1.0`, `whop: true`, `whop_checkout: true`. A manually
+  signed ping answered 200 `ignored: test`; Whop's own `payment.failed` test answered 200
+  `ignored: failed`, `matched: null`. KV readback found no grant, unmatched-payment, refund
+  or Whop-membership markers from those tests.
 
 ## 3. Configuration (GitHub repo secrets → deploy sets Worker secrets)
 
-Add these under GitHub → tapstall repo → Settings → Secrets and variables → Actions
-(the deploy passes only non-empty ones, so unset never wipes what is live):
+These are configured under GitHub → tapstall repo → Settings → Secrets and variables →
+Actions, and the deploy passes non-empty values through to Worker secrets (unset never
+wipes what is live):
 
 | Secret | Value |
 |---|---|
-| `WHOP_WEBHOOK_SECRET` | Signing secret for webhook `hook_lo2v5QyNxqenn` from step 2. Until this exists the endpoint answers **503 — refused**, by design |
+| `WHOP_WEBHOOK_SECRET` | Configured signing secret for webhook `hook_lo2v5QyNxqenn`; value intentionally not recorded here. If it is ever removed, the endpoint answers **503 — refused**, by design |
 | `WHOP_CHECKOUT_URL_ANNUAL` | `https://whop.com/checkout/plan_LOEvoldSgFUUI` |
 | `WHOP_CHECKOUT_URL_MONTHLY` | `https://whop.com/checkout/plan_jWquFledgoz6B` |
 | `WHOP_CHECKOUT_URL` | Fallback only; leave unset now that annual/monthly are set |
@@ -66,11 +72,12 @@ The ZAR plans are live on the Whop product page and at the direct checkout links
 The current Worker renew page consumes the USD annual/monthly env vars; do not invent ZAR
 env names unless the Worker is changed to read them.
 
-Then any push to `main` (or a manual deploy run) arms it. Verify in the owner console →
-health → `pipeline.armed.whop: true`. The manual **ops-health** GitHub workflow performs
-the same authenticated read and prints only the version/armed booleans, so verification does
-not require moving `ADMIN_SECRET` out of GitHub. Send Whop's **test event** only after that
-check: a ping/test payload must answer 200 `ignored: test` and grant nothing.
+For future secret changes, deploy from `main`, then verify in the owner console → health →
+`pipeline.armed.whop: true`. The manual **ops-health** GitHub workflow performs the same
+authenticated read and prints only the version/armed booleans, so verification does not
+require moving `ADMIN_SECRET` out of GitHub. After any webhook-secret change, send a signed
+ping/test payload (must answer 200 `ignored: test`) and a non-granting Whop test such as
+`payment.failed`; neither may create a grant marker.
 
 ## How matching and money safety work (so support can answer questions)
 

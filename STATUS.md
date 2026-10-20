@@ -1,5 +1,5 @@
 # Tapstall — status
-## v1.1.0 (built 2026-10-19, pending deploy): Whop activates, sellers send, one brand
+## v1.1.0 (deployed 2026-10-20): Whop activates, sellers send, one brand
 
 The owner's collection rail is Whop, so now the product says so. **Automated activation**:
 `POST /api/hook/whop` verifies Whop's Standard Webhooks signature exactly as the sister mint does
@@ -16,9 +16,12 @@ the monthly door beside it is new) and prints the owner's manual-rail details wh
 hunt, sends from each seller's own Gmail via app password (Worker-secret key ring behind
 `/api/outreach/mailboxes`), three touches maximum under the existing caps, IMAP replies stop the
 machine (STOP → DNC). **Brand**: `brand/` — stall-and-tap mark, lockups, Whop cover, palette grown
-from the UI kit, on the landing page. 348 tests. NOT YET DEPLOYED: built and committed locally;
-the session's deploy tokens were shredded at v1.0.0, so this lands on the next push (see
-`docs/WHOP-SETUP.md` for the owner's ten minutes in the Whop + GitHub dashboards).
+from the UI kit, on the landing page. 348 tests. **Deployed 2026-10-20** in GitHub run
+`39408028831`; live `/__ping` reports 1.1.0. The four Whop Worker secrets are bound, the manual
+**ops-health** run `39409217262` read owner-console health as `whop: true` and
+`whop_checkout: true`, and Whop webhook `hook_lo2v5QyNxqenn` is enabled. A signed ping returned
+`ignored: test`, Whop's `payment.failed` sample returned `ignored: failed` with no match, and KV
+held no grant/unmatched/membership markers afterward. See `docs/WHOP-SETUP.md` for the live IDs.
 
 **Retired-brand removal (same unreleased build, owner instruction):** the executable codebase is
 Tapstall-only now. Gone: legacy cookie/header/template-marker spellings, browser cart/onboarding/
