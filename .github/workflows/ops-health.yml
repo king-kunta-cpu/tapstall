@@ -1,0 +1,86 @@
+name: ops-health
+# A narrow, manual read of the owner console's health endpoint. It exists for deploy
+# verification after a secret is bound: the platform secret stays in GitHub's secret store,
+# the session cookie is never printed, and the log carries only the version plus boolean
+# "armed" fields. It has no schedule and changes nothing in production.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ops-health
+  cancel-in-progress: false
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    steps:
+      - name: owner-console health (booleans only)
+        env:
+          ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+          ORIGIN: https://tapstall.zlnew.workers.dev
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import sys
+          import urllib.error
+          import urllib.request
+
+          origin = os.environ["ORIGIN"].rstrip("/")
+          secret = os.environ.get("ADMIN_SECRET", "")
+          if not secret:
+              raise SystemExit("ADMIN_SECRET repo secret is missing")
+
+          def call(path, data=None, headers=None):
+              body = None if data is None else json.dumps(data).encode()
+              req = urllib.request.Request(
+                  origin + path,
+                  data=body,
+                  method="POST" if data is not None else "GET",
+                  headers={"Accept": "application/json", **(headers or {})},
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=90) as resp:
+                      return resp.status, resp.headers, json.loads(resp.read() or b"{}")
+              except urllib.error.HTTPError as e:
+                  raw = e.read()
+                  try:
+                      payload = json.loads(raw or b"{}")
+                  except Exception:
+                      payload = {"raw": raw[:200].decode("utf-8", "replace")}
+                  return e.code, e.headers, payload
+
+          status, headers, login = call(
+              "/ops/login",
+              {"secret": secret},
+              {"Content-Type": "application/json"},
+          )
+          cookies = " ".join(headers.get_all("Set-Cookie", []))
+          match = re.search(r"tp_ops=([^;]+)", cookies)
+          if status != 200 or not login.get("ok") or not match:
+              print(json.dumps({"login_status": status, "login_ok": bool(login.get("ok"))}))
+              raise SystemExit("owner-console login did not produce a session")
+
+          status, _, health = call(
+              "/ops/api/health",
+              headers={"Cookie": "tp_ops=" + match.group(1)},
+          )
+          pipeline = health.get("pipeline") or {}
+          armed = pipeline.get("armed") or {}
+          result = {
+              "health_status": status,
+              "ok": bool(health.get("ok")),
+              "version": health.get("version"),
+              "selftest_ok": bool((health.get("selftest") or {}).get("ok")),
+              "armed": armed,
+          }
+          print(json.dumps(result, sort_keys=True))
+          if status != 200 or not result["ok"]:
+              raise SystemExit("owner-console health did not answer ok:true")
+          if armed.get("whop") is not True or armed.get("whop_checkout") is not True:
+              raise SystemExit("Whop is not fully armed in owner-console health")
+          PY

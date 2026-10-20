@@ -67,8 +67,10 @@ The current Worker renew page consumes the USD annual/monthly env vars; do not i
 env names unless the Worker is changed to read them.
 
 Then any push to `main` (or a manual deploy run) arms it. Verify in the owner console →
-health → `pipeline.armed.whop: true`, and send Whop's **test event**: it must answer 200
-`ignored: test` and grant nothing.
+health → `pipeline.armed.whop: true`. The manual **ops-health** GitHub workflow performs
+the same authenticated read and prints only the version/armed booleans, so verification does
+not require moving `ADMIN_SECRET` out of GitHub. Send Whop's **test event** only after that
+check: a ping/test payload must answer 200 `ignored: test` and grant nothing.
 
 ## How matching and money safety work (so support can answer questions)
 
