@@ -217,7 +217,7 @@ def post_leads(origin, secret, leads):
             origin.rstrip("/") + "/api/leads/ingest",
             data=json.dumps({"leads": chunk}).encode(),
             headers={"Content-Type": "application/json", "x-tapstall-admin": secret,
-                     "x-confirm": "yes", "User-Agent": "tapstall-lead-hunt/1.0"})
+                     "x-tapstall-confirm": "1", "User-Agent": "tapstall-lead-hunt/1.0"})
         with urllib.request.urlopen(req, timeout=30) as r:
             res = json.loads(r.read())
         for k, v in (res.get("counts") or {}).items():

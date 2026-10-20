@@ -11,7 +11,7 @@ NAME="${2:?seller full name required}"
 PCT="${3:-30}"
 : "${ADMIN_SECRET:?set ADMIN_SECRET}"
 curl -s -m 30 -X POST "$ORIGIN/ops/api/sellers" \
-  -H "x-tapstall-admin: $ADMIN_SECRET" -H "x-confirm: yes" -H 'Content-Type: application/json' \
+  -H "x-tapstall-admin: $ADMIN_SECRET" -H "x-tapstall-confirm: 1" -H 'Content-Type: application/json' \
   -d "$(printf '{"action":"register","code":"%s","name":"%s","commission_pct":%s}' "$CODE" "$NAME" "$PCT")" \
   | python3 -c 'import sys,json
 d=json.load(sys.stdin)

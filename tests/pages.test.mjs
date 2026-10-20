@@ -162,6 +162,8 @@ test('the quota redesign stays wired: indexed cron, one-write orders, zero-KV me
   const admin = page('admin');
   assert.match(admin, /S\.justIn = 1/, 'a fresh sign-in is marked so the first dashboard load may retry');
   assert.match(admin, /\(authed \|\| S\.justIn\) && S\.loadRetry < 2/, 'and the cookie-landing retry applies to that first load, not only to a dashboard already on screen');
+  const hunt = readFileSync(join(root, 'scripts/lead_hunt.py'), 'utf8');
+  assert.match(hunt, /"x-tapstall-confirm": "1"/, 'the lead hunter sends the confirm header the Worker actually reads (the retired x-confirm spelling 403s at ingest)');
   const quota = readFileSync(join(root, 'scripts/quota.sh'), 'utf8');
   assert.match(quota, /kvOperationsAdaptiveGroups/, 'quota measurement reads GraphQL counters');
   assert.match(quota, /--inventory/, 'the KV-spending inventory is opt-in and says so');
