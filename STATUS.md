@@ -61,6 +61,26 @@ sender: a value post with its branded card and a native video post are on
 the house Bluesky feed, with the next cadence items waiting on the grid.
 Deploy run `39468840161`; 357 tests.
 
+## v1.5.1–v1.5.2 (deployed 2026-10-20): who the studio may post to
+
+Owner clarified the mesh: **(a)** company accounts and **(b)** seller
+accounts are posting surfaces; **(c)** operators/tenants are never posted to
+by the studio — Tapstall is not a content agency for its tenants. That is
+now policy data (`CONTENT_STUDIO_POLICY`) on top of the registry rules that
+already refuse an operator identity outright. Link policy follows the same
+split and is applied when a plan becomes posts *and* to anything already
+queued: owner promos may carry the actual URL; seller promos carry no link
+ever and end “Link in bio.”; value posts are native (their citation stays
+internal provenance, not a naked URL in the post). Scheduling became real
+for direct rails: a 20-minute press-only cron flushes due items near their
+40-minute grid times (the 6-hourly sweep still owns terms/dispatch/digest),
+the queue merge no longer discards an item for being overdue before the
+sender saw it, and motion is a cadence (first slot every third day), not a
+hash lottery. Verified autonomously at the 19:45Z tick: owner queue composed
+2 value stills (no URLs) + 1 promo with the /onboard URL; the seller queue's
+promo reads “Link in bio.” with an empty link field. Deploy runs
+`39479839267` (v1.5.1) and `39483958127` (v1.5.2).
+
 ## Login recovery (2026-10-20, after v1.3.0)
 
 Owner reported both UIs looping to sign-in. Server-side login was proven first
