@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20128%20128%22%20aria-hidden%3D%22true%22%3E%3Crect%20x%3D%224%22%20y%3D%224%22%20width%3D%22120%22%20height%3D%22120%22%20rx%3D%2228%22%20fill%3D%22%230B5B34%22%2F%3E%3Cpath%20d%3D%22M24%2052%20L40%2028%20H88%20L104%2052%20Z%22%20fill%3D%22%23FFB01E%22%2F%3E%3Ccircle%20cx%3D%2229%22%20cy%3D%2252%22%20r%3D%227.5%22%20fill%3D%22%23FFB01E%22%2F%3E%3Ccircle%20cx%3D%2246.5%22%20cy%3D%2252%22%20r%3D%227.5%22%20fill%3D%22%23FFFFFF%22%2F%3E%3Ccircle%20cx%3D%2264%22%20cy%3D%2252%22%20r%3D%227.5%22%20fill%3D%22%23FFB01E%22%2F%3E%3Ccircle%20cx%3D%2281.5%22%20cy%3D%2252%22%20r%3D%227.5%22%20fill%3D%22%23FFFFFF%22%2F%3E%3Ccircle%20cx%3D%2299%22%20cy%3D%2252%22%20r%3D%227.5%22%20fill%3D%22%23FFB01E%22%2F%3E%3Crect%20x%3D%2228%22%20y%3D%2254%22%20width%3D%227%22%20height%3D%2238%22%20rx%3D%223%22%20fill%3D%22%23E8F7EF%22%2F%3E%3Crect%20x%3D%2293%22%20y%3D%2254%22%20width%3D%227%22%20height%3D%2238%22%20rx%3D%223%22%20fill%3D%22%23E8F7EF%22%2F%3E%3Crect%20x%3D%2220%22%20y%3D%2292%22%20width%3D%2288%22%20height%3D%2210%22%20rx%3D%225%22%20fill%3D%22%23FFFFFF%22%2F%3E%3Ccircle%20cx%3D%2264%22%20cy%3D%2273%22%20r%3D%2212%22%20fill%3D%22none%22%20stroke%3D%22%23FFFFFF%22%20stroke-width%3D%226%22%2F%3E%3Ccircle%20cx%3D%2264%22%20cy%3D%2273%22%20r%3D%224.5%22%20fill%3D%22%23FFB01E%22%2F%3E%3C%2Fsvg%3E">
 <!--@SEO@-->
 <title>Tapstall Store</title>
 <meta name="theme-color" content="#0b0f14">
@@ -111,6 +112,76 @@ ol.steps li{margin:.25rem 0}
 .badge{display:inline-block;font-size:.7rem;background:#e8f7ef;color:#0b5b34;border:1px solid #bfe6d0;border-radius:999px;padding:.15rem .5rem;margin-top:.5rem}
 .warn{background:#fff0f1;border:1px solid #f3c3c9;color:#8a1524;border-radius:10px;padding:.5rem .6rem;font-size:.78rem;margin-top:.6rem;text-align:left}
 @media (prefers-reduced-motion:reduce){.sheet{transition:none}}
+
+/* ---- v1.4 professional storefront skin -------------------------------------
+ * Same one tested checkout underneath; this layer is presentation only:
+ * a wider responsive shelf, a proper product-media treatment, a sticky
+ * browse toolbar, a floating cart bar and template-specific rhythms. */
+:root{--radius:20px;--card-shadow:0 1px 2px rgba(16,24,32,.05),0 14px 34px -24px rgba(16,24,32,.28)}
+body{background:linear-gradient(180deg,#eef2f5 0,#f7f9fa 22rem,#f4f6f8 100%)}
+.wrap{max-width:76rem;padding:0 clamp(.75rem,3vw,1.5rem) 7.5rem}
+header{margin:0 calc(clamp(.75rem,3vw,1.5rem) * -1);padding:1rem clamp(1rem,3vw,1.5rem)}
+header .brand{max-width:73rem;margin:0 auto}
+.logo,.avatarFallback{width:52px;height:52px;border-radius:16px;flex:0 0 auto}
+.logo{border:2px solid rgba(255,255,255,.28);box-shadow:0 4px 16px rgba(0,0,0,.22)}
+.avatarFallback{display:flex;align-items:center;justify-content:center;background:var(--accent);color:var(--on-accent);font-size:1.35rem;font-weight:800;box-shadow:0 4px 16px rgba(0,0,0,.22)}
+h1{font-size:clamp(1.12rem,3vw,1.45rem);letter-spacing:-.015em}
+.hero{margin:0 calc(clamp(.75rem,3vw,1.5rem) * -1);min-height:15rem;border-radius:0 0 30px 30px;overflow:hidden}
+.hero-in{width:100%;max-width:73rem;margin:0 auto;padding:2rem clamp(1rem,3vw,1.5rem)}
+.hero-title{font-size:clamp(2rem,6vw,3.5rem);letter-spacing:-.035em}
+.hero-actions{display:flex;gap:.6rem;flex-wrap:wrap;margin-top:1rem}
+.hero-cta,.hero-wa{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:.72rem 1.05rem;font-weight:800;font-size:.9rem;text-decoration:none}
+.hero-cta{background:#fff;color:#101418;box-shadow:0 10px 26px -14px rgba(0,0,0,.55)}
+.hero-wa{background:#128c4a;color:#fff}
+.service-strip{display:flex;gap:.5rem;flex-wrap:wrap;margin:.85rem 0 0}
+.service-strip span{display:inline-flex;align-items:center;gap:.35rem;background:#fff;border:1px solid #e3eaf0;border-radius:999px;padding:.42rem .65rem;font-size:.76rem;font-weight:700;color:#42566a;box-shadow:0 1px 8px rgba(16,24,32,.035)}
+.service-strip b{color:var(--accent-dark)}
+.toolbar{position:sticky;top:5.4rem;z-index:4;margin:.9rem 0 .2rem;padding:.8rem .85rem .65rem;background:rgba(255,255,255,.94);backdrop-filter:blur(12px);border:1px solid #e3eaf0;border-radius:20px;box-shadow:0 12px 30px -24px rgba(16,24,32,.35)}
+.section-head{display:flex;justify-content:space-between;align-items:flex-end;gap:1rem}
+.section-head h2{font-size:clamp(1.25rem,3vw,1.7rem);letter-spacing:-.025em;margin:0}
+.section-head p{margin:.15rem 0 0;color:#65788b;font-size:.84rem}
+.itemCount{white-space:nowrap;background:var(--accent-soft);color:var(--accent-dark);border-radius:999px;padding:.32rem .6rem;font-size:.76rem;font-weight:800}
+.tools{padding:.65rem 0 0}
+.tools input{padding:.72rem 1rem;border-color:#dbe5ed;background:#f8fafc}
+.cats{padding:.65rem 0 .1rem}
+.cat{padding:.48rem .85rem;font-weight:700;cursor:pointer}
+.cat.on{box-shadow:0 8px 18px -12px rgba(16,24,32,.55)}
+.grid{gap:.85rem;padding:.85rem 0}
+.card{border-radius:var(--radius);box-shadow:var(--card-shadow);transition:transform .18s ease,box-shadow .18s ease}
+@media (hover:hover){.card:hover{transform:translateY(-3px);box-shadow:0 2px 4px rgba(16,24,32,.05),0 22px 42px -26px rgba(16,24,32,.38)}}
+.media{position:relative;aspect-ratio:4/3;background:#eef2f6;overflow:hidden}
+.card .media img,.card .media .noimg{width:100%;height:100%}
+.card .noimg{display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 25% 20%,rgba(255,255,255,.95),transparent 34%),linear-gradient(135deg,var(--accent-soft),#eef2f6)}
+.noimg span{font-size:2.3rem;font-weight:800;letter-spacing:-.04em;color:var(--accent-dark);opacity:.24}
+.pop{position:absolute;top:.6rem;left:.6rem;background:rgba(255,255,255,.96);box-shadow:0 6px 18px -10px rgba(16,24,32,.5)}
+.soldflag{position:absolute;top:.6rem;right:.6rem;background:#8a1524;color:#fff;border-radius:999px;padding:.18rem .5rem;font-size:.66rem;font-weight:800;text-transform:uppercase;letter-spacing:.05em}
+.cb{padding:.78rem .82rem .85rem;gap:.28rem}
+.cn{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:2.5em}
+.cd{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;max-height:none}
+.price{font-size:1.02rem;letter-spacing:-.01em}
+.add{padding:.58rem .9rem;min-height:2.45rem;box-shadow:0 10px 20px -14px rgba(16,24,32,.65);cursor:pointer}
+.add:active{transform:scale(.97)}
+.sheetImg{width:100%;max-height:15rem;object-fit:cover;border-radius:16px;margin:.2rem 0 .7rem;background:#eef2f6}
+.bar{left:50%;right:auto;transform:translateX(-50%);width:min(46rem,calc(100% - 1.5rem));bottom:.85rem;border:1px solid #e1eaf1;border-radius:20px;box-shadow:0 22px 48px -24px rgba(16,24,32,.5);padding:.75rem .85rem calc(.75rem + env(safe-area-inset-bottom))}
+.waFloat{bottom:6.4rem}
+.skel{border-radius:var(--radius);min-height:15rem;background:linear-gradient(100deg,#e9eef3 40%,#f7fafc 50%,#e9eef3 60%);background-size:200% 100%;animation:sks 1.25s infinite}
+@keyframes sks{to{background-position:-200% 0}}
+.foot{display:flex;flex-direction:column;align-items:center;gap:.45rem}
+.foot .footmark{display:inline-flex;align-items:center;gap:.45rem;font-weight:700;color:#42566a}
+@media (min-width:640px){body.layout-grid .grid{grid-template-columns:repeat(3,1fr)}body.layout-compact .grid{grid-template-columns:repeat(4,1fr)}}
+@media (min-width:1024px){body.layout-grid .grid{grid-template-columns:repeat(4,1fr)}body.layout-compact .grid{grid-template-columns:repeat(5,1fr)}}
+@media (min-width:700px){.sheet{left:50%;right:auto;width:min(44rem,calc(100% - 2rem));bottom:1rem;border-radius:22px;transform:translate(-50%,110%)}.sheet.on{transform:translate(-50%,0)}}
+body.layout-list .grid{max-width:56rem;margin:0 auto;width:100%}
+body.layout-list .media{width:8.5rem;flex:0 0 8.5rem;aspect-ratio:auto}
+body.layout-list .card img,body.layout-list .card .noimg{width:100%;height:100%;min-height:0;flex:none}
+body.tpl-fashion .media{aspect-ratio:3/4}
+body.tpl-fashion .hero-title{font-family:Georgia,'Times New Roman',serif;font-weight:700}
+body.tpl-food .hero{min-height:16rem}
+body.tpl-electronics .price{font-family:ui-monospace,Menlo,monospace}
+body.tpl-services.layout-list .card{border-left:5px solid var(--accent)}
+body.tpl-grocery.layout-compact .media{aspect-ratio:16/10}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){.card{transition:none}.skel{animation:none}}
 </style>
 </head>
 <body>
@@ -120,11 +191,12 @@ ol.steps li{margin:.25rem 0}
       <div class="kicker" id="heroKicker"></div>
       <div class="hero-title" id="heroTitle"></div>
       <p id="heroText"></p>
+      <div class="hero-actions"><a class="hero-cta" href="#browse">Browse items</a><a class="hero-wa" id="heroWa" href="#" hidden>WhatsApp us</a></div>
     </div>
   </div>
   <header>
     <div class="brand">
-      <img class="logo" id="logo" alt="" hidden>
+      <img class="logo" id="logo" alt="" hidden><div class="avatarFallback" id="avatarFallback" aria-hidden="true">S</div>
       <div style="min-width:0">
         <h1 id="sname">Store</h1>
         <p class="tag" id="stag"></p>
@@ -145,14 +217,19 @@ ol.steps li{margin:.25rem 0}
   <!-- The buyer's own door, kept on their device for as long as one is valid. It
        offers a link; it never claims the order is still owed anything. -->
   <div class="pfbar" id="pfbar" hidden></div>
+  <div class="service-strip" aria-label="How ordering works"><span><b>✓</b> Order on WhatsApp</span><span><b>✓</b> Exact amount to pay</span><span id="serviceMode"><b>✓</b> Pickup or delivery</span></div>
   <div class="welcome" id="welcome" hidden></div>
-  <div class="tools" id="tools" hidden><input id="q" type="search" autocomplete="off" aria-label="Search this shop" placeholder="Search this shop…"></div>
-  <div class="cats" id="cats" hidden></div>
-  <div class="grid" id="grid"></div>
+  <section class="toolbar" id="browse">
+    <div class="section-head"><div><h2 id="browseTitle">Browse products</h2><p id="browseSub">Tap an item to add it to your order.</p></div><span class="itemCount" id="itemCount">Loading…</span></div>
+    <div class="tools" id="tools" hidden><input id="q" type="search" autocomplete="off" aria-label="Search this shop" placeholder="Search this shop…"></div>
+    <div class="cats" id="cats" hidden></div>
+  </section>
+  <div class="grid" id="grid" aria-live="polite"><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>
   <div class="empty" id="empty" hidden></div>
   <section class="about" id="about" hidden><h2 id="aboutTitle">About this shop</h2><p id="aboutText"></p></section>
 
   <div class="foot">
+    <span class="footmark"><svg width="22" height="22" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" aria-hidden="true"><rect x="4" y="4" width="120" height="120" rx="28" fill="#0B5B34"/><path d="M24 52 L40 28 H88 L104 52 Z" fill="#FFB01E"/><circle cx="29" cy="52" r="7.5" fill="#FFB01E"/><circle cx="46.5" cy="52" r="7.5" fill="#FFFFFF"/><circle cx="64" cy="52" r="7.5" fill="#FFB01E"/><circle cx="81.5" cy="52" r="7.5" fill="#FFFFFF"/><circle cx="99" cy="52" r="7.5" fill="#FFB01E"/><rect x="28" y="54" width="7" height="38" rx="3" fill="#E8F7EF"/><rect x="93" y="54" width="7" height="38" rx="3" fill="#E8F7EF"/><rect x="20" y="92" width="88" height="10" rx="5" fill="#FFFFFF"/><circle cx="64" cy="73" r="12" fill="none" stroke="#FFFFFF" stroke-width="6"/><circle cx="64" cy="73" r="4.5" fill="#FFB01E"/></svg><span>Tapstall</span></span>
     <span id="powered"></span>
   </div>
 </div>
@@ -257,7 +334,16 @@ var TERM = /*__TAPSTALL_TERM__*/null;
   document.title = CFG.shop_name + ' — order on WhatsApp';
   $('sname').textContent = CFG.shop_name;
   if (CFG.tagline) $('stag').textContent = CFG.tagline;
-  if (CFG.logo) { var L = $('logo'); L.src = CFG.logo; L.hidden = false; }
+  var av = $('avatarFallback');
+  if (av) av.textContent = String(CFG.shop_name || 'S').trim().charAt(0).toUpperCase() || 'S';
+  if (CFG.logo) {
+    var L = $('logo'); L.src = CFG.logo; L.hidden = false; if (av) av.hidden = true;
+    var fav = document.querySelector('link[rel="icon"]'); if (fav) fav.href = CFG.logo;
+  }
+  var browseTitles = { food: 'Browse the menu', fashion: 'Shop the collection', grocery: 'Everyday essentials', electronics: 'Shop devices & accessories', home: 'Shop home & handmade', services: 'Book a service', general: 'Browse products' };
+  if ($('browseTitle')) $('browseTitle').textContent = browseTitles[D.template] || browseTitles.general;
+  if ($('browseSub')) $('browseSub').textContent = D.template === 'services' ? 'Choose a service, send the order, and the shop confirms on WhatsApp.' : 'Tap an item to add it to your order.';
+  if ($('serviceMode')) $('serviceMode').innerHTML = '<b>✓</b> ' + ((Number(CFG.delivery_fee) || Number(CFG.free_over)) ? 'Pickup or delivery' : 'Pickup available');
   // The shop's own clock, not the buyer's: `open` is computed on the server from
   // the store's week, so a phone in another zone still reads the truth.
   if (CFG.hours || (CFG.open && CFG.open.known)) {
@@ -289,6 +375,7 @@ var TERM = /*__TAPSTALL_TERM__*/null;
   if (D.whatsapp_button && CFG.whatsapp) {
     var wa = 'https://wa.me/' + String(CFG.whatsapp).replace(/\D/g, '') + '?text=' + encodeURIComponent('Hi ' + CFG.shop_name + ', I have a question about your shop.');
     $('waChip').href = wa; $('waChip').hidden = false;
+    if ($('heroWa')) { $('heroWa').href = wa; $('heroWa').hidden = false; }
     $('waFloat').href = wa; $('waFloat').hidden = false;
   }
   if (CFG.closed) note('Shop closed right now — you can still order and we will confirm when we open.');
@@ -314,9 +401,11 @@ var TERM = /*__TAPSTALL_TERM__*/null;
       $('empty').hidden = false;
       $('empty').innerHTML = '<b>' + esc(D.empty_title) + '.</b><br>' + (CFG.feed_error ? '(' + CFG.feed_error + ')' : '') +
         '<br><span style="font-size:.8rem">Owner: share your Google Sheet as “Anyone with the link”, then re-open this page — it refreshes itself in ~2 minutes.</span>';
-      g.hidden = true; return;
+      g.hidden = true; if ($('browse')) $('browse').hidden = true; if ($('itemCount')) $('itemCount').textContent = '0 items'; return;
     }
     g.hidden = false;
+    if ($('browse')) $('browse').hidden = false;
+    if ($('itemCount')) $('itemCount').textContent = PRODUCTS.length + (PRODUCTS.length === 1 ? ' item' : ' items');
     if (D.search) {
       $('tools').hidden = false;
       $('q').oninput = function () { query = this.value.trim().toLowerCase(); renderCards(); };
@@ -351,25 +440,26 @@ var TERM = /*__TAPSTALL_TERM__*/null;
     else if (D.sort === 'price_low') list.sort(function (a, b) { return (Number(a.price) || 0) - (Number(b.price) || 0); });
     else if (D.sort === 'price_high') list.sort(function (a, b) { return (Number(b.price) || 0) - (Number(a.price) || 0); });
     else if (D.sort === 'name') list.sort(function (a, b) { return String(a.name || '').localeCompare(String(b.name || '')); });
+    if ($('itemCount')) $('itemCount').textContent = query || activeCat !== 'all' ? (list.length + ' shown') : (PRODUCTS.length + (PRODUCTS.length === 1 ? ' item' : ' items'));
     $('empty').hidden = list.length > 0;
     if (!list.length) $('empty').innerHTML = '<b>Nothing matches that here.</b><br><span style="font-size:.82rem">Try another word, or clear the search to see the whole shop.</span>';
     $('grid').innerHTML = list.map(function (p, i) {
       var idx = PRODUCTS.indexOf(p);
-      var img = p.img ? '<img loading="lazy" decoding="async" src="' + esc(p.img) + '" alt="' + esc(p.name) + '">' : '<div class="noimg"></div>';
+      var img = p.img ? '<img loading="lazy" decoding="async" src="' + esc(p.img) + '" alt="' + esc(p.name) + '">' : '<div class="noimg"><span>' + esc(String(p.name || '?').trim().charAt(0).toUpperCase()) + '</span></div>';
       var soldOut = p.available === false;
+      var media = '<div class="media">' + img + (p.popular ? '<span class="pop">★ ' + esc(D.popular_label) + '</span>' : '') + (soldOut ? '<span class="soldflag">Sold out</span>' : '') + '</div>';
       var inCart = cart.filter(function (c) { return c.id === p.id; }).length;
       var cta = soldOut ? '—' : ((p.opts.length || p.addons.length) ? 'Choose' : (inCart ? D.cta + ' +' : D.cta));
-      return '<div class="card">' + img + '<div class="cb">' +
+      return '<article class="card">' + media + '<div class="cb">' +
         (p.cat ? '<div class="ck">' + esc(p.cat) + '</div>' : '') +
         '<div class="cn">' + esc(p.name) + '</div>' +
-        (p.popular ? '<span class="pop">★ ' + esc(D.popular_label) + '</span>' : '') +
         (D.descriptions && p.desc ? '<div class="cd">' + esc(p.desc) + '</div>' : '') +
         '<div class="row"><div><div class="price">' + money(p.price) + '</div>' +
         (ZIG ? '<div class="alt">' + alt(p.price) + '</div>' : '') +
         (soldOut ? '<div class="soldout">sold out</div>' : '') +
         '</div>' +
         '<button class="add" data-i="' + idx + '"' + (soldOut ? ' disabled' : '') + '>' + esc(cta) + '</button>' +
-        '</div></div></div>';
+        '</div></div></article>';
     }).join('');
     Array.prototype.forEach.call($('grid').querySelectorAll('.add'), function (b) {
       b.onclick = function () { openItem(PRODUCTS[Number(b.getAttribute('data-i'))]); };
@@ -385,6 +475,7 @@ var TERM = /*__TAPSTALL_TERM__*/null;
     p.opts.forEach(function (o) { var c = norm(o.choices[0]); draft.opts[o.name] = { label: c.label, up: c.up }; });
     $('shTitle').textContent = p.name;
     var h = '';
+    if (p.img) h += '<img class="sheetImg" src="' + esc(p.img) + '" alt="' + esc(p.name) + '">';
     if (p.desc) h += '<p style="font-size:.85rem;color:#54677a;margin:.2rem 0 .5rem">' + esc(p.desc) + '</p>';
     p.opts.forEach(function (o, oi) {
       h += '<h4>' + esc(o.name) + '</h4><div class="opts" data-oi="' + oi + '">' + o.choices.map(function (c, ci) {

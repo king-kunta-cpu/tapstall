@@ -129,6 +129,28 @@ test('the design surfaces all speak the same template list', () => {
   assert.match(worker, /templates: STOREFRONT_TEMPLATES/, 'the dashboard API carries the catalogue');
 });
 
+test('the brand is on every surface, and the storefront wears the professional shelf', () => {
+  for (const name of PAGES.concat(['guide-whatsapp-shop-payments', 'guide-payment-reference-matching'])) {
+    assert.match(page(name), /<link rel="icon" type="image\/svg\+xml" href="data:image\/svg\+xml,/, name + ' has no Tapstall favicon');
+  }
+  for (const rel of ['public/onboard.html', 'public/a.html', 'public/guide/whatsapp-shop-payments.html']) {
+    assert.match(readFileSync(join(root, 'pages', rel), 'utf8'), /rel="icon"/, rel + ' (Pages mirror handoff) has no favicon');
+  }
+  for (const f of ['brand/favicon.svg', 'brand/favicon.ico', 'brand/apple-touch-icon.png', 'brand/icon-192.png', 'brand/icon-512.png',
+                   'brand/og-banner.png', 'brand/banner-1600x900.png', 'brand/banner-square.png',
+                   'pages/public/brand/og-banner.png', 'pages/public/brand/apple-touch-icon.png']) {
+    assert.ok(existsSync(join(root, f)), 'missing brand asset ' + f);
+  }
+  const og = readFileSync(join(root, 'brand/og-banner.png'));
+  assert.equal(og.readUInt32BE(16), 1200, 'OG banner is 1200 wide');
+  assert.equal(og.readUInt32BE(20), 630, 'OG banner is 630 tall');
+  const store = page('store');
+  for (const needle of ['class="toolbar" id="browse"', 'class="service-strip"', 'id="avatarFallback"', 'class="media"', 'class="soldflag"', 'class="skel"', 'id="browseTitle"', 'id="itemCount"', 'class="footmark"']) {
+    assert.ok(store.includes(needle), 'professional storefront is missing ' + needle);
+  }
+  assert.match(store, /@media \(min-width:1024px\)\{body\.layout-grid \.grid\{grid-template-columns:repeat\(4,1fr\)\}/, 'the shelf widens on desktop instead of staying a phone column');
+});
+
 test('the quota redesign stays wired: indexed cron, one-write orders, zero-KV measurement', () => {
   assert.match(worker, /metadata: storeMeta\(st\)/, 'a store write carries its cron/index row in the same write');
   assert.match(worker, /storeMetaAction\(k\.metadata/, 'cron judges shops from list metadata before reading documents');
@@ -233,8 +255,9 @@ test('the storefront head is filled by the Worker, and the pair agree', () => {
   assert.match(worker, /replace\('<!--@SEO@-->'/, 'the Worker replaces that exact marker');
   assert.match(worker, /if \(!out\.includes\('<!--@SEO@-->'\)\) return out;/, 'and leaves a page without one exactly as it found it');
   assert.match(worker, /<title>Tapstall Store<\/title>', ''\)/, 'it removes the fallback, so there is one title and not two');
-  for (const name of ['store', 'index', 'fees']) {
-    assert.ok(!/<meta property="og:/.test(page(name)), name + ' hard-codes an og: tag that every store would share');
+  assert.ok(!/<meta property="og:/.test(page('store')), 'store hard-codes an og: tag that every store would share — its head is per-shop, from the Worker');
+  for (const name of ['index', 'fees']) {
+    assert.match(page(name), /<meta property="og:image" content="https:\/\/king-kunta-cpu\.github\.io\/tapstall\/brand\/og-banner\.png">/, name + ' is a platform page, so it carries the one platform banner');
   }
   // robots.txt says these are private; the header is the version a bot cannot ignore
   assert.match(worker, /const NOINDEX = \{ 'x-robots-tag'|const NOINDEX = \{ 'X-Robots-Tag': 'noindex, nofollow' \};/, 'the Worker holds one noindex constant');
@@ -426,7 +449,7 @@ test('a merchant can drop a picture, browse for one, or paste a link — in both
   assert.ok(/fetch\('\/api\/image\?handle='/.test(a), 'it posts to the store that asked for it');
   assert.ok(/'x-tapstall-confirm': '1'/.test(a), 'with the confirmation header a cross-site form cannot set');
   // The bytes never become the setting. Only a path does.
-  assert.ok(!/data:image/.test(a), 'no base64 picture is ever built into a save payload');
+  assert.ok(!/data:image\/(?:png|jpe?g|gif|webp);base64|readAsDataURL/.test(a), 'no base64 picture is ever built into a save payload (the SVG favicon in the head is not an upload)');
   assert.ok(a.includes("apply(o.j.ref)"), 'what comes back from the upload is the path, and that is what is applied');
   assert.ok(/setEdit\(box\.getAttribute\('data-id'\), \{ img: v \|\| '' \}\)/.test(a), 'a row records the path in the same draft the price uses');
   // Client and server have to agree on the ceiling, or a squeezed file still gets refused.

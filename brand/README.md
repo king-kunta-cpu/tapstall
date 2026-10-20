@@ -18,6 +18,18 @@ shape. Files:
 | `tapstall-avatar.png` (1024²) | Whop / social profile picture |
 | `whop-cover.png` (1600×900) | Whop product cover / link preview |
 | `social-card.png` (1080²) | Square social post base |
+| `banner-1600x900.png` | Wide banner (README hero, Whop cover twin) |
+| `banner-square.png` | Square banner (social post twin) |
+| `og-banner.png` (1200×630) | Open Graph / Twitter card image for public pages |
+| `favicon.svg` / `favicon.ico` | Browser tab icon (every page inlines the SVG as a data URI) |
+| `favicon-16/32/48.png`, `apple-touch-icon.png` (180²), `icon-192.png`, `icon-512.png` | PNG icon set, generated from the avatar tile |
+
+`pages/public/brand/` mirrors these files for the GitHub Pages host, which is
+where public pages point their `og:image`/apple-touch-icon URLs. Product pages
+themselves stay single-file: the favicon is an inlined SVG data URI and the
+lockups are inline SVG, so branding costs no extra request and no KV read.
+A shop with its own logo gets that logo as its storefront favicon; the mark
+above is the platform fallback.
 
 ## Palette
 

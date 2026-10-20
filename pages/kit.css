@@ -33,6 +33,10 @@
   --shadow: 0 1px 2px rgba(16, 20, 24, .04), 0 8px 24px -18px rgba(16, 20, 24, .35);
 }
 * { box-sizing: border-box }
+.brandlock { display: inline-flex; align-items: center; gap: .55rem; min-width: 0 }
+.brandlock svg { flex: 0 0 auto; border-radius: 9px; box-shadow: 0 1px 8px rgba(0,0,0,.18) }
+.brandlock .bt { display:flex; flex-direction:column; line-height:1.05; min-width:0 }
+.brandlock .bt small { font-size:.62rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; opacity:.72 }
 html { -webkit-text-size-adjust: 100% }
 body {
   margin: 0;

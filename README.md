@@ -1,5 +1,7 @@
 # Tapstall — a WhatsApp order desk for markets a global platform will not serve
 
+![Tapstall — WhatsApp orders, paid properly](brand/banner-1600x900.png)
+
 Merchants on WhatsApp lose money in the last five minutes before the money
 moves: buyers send screenshots instead of payments, mobile-money rails cost
 3–5% and nobody passes that on, and a spreadsheet of "pending" orders is the

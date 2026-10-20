@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 128" role="img" aria-label="Tapstall">
+  <g>
+    <rect x="4" y="4" width="120" height="120" rx="28" fill="#0B5B34"/>
+    <path d="M24 52 L40 28 H88 L104 52 Z" fill="#FFB01E"/>
+    <circle cx="29" cy="52" r="7.5" fill="#FFB01E"/><circle cx="46.5" cy="52" r="7.5" fill="#FFFFFF"/>
+    <circle cx="64" cy="52" r="7.5" fill="#FFB01E"/><circle cx="81.5" cy="52" r="7.5" fill="#FFFFFF"/>
+    <circle cx="99" cy="52" r="7.5" fill="#FFB01E"/>
+    <rect x="28" y="54" width="7" height="38" rx="3" fill="#E8F7EF"/>
+    <rect x="93" y="54" width="7" height="38" rx="3" fill="#E8F7EF"/>
+    <rect x="20" y="92" width="88" height="10" rx="5" fill="#FFFFFF"/>
+    <circle cx="64" cy="73" r="12" fill="none" stroke="#FFFFFF" stroke-width="6"/>
+    <circle cx="64" cy="73" r="4.5" fill="#FFB01E"/>
+  </g>
+  <text x="148" y="72" font-family="-apple-system,'Segoe UI',Roboto,'Helvetica Neue',sans-serif" font-size="52" font-weight="800" letter-spacing="-1" fill="#FFFFFF">Tapstall</text>
+  <text x="150" y="102" font-family="-apple-system,'Segoe UI',Roboto,'Helvetica Neue',sans-serif" font-size="19" fill="#65788B">WhatsApp orders, paid properly.</text>
+</svg>
