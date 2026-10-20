@@ -55,3 +55,14 @@ the tagline is **"WhatsApp orders, paid properly."** Prices are always stated wh
 - Don't recolour the awning; marigold is reserved for it and for the one call-to-action per surface.
 - Seller/press material uses these files as-is — regenerate sizes from the SVGs rather than
   screenshotting the PNGs.
+
+
+## Social content library (v1.5)
+
+`cards/` holds the eight 1200×630 pillar cards the press attaches to social
+posts (exact-amount, shop-math, till-tips, buyer-trust, menu-craft, books,
+promo, launch); `motion/` holds the exact-amount loop as GIF + MP4. Both are
+rendered by `scripts/make_content_cards.py` from this mark and palette and
+mirrored under `pages/public/brand/`, which is where the Worker fetches them
+at send time. Regenerate after any brand change; never screenshot a card to
+make the next one.

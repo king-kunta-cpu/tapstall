@@ -37,6 +37,30 @@ and a branded footer. Verified in a DOM against production (Mama Too: 4
 cards, zero page errors) and in the 7-template preview gallery. Deploy run
 `39456000995`; live `/__ping` reports 1.4.0. 357 tests.
 
+## v1.5.0 (deployed 2026-10-20): the Till-to-Feed content studio
+
+Owner instruction: every social post/send (email excepted) carries text plus
+branded media, value content outnumbers promotion 2:1, and the route is ours
+— not the STPi/hunta pattern. So content now generates **from the till
+outward**: six value pillars (Exact Amount, Shop Math, Till Tips, Buyer
+Trust, Menu Craft, Books) whose lines are written from Tapstall's own facts
+— the `RAILS` tariffs (one Shop Math line is computed live from the EcoCash
+USD pct+IMTT), the exact-amount fingerprint, shop menu/stock words for
+shop-fed beats, and the guides each line cites. `CONTENT_RATIO` is policy
+data ({value:2, promo:1}); company plans compose 2 value + 1 promo, and a
+shop plan only earns its promo when two value beats are already in it.
+Every queue item travels with media (`contentMediaFor`): the product's own
+photo for shop beats, otherwise its pillar card from the hosted library
+(`brand/cards/*.png`, rendered by `scripts/make_content_cards.py`), with the
+exact-amount MP4/GIF loop rotating in deterministically. The Bluesky direct
+sender uploads the image blob (or runs the video service flow and falls back
+to the poster card if refused — never bare text); Telegram sends photo/video
+with caption; Buffer attaches the same image. Email outreach stays plain
+text by design. Proved live on deploy day through the Worker's own press
+sender: a value post with its branded card and a native video post are on
+the house Bluesky feed, with the next cadence items waiting on the grid.
+Deploy run `39468840161`; 357 tests.
+
 ## Login recovery (2026-10-20, after v1.3.0)
 
 Owner reported both UIs looping to sign-in. Server-side login was proven first
