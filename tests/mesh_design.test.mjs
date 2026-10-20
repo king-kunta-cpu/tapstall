@@ -523,13 +523,13 @@ test('0.9.12 the login form asks once — a second time has a reason, and the sh
   const shop = read('pages/admin.html');
   assert.match(shop, /if \(!S\.handle\) return;\s*\/\/ a boot with no store name/,
     'a boot with nothing typed in asks the server nothing, so the login card is never greeted by an error');
-  assert.match(shop, /S\.loadRetry = 1;\s*setTimeout\(function \(\) \{ S\.loadRetry = 0; load\(\); \}, 1000\);/,
-    'one mid-session failure buys a single quiet retry before anyone is bounced');
+  assert.match(shop, /\(authed \|\| S\.justIn\) && S\.loadRetry < 2[\s\S]{0,900}S\.loadRetry\+\+;\s*setTimeout\(load, 1000\);/,
+    'a failure while the dashboard is open — or on the first load after sign-in — buys quiet retries before anyone is bounced');
   assert.match(shop, /stopped working mid-look/, 'and if it does bounce, the page says what happened and what did not');
   assert.match(shop, /q\('#fK'\)\.value = S\.handle;\s*\/\/ the store name they typed, kept; only the PIN is ever theirs/,
     'the store name they typed is re-filled — they re-enter a PIN, not their identity');
   const src = read('pages/src/admin.html');
-  assert.ok(src.indexOf('S.loadRetry') > src.indexOf('function load'), 'the retry lives in load(), which every refresher calls');
+  assert.ok(src.indexOf('S.loadRetry++') > src.indexOf('function load'), 'the retry lives in load(), which every refresher calls');
 });
 
 /* v1.0.0 — the tap is gone: the clock is the trigger, credentials are env-only, and the direct

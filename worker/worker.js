@@ -48,7 +48,7 @@ import {
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '1.3.0';
+const VERSION = '1.3.1';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
@@ -147,11 +147,25 @@ async function governedDelete(ns, key, priority) {
    use `tp_*`, `x-tapstall-*` and TAPSTALL template markers, or they are not talking to
    this platform. */
 function reqHeader(req, name) { return req.headers.get(name); }
-function cookieVal(req, name) {
+function cookieVals(req, name) {
+  // A browser can legitimately send two cookies with this name (an old one
+  // from a different path/host variant beside the fresh one), and it decides
+  // the order. Reading only the first made a correct sign-in answer
+  // "unauthorised" whenever the stale/empty copy won the race — so every
+  // candidate is collected and the auth doors try each signed one.
   const raw = req.headers.get('cookie') || '';
-  const m = raw.match(new RegExp('(?:^|;\s*)' + name + '=([^;]*)'));
-  return m && m[1] ? decodeURIComponent(m[1]) : '';
+  const out = [];
+  for (const part of raw.split(';')) {
+    const t = part.trim();
+    if (!t.startsWith(name + '=')) continue;
+    try {
+      const v = decodeURIComponent(t.slice(name.length + 1));
+      if (v && !out.includes(v)) out.push(v);
+    } catch (e) { /* a malformed copy cannot veto a good one */ }
+  }
+  return out;
 }
+function cookieVal(req, name) { return cookieVals(req, name)[0] || ''; }
 function killCookies(names) {
   return names.map((n) => n + '=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict; Secure');
 }
@@ -2853,8 +2867,9 @@ async function identify(req, env, handle) {
   handle = slug(String(handle || ''));
   const st = await getStore(env, handle);
   if (!st) return null;
-  const raw = cookieVal(req, 'tp_sess');
-  if (raw) {
+  const raws = cookieVals(req, 'tp_sess');
+  if (raws.length) {
+    for (const raw of raws) {
     const p = await verifyCap(env.ADMIN_SECRET || 'dev-secret', raw);
     // gen-rule: strict — deliberately not `capGenOk`. A cookie has a self-service replacement one
     // tap away (sign in again), so there is no buyer to strand and no cliff to soften; the time
@@ -2866,6 +2881,7 @@ async function identify(req, env, handle) {
     if (p && p.a === 'sess' && p.h === handle && String(p.g) === String(st.auth_gen || '0')) {
       await authClear(env, handle);
       return { via: 'sess', st, handle };
+    }
     }
     return { bad: true, st, handle };
   }
@@ -3988,10 +4004,13 @@ async function opsAuthed(req, env) {
   // gen-rule: platform — this door is bound to `ops_gen`, not to a store's `auth_gen`, and
   // `issueCap` demands `n` of an `ops` cap for exactly that reason: `g` here is a version string,
   // so a guard that only looked for `g` would have called any ops cap bound.
-  const raw = cookieVal(req, OPS_COOKIE);
-  if (!raw) return { anon: true };
-  const p = await verifyCap(env.ADMIN_SECRET || 'dev-secret', raw);
-  if (p && p.a === 'ops' && String(p.n) === String(await opsGen(env))) return { ok: true };
+  const raws = cookieVals(req, OPS_COOKIE);
+  if (!raws.length) return { anon: true };
+  const gen = String(await opsGen(env));
+  for (const raw of raws) {
+    const p = await verifyCap(env.ADMIN_SECRET || 'dev-secret', raw);
+    if (p && p.a === 'ops' && String(p.n) === gen) return { ok: true };
+  }
   return { bad: true };
 }
 

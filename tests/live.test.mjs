@@ -393,6 +393,14 @@ test('the dashboard needs a session: the code opens it, nothing else does', asyn
   assert.match(sc, /Secure/, 'and it is only ever sent over https');
   assert.match(sc, /Max-Age=43200/, 'and it dies after 12 hours');
   store.cookie = s.cookie;
+  // A browser may send a stale/empty copy of the cookie beside the fresh one
+  // (different path/host variant), in its own order. The first copy must not
+  // veto the signed one behind it — that read as "unauthorised" after a
+  // correct PIN in production.
+  const dupEmpty = await call('/api/admin?handle=mamatoe', { cookie: 'tp_sess=; ' + s.cookie });
+  assert.equal(dupEmpty.status, 200, 'an empty stale cookie in front does not hide the session: ' + dupEmpty.text);
+  const dupStale = await call('/api/admin?handle=mamatoe', { cookie: 'tp_sess=v1.9999999999.eyJhIjoic2VzcyJ9.deadbeef; ' + s.cookie });
+  assert.equal(dupStale.status, 200, 'and neither does a dead one: ' + dupStale.text);
   const replay = await call('/api/auth', { method: 'POST', body: { key: store.key, pin: '000000' } });
   assert.equal(replay.status, 401, 'a wrong PIN is refused');
   assert.equal(replay.json.error, 'Store name or PIN is wrong.');

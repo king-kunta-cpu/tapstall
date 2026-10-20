@@ -136,6 +136,10 @@ test('the quota redesign stays wired: indexed cron, one-write orders, zero-KV me
   assert.match(worker, /const SEQ_BLOCK = 50/, 'order numbers are block-leased, not incremented per order');
   assert.match(worker, /async function ledgerRowsAll/, 'owner state reads the order key space once, not once per shop');
   assert.match(worker, /quotaGate\('writes', force \? 'operator' : 'automation'\)/, 'feed snapshots are governed writes');
+  assert.match(worker, /function cookieVals/, 'auth doors try every same-name cookie a browser sends, not just the first');
+  const admin = page('admin');
+  assert.match(admin, /S\.justIn = 1/, 'a fresh sign-in is marked so the first dashboard load may retry');
+  assert.match(admin, /\(authed \|\| S\.justIn\) && S\.loadRetry < 2/, 'and the cookie-landing retry applies to that first load, not only to a dashboard already on screen');
   const quota = readFileSync(join(root, 'scripts/quota.sh'), 'utf8');
   assert.match(quota, /kvOperationsAdaptiveGroups/, 'quota measurement reads GraphQL counters');
   assert.match(quota, /--inventory/, 'the KV-spending inventory is opt-in and says so');
