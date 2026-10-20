@@ -23,6 +23,17 @@ stale-first duplicate headers), and the dashboard's cookie-landing retry now
 applies to the first load after sign-in, not only to a dashboard already on
 screen. 356 tests.
 
+Second follow-up **v1.3.2** (deploy run `39444918402`): the dashboard then
+opened *under* the sign-in card. Root cause was older than the login saga:
+`MDRAFT` (the menu draft) was read by `menuRows()` on the first load but
+never declared, so `renderShop()` threw after the app had been shown and
+`load()`'s catch put the login card back over it. `MDRAFT` is declared, and
+`load()` is sequence-guarded so a stale/retry answer cannot move the panels
+after a newer sign-in, and a render error after opening can never resurrect
+the sign-in card. Verified in a real DOM against production before and after
+(ReferenceError + both panels → login hidden, app shown, zero page errors,
+first sign-in). 356 tests.
+
 ## v1.3.0 (deployed 2026-10-20): the quota-first pipeline
 
 Owner instruction: redesign the entire pipeline to use the least quota while
