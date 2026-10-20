@@ -32,9 +32,13 @@ it again. Fixed in three parts:
 
 363 tests (new pins: no repeat inside the window, the mark ages out, clock
 slots stable across ticks, a missed slot never fires late, a throw is
-contained, pool depth and citation paths). Deploy run `39511456089` (worker +
-pages), live `/__ping` = `1.5.3`; `GMAIL_OWNER_APP_PASSWORD` and
-`PRESS_OWNER_BLUESKY_APP_PASSWORD` rotated on the Worker the same hour.
+contained, pool depth and citation paths). Deploy runs `39511456089` (the
+dedupe guard) and `39511887284` (fixed clock slots), both worker + pages, both
+successful; live `/__ping` = `1.5.3`. `GMAIL_OWNER_APP_PASSWORD` and
+`PRESS_OWNER_BLUESKY_APP_PASSWORD` were rotated on the Worker the same hour and
+verified by direct IMAP/SMTP and ATProto session login. Verified live: the
+23:05Z tick after the slot fix posted nothing (every slot for the UTC day had
+closed) where the previous three ticks had each repeated the same line.
 
 ## v1.4.0 (deployed 2026-10-20): brand everywhere, professional storefront shelf
 
