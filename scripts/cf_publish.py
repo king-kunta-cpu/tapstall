@@ -120,7 +120,7 @@ def main():
         "main_module": "worker.js",
         "triggers": {"crons": [CRON]},
         "bindings": bindings,
-        "observability": {"enabled": True, "head_sampling_rate": 1},
+        "observability": {"enabled": False, "head_sampling_rate": 0.01},
     }
 
     afiles = {}

@@ -17,4 +17,5 @@ id = "7dd531983a814ff5bb693598b93714d6"
 crons = ["15 6,12,18,0 * * *"]
 
 [observability]
-enabled = true
+# Quota-first: invocation logs are off; /__selftest + ops health are the witness.
+enabled = false

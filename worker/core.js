@@ -4,6 +4,106 @@
  * tests/core.test.mjs, so the tests run against shipped code, not a copy.
  */
 
+/* ------------------------------------------------------------ quota policy
+ * The free stack is not one budget, it is five, and they do not bind equally:
+ * 100,000 Worker requests and KV reads a day are roomy; 1,000 KV writes,
+ * deletes and lists are not. So the platform spends in that order — memory and
+ * reads first, lists only through cached/indexed paths, and writes only for a
+ * fact somebody would miss tomorrow. The policy is pure data + arithmetic here
+ * so the Worker, the quota script and the tests all argue from the same numbers.
+ *
+ * Priorities are a reserve ladder, not a queue-jump for importance theatre:
+ * money may spend the last write, security keeps 25 back, an operator's own
+ * save keeps 75 back, and automation/telemetry stop at 800/700 so a press run,
+ * a feed refresh or a log line can never be the reason an order cannot land.
+ * Telemetry is also *paced* through the UTC day: at 01:00 it may not burn the
+ * whole soft cap just because the isolate that woke up first felt industrious.
+ * Scheduled automation keeps only the reserve ceiling — its cadence is the
+ * pacing, and a press slot that is due is due.
+ */
+export const QUOTA_LIMITS = {
+  worker_requests: 100000,
+  kv_reads: 100000,
+  kv_writes: 1000,
+  kv_deletes: 1000,
+  kv_lists: 1000,
+  kv_storage_bytes: 1000 * 1000 * 1000,
+};
+export const QUOTA_RESERVE = { money: 0, security: 25, operator: 75, automation: 200, telemetry: 300 };
+export const QUOTA_PRIORITIES = Object.keys(QUOTA_RESERVE);
+
+export function quotaPriorityForKey(key) {
+  const k = String(key || '');
+  if (/^(order|store|sale|paid|tx|renew|whopmem|term):/.test(k)) return 'money';
+  if (/^(lock|pinl|rl|pin):/.test(k) || k === 'ops_gen') return 'security';
+  if (/^(audit|img|tpl-ovr|digest):/.test(k)) return 'operator';
+  if (/^(press|mesh|lead|seller|buyer|cron|hooks|dispatch):/.test(k)) return 'automation';
+  return 'operator';
+}
+
+/** One decision, with the arithmetic visible: may this priority spend one more
+ *  unit of a daily budget, given how much this isolate believes has been spent
+ *  and how far through the UTC day it is? Money/security/operator saves are not
+ *  paced (a buyer at 00:05 is not worth less than one at 23:05); telemetry is,
+ *  because a count or a heartbeat can always be done an hour later. */
+export function quotaAllows(opts = {}) {
+  const limit = Math.max(0, Number(opts.limit == null ? QUOTA_LIMITS.kv_writes : opts.limit) || 0);
+  const used = Math.max(0, Number(opts.used) || 0);
+  const cost = Math.max(1, Number(opts.cost) || 1);
+  const priority = QUOTA_PRIORITIES.includes(opts.priority) ? opts.priority : 'automation';
+  const reserve = QUOTA_RESERVE[priority] || 0;
+  const ceiling = Math.max(0, limit - reserve);
+  const now = Number(opts.now == null ? Date.now() : opts.now) || 0;
+  const dayMs = 864e5;
+  const elapsed = Math.min(1, Math.max(0, (((now % dayMs) + dayMs) % dayMs) / dayMs));
+  const paced = priority === 'telemetry';
+  const paceCeiling = paced ? Math.min(ceiling, Math.floor(ceiling * elapsed) + 10) : ceiling;
+  const ok = used + cost <= paceCeiling;
+  return {
+    ok, priority, used, cost, limit, reserve, ceiling, pace_ceiling: paceCeiling,
+    reason: ok ? 'within_budget' : (used + cost > ceiling ? 'reserve_for_higher_priority' : 'paced_for_later_in_day'),
+  };
+}
+
+/* A tiny non-secret fingerprint for an email address, good enough to find the
+ * one candidate store in a KV metadata listing without putting the address
+ * itself in list metadata. It is an index hint, never a credential: the Worker
+ * still reads the candidate document and compares the real address. */
+export function emailHash(v) {
+  const s = String(v || '').trim().toLowerCase();
+  if (!s) return '';
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return ('00000000' + h.toString(16)).slice(-8);
+}
+
+/** The cron/index row that rides on a store document's KV metadata, exactly as
+ *  an order's ledger row rides on the order document. One `list()` then answers
+ *  "who is due, expiring, suspended or chain-watched?" with no per-shop reads;
+ *  the document is fetched only for a shop the row says needs work. Short keys
+ *  because metadata is capped at 1,024 bytes and this row must never grow teeth. */
+export function storeMeta(st) {
+  const s = st && typeof st === 'object' ? st : {};
+  const emails = [emailHash(s.owner_email), emailHash(s.notify_email)].filter(Boolean);
+  return {
+    p: Number(s.paid_until) || 0,
+    s: s.suspended ? 1 : 0,
+    w: s.warned_at ? 1 : 0,
+    c: s.crypto_watch ? 1 : 0,
+    ...(emails.length ? { e: [...new Set(emails)] } : {}),
+  };
+}
+export function storeMetaAction(meta, nowMs) {
+  if (!meta || typeof meta !== 'object' || !('p' in meta)) return 'legacy';
+  const now = Number(nowMs == null ? Date.now() : nowMs) || 0;
+  const leftDays = ((Number(meta.p) || 0) - now) / 864e5;
+  if (leftDays <= 0 && !meta.s) return 'suspend';
+  if (leftDays > 0 && meta.s) return 'reinstate';
+  if (leftDays > 0 && leftDays <= 7 && !meta.w) return 'warn';
+  if (meta.c) return 'watch';
+  return '';
+}
+
 /* Every rail also says what its payment *detail* looks like, because one
  * `pay_account` per shop cannot be true: the EcoCash wallet is a phone number, the
  * ZIPIT account is a bank number, PayShap is a proxy handle, and cash has nothing

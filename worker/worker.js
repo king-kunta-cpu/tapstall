@@ -3,15 +3,15 @@
  * Cloudflare Worker. Free-tier only (Worker + 2 KV namespaces + cron + assets).
  *
  * Bindings
- *   STORES (KV)  store:{handle} term:{handle} renew:{token} tx:{ref} seq:{h} rl:* buyer:* tpl:*
- *   ORDERS (KV)  order:{handle}:{id}  list:{handle}
+ *   STORES (KV)  store:{handle} renew:{token} tx:{ref} seq:{h} rl:* buyer:* tpl-ovr:*
+ *   ORDERS (KV)  order:{handle}:{id} (ledger row in metadata)  list:{handle} (legacy)
  *   ADMIN_URL_PREFIX      optional; not required
  *   ADMIN_SECRET (secret) signs buyer-fingerprint hashes
  *   CRON                  every 6 hours → paid-term enforcement + renewal notice
  *
- * Templates live in KV (tpl:store, tpl:onboard, tpl:admin) so the storefront
- * can be hot-updated without redeploying the Worker (no assets binding needed,
- * so the free plan is enough and one curl can fix a template).
+ * Pages ride in the Worker bundle; `tpl-ovr:*` is only the emergency override.
+ * Quota rule (v1.3.0): memory first, reads second, indexed lists third, and a
+ * KV write only for a fact that must survive the isolate.
  */
 
 import {
@@ -44,14 +44,102 @@ import {
   isPlaceholderFeed, isTronAddr, cryptoMatch, toUnits, fromUnits, railAcctOf,
   EDITABLE_FIELDS, SOFT_FIELDS, sign, adminStore, normaliseRail, resolveRail,
   STOREFRONT_TEMPLATES, storefrontDesign,
+  QUOTA_LIMITS, quotaAllows, quotaPriorityForKey, storeMeta, storeMetaAction, emailHash,
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '1.2.0';
+const VERSION = '1.3.0';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
 const RL = { windowSec: 60, max: 8 };
+
+/* ------------------------------------------------------ quota-first runtime
+ * The cheapest KV operation is the one this isolate already knows the answer
+ * to. These caches are deliberately small, short-lived and clone-on-read:
+ * Cloudflare KV is itself eventually consistent for about a minute, so a
+ * 15–60 second isolate cache does not invent a new consistency model — it
+ * simply stops paying a billed KV read for the same answer inside the window
+ * KV was already allowed to be stale. Every mutation that goes through a
+ * central helper below updates or invalidates the cache in the same breath.
+ *
+ * The write governor is the other half. It cannot know the account-global
+ * counter without spending the thing it is guarding, so it does the honest
+ * local version: this isolate counts the governed writes it makes, core's
+ * reserve ladder decides whether automation may spend another one, and the
+ * external quota script reads Cloudflare's GraphQL truth with zero KV ops.
+ */
+const memCache = new Map();              // key -> { at, ttl, value }
+const MEM_CACHE_MAX = 256;
+function cloneVal(v) {
+  if (v == null || typeof v !== 'object') return v;
+  try { return structuredClone(v); } catch (e) { return JSON.parse(JSON.stringify(v)); }
+}
+function memGet(key) {
+  const hit = memCache.get(key);
+  if (!hit) return undefined;
+  if (Date.now() - hit.at > hit.ttl) { memCache.delete(key); return undefined; }
+  // refresh LRU order without extending the TTL: hot is not the same as fresh
+  memCache.delete(key); memCache.set(key, hit);
+  return cloneVal(hit.value);
+}
+function memSet(key, value, ttlMs) {
+  if (memCache.size >= MEM_CACHE_MAX) {
+    for (const k of memCache.keys()) { memCache.delete(k); if (memCache.size < MEM_CACHE_MAX - 16) break; }
+  }
+  memCache.set(key, { at: Date.now(), ttl: Math.max(250, Number(ttlMs) || 30000), value: cloneVal(value) });
+  return value;
+}
+function memDel(key) { memCache.delete(key); }
+function memDelPrefix(prefix) { for (const k of memCache.keys()) if (k.startsWith(prefix)) memCache.delete(k); }
+async function cached(key, ttlMs, loader) {
+  const hit = memGet(key);
+  if (hit !== undefined) return hit;
+  const value = await loader();
+  memSet(key, value, ttlMs);
+  return cloneVal(value);
+}
+
+const quotaMem = { day: '', reads: 0, writes: 0, deletes: 0, lists: 0, blocked: 0, by_priority: {} };
+function quotaToday(now = Date.now()) {
+  const day = new Date(now).toISOString().slice(0, 10);
+  if (quotaMem.day !== day) Object.assign(quotaMem, { day, reads: 0, writes: 0, deletes: 0, lists: 0, blocked: 0, by_priority: {} });
+  return quotaMem;
+}
+function quotaNote(op, priority = 'operator', n = 1) {
+  const q = quotaToday();
+  if (op in q) q[op] += n;
+  if (op === 'writes' || op === 'deletes') q.by_priority[priority] = (q.by_priority[priority] || 0) + n;
+}
+function quotaGate(op = 'writes', priority = 'automation', cost = 1) {
+  const q = quotaToday();
+  const limit = op === 'deletes' ? QUOTA_LIMITS.kv_deletes : op === 'lists' ? QUOTA_LIMITS.kv_lists : QUOTA_LIMITS.kv_writes;
+  const d = quotaAllows({ used: q[op] || 0, limit, priority, cost, now: Date.now() });
+  if (!d.ok) q.blocked++;
+  return d;
+}
+function quotaLocal() {
+  const q = quotaToday();
+  return { day: q.day, reads: q.reads, writes: q.writes, deletes: q.deletes, lists: q.lists,
+    blocked_optional: q.blocked, by_priority: { ...q.by_priority }, limits: QUOTA_LIMITS,
+    note: 'isolate-local governed counters; Cloudflare GraphQL via scripts/quota.sh is the account truth' };
+}
+async function governedPut(ns, key, value, opts, priority) {
+  if (!ns) return false;
+  const pri = priority || quotaPriorityForKey(key);
+  if (!quotaGate('writes', pri).ok) return false;
+  await ns.put(key, value, opts);
+  quotaNote('writes', pri);
+  return true;
+}
+async function governedDelete(ns, key, priority) {
+  if (!ns) return false;
+  const pri = priority || quotaPriorityForKey(key);
+  if (!quotaGate('deletes', pri).ok) return false;
+  await ns.delete(key);
+  quotaNote('deletes', pri);
+  return true;
+}
 
 /* ---- Tapstall is the only spelling this Worker speaks ----------------------
    One cookie name, one header name, one template marker, one Worker. The retired
@@ -147,7 +235,7 @@ async function route(req, url, env, ctx) {
     return redirect('/onboard');
   }
   if (p === '/data/sample-menu.csv') {
-    const csv = await env.STORES.get('tpl:sample-menu');
+    const csv = await tpl(env, 'sample-menu');
     if (csv) return new Response(csv, { headers: { 'content-type': 'text/csv', 'cache-control': 'public, max-age=86400' } });
   }
 
@@ -159,8 +247,9 @@ async function route(req, url, env, ctx) {
   if ((m = p.match(/^\/i\/([a-z0-9][a-z0-9-]{1,30})\/([A-Za-z0-9_-]{4,40})$/))) return imageGet(req, env, m[1], m[2]);
   if ((m = p.match(/^\/s\/([a-z0-9][a-z0-9-]{1,30})$/))) return storePage(url, env, m[1]);
   if ((m = p.match(/^\/s\/([a-z0-9][a-z0-9-]{1,30})\/config\.json$/))) {
-    const st = await getStore(env, m[1]);
-    return st ? json({ ok: true, store: publicStore(st, await railsCatalog(env)) }) : json({ ok: false, error: 'no_store' }, 404);
+    const st = await getStore(env, m[1], { cache: true });
+    return st ? json({ ok: true, store: publicStore(st, await railsCatalog(env)) }, 200, { 'Cache-Control': 'public, max-age=30, s-maxage=60' })
+      : json({ ok: false, error: 'no_store' }, 404, { 'Cache-Control': 'public, max-age=30' });
   }
   // The written pages. `@ORIGIN@` is stamped here rather than at build time so the
   // canonical URL is the host that answered, forever, and so a move to a real domain
@@ -177,7 +266,7 @@ async function route(req, url, env, ctx) {
     // The post a merchant would otherwise have to write at 21:00 with one hand. Plain
     // text on purpose: on any phone a text page is select-all then share, and it works
     // with JavaScript off, which the storefront itself cannot claim.
-    const st = await getStore(env, m[1]);
+    const st = await getStore(env, m[1], { cache: true });
     if (!st) return text('No store at this address.', 404);
     const c = shareCopy(st, seoFacts(st, url.origin), url.origin);
     return text('Copy the block for the place you are posting it.\n\n'
@@ -211,13 +300,15 @@ async function route(req, url, env, ctx) {
       'vary': 'Accept-Encoding', 'x-tapstall-art': 'sample, not a photo' } });
   }
   if ((m = p.match(/^\/s\/([a-z0-9][a-z0-9-]{1,30})\/feed\.json$/))) {
-    const st = await getStore(env, m[1]);
+    const st = await getStore(env, m[1], { cache: true });
     if (!st) return json({ ok: false, error: 'no_store' }, 404);
     // Cached by default now, and ?fresh=1 means it: the storefront is the hot path,
      // and a sheet that has not changed in two minutes does not need to be asked
      // again by every buyer. The dashboard's own Re-read button passes fresh=1, so
      // "I just edited the sheet" still answers immediately.
-    return json({ ok: true, products: await loadProducts(st, env, url.searchParams.get('fresh') === '1') });
+    const fresh = url.searchParams.get('fresh') === '1';
+    return json({ ok: true, products: await loadProducts(st, env, fresh) }, 200,
+      { 'Cache-Control': fresh ? 'no-store' : 'public, max-age=30, s-maxage=120' });
   }
 
   // ---- merchant authority: a code becomes a cookie, and only POSTs act ----
@@ -346,11 +437,14 @@ async function route(req, url, env, ctx) {
 }
 /* ------------------------------------------------------------- store page */
 async function storePage(url, env, handle) {
-  const st = await getStore(env, handle);
+  const st = await getStore(env, handle, { cache: true });
   if (!st) return html(notFoundPage(handle), 404, NOINDEX);
-  const term = await env.STORES.get('term:' + handle, 'json');
+  // The term state is already on the store document (`suspended` +
+  // `suspended_at`); a second `term:` read on every storefront view bought
+  // nothing but another billed KV read and a second write on every suspend.
+  const term = st.suspended ? { state: 'expired', at: st.suspended_at || null } : null;
   const page = fillPage(await tpl(env, 'store'),
-    [['TAPSTALL_CONFIG', publicStore(st, await railsCatalog(env))], ['TAPSTALL_TERM', term || null]]);
+    [['TAPSTALL_CONFIG', publicStore(st, await railsCatalog(env))], ['TAPSTALL_TERM', term]]);
   return html(fillSeo(page, url.origin, st), 200, { 'Cache-Control': 'public, max-age=60, s-maxage=300', ...FRAMEABLE });
 }
 
@@ -379,10 +473,26 @@ function fillSeo(page, origin, st) {
  * the read path means no timer to lose: the change takes effect the first time
  * a buyer or the merchant looks, which is exactly when it matters.
  */
-async function getStore(env, handle) {
-  if (!env.STORES) return null;
-  const st = await env.STORES.get('store:' + handle, 'json');
-  if (!st || !st.pending) return st;
+async function getStore(env, handle, opts = {}) {
+  if (!env.STORES || !handle) return null;
+  const ck = 'store:' + handle;
+  // Cache is opt-in for public read paths. Authority, order and admin paths
+  // always judge the document KV holds now; a buyer page may reuse a copy
+  // for a few seconds (inside KV's own stale window), and never when a
+  // pending money change is in flight — its fold is clock-judged fresh.
+  let raw = (opts.cache && !opts.fresh) ? memGet(ck) : undefined;
+  if (raw && raw.pending) raw = undefined;
+  if (raw === undefined) {
+    raw = await env.STORES.get(ck, 'json');
+    quotaNote('reads', 'operator');
+    // Cache the *unfolded* document (and a negative answer, briefly): the
+    // pending fold below is a function of the clock, so it is re-judged on
+    // every hit, while the billed KV read happens at most once a TTL.
+    memSet(ck, raw || null, raw ? 15000 : 5000);
+  }
+  if (!raw) return null;
+  const st = cloneVal(raw);
+  if (!st.pending) return st;
   const { applied } = applyPending(st, Date.now());
   if (applied.length) {
     // Persisting the fold is a convenience — the next read would fold it again
@@ -397,7 +507,13 @@ async function getStore(env, handle) {
 }
 
 async function writeStore(env, st) {
-  if (env.STORES) await env.STORES.put('store:' + st.handle, JSON.stringify(st));
+  if (!env.STORES || !st || !st.handle) return;
+  // One write, three jobs: the document, its cron/index metadata row, and the
+  // isolate cache entry every hot read will reuse for the next few seconds.
+  await env.STORES.put('store:' + st.handle, JSON.stringify(st), { metadata: storeMeta(st) });
+  quotaNote('writes', 'money');
+  memSet('store:' + st.handle, st, 15000);
+  memDelPrefix('ledger:all:');
 }
 
 /* --------------------------------------------------------------- products */
@@ -456,24 +572,43 @@ async function loadProducts(st, env, force) {
     }
     return applyMenu([], st.menu, st.handle);
   }
-  const ms = (st.cache_seconds || 120) * 1000;
-  if (!force && st.feed_cache && st.feed_cache.at && Date.now() - st.feed_cache.at < ms) return applyMenu(st.feed_cache.products, st.menu, st.handle);
+  const ms = Math.max(15000, (Number(st.cache_seconds) || 120) * 1000);
+  const feedKey = 'feed:' + st.handle + ':' + String(st.feed_url || '');
+  if (!force) {
+    const hot = memGet(feedKey);
+    if (hot && Array.isArray(hot.products)) return applyMenu(hot.products, st.menu, st.handle);
+    if (st.feed_cache && st.feed_cache.at && Date.now() - st.feed_cache.at < ms) {
+      memSet(feedKey, { products: st.feed_cache.products || [], error: st.feed_cache.error || null }, ms);
+      return applyMenu(st.feed_cache.products, st.menu, st.handle);
+    }
+  }
   let products = [], error = null;
   try {
     const feed = normalizeFeedUrl(st.feed_url);
     if (!feed) error = 'no_feed';
     else {
-      const r = await fetch(feed, { headers: { 'User-Agent': 'tapstall/1' }, cf: { cacheTtl: 60 } });
+      const r = await fetch(feed, { headers: { 'User-Agent': 'tapstall/1' }, cf: { cacheTtl: Math.min(300, Math.max(30, Math.round(ms / 1000))) } });
       if (!r.ok) error = 'feed_http_' + r.status;
       else products = parseProducts(await r.text(), st);
     }
   } catch (e) { error = 'feed_fetch_failed'; }
-  st.feed_cache = { at: Date.now(), products, count: products.length, error };
-  // Same rule one layer up: the products came from the merchant's sheet and cost
-  // nothing to read, so refusing to *cache* them must not refuse to *show* them.
-  // A quota day leaves the storefront re-fetching per hit instead of 503-ing at
-  // every buyer who only wanted to see what is on offer.
-  try { await writeStore(env, st); } catch (e) { /* uncached today, correct today */ }
+  memSet(feedKey, { products, error }, ms);
+  const prev = st.feed_cache || null;
+  const nextCache = { at: Date.now(), products, count: products.length, error };
+  st.feed_cache = nextCache;
+  // The durable snapshot is for SEO, ops health and a cold isolate — not for
+  // proving the sheet was asked again. Persist it only when it says something
+  // new (rows, count or error changed), when force was explicit, or at most
+  // every six hours; the hot copy above serves buyers either way. Before this,
+  // one busy shop on the default 120s cache could rewrite its whole store
+  // document 720 times a day and spend most of the account's write budget
+  // recording that its menu had not changed.
+  const changed = !prev || prev.error !== error || Number(prev.count || 0) !== products.length
+    || JSON.stringify(prev.products || []) !== JSON.stringify(products);
+  const staleSnapshot = !prev || !prev.at || Date.now() - prev.at > 6 * 3600e3;
+  if ((changed || force || staleSnapshot) && quotaGate('writes', force ? 'operator' : 'automation').ok) {
+    try { await writeStore(env, st); } catch (e) { /* uncached today, correct today */ }
+  }
   return applyMenu(products, st.menu, st.handle);
 }
 
@@ -531,9 +666,11 @@ async function placeOrder(req, url, env, ctx) {
   const cap = Number(st.max_order_value) || 0;
   if (cap && pricing.total > cap) return json({ ok: false, error: `order over this shop's limit of ${cap} ${st.currency || 'USD'}` }, 422);
 
-  const seq = await incr(env, 'seq:' + st.handle);
-  const code = (st.order_prefix || st.handle.slice(0, 3).toUpperCase()).replace(/[^A-Za-z0-9-]/g, '') + '-' + String(seq).padStart(4, '0');
   const id = nowId();
+  const seq = await nextOrderSeq(env, st.handle);
+  const prefix = (st.order_prefix || st.handle.slice(0, 3).toUpperCase()).replace(/[^A-Za-z0-9-]/g, '');
+  const code = seq ? prefix + '-' + String(seq).padStart(4, '0')
+    : prefix + '-' + id.slice(-6).toUpperCase();
   const buyerHash = await hash(st.handle + '|' + buyer.phone + '|' + (env.ADMIN_SECRET || 'dev-secret'));
   const hist = await buyerTouch(env, st.handle, buyerHash);
 
@@ -646,6 +783,9 @@ async function saveOrder(env, handle, order) {
   if (!env.ORDERS || !handle || !order || !order.id) return;
   await env.ORDERS.put('order:' + handle + ':' + order.id, JSON.stringify(order),
     { metadata: packRow(orderRow(order)) });
+  quotaNote('writes', 'money');
+  memDelPrefix('ledger:' + handle + ':');
+  memDelPrefix('ledger:all:');
 }
 
 async function persistOrder(env, st, order) {
@@ -662,7 +802,20 @@ async function persistOrder(env, st, order) {
  * A document with neither a row nor an index entry still shows as a thin row, because counting an
  * order a shop took is not the same as pricing one.
  */
-async function ledgerRows(env, handle, cap) {
+async function ledgerRows(env, handle, cap, opts = {}) {
+  if (!env.ORDERS || !handle) return [];
+  const wanted = Math.max(Number(cap) || MAX_ORDERS_KEPT, 1);
+  const ck = 'ledger:' + handle + ':' + wanted;
+  if (!opts.fresh) {
+    const hit = memGet(ck);
+    if (hit !== undefined) return hit;
+  }
+  const rows = await ledgerRowsFresh(env, handle, wanted);
+  memSet(ck, rows, 15000);
+  return cloneVal(rows);
+}
+
+async function ledgerRowsFresh(env, handle, cap) {
   if (!env.ORDERS || !handle) return [];
   const prefix = 'order:' + handle + ':';
   const wanted = Math.max(Number(cap) || MAX_ORDERS_KEPT, 1);
@@ -672,6 +825,7 @@ async function ledgerRows(env, handle, cap) {
     let cursor, pages = 0;
     do {
       const l = await env.ORDERS.list({ prefix, limit: 1000, cursor });
+      quotaNote('lists', 'operator');
       for (const k of l.keys || []) {
         const id = String(k.name || '').slice(prefix.length);
         if (k.metadata) {
@@ -702,6 +856,43 @@ async function ledgerRows(env, handle, cap) {
     thin.push({ id, code: id.slice(-5).toUpperCase(), at: '', total: 0, status: 'unknown', thin: true });
   }
   return thin.length ? mergeRows(merged, thin, wanted) : merged;
+}
+
+/** Every shop's rows from one listing of the order key space, grouped by the
+ *  handle in the key. The owner state used to spend one list *per shop* (plus
+ *  a legacy read each) to learn what one list already knew; at 1,000 list
+ *  operations a day that made the oversight page the quota risk. Shops whose
+ *  documents carry no metadata row fall back to the per-shop reader, which is
+ *  also where the frozen legacy index lives. */
+async function ledgerRowsAll(env, capPerStore = MAX_ORDERS_KEPT) {
+  if (!env.ORDERS) return new Map();
+  const cap = Math.max(1, Number(capPerStore) || MAX_ORDERS_KEPT);
+  return cached('ledger:all:' + cap, 15000, async () => {
+    const by = new Map();
+    const bare = new Set();
+    let cursor, pages = 0;
+    try {
+      do {
+        const l = await env.ORDERS.list({ prefix: 'order:', limit: 1000, cursor });
+        quotaNote('lists', 'operator');
+        for (const k of l.keys || []) {
+          const parts = String(k.name || '').split(':');
+          if (parts.length < 3) continue;
+          const handle = parts[1], id = parts.slice(2).join(':');
+          if (!by.has(handle)) by.set(handle, []);
+          if (k.metadata) {
+            const r = unpackRow(k.metadata);
+            if (r.id !== id) r.id = id;
+            by.get(handle).push(r);
+          } else bare.add(handle);
+        }
+        cursor = l.list_complete ? undefined : l.cursor;
+      } while (cursor && ++pages < 10);
+    } catch (e) { /* the per-shop fallback below is the answer, not a guess */ }
+    for (const [h, rows] of by) by.set(h, mergeRows(rows, [], cap));
+    for (const h of bare) by.set(h, await ledgerRows(env, h, cap, { fresh: true }));
+    return by;
+  });
 }
 
 const MARK_BASE = '/api/mark?handle=';
@@ -1218,6 +1409,7 @@ async function register(req, url, env) {
     owner_email: isEmail(b.owner_email) ? b.owner_email : '',
     created_at: new Date().toISOString(),
     admin_token: adminKey,          // API key for the merchant's own tooling; never in a URL
+    auth_gen: '0',                  // bumpadminKey,          // API key for the merchant's own tooling; never in a URL
     auth_gen: '0',                  // bump to invalidate every link, key and cookie
     paid_until: Date.now() + FREE_DAYS * 864e5,
     plan: 'free60',
@@ -1232,7 +1424,8 @@ async function register(req, url, env) {
      expires, so nothing about it can go stale in an inbox or be mangled by a mailer. */
   const pin = genPin();
   st.pin = await pinRecord(pin);
-  await env.STORES.put('store:' + handle, JSON.stringify(st));
+  await writeStore(env, st);
+  memDelPrefix('listkeys:');
   // `g` because the link must die with the authority that issued it: `made` is what a legacy
   // record is judged by, and a record with neither is the hole the Revoke was meant to close.
   await env.STORES.put('renew:' + renewToken,
@@ -1425,6 +1618,7 @@ async function renewRef(req, env) {
   const cur = (await env.STORES.get(key, 'json')) || [];
   cur.unshift({ at: new Date().toISOString(), ref, amount: clamp(Number(b.amount), 0, 100000) || 0, phone: String(b.phone || '').replace(/\D/g, '').slice(0, 15) });
   await env.STORES.put(key, JSON.stringify(cur.slice(0, 10)), { expirationTtl: 30 * 86400 });
+  quotaNote('writes', 'money'); memDelPrefix('listkeys:');
   return json({
     ok: true, filed: cur.length,
     note: 'Filed against ' + rec.handle + '. This note alone switches nothing on — the plan extends when the payment itself is recognised (webhook, or the operator ticking it off), and you will not be chased for it.',
@@ -1483,7 +1677,6 @@ async function hookFlutterwave(req, url, env, ctx) {
   st.suspended = false; st.warned_at = null;
   await writeStore(env, st);
   await env.STORES.delete('tx:' + txRef);
-  await env.STORES.delete('term:' + st.handle);
   await recordSale(env, st, { amount: tx.amount, currency: tx.currency, provider: 'flutterwave', ref: txRef, days: tx.days });
   return say({ ok: true, activated: st.handle, paid_until: new Date(st.paid_until).toISOString() });
 }
@@ -1538,7 +1731,6 @@ async function hookPayfast(req, url, env, ctx) {
   // the extra key is what lets a retry be answered with the truth instead of a shrug.
   await env.STORES.delete('tx:' + ref);
   await writeStore(env, st);
-  await env.STORES.delete('term:' + st.handle);
   await recordSale(env, st, { amount: tx.amount, currency: tx.currency, provider: 'payfast', ref, days: tx.days });
   return say({ ok: true, activated: st.handle, paid_until: new Date(st.paid_until).toISOString(), days: tx.days });
 }
@@ -1812,28 +2004,59 @@ async function cryptoCheck(req, env) {
 async function runCron(env) {
   const out = { checked: 0, suspended: 0, reinstated: 0, warned: 0 };
   if (!env.STORES) return out;
-  // heartbeat: proves the schedule actually fires, without opening a dashboard
-  try { await env.STORES.put('cron:last', JSON.stringify({ at: new Date().toISOString(), unix: Date.now() })); } catch (e) {}
-  const watch = [];                                  // shops that asked for the chain reader
   const nightly = new Date().getUTCHours() === 0;    // the 00:15 slot owns the report
+  // Heartbeat once a day, not four times: it proves the schedule fires, and
+  // the other three writes proved only that a write costs a write.
+  if (nightly) {
+    try { if (await governedPut(env.STORES, 'cron:last', JSON.stringify({ at: new Date().toISOString(), unix: Date.now() }), null, 'telemetry')) out.heartbeat = true; } catch (e) {}
+  }
+  try { out.buyer_flushed = await flushBuyerBuf(env, 25); } catch (e) { out.buyer_flushed = 0; }
+  const watch = [];                                  // shops that asked for the chain reader
+  const summary = { total: 0, live: 0, suspended: 0, expiring: [] };
+  out.read_docs = 0; out.legacy_docs = 0; out.backfilled = 0;
   let cursor, loops = 0;
   do {
     const list = await env.STORES.list({ prefix: 'store:', cursor });
+    quotaNote('lists', 'operator');
     for (const k of (list.keys || [])) {
-      out.checked++;
-      const st = await env.STORES.get(k.name, 'json');
+      out.checked++; summary.total++;
+      const handle = String(k.name).slice('store:'.length);
+      const action = storeMetaAction(k.metadata, Date.now());
+      if (action !== 'legacy') {
+        const meta = k.metadata || {};
+        const left = ((Number(meta.p) || 0) - Date.now()) / 864e5;
+        if (meta.s) summary.suspended++;
+        else if (left > 0) { summary.live++; if (left <= 14) summary.expiring.push({ handle, left_days: Math.ceil(left) }); }
+        if (!action) continue;               // the metadata row was the whole visit: no document read
+      } else out.legacy_docs++;
+      out.read_docs++;
+      const st = await getStore(env, handle, { fresh: true });
       if (!st) continue;
+      if (action === 'legacy') {
+        const left0 = ((st.paid_until || 0) - Date.now()) / 864e5;
+        if (st.suspended) summary.suspended++;
+        else if (left0 > 0) { summary.live++; if (left0 <= 14) summary.expiring.push({ handle, left_days: Math.ceil(left0) }); }
+        // Give a pre-metadata document its row at most 25 shops a night (and
+        // only at night): the migration is one write per shop, ever, paced so
+        // it can never crowd out a day's orders. Any real action below writes
+        // the document anyway and backfills for free.
+        const needsAction = (left0 <= 0 && !st.suspended) || (left0 > 0 && st.suspended)
+          || (left0 > 0 && left0 <= 7 && !st.warned_at);
+        if (!needsAction && nightly && out.backfilled < 25 && quotaGate('writes', 'automation').ok) {
+          try { await writeStore(env, st); out.backfilled++; } catch (e) { /* next night */ }
+        }
+      }
       if (st.crypto_watch) watch.push(st);
       const leftDays = ((st.paid_until || 0) - Date.now()) / 864e5;
       if (leftDays <= 0 && !st.suspended) {
         st.suspended = true; st.suspended_at = new Date().toISOString();
         await writeStore(env, st);
-        await env.STORES.put('term:' + st.handle, JSON.stringify({ state: 'expired', at: st.suspended_at }));
+        summary.suspended++;
         out.suspended++;
       } else if (leftDays > 0 && st.suspended) {
         st.suspended = false;
         await writeStore(env, st);
-        await env.STORES.delete('term:' + st.handle);
+        summary.suspended = Math.max(0, summary.suspended - 1); summary.live++;
         out.reinstated++;
       } else if (leftDays > 0 && leftDays <= 7 && !st.warned_at) {
         st.warned_at = new Date().toISOString();
@@ -1849,6 +2072,7 @@ async function runCron(env) {
     }
     cursor = list.cursor;
   } while (cursor && loops++ < 10);
+  out.stores = summary;
   /* The chain readers run after the sweep finished reading, on the same documents —
    * capped at twenty shops a slot so a wedged TronGrid can never make the cron slow
    * for the expiry walk that actually keeps the doors shut. */
@@ -1875,7 +2099,7 @@ async function runCron(env) {
   try { out.dispatch = await dispatchTick(env); }
   catch (e) { out.dispatch = { error: String(e && e.message || e).slice(0, 160) }; }
   if (nightly) {
-    try { out.digest = await writeDigest(env); }
+    try { out.digest = await writeDigest(env, summary); }
     catch (e) { out.digest = { error: String(e && e.message || e).slice(0, 160) }; }
   }
   return out;
@@ -1977,6 +2201,7 @@ async function adminPut(req, env) {
   if (!/^tpl(-ovr)?:(store|onboard|admin|fees|index|sample-menu)$/.test(String(b.key || ''))) return json({ ok: false, error: 'bad key' }, 422);
   if (String(b.value || '').length < 200 || String(b.value || '').length > 400000) return json({ ok: false, error: 'bad size' }, 422);
   await env.STORES.put(b.key, b.value);
+  memDel('tplkv:' + String(b.key).split(':').pop()); quotaNote('writes', 'operator');
   return json({ ok: true, key: b.key, bytes: b.value.length });
 }
 
@@ -2061,26 +2286,79 @@ async function rateLimited(env, ip, bucket, rl) {
  *  oracle. `proof:` keeps it off the order counter, because a buyer and a shop behind
  *  one carrier NAT should not be spending each other's allowance. */
 const PRL = { windowSec: 60, max: 6 };
-async function incr(env, key) {
+/** Order numbers are leased in blocks. The human code stays sequential in the
+ *  common case, but KV is touched once per block instead of once per order:
+ *  at full tilt that turns 1,000 sequence writes into 20. KV never offered an
+ *  atomic increment here (the old get+put could already race across isolates),
+ *  and the order *id* — not the printed code — is the unique key, so a leased
+ *  block changes the cost without changing what correctness rests on. If the
+ *  lease write is refused, the caller falls back to a code derived from the
+ *  unique order id and the order still lands with its one money write. */
+const seqBlocks = new Map();       // handle -> { next, end }
+const SEQ_BLOCK = 50;
+async function nextOrderSeq(env, handle) {
   if (!env.STORES) return 1;
-  const n = Number((await env.STORES.get(key)) || 0) + 1;
-  await env.STORES.put(key, String(n));
-  return n;
+  const held = seqBlocks.get(handle);
+  if (held && held.next <= held.end) return held.next++;
+  try {
+    const key = 'seq:' + handle;
+    const cur = Number((await env.STORES.get(key)) || 0) || 0;
+    quotaNote('reads', 'operator');
+    const end = cur + SEQ_BLOCK;
+    await env.STORES.put(key, String(end));
+    quotaNote('writes', 'money');
+    seqBlocks.set(handle, { next: cur + 2, end });
+    return cur + 1;
+  } catch (e) { return 0; }
 }
+
+/** Buyer history is a risk hint, not the ledger. It used to cost a KV write on
+ *  every order — as much as the order itself — to increment two counters. Now
+ *  the durable record is read once per isolate, deltas accumulate in memory,
+ *  and a write happens only every tenth touch for that buyer, when the repeat
+ *  threshold is crossed, or when cron flushes the buffer. The returned shape
+ *  and semantics are the old ones (the current order included), so riskFlags
+ *  and the trust line read exactly as they did. */
+const buyerBuf = new Map();        // key -> { count, unpaid, dirty }
 async function buyerTouch(env, handle, h) {
   if (!env.STORES) return { count: 0, unpaid: 0 };
   const key = `buyer:${handle}:${h.slice(0, 16)}`;
-  const rec = (await env.STORES.get(key, 'json')) || { count: 0, unpaid: 0 };
-  rec.count++; rec.unpaid++;
-  await env.STORES.put(key, JSON.stringify(rec), { expirationTtl: 180 * 86400 });
-  return rec;
+  let rec = buyerBuf.get(key);
+  if (!rec) {
+    const stored = (await env.STORES.get(key, 'json').catch(() => null)) || { count: 0, unpaid: 0 };
+    quotaNote('reads', 'operator');
+    rec = { count: Number(stored.count) || 0, unpaid: Number(stored.unpaid) || 0, dirty: 0 };
+    buyerBuf.set(key, rec);
+  }
+  rec.count++; rec.unpaid++; rec.dirty++;
+  if (rec.dirty >= 10 || rec.unpaid === 2) {
+    try {
+      await env.STORES.put(key, JSON.stringify({ count: rec.count, unpaid: rec.unpaid }), { expirationTtl: 180 * 86400 });
+      quotaNote('writes', 'telemetry'); rec.dirty = 0;
+    } catch (e) { /* a hint that cannot persist today is still a hint in this isolate */ }
+  }
+  return { count: rec.count, unpaid: rec.unpaid };
+}
+async function flushBuyerBuf(env, cap = 100) {
+  if (!env.STORES) return 0;
+  let n = 0;
+  for (const [key, rec] of buyerBuf) {
+    if (!rec.dirty || n >= cap) continue;
+    if (!quotaGate('writes', 'telemetry').ok) break;
+    try {
+      await env.STORES.put(key, JSON.stringify({ count: rec.count, unpaid: rec.unpaid }), { expirationTtl: 180 * 86400 });
+      quotaNote('writes', 'telemetry'); rec.dirty = 0; n++;
+    } catch (e) { break; }
+  }
+  return n;
 }
 
 async function selftest(env) {
   const t = { version: VERSION, kv_stores: !!env.STORES, kv_orders: !!env.ORDERS, email: !!env.EMAIL,
     // whose cron is this? an alias answers redirects and skips the sweep, and the
     // deploy check reads this instead of trusting that the schedule was deleted
-    cron_owner: true };
+    cron_owner: true,
+    quota_policy: { limits: QUOTA_LIMITS, soft_writes: QUOTA_LIMITS.kv_writes - 200, one_write_order: true } };
   /* Login is one PBKDF2 comparison, so the runtime having WebCrypto's deriveBits
      is a health question, not a detail: without it every merchant in the country
      fails to sign in and every status page says green. */
@@ -2098,9 +2376,11 @@ async function selftest(env) {
     // turned the endpoint that exists to explain outages into one more outage.
     // Fail the probe, keep the report, and name the reason with a clock.
     try {
-      await env.STORES.put(k, '1');
+      await env.STORES.put(k, '1', { expirationTtl: 120 });
+      quotaNote('writes', 'telemetry');
       t.kv_roundtrip = (await env.STORES.get(k)) === '1';
-      await env.STORES.delete(k);
+      // no delete: the probe already spent the write it exists to test, and a
+      // delete is a second daily budget. The key expires by itself.
     } catch (e) {
       const msg = String((e && e.message) || e);
       t.kv_roundtrip = false;
@@ -2327,9 +2607,11 @@ const CAPABILITY_FLAGS = ['kv_stores', 'kv_orders', 'email', 'cron_owner'];
  * changes every time a telco launches a wallet.
  */
 async function railsCatalog(env) {
+  const hit = memGet('rails:catalog');
+  if (hit !== undefined) return hit;
   const out = Object.assign({}, RAILS);
   let extra = null;
-  try { extra = env.STORES ? await env.STORES.get('rails:extra', 'json') : null; } catch (e) { extra = null; }
+  try { extra = env.STORES ? await env.STORES.get('rails:extra', 'json') : null; if (env.STORES) quotaNote('reads', 'operator'); } catch (e) { extra = null; }
   for (const k of Object.keys(extra || {})) {
     const r = normaliseRail(extra[k], k);
     if (r) out[k] = r;
@@ -2339,7 +2621,8 @@ async function railsCatalog(env) {
   // a wallet ID, a name worth checking and, if they have one, a till.
   out.custom = { key: 'custom', label: 'My own method (I describe it)', dial: 'as you describe', pct: 0, imtt: 0, fixed: 0, type: 'manual',
                  spec: 'wallet', holder: true, till: true, own: true };
-  return out;
+  memSet('rails:catalog', out, 10 * 60e3);
+  return cloneVal(out);
 }
 
 /* Every page this Worker serves, inlined by build_bundle.sh. The declaration below is what the
@@ -2361,15 +2644,22 @@ const INLINED_PAGES = {};
  * One KV read in the normal case: an inlined page never falls through to the legacy key.
  */
 async function tplPage(env, name) {
+  // The override is an emergency door, so it is checked live: caching its
+  // absence would make a 22:00 page fix wait on a timer. That one read is
+  // the price of the door; everything downstream of it is bundle bytes.
   if (env.STORES) {
     const ovr = await env.STORES.get('tpl-ovr:' + name);
+    quotaNote('reads', 'operator');
     if (ovr && ovr.length > 200) return { html: ovr, from: 'override' };
   }
   const inline = INLINED_PAGES[name];
   if (inline && inline.length > 200) return { html: inline, from: 'bundle' };
   if (env.STORES) {
-    const v = await env.STORES.get('tpl:' + name);
-    if (v && v.length > 200) return { html: v, from: 'kv' };
+    return cached('tplkv:' + name, 60e3, async () => {
+      const v = await env.STORES.get('tpl:' + name);
+      quotaNote('reads', 'operator');
+      return (v && v.length > 200) ? { html: v, from: 'kv' } : { html: '', from: 'none' };
+    });
   }
   return { html: '', from: 'none' };
 }
@@ -2508,25 +2798,54 @@ async function readBody(req) {
   if (t && t[0] === '{') { try { return JSON.parse(t); } catch (e) { return {}; } }
   return {};
 }
+/* Local-first, for the same reason the PIN tiers are: a counter that reads KV
+ * on every authenticated dashboard request and writes KV on every bad guess
+ * is a quota door held open for whoever knocks. This isolate counts first;
+ * KV is read once to seed the count and written only when the lock actually
+ * starts, which is the moment the cross-isolate fact matters. A success
+ * clears the local count for free and touches KV only if a lock was ever
+ * persisted (or might have been, once, before this isolate looked). */
+const authMem = new Map();         // handle -> { n, persisted, loaded }
+async function authState(env, handle) {
+  let a = authMem.get(handle) || { n: 0, persisted: false, loaded: false };
+  if (env.STORES) {
+    try {
+      const raw = await env.STORES.get('lock:' + handle);
+      quotaNote('reads', 'security');
+      a.n = Math.max(a.n, Number(raw) || 0);
+      a.persisted = raw != null && Number(raw) > 0;
+    } catch (e) { /* the local count still answers */ }
+  }
+  a.loaded = true;
+  authMem.set(handle, a);
+  return a;
+}
 async function lockedOut(env, handle) {
   if (!env.STORES) return false;
-  return Number((await env.STORES.get('lock:' + handle)) || 0) >= LOCK_MAX;
+  const a = authMem.get(handle);
+  if (a && a.n >= LOCK_MAX) return true;
+  return (await authState(env, handle)).n >= LOCK_MAX;
 }
 async function authFail(env, handle) {
   if (!env.STORES) return 0;
-  const n = Number((await env.STORES.get('lock:' + handle)) || 0) + 1;
-  // the counter is a courtesy to slow guessing, not a dependency: on a day the
-  // write budget is gone, refuse with 403 as usual instead of 500-ing
-  try { await env.STORES.put('lock:' + handle, String(n), { expirationTtl: LOCK_TTL }); } catch (e) {}
-  return n;
+  const a = await authState(env, handle);
+  a.n++;
+  // Persist at the first failure, halfway, and at the lock: cross-isolate
+  // counting stays honest where it matters, without a write per guess.
+  if (a.n === 1 || a.n === Math.ceil(LOCK_MAX / 2) || a.n >= LOCK_MAX) {
+    // the counter is a courtesy to slow guessing, not a dependency: on a day the
+    // write budget is gone, refuse with 403 as usual instead of 500-ing
+    try { await env.STORES.put('lock:' + handle, String(a.n), { expirationTtl: LOCK_TTL }); quotaNote('writes', 'security'); a.persisted = true; } catch (e) {}
+  }
+  return a.n;
 }
 async function authClear(env, handle) {
-  if (!env.STORES) return;
-  // Only touch KV when a counter actually exists: an unconditional delete on
-  // every authenticated request would burn the 1,000 free writes/day on a
-  // dashboard that polls. Reads are 100k/day, so checking first is free.
-  const n = await env.STORES.get('lock:' + handle);
-  if (n && Number(n) > 0) { try { await env.STORES.delete('lock:' + handle); } catch (e) {} }
+  if (!env.STORES) { authMem.delete(handle); return; }
+  const n = await env.STORES.get('lock:' + handle).catch(() => null);
+  if (n && Number(n) > 0) {
+    try { await env.STORES.delete('lock:' + handle); quotaNote('deletes', 'security'); } catch (e) {}
+  }
+  authMem.set(handle, { n: 0, persisted: false, loaded: true });
 }
 
 /** Who is asking? Cookie session, or the store's API key. Never a URL token. */
@@ -2834,8 +3153,11 @@ async function pressAdmin(req, env) {
   return null;
 }
 async function pressRegistry(env) {
-  const raw = await env.STORES.get('press:registry', 'json').catch(() => null);
-  return (raw && typeof raw === 'object') ? raw : {};
+  return cached('press:registry', 5 * 60e3, async () => {
+    const raw = await env.STORES.get('press:registry', 'json').catch(() => null);
+    quotaNote('reads', 'operator');
+    return (raw && typeof raw === 'object') ? raw : {};
+  });
 }
 async function pressShopIds(env) {
   const ids = [];
@@ -2861,13 +3183,13 @@ async function pressAccounts(req, env) {
     const id = String(b.id || '').toLowerCase();
     if (!reg[id]) return json({ ok: false, error: 'no such identity' }, 404);
     delete reg[id];
-    try { await env.STORES.put('press:registry', JSON.stringify(reg)); } catch (e) { return json({ ok: false, error: 'no writes left to forget it', why: String(e && e.name || e) }, 503); }
+    try { await env.STORES.put('press:registry', JSON.stringify(reg)); quotaNote('writes', 'operator'); memSet('press:registry', reg, 5 * 60e3); } catch (e) { return json({ ok: false, error: 'no writes left to forget it', why: String(e && e.name || e) }, 503); }
     return json({ ok: true, action: 'forget', id: id, left: Object.keys(reg).length, note: 'removed here; the provider password change is what actually stops them' });
   }
   const guard = await pressShopIds(env);
   const res = meshRegister(reg, b, { refuse_ids: guard, now: Date.now() });
   if (!res.ok) return json(Object.assign({ refused_because: 'a shop on the platform is an operator, and the platform does not post to an operator socials in any shape' }, res), 400);
-  try { await env.STORES.put('press:registry', JSON.stringify(reg)); } catch (e) { return json({ ok: false, error: 'no writes left to save the registry', why: String(e && e.name || e) }, 503); }
+  try { await env.STORES.put('press:registry', JSON.stringify(reg)); quotaNote('writes', 'operator'); memSet('press:registry', reg, 5 * 60e3); } catch (e) { return json({ ok: false, error: 'no writes left to save the registry', why: String(e && e.name || e) }, 503); }
   return json({ ok: true, action: 'register', id: res.id, identity: { class: res.identity.class, token_env: res.identity.token_env,
     rails: Object.keys(res.identity.rails), has_token_in_env: !!env[res.identity.token_env] }, count: res.count });
 }
@@ -2922,9 +3244,17 @@ async function runPress(env, origin, opt) {
     const merged = meshQueueMerge(prevQ, items, { store: id, landing: origin + '/fees', cadence: e.cadence || MESH_QUEUE_DEFAULTS });
     const flush = await meshPressFlush(merged.items, press, { dry: dry, now: Date.now() });
     const sent = new Set(flush.results.filter((r) => r.status === 'sent').map((r) => r.id));
-    try { await env.ORDERS.put('press:queue:' + id, JSON.stringify({ store: id, landing: origin + '/fees', at: new Date().toISOString(), items: merged.items.filter((i) => !sent.has(i.id)) })); } catch (e2) { /* a full queue is not worth failing the run for */ }
-    const ledger = meshPressLedger(await env.ORDERS.get('press:state:' + id, 'json').catch(() => null), flush.results, { now: Date.now() });
-    try { await env.ORDERS.put('press:state:' + id, JSON.stringify(ledger)); } catch (e2) { /* same */ }
+    const keptItems = merged.items.filter((i) => !sent.has(i.id));
+    const queueChanged = JSON.stringify(((prevQ && prevQ.items) || [])) !== JSON.stringify(keptItems);
+    if (!dry && queueChanged) {
+      try { await governedPut(env.ORDERS, 'press:queue:' + id, JSON.stringify({ store: id, landing: origin + '/fees', at: new Date().toISOString(), items: keptItems }), null, 'automation'); } catch (e2) { /* a full queue is not worth failing the run for */ }
+    }
+    const prevState = await env.ORDERS.get('press:state:' + id, 'json').catch(() => null);
+    const ledger = meshPressLedger(prevState, flush.results, { now: Date.now() });
+    const stateChanged = flush.results.some((r) => r.status === 'sent' || r.status === 'failed');
+    if (!dry && stateChanged) {
+      try { await governedPut(env.ORDERS, 'press:state:' + id, JSON.stringify(ledger), null, 'automation'); } catch (e2) { /* same */ }
+    }
     out.push({ id, class: e.class, ok: true, dry: dry, composed: items.length, queued_now: merged.added, dropped: merged.dropped.length,
       sent: flush.sent, waiting: flush.waiting, token_env: e.token_env, token_present: !!press.buffer_token,
       results: flush.results.map((r) => ({ channel: r.channel, status: r.status, due: r.due, err: r.err || r.note || '' })),
@@ -2963,7 +3293,7 @@ async function meshPressSet(req, env) {
   delete next.buffer_token;   // clear one saved by the old shape, so a stale credential cannot linger in a document every handler can read
   if (b.cadence && typeof b.cadence === 'object') next.cadence = b.cadence;
   doc.press = next;
-  try { await env.STORES.put('store:' + handle, JSON.stringify(doc)); }
+  try { await writeStore(env, doc); }
   catch (e) { return json({ ok: false, error: 'no writes left to save the wiring', why: String(e && e.name || e) }, 503); }
   const pr = meshPress(doc, env);
   return json({ ok: true, handle, channels: Object.keys(next.channels || {}), has_token: pr.has_token, token_from: pr.token_from,
@@ -2992,13 +3322,18 @@ async function meshPublish(req, env) {
   const flush = await meshPressFlush(merged.items, pr, { dry: dry, now: Date.now() });
   const sent = new Set(flush.results.filter((r) => r.status === 'sent').map((r) => r.id));
   const kept = merged.items.filter((i) => !sent.has(i.id));
-  try { await env.ORDERS.put('press:queue:' + handle, JSON.stringify({ store: handle, landing: origin + '/s/' + handle, at: new Date().toISOString(), items: kept })); } catch (e) { /* a full queue is not worth failing the run for */ }
-  const rails = Object.assign({}, (state && state.rails && typeof state.rails === 'object') ? state.rails : {});
-  for (const r of flush.results) {
-    if (r.status === 'sent') rails[r.channel] = { ok: true, fails: 0, at: new Date().toISOString() };
-    else if (r.status === 'failed') rails[r.channel] = { ok: false, fails: (Number((rails[r.channel] || {}).fails) || 0) + 1, at: new Date().toISOString(), err: r.err || r.note };
+  if (!dry && JSON.stringify(((prevQ && prevQ.items) || [])) !== JSON.stringify(kept)) {
+    try { await governedPut(env.ORDERS, 'press:queue:' + handle, JSON.stringify({ store: handle, landing: origin + '/s/' + handle, at: new Date().toISOString(), items: kept }), null, 'automation'); } catch (e) { /* a full queue is not worth failing the run for */ }
   }
-  try { await env.ORDERS.put('mesh:' + handle, JSON.stringify({ ...(state || {}), rails })); } catch (e) { /* same: report, do not break */ }
+  const rails = Object.assign({}, (state && state.rails && typeof state.rails === 'object') ? state.rails : {});
+  let railsChanged = false;
+  for (const r of flush.results) {
+    if (r.status === 'sent') { rails[r.channel] = { ok: true, fails: 0, at: new Date().toISOString() }; railsChanged = true; }
+    else if (r.status === 'failed') { rails[r.channel] = { ok: false, fails: (Number((rails[r.channel] || {}).fails) || 0) + 1, at: new Date().toISOString(), err: r.err || r.note }; railsChanged = true; }
+  }
+  if (!dry && railsChanged) {
+    try { await governedPut(env.ORDERS, 'mesh:' + handle, JSON.stringify({ ...(state || {}), rails }), null, 'automation'); } catch (e) { /* same: report, do not break */ }
+  }
   return json({ ok: true, handle, dry: dry, class: meshAccount(doc).class, socials: meshAccount(doc).socials,
     composed: items.length, queued_now: merged.added, dropped: merged.dropped, still_queued: kept.length,
     flush: { sent: flush.sent, queued: flush.queued, waiting: flush.waiting, results: flush.results },
@@ -3219,18 +3554,27 @@ async function imageUpload(req, env) {
  * the picture they removed, orphaned until some later save happens to notice it.
  * The listing still runs after that, as the janitor for everything else.
  */
+const imageSweepAt = new Map();
 async function pruneImages(env, st, before) {
   const prefix = 'img:' + st.handle + ':';
   const keep = referencedImages(st);
   let gone = 0;
   const dropped = new Set(Array.from(before || []).filter((ref) => !keep.has(ref) && ref.indexOf('/i/') === 0));
   for (const ref of dropped) {
-    try { await env.STORES.delete(prefix + String(ref).split('/').pop()); gone++; }
+    try { await governedDelete(env.STORES, prefix + String(ref).split('/').pop(), 'operator'); gone++; }
     catch (e) { /* the day's delete budget; the sweep below or a later save tries again */ }
   }
+  // A save that already named the dropped refs does not need a janitor list:
+  // it knew exactly what to delete. The full sweep (for uploads abandoned
+  // before Save) runs when a count is actually needed — no `before` set —
+  // and otherwise at most once a day per shop in this isolate.
+  const lastSweep = imageSweepAt.get(st.handle) || 0;
+  if (before && Date.now() - lastSweep < 24 * 3600e3) return keep.size;
+  imageSweepAt.set(st.handle, Date.now());
   let keys = [];
   try {
     const r = await env.STORES.list({ prefix, limit: 1000 });
+    quotaNote('lists', 'operator');
     keys = (r && r.keys) || [];
   } catch (e) { return dropped.size ? keep.size : 0; }
   let live = 0;
@@ -3238,7 +3582,7 @@ async function pruneImages(env, st, before) {
     const id = String(k.name).slice(prefix.length);
     const ref = imgRefOf(st.handle, id);
     if (keep.has(ref)) live++;
-    else if (!dropped.has(ref)) { try { await env.STORES.delete(k.name); gone++; } catch (e) { /* budget; next save tries again */ } }
+    else if (!dropped.has(ref)) { try { await governedDelete(env.STORES, k.name, 'telemetry'); gone++; } catch (e) { /* budget; next save tries again */ } }
   }
   if (gone) console.log('image_prune', st.handle, gone, 'freed');
   return live;
@@ -3461,9 +3805,12 @@ async function revokeKeys(req, url, env) {
 /* ------------------------------------------------------------------ audit */
 async function pushAudit(env, st, row) {
   if (!env.ORDERS || !st) return false;
+  if (!quotaGate('writes', 'operator').ok) return false;
   const k = 'audit:' + st.handle;
-  let cur = [];
-  try { cur = (await env.ORDERS.get(k, 'json')) || []; } catch (e) { cur = []; }
+  let cur = memGet(k);
+  if (cur === undefined) {
+    try { cur = (await env.ORDERS.get(k, 'json')) || []; quotaNote('reads', 'operator'); } catch (e) { cur = []; }
+  }
   try {
     cur.unshift({
     at: new Date().toISOString(), act: row.act, via: row.via || '', ip: row.ip || '',
@@ -3471,13 +3818,19 @@ async function pushAudit(env, st, row) {
       fields: row.fields || Object.keys(row.before || {}),
       before: row.before || undefined, after: row.after || undefined,
     });
-    await env.ORDERS.put(k, JSON.stringify(cur.slice(0, 40)));
+    const kept = cur.slice(0, 40);
+    await env.ORDERS.put(k, JSON.stringify(kept));
+    quotaNote('writes', 'operator'); memSet(k, kept, 60e3);
     return true;
   } catch (e) { return false; }   // the change stands; the log has a gap, and
 }                                 // the response says so rather than failing
 async function getAudit(env, handle) {
   if (!env.ORDERS) return [];
-  return (await env.ORDERS.get('audit:' + handle, 'json')) || [];
+  return cached('audit:' + handle, 60e3, async () => {
+    const rows = (await env.ORDERS.get('audit:' + handle, 'json')) || [];
+    quotaNote('reads', 'operator');
+    return rows;
+  });
 }
 
 /* -------------------------------------------------- inert, self-posting page */
@@ -3783,14 +4136,18 @@ async function opsRefs(env, handle) {
 async function opsState(env) {
   const t0 = Date.now();
   const listed = await env.STORES.list({ prefix: 'store:', limit: 1000 });
+  quotaNote('lists', 'operator');
   const handles = (listed.keys || []).map(k => String(k.name).slice('store:'.length)).filter(Boolean);
+  const rowsByStore = await ledgerRowsAll(env);
+  const refKeys = await listKeys(env.STORES, 'ref:', 1000);
+  const refHandles = new Set(refKeys.map((k) => k.slice('ref:'.length)));
   const stores = [];
   for (const h of handles) {
     const st = await getStore(env, h);
     if (!st) continue;
-    const rows = await ledgerRows(env, h);
+    const rows = rowsByStore.get(h) || [];
     const sum = opsSummarise(st, rows);
-    sum.awaiting_reference = await opsRefs(env, h);
+    sum.awaiting_reference = refHandles.has(h) ? await opsRefs(env, h) : [];
     sum.awaiting_ref = sum.awaiting_reference.length;
     stores.push(sum);
   }
@@ -3818,7 +4175,7 @@ async function opsState(env) {
     attention: stores.filter(s => s.suspended || s.left <= 7 || !s.feed_products || s.feed_error || s.has_pending || s.awaiting_ref)
       .map(s => ({ handle: s.handle, why: [s.suspended ? 'suspended' : '', s.left <= 0 ? 'expired' : (s.left <= 7 ? s.left + 'd left' : ''), (!s.feed_products || s.feed_error) ? 'menu' : '', s.has_pending ? 'queued settings' : '', s.awaiting_ref ? s.awaiting_ref + ' payment ref(s)' : ''].filter(Boolean).join(' · '), left: s.left })),
     free_plan: { kv_reads_day: 100000, kv_writes_day: 1000, kv_list_day: 1000, requests_day: 100000, cron_runs_day: 5 },
-    reads_used_estimate: stores.length * 2 + 1,
+    reads_used_estimate: stores.length + 3,
   }, 200, { 'Cache-Control': 'no-store' });
 }
 
@@ -3883,7 +4240,7 @@ async function opsHealth(env) {
   // The pipeline at a glance, for the one question that matters at 07:00: what needs a person,
   // and what is merely unarmed? Arming is a one-time policy act (bind a secret); after that the
   // slots run themselves and this block is how the owner can tell.
-  const pipeline = { digest: null, press_last: null, armed: {}, sellers_active: 0, press_identities: [] };
+  const pipeline = { digest: null, press_last: null, armed: {}, sellers_active: 0, press_identities: [], quota_local: quotaLocal() };
   try {
     pipeline.digest = await env.ORDERS.get('digest:last', 'json').catch(() => null);
     pipeline.press_last = await env.ORDERS.get('press:last', 'json').catch(() => null);
@@ -3919,7 +4276,11 @@ async function opsAudit(req, url, env) {
 
 async function getOpsLog(env) {
   if (!env.ORDERS) return [];
-  return (await env.ORDERS.get('audit:ops', 'json')) || [];
+  return cached('audit:ops', 60e3, async () => {
+    const rows = (await env.ORDERS.get('audit:ops', 'json')) || [];
+    quotaNote('reads', 'operator');
+    return rows;
+  });
 }
 /**
  * Logging is never allowed to break the thing it is logging. Cloudflare's free
@@ -3933,10 +4294,13 @@ const LOG_GAP = 'Applied, but this change could not be written to your change lo
 
 async function pushOpsLog(env, row) {
   if (!env.ORDERS) return false;
+  if (!quotaGate('writes', 'security').ok) return false;
   try {
     const cur = await getOpsLog(env);
     cur.unshift({ at: new Date().toISOString(), act: row.act, handle: row.handle || '', note: row.note || '', ip: row.ip || '' });
-    await env.ORDERS.put('audit:ops', JSON.stringify(cur.slice(0, 60)));
+    const kept = cur.slice(0, 60);
+    await env.ORDERS.put('audit:ops', JSON.stringify(kept));
+    quotaNote('writes', 'security'); memSet('audit:ops', kept, 60e3);
     return true;
   } catch (e) { return false; }
 }
@@ -4028,7 +4392,7 @@ async function opsStoreAction(req, env) {
     const rest = refs.filter((_, i) => i !== idx);
     if (rest.length) await env.STORES.put(key, JSON.stringify(rest), { expirationTtl: 30 * 86400 });
     else await env.STORES.delete(key);
-    await env.STORES.delete('term:' + handle);
+    memDelPrefix('listkeys:');
     await writeStore(env, st);
     const sale = await recordSale(env, st, { amount, provider: 'manual_ref', ref: String(pick.ref || ''), days });
     await pushOpsLog(env, { act: 'recognise_ref', handle, note: String(pick.ref || '') + ' -> +' + days + 'd, ' + amount + ' USD' + (sale && sale.seller_code ? ', commission ' + sale.commission + ' to ' + sale.seller_code : ''), ip: ipOf(req) });
@@ -4100,13 +4464,13 @@ async function opsStoreAction(req, env) {
   const before = { plan: st.plan, paid_until: st.paid_until, suspended: !!st.suspended };
   let done = act;
   if (act === 'suspend') st.suspended = true;
-  else if (act === 'reinstate') { st.suspended = false; st.warned_at = null; await env.STORES.delete('term:' + handle); }
+  else if (act === 'reinstate') { st.suspended = false; st.warned_at = null; }
   else if (act === 'extend7') st.paid_until = Math.max(Date.now(), st.paid_until || 0) + 7 * 864e5;
   else if (act === 'extend30') st.paid_until = Math.max(Date.now(), st.paid_until || 0) + 30 * 864e5;
   else if (act === 'grant_year') { st.paid_until = Math.max(Date.now(), st.paid_until || 0) + 365 * 864e5; st.plan = 'annual'; st.suspended = false; }
   else if (act === 'reset_free') { st.paid_until = Date.now() + FREE_DAYS * 864e5; st.plan = 'free60'; st.suspended = false; }
   else if (act === 'clear_pending') { delete st.pending; done = 'reverted a queued settings change'; }
-  else if (act === 'clear_refs') { await env.STORES.delete('ref:' + handle); delete st.pending_ref_note; done = 'cleared the payment references the merchant filed'; }
+  else if (act === 'clear_refs') { await env.STORES.delete('ref:' + handle); memDelPrefix('listkeys:'); delete st.pending_ref_note; done = 'cleared the payment references the merchant filed'; }
   else if (act === 'revoke') { st.auth_gen = Date.now().toString(36); st.admin_token = randomKey(16); delete st.pending; await rotateRenewLink(env, st); done = 'revoked every link, key and cookie, including the renew link'; }
   else return json({ ok: false, error: 'unknown action', actions: ['suspend', 'reinstate', 'extend7', 'extend30', 'grant_year', 'reset_free', 'clear_pending', 'clear_refs', 'revoke', 'notify', 'reset_pin', 'menu', 'menu_revert', 'recognise_ref'] }, 422);
 
@@ -4191,7 +4555,7 @@ async function opsRailsWrite(req, env) {
         note: 'Move those stores to another rail first, or leave the rail in place.' }, 422);
     }
   }
-  await env.STORES.put('rails:extra', JSON.stringify(out));
+  await env.STORES.put('rails:extra', JSON.stringify(out)); memDel('rails:catalog'); quotaNote('writes', 'operator');
   await pushOpsLog(env, { act: 'rails', handle: 'rails', note: (Object.keys(was || {}).length) + ' -> ' + Object.keys(out).length + ' added rails: ' + Object.keys(out).join(','), ip: ipOf(req) });
   return json({ ok: true, added: Object.keys(out), live: await railsCatalog(env),
     note: 'Live at once for new stores and new orders. Orders already placed keep the rail printed on their slip.' });
@@ -4371,12 +4735,12 @@ async function opsTemplateWrite(req, env) {
     if (!raw.ok) return json({ ok: false, error: 'could not read the committed copy (HTTP ' + raw.status + ')' }, 502);
     const text = await raw.text();
     if (text.length < 200) return json({ ok: false, error: 'committed copy looks truncated; refusing to publish it' }, 502);
-    await env.STORES.put(key, text);
+    await env.STORES.put(key, text); memDel('tplkv:' + name); quotaNote('writes', 'operator');
     await pushOpsLog(env, { act: 'template-restore', handle: name, note: (was ? was.length : 0) + ' -> ' + text.length + ' bytes from main', ip: ipOf(req) });
     return json({ ok: true, restored: name, bytes: text.length, was: was ? was.length : 0, source: 'git main' });
   }
-  await env.STORES.put(key, html);
-  const now = await env.STORES.get(key);
+  await env.STORES.put(key, html); memDel('tplkv:' + name); quotaNote('writes', 'operator');
+  const now = html;
   await pushOpsLog(env, { act: 'template', handle: name, note: (was ? was.length : 0) + ' -> ' + now.length + ' bytes', ip: ipOf(req) });
   return json({ ok: true, name, bytes: now.length, was: was ? was.length : 0, matches: now === html, hot: 'no redeploy needed — this is the live copy', note: name === 'sample-menu' ? 'CSV published.' : 'Live for the next request.' });
 }
@@ -4389,31 +4753,47 @@ async function opsTemplateWrite(req, env) {
  * is judged at registration, leads are allocated by hash, commission is arithmetic on a recorded
  * payment, and the counters a human would have to babysit are derived at read time. */
 
-async function listKeys(ns, prefix, cap = 1000) {
+const nsIds = new WeakMap();
+let nsSeq = 0;
+function nsId(ns) { if (!nsIds.has(ns)) nsIds.set(ns, ++nsSeq); return nsIds.get(ns); }
+async function listKeys(ns, prefix, cap = 1000, opts = {}) {
   const out = [];
   if (!ns) return out;
+  const ck = 'listkeys:' + nsId(ns) + ':' + prefix + ':' + cap;
+  if (!opts.fresh) {
+    const hit = memGet(ck);
+    if (hit !== undefined) return hit;
+  }
   let cursor, loops = 0;
   do {
     const l = await ns.list({ prefix, limit: 1000, cursor });
+    quotaNote('lists', 'operator');
     for (const k of (l.keys || [])) out.push(String(k.name));
     cursor = l.list_complete ? null : l.cursor;
   } while (cursor && loops++ < 5 && out.length < cap);
-  return out.slice(0, cap);
+  const sliced = out.slice(0, cap);
+  memSet(ck, sliced, 30000);
+  return cloneVal(sliced);
 }
 
 /* ---- sellers ---- */
 async function sellerDoc(env, code) {
   const c = cleanSellerCode(code);
   if (!c || !env.STORES) return null;
-  try { return await env.STORES.get('seller:' + c, 'json'); } catch (e) { return null; }
+  return cached('seller:' + c, 60e3, async () => {
+    try { const d = await env.STORES.get('seller:' + c, 'json'); quotaNote('reads', 'operator'); return d || null; }
+    catch (e) { return null; }
+  });
 }
 async function listSellers(env) {
-  const keys = await listKeys(env.STORES, 'seller:', 500);
-  const out = [];
-  for (const k of keys) {
-    try { const d = await env.STORES.get(k, 'json'); if (d && d.code) out.push(d); } catch (e) { void e; }
-  }
-  return out.sort((a, b) => String(a.code).localeCompare(String(b.code)));
+  return cached('sellers:list', 60e3, async () => {
+    const keys = await listKeys(env.STORES, 'seller:', 500);
+    const out = [];
+    for (const k of keys) {
+      try { const d = await env.STORES.get(k, 'json'); quotaNote('reads', 'operator'); if (d && d.code) out.push(d); } catch (e) { void e; }
+    }
+    return out.sort((a, b) => String(a.code).localeCompare(String(b.code)));
+  });
 }
 function publicSeller(d) {
   if (!d) return null;
@@ -4440,12 +4820,23 @@ async function leadActor(env, codeIn, keyIn) {
   return sellerAuth(env, codeIn, keyIn);
 }
 async function listSales(env) {
-  const keys = await listKeys(env.STORES, 'sale:', 2000);
-  const out = [];
-  for (const k of keys) {
-    try { const s = await env.STORES.get(k, 'json'); if (s) out.push(s); } catch (e) { void e; }
-  }
-  return out.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+  return cached('sales:list', 60e3, async () => {
+    const out = [];
+    let cursor, pages = 0;
+    try {
+      do {
+        const l = await env.STORES.list({ prefix: 'sale:', limit: 1000, cursor });
+        quotaNote('lists', 'operator');
+        for (const k of l.keys || []) {
+          if (k.metadata && k.metadata.at) { out.push(k.metadata); continue; }
+          try { const s = await env.STORES.get(k.name, 'json'); quotaNote('reads', 'operator'); if (s) out.push(s); } catch (e) { void e; }
+          if (out.length >= 2000) break;
+        }
+        cursor = l.list_complete ? undefined : l.cursor;
+      } while (cursor && ++pages < 2 && out.length < 2000);
+    } catch (e) { /* a board with no sales row is better than a 500 */ }
+    return out.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+  });
 }
 /** One payment, one sale row, commission attached at the seller's standing rate. Best-effort by
  *  design: a spent write budget must never un-activate a shop that really paid — the activation
@@ -4470,7 +4861,8 @@ async function recordSale(env, st, sale) {
       days: Number(sale && sale.days) || 365, pct, commission: commissionFor(amount, pct), commission_via: via,
       provider: String((sale && sale.provider) || ''), ref: String((sale && sale.ref) || '').slice(0, 80),
       at: new Date().toISOString() };
-    await env.STORES.put('sale:' + st.handle + ':' + Date.now().toString(36) + alnumToken(6), JSON.stringify(row));
+    await env.STORES.put('sale:' + st.handle + ':' + Date.now().toString(36) + alnumToken(6), JSON.stringify(row), { metadata: row });
+    quotaNote('writes', 'money'); memDel('sales:list'); memDelPrefix('listkeys:');
     return row;
   } catch (e) { return null; }
 }
@@ -4479,7 +4871,7 @@ async function boardInputs(env) {
   const handles = (await listKeys(env.STORES, 'store:', 1000)).map((k) => k.slice('store:'.length)).filter(Boolean);
   const stores = [];
   for (const h of handles) {
-    try { const st = await env.STORES.get('store:' + h, 'json'); if (st) stores.push(st); } catch (e) { void e; }
+    try { const st = await getStore(env, h); if (st) stores.push(st); } catch (e) { void e; }
   }
   const sales = await listSales(env);
   return { sellers, stores, sales };
@@ -4496,9 +4888,9 @@ async function sellerRedirect(url, env, codeIn, mode) {
   // link cannot spend the account's 1,000 daily writes one redirect at a time. Attribution —
   // the number money hangs off — is judged exactly, at registration.
   const n = (sellerClickBuf.get(code) || 0) + 1;
-  if (n >= 10) {
+  if (n >= 50 && quotaGate('writes', 'telemetry').ok) {
     sellerClickBuf.set(code, 0);
-    try { doc.clicks = (Number(doc.clicks) || 0) + n; await env.STORES.put('seller:' + code, JSON.stringify(doc)); } catch (e) { void e; }
+    try { doc.clicks = (Number(doc.clicks) || 0) + n; await env.STORES.put('seller:' + code, JSON.stringify(doc)); quotaNote('writes', 'telemetry'); memSet('seller:' + code, doc, 60e3); memDel('sellers:list'); } catch (e) { void e; }
   } else sellerClickBuf.set(code, n);
   return redirect(url.origin + landing + '?ref=' + code);
 }
@@ -4517,7 +4909,7 @@ async function opsSellers(req, env) {
   if (act === 'deactivate' || act === 'activate') {
     if (!existing) return json({ ok: false, error: 'no such seller' }, 404);
     existing.active = act === 'activate';
-    await env.STORES.put('seller:' + code, JSON.stringify(existing));
+    await env.STORES.put('seller:' + code, JSON.stringify(existing)); quotaNote('writes', 'operator'); memSet('seller:' + code, existing, 60e3); memDel('sellers:list'); memDelPrefix('listkeys:');
     await pushOpsLog(env, { act: 'seller_' + act, handle: code, note: existing.name || '', ip: ipOf(req) });
     return json({ ok: true, seller: publicSeller(existing), note: act === 'deactivate'
       ? 'Deactivated: their links land on plain onboarding and no new leads allocate to them. Shops already attributed stay attributed — history is not edited.'
@@ -4527,7 +4919,7 @@ async function opsSellers(req, env) {
     if (!existing) return json({ ok: false, error: 'no such seller' }, 404);
     const key = randomKey(18);
     existing.key_hash = await hash(code + ':' + key);
-    await env.STORES.put('seller:' + code, JSON.stringify(existing));
+    await env.STORES.put('seller:' + code, JSON.stringify(existing)); quotaNote('writes', 'operator'); memSet('seller:' + code, existing, 60e3); memDel('sellers:list'); memDelPrefix('listkeys:');
     await pushOpsLog(env, { act: 'seller_rotate_key', handle: code, note: '', ip: ipOf(req) });
     return json({ ok: true, seller: publicSeller(existing), seller_key: key, note: 'Shown once. The old key is dead everywhere (seller view, leads, sheets feed).' });
   }
@@ -4544,7 +4936,7 @@ async function opsSellers(req, env) {
     created_at: (existing && existing.created_at) || new Date().toISOString() };
   let key = null;
   if (!doc.key_hash) { key = randomKey(18); doc.key_hash = await hash(code + ':' + key); }
-  await env.STORES.put('seller:' + code, JSON.stringify(doc));
+  await env.STORES.put('seller:' + code, JSON.stringify(doc)); quotaNote('writes', 'operator'); memSet('seller:' + code, doc, 60e3); memDel('sellers:list'); memDelPrefix('listkeys:');
   await pushOpsLog(env, { act: existing ? 'seller_update' : 'seller_register', handle: code, note: doc.name + ' · ' + doc.commission_pct + '%', ip: ipOf(req) });
   return json({ ok: true, seller: publicSeller(doc), ...(key ? { seller_key: key } : {}),
     links: { short: '/r/' + code, onboard: '/onboard?ref=' + code, whop_hint: doc.whop ? '?a=' + doc.whop : null },
@@ -4575,11 +4967,14 @@ async function sellerView(url, env) {
 async function listLeads(env, filter) {
   const f = filter || {};
   if (!env.ORDERS) return [];
-  const keys = await listKeys(env.ORDERS, 'lead:', 2000);
-  const out = [];
-  for (const k of keys) {
-    try { const l = await env.ORDERS.get(k, 'json'); if (l && l.id) out.push(l); } catch (e) { void e; }
-  }
+  const out = await cached('leads:all', 60e3, async () => {
+    const keys = await listKeys(env.ORDERS, 'lead:', 2000);
+    const rows = [];
+    for (const k of keys) {
+      try { const l = await env.ORDERS.get(k, 'json'); quotaNote('reads', 'operator'); if (l && l.id) rows.push(l); } catch (e) { void e; }
+    }
+    return rows;
+  });
   const rows = out.filter((l) => (!f.seller || l.seller_code === f.seller) && (!f.status || l.status === f.status));
   rows.sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0)
     || String(a.next_follow_at || '9999').localeCompare(String(b.next_follow_at || '9999')));
@@ -4609,13 +5004,13 @@ async function leadsIngest(req, env) {
       if (existing.status === 'research_hold' && merged.length >= 2) existing.status = 'queued';
       if (!existing.source_url && lead.source_url) existing.source_url = lead.source_url;
       if (JSON.stringify([existing.signals, existing.status, existing.score]) !== before) {
-        await env.ORDERS.put('lead:' + lead.id, JSON.stringify(existing)); counts.updated++;
+        await env.ORDERS.put('lead:' + lead.id, JSON.stringify(existing)); quotaNote('writes', 'automation'); memDel('leads:all'); counts.updated++;
       } else counts.duplicate++;
       continue;
     }
     lead.seller_code = (lead.seller_code && activeCodes.includes(lead.seller_code))
       ? lead.seller_code : allocateSeller(lead.dedupe, activeCodes);
-    await env.ORDERS.put('lead:' + lead.id, JSON.stringify(lead));
+    await env.ORDERS.put('lead:' + lead.id, JSON.stringify(lead)); quotaNote('writes', 'automation'); memDel('leads:all'); memDelPrefix('listkeys:');
     counts.added++; if (lead.status === 'research_hold') counts.research_hold++;
     if (added.length < 100) added.push(lead.id);
   }
@@ -4653,7 +5048,7 @@ async function leadsAct(req, env) {
   if (!t.ok) return json({ ok: false, conflict: !!t.conflict, error: t.error, ...(t.actions ? { actions: t.actions } : {}) }, t.conflict ? 409 : 422);
   if (b.note) t.lead.note = String(b.note).slice(0, 300);
   if (b.sender && isEmail(String(b.sender))) t.lead.last_sender = String(b.sender).toLowerCase().slice(0, 80);
-  await env.ORDERS.put('lead:' + id, JSON.stringify(t.lead));
+  await env.ORDERS.put('lead:' + id, JSON.stringify(t.lead)); quotaNote('writes', 'automation'); memDel('leads:all');
   if (b.action === 'dnc') {
     try {
       if (t.lead.email) await env.STORES.put('Lead:' + t.lead.email, JSON.stringify({ at: new Date().toISOString(), by: doc.code }));
@@ -4715,24 +5110,40 @@ async function dispatchTick(env) {
     try { out.outreach = await fire('outreach.yml', { mode: 'send_and_poll' }); }
     catch (e) { out.outreach = 'error'; out.outreach_error = String(e && e.message || e).slice(0, 120); }
   }
-  try { await env.ORDERS.put('dispatch:last', JSON.stringify(out)); } catch (e) { void e; }
+  // No token bound means nothing was dispatched and nothing needs remembering:
+  // writing "skipped" four times a day would spend the budget to record an
+  // absence. The stamp lands only when a dispatch was actually attempted, so
+  // binding the token later the same day still fires that day's work.
+  if (env.GH_DISPATCH_TOKEN && env.GH_REPO) {
+    try { await governedPut(env.ORDERS, 'dispatch:last', JSON.stringify(out), null, 'automation'); } catch (e) { void e; }
+  }
   return out;
 }
 /** The nightly exception digest: derived from the same rows everything else reads, stored once,
  *  and surfaced by /ops/api/health. It exists so the owner's morning question — "what needs a
  *  person?" — has one answer with numbers, instead of an approval queue with opinions. */
-async function writeDigest(env) {
+async function writeDigest(env, sweep) {
   const now = Date.now();
-  const handles = (await listKeys(env.STORES, 'store:', 1000)).map((k) => k.slice('store:'.length)).filter(Boolean);
-  let live = 0, suspended = 0; const expiring = [];
-  for (const h of handles) {
-    try {
-      const st = await env.STORES.get('store:' + h, 'json');
-      if (!st) continue;
-      const left = ((st.paid_until || 0) - now) / 864e5;
-      if (st.suspended) suspended++;
-      else if (left > 0) { live++; if (left <= 14) expiring.push({ handle: h, left_days: Math.ceil(left) }); }
-    } catch (e) { void e; }
+  // The cron sweep just listed every store and judged the same three facts
+  // from metadata; rescanning the estate here would double the nightly reads
+  // to learn them twice. A direct call with no sweep keeps the old path.
+  let total = 0, live = 0, suspended = 0; const expiring = [];
+  if (sweep && Number.isFinite(Number(sweep.total))) {
+    total = Number(sweep.total) || 0;
+    live = Number(sweep.live) || 0; suspended = Number(sweep.suspended) || 0;
+    for (const x of sweep.expiring || []) expiring.push(x);
+  } else {
+    const handles = (await listKeys(env.STORES, 'store:', 1000)).map((k) => k.slice('store:'.length)).filter(Boolean);
+    total = handles.length;
+    for (const h of handles) {
+      try {
+        const st = await getStore(env, h);
+        if (!st) continue;
+        const left = ((st.paid_until || 0) - now) / 864e5;
+        if (st.suspended) suspended++;
+        else if (left > 0) { live++; if (left <= 14) expiring.push({ handle: h, left_days: Math.ceil(left) }); }
+      } catch (e) { void e; }
+    }
   }
   let refCount = 0; const refHandles = [];
   for (const k of await listKeys(env.STORES, 'ref:', 200)) {
@@ -4757,7 +5168,7 @@ async function writeDigest(env) {
   const whopUnmatched = (await listKeys(env.ORDERS, 'whop:unmatched:', 200)).length;
   const whopRefunds = (await listKeys(env.ORDERS, 'whop:refund:', 200)).length;
   const digest = { at: new Date(now).toISOString(), version: VERSION,
-    stores: { total: handles.length, live, suspended, expiring_14d: expiring },
+    stores: { total, live, suspended, expiring_14d: expiring },
     awaiting_refs: { count: refCount, handles: refHandles },
     press: { identities: Object.keys(reg).length, queued_items: queuedItems, overdue_items: overdueItems,
       last_run: pressLast ? { at: pressLast.at, sent: pressLast.sent, statuses: pressLast.statuses } : null },
@@ -4773,7 +5184,7 @@ async function writeDigest(env) {
       ...(whopUnmatched ? [whopUnmatched + ' Whop payment(s) could not be matched to a shop (wrong handle at checkout?) — match by hand, the money is already in Whop'] : []),
       ...(whopRefunds ? [whopRefunds + ' Whop refund/dispute(s) to review before any term is clawed back'] : []),
     ] };
-  try { await env.ORDERS.put('digest:last', JSON.stringify(digest)); } catch (e) { void e; }
+  try { await governedPut(env.ORDERS, 'digest:last', JSON.stringify(digest), null, 'operator'); } catch (e) { void e; }
   return { written: true, needs_a_person: digest.needs_a_person.length, stores_live: live, leads_total: leads.length };
 }
 
@@ -4843,10 +5254,30 @@ async function hookWhop(req, url, env, ctx) {
     if (idx && idx.handle) st = await getStore(env, idx.handle);
   }
   if (!st && buyer.email) {
-    for (const k of await listKeys(env.STORES, 'store:', 1000)) {
+    const wanted = emailHash(buyer.email);
+    const legacy = [];
+    try {
+      let cursor, pages = 0;
+      do {
+        const l = await env.STORES.list({ prefix: 'store:', limit: 1000, cursor });
+        quotaNote('lists', 'operator');
+        for (const k of l.keys || []) {
+          const handle = String(k.name).slice('store:'.length);
+          const hashes = (k.metadata && k.metadata.e) || null;
+          if (!hashes) { legacy.push(handle); continue; }
+          if (hashes.includes(wanted)) {
+            const cand = await getStore(env, handle, { fresh: true });
+            if (cand && [cand.owner_email, cand.notify_email].some((e) => String(e || '').toLowerCase() === buyer.email)) { st = cand; break; }
+          }
+        }
+        cursor = l.list_complete ? undefined : l.cursor;
+      } while (!st && cursor && ++pages < 5);
+    } catch (e) { void e; }
+    for (const handle of legacy) {
+      if (st) break;
       try {
-        const cand = await env.STORES.get(k, 'json');
-        if (cand && [cand.owner_email, cand.notify_email].some((e) => String(e || '').toLowerCase() === buyer.email)) { st = await getStore(env, cand.handle); break; }
+        const cand = await getStore(env, handle, { fresh: true });
+        if (cand && [cand.owner_email, cand.notify_email].some((e) => String(e || '').toLowerCase() === buyer.email)) st = cand;
       } catch (e) { void e; }
     }
   }
@@ -4894,7 +5325,6 @@ async function hookWhop(req, url, env, ctx) {
   st.whop_status = 'valid';
   st.whop_last_grant = { at: new Date().toISOString(), ref: buyer.payment_id || webhookId, days: term.days, from: term.from };
   await writeStore(env, st);
-  await env.STORES.delete('term:' + st.handle).catch(() => {});
   if (buyer.membership_id) { try { await env.STORES.put('whopmem:' + buyer.membership_id, JSON.stringify({ handle: st.handle, at: new Date().toISOString() })); } catch (e) { void e; } }
   if (buyer.payment_id) { try { await env.STORES.put('paid:whop:pay:' + buyer.payment_id, JSON.stringify({ handle: st.handle, at: new Date().toISOString() }), { expirationTtl: 40 * 86400 }); } catch (e) { void e; } }
   const code = cleanSellerCode(st.seller_code || '');

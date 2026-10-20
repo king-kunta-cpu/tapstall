@@ -30,7 +30,8 @@ id = "{oid}"
 crons = ["15 6,12,18,0 * * *"]
 
 [observability]
-enabled = true
+# Quota-first: invocation logs are off; /__selftest + ops health are the witness.
+enabled = false
 '''
 if origin:
     out += f'''

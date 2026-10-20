@@ -276,6 +276,40 @@ test('design settings are instant, closed-world, and cannot smuggle CSS', () => 
   assert.ok(!JSON.stringify(pub).includes('EVIL'), 'publishing the outfit did not widen the allowlist');
 });
 
+test('quota policy reserves the last writes for money and paces only telemetry', () => {
+  assert.equal(C.QUOTA_LIMITS.kv_writes, 1000);
+  assert.equal(C.quotaPriorityForKey('order:shop:1'), 'money');
+  assert.equal(C.quotaPriorityForKey('lock:shop'), 'security');
+  assert.equal(C.quotaPriorityForKey('audit:shop'), 'operator');
+  assert.equal(C.quotaPriorityForKey('press:queue:owner'), 'automation');
+  const noon = Date.UTC(2026, 9, 20, 12, 0, 0);
+  assert.equal(C.quotaAllows({ used: 999, priority: 'money', now: noon }).ok, true, 'money may spend the last write');
+  assert.equal(C.quotaAllows({ used: 975, priority: 'security', now: noon }).ok, false, 'security keeps 25 back');
+  assert.equal(C.quotaAllows({ used: 924, priority: 'operator', now: noon }).ok, true);
+  assert.equal(C.quotaAllows({ used: 925, priority: 'operator', now: noon }).ok, false, 'operator saves keep 75 back');
+  assert.equal(C.quotaAllows({ used: 799, priority: 'automation', now: noon }).ok, true, 'scheduled automation is reserve-capped, not clock-paced');
+  assert.equal(C.quotaAllows({ used: 800, priority: 'automation', now: noon }).ok, false);
+  const early = Date.UTC(2026, 9, 20, 1, 0, 0);
+  assert.equal(C.quotaAllows({ used: 100, priority: 'telemetry', now: early }).ok, false, 'telemetry may not burn its soft cap at 01:00');
+  assert.equal(C.quotaAllows({ used: 10, priority: 'telemetry', now: early }).ok, true);
+  assert.equal(C.quotaAllows({ used: 100, priority: 'telemetry', now: noon }).ok, true, 'and the same spend is in pace by noon');
+});
+
+test('the store metadata row answers cron’s questions without the document', () => {
+  const now = Date.UTC(2026, 9, 20, 12, 0, 0);
+  const meta = C.storeMeta({ paid_until: now + 3 * 864e5, suspended: false, warned_at: null, crypto_watch: true, owner_email: 'Owner@Example.com' });
+  assert.deepEqual(Object.keys(meta).sort(), ['c', 'e', 'p', 's', 'w']);
+  assert.ok(JSON.stringify(meta).length < 200, 'the row stays far inside the metadata cap');
+  assert.equal(meta.e[0], C.emailHash('owner@example.com'), 'email lookup is a hash hint, never the address');
+  assert.equal(C.storeMetaAction(meta, now), 'warn');
+  assert.equal(C.storeMetaAction({ ...meta, w: 1 }, now), 'watch');
+  assert.equal(C.storeMetaAction({ p: now - 1, s: 0, w: 1, c: 0 }, now), 'suspend');
+  assert.equal(C.storeMetaAction({ p: now + 864e5, s: 1, w: 1, c: 0 }, now), 'reinstate');
+  assert.equal(C.storeMetaAction({ p: now + 30 * 864e5, s: 0, w: 1, c: 0 }, now), '', 'a healthy shop needs no document read');
+  assert.equal(C.storeMetaAction(null, now), 'legacy');
+  assert.equal(C.storeMetaAction({}, now), 'legacy');
+});
+
 test('a held change merges with an earlier one instead of overwriting it', () => {
   const st = { rail: 'cash', pay_account: 'A', whatsapp: '771', hours: 'x' };
   C.stageSettings(st, {}, { pay_account: 'B' }, 900e3, 1000);

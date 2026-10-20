@@ -1,12 +1,17 @@
 name: monitor
-# The outside witness. The Worker's cron is the system's only clock (press windows, term sweep,
-# chain watcher, nightly exception digest all run in its slots), but a dead Worker cannot report
-# its own death — so something outside Cloudflare looks in once a week and fails loudly when the
-# live system stops behaving. This file deploys nothing and writes nothing to production except
-# the sandbox store's own probe orders, which prod_check creates and cancels itself.
+# The outside witness, in two weights (v1.3.0 quota redesign):
+#
+#  - weekly light check: two public GETs (`/__ping`, `/rails`). It proves the
+#    Worker is alive and serving this checkout's version, and it spends no KV
+#    writes, no probe orders and a few seconds of runner time.
+#  - monthly full prod_check (also what workflow_dispatch runs): the deep
+#    outside witness against the sandbox store. It creates/cancels its own
+#    probe orders, so it is deliberately monthly, not weekly — the monitor
+#    must never be a meaningful line in the quota it exists to watch.
 on:
   schedule:
-    - cron: '20 5 * * 1'   # Mondays 05:20 UTC — before the week's traffic, never gated by hour
+    - cron: '20 5 * * 1'   # Mondays 05:20 UTC: light check
+    - cron: '35 5 1 * *'   # 1st of the month 05:35 UTC: full prod_check
   workflow_dispatch: {}
 
 permissions:
@@ -17,7 +22,26 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  light:
+    if: github.event.schedule == '20 5 * * 1'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: ping the live Worker (read-only)
+        env:
+          ORIGIN: https://tapstall.zlnew.workers.dev
+        run: |
+          want=$(node -p "require('./package.json').version")
+          ping=$(curl -sf -A "Mozilla/5.0" --max-time 20 "$ORIGIN/__ping")
+          echo "$ping"
+          got=$(printf '%s' "$ping" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("version",""))')
+          [ "$got" = "$want" ] || { echo "live version $got != checkout $want"; exit 1; }
+          curl -sf -A "Mozilla/5.0" --max-time 20 "$ORIGIN/rails" > /dev/null
+          echo "## monitor (weekly light check)" >> "$GITHUB_STEP_SUMMARY"
+          echo "live version: $got — /__ping and /rails answered; zero KV writes spent" >> "$GITHUB_STEP_SUMMARY"
+
   prod-check:
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '35 5 1 * *'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,7 +60,7 @@ jobs:
           cat /tmp/prod.clean
           tail -c 600 /tmp/prod.err
           {
-            echo "## prod_check (weekly outside witness)"
+            echo "## prod_check (monthly outside witness)"
             grep -E "^(target:|store:)" /tmp/prod.clean
             grep -cE "^  \+ " /tmp/prod.clean | sed 's/^/passed checks: /'
             echo "failed checks:"

@@ -33,12 +33,31 @@ Storefront `…/s/<handle>` · dashboard `…/a` · rate calculator `…/fees`
 A new merchant is one KV write. There is no per-customer deploy, no approval
 queue, no invoice to send.
 
-The one number that bounds it: **1,000 KV writes/day for the whole account**
-(reads are 100,000/day). An order costs about four writes, so the free tier is
-~150–200 orders a day across all tenants before anything needs paying for —
-measured the hard way on 2026-10-10, and the reason every path that can avoid a
-write now does (a deploy with unchanged HTML writes nothing; log writes are
-best-effort; a quota answers 503 with a retry time instead of a 500).
+The numbers that bound it: **1,000 KV writes, 1,000 deletes and 1,000 lists a
+day for the whole account** (reads and Worker requests are 100,000/day each).
+v1.3.0 is built around that asymmetry — *memory first, reads second, indexed
+lists third, a write only for a fact that must survive the isolate*:
+
+- a warm order is **one KV write** (the document; order numbers are leased in
+  blocks of 50, buyer counters coalesce, an unchanged menu rewrites nothing);
+- a store document carries a tiny cron/index row in its KV metadata, so the
+  6-hourly sweep lists once and reads only shops that are due, expiring or
+  chain-watched — a healthy estate costs zero document reads a slot;
+- public store/config/feed reads, the rails catalogue, ledgers and the
+  seller/lead/sale collections are isolate-cached with invalidation on the
+  write paths; owner state takes one order listing for every shop, not one
+  per shop;
+- press/dispatch/log writes are change-only and pass a reserve ladder in
+  `core.js` (`QUOTA_RESERVE`): automation stops at 800 writes, telemetry at
+  700, operator saves at 925, security at 975 — the last writes belong to
+  orders. `./scripts/quota.sh` reads the account truth from Cloudflare
+  GraphQL and spends **zero KV operations** doing it (`--inventory` is the
+  old listing mode, opt-in).
+
+So the free ceiling is now roughly **800 warm orders a day** before automation
+has already stood down and orders themselves approach the hard cap — and on
+the day it is spent anyway, reads keep serving and a quota answers 503 with a
+retry time instead of a 500.
 
 ## The two things the incumbent cannot do here
 
@@ -79,7 +98,7 @@ scripts/deploy.sh --templates   does the bundle carry every page? reads git, wri
 scripts/deploy.sh --pages-override <name>   the emergency door: one KV write, read back five times
 scripts/build_bundle.sh   inlines core.js and pages/*.html into .build/worker.js, ESM syntax check
 scripts/check_bundle_pages.py   byte-for-byte: is this file, exactly, inside that bundle?
-scripts/quota.sh      what the account holds and what a release costs. reads, and only reads
+scripts/quota.sh      account usage vs the free budgets, from GraphQL: zero KV ops (--inventory spends lists/reads)
 scripts/cf_publish.py     dependency-free publisher (fallback when wrangler is absent)
 scripts/set_triggers.py   verifies the schedule/route over HTTP rather than trusting a write
 ```
@@ -93,7 +112,7 @@ export CF_TOKEN=… CF_ACCOUNT=…     # or put them in .secrets/
 ./scripts/deploy.sh --check         # tests + build, uploads nothing
 ./scripts/deploy.sh --push          # also creates/updates the GitHub repo + Pages
 ./scripts/deploy.sh --templates      # does the bundle carry every page? reads git, writes nothing
-./scripts/quota.sh                   # what the account holds and what a release costs. reads only
+./scripts/quota.sh                   # usage vs budget from GraphQL (zero KV ops); --inventory for key prefixes
 ```
 
 A release used to spend 11 KV writes publishing the pages and 11 reads reading them back, and every

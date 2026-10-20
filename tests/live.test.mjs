@@ -300,6 +300,36 @@ test('a shop is born in its template and can restyle itself without an operator'
   assert.ok(r.json.fields.accent_color, 'a colour that is really CSS is named and refused');
 });
 
+test('quota-first hot paths: a warm order is one KV write and an unchanged feed is none', async () => {
+  const h = 'quotashop';
+  let r = await call('/api/register', {
+    method: 'POST', ip: '196.51.100.31',
+    body: { handle: h, shop_name: 'Quota Kitchen', whatsapp: '263771234569', currency: 'USD', feed_url: 'https://stub/menu.csv', rail: 'cash' },
+  });
+  assert.equal(r.status, 201, r.text);
+  const rec = env.STORES._map.get('store:' + h);
+  assert.ok(rec && rec.meta && rec.meta.p > Date.now(), 'the store write carries its cron metadata row in the same write');
+  const buy = (phone) => call('/api/order', {
+    method: 'POST', ip: '196.51.100.32',
+    body: { handle: h, service: 'pickup', buyer: { name: 'Quota Buyer', phone }, items: [{ id: '2', name: '2 litre Coke', price: 2.5, qty: 1 }] },
+  });
+  assert.equal((await call('/s/' + h + '/feed.json')).status, 200);
+  assert.equal((await buy('0781000001')).status, 201, 'warm-up order lands (this one leases the sequence block)');
+  const sw = env.STORES._writes, ow = env.ORDERS._writes;
+  assert.equal((await call('/s/' + h + '/feed.json')).status, 200);
+  assert.equal(env.STORES._writes, sw, 're-reading an unchanged sheet rewrites no store document');
+  const second = await buy('0781000002');
+  assert.equal(second.status, 201, second.text);
+  assert.equal(env.STORES._writes, sw, 'a warm order spends no STORES write: no sequence, no buyer counter, no feed snapshot');
+  assert.equal(env.ORDERS._writes, ow + 1, 'and exactly one ORDERS write: the order document itself');
+  assert.match(second.json.order.code, /-0002$/, 'the printed code is still sequential from the leased block');
+
+  const tick = await call('/__selftest?scheduled=1');
+  assert.equal(tick.status, 200, tick.text);
+  assert.equal(tick.json.scheduled.read_docs, 0, 'cron judged every healthy shop from metadata and read no documents: ' + JSON.stringify(tick.json.scheduled));
+  assert.ok(tick.json.scheduled.checked >= 3, 'while still checking the estate');
+});
+
 test('menu comes from the feed and honours options, add-ons and stock', async () => {
   const feed = await call('/s/mamatoe/feed.json');   // force=true path
   assert.equal(feed.json.products.length > 0, true, 'feed fetched');
@@ -916,7 +946,7 @@ test('the console sees the whole estate but not the keys', async () => {
   assert.equal(me.awaiting_ref, 1, 'the filed reference shows up as an item of work');
   assert.match(st.json.attention[0].why, /ref|menu|queued|left|suspended/, 'attention rows explain themselves');
   assert.equal(st.json.totals.awaiting_reference, 1);
-  assert.equal(st.json.reads_used_estimate, st.json.stores.length * 2 + 1, 'the page tells the operator what a refresh costs');
+  assert.equal(st.json.reads_used_estimate, st.json.stores.length + 3, 'the page tells the operator what a refresh costs: three listings plus at most one store read each');
   const blob = JSON.stringify(st.json);
   for (const leak of ['admin_token', 'secret_hash', 'auth_gen', 'fw_secret', 'feed_cache']) {
     assert.ok(!blob.includes(leak), 'state leaked ' + leak);

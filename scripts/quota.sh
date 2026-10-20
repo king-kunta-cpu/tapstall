@@ -2,30 +2,106 @@
 # scripts/quota.sh — what the KV write budget looks like right now, and what a pipeline run costs.
 #
 # Why this exists: on the free plan the binding limit is not CPU or memory, it is 1,000 KV writes a
-# day across the whole account, and nothing in the Cloudflare UI shows a maintainer both halves of the
-# answer at once — what the account is holding, and what is spending it. Both halves here come from
-# READS (two key listings and one value per shop), and reads are 100,000 a day, so this script is
-# safe to run as often as you like, including on a day the writes are gone.
+# day across the whole account (and 1,000 deletes, 1,000 lists, 100k reads/requests). The default
+# mode therefore asks Cloudflare's GraphQL analytics — the account's own counters — and spends
+# **zero KV operations of any kind** to measure them. The old inventory (two namespace listings
+# plus per-shop reads) still exists behind --inventory for the day you need to know what keys are
+# held, and it says up front that it spends list/read quota to find out.
 #
-# It writes nothing and creates nothing — unlike /__selftest, which has to write a probe key to know
-# it can. That distinction is the whole design of v0.9.1, so the script keeps it.
-#
-#   ./scripts/quota.sh
-#   ./scripts/quota.sh mamatoe kotaking      # plus that shop's own order-writes today
+#   ./scripts/quota.sh                 # GraphQL usage vs the free budgets (zero KV ops)
+#   ./scripts/quota.sh --inventory     # key-prefix inventory (spends KV lists/reads)
+#   ./scripts/quota.sh mamatoe         # legacy spelling of --inventory for one shop
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; source "${SCRIPT_DIR}/lib.sh"
 WORKER_NAME="${WORKER_NAME:-tapstall}"
-# a missing token costs you the account half of the answer, not the whole script
-load_secrets >/dev/null 2>&1 || CF_ACCOUNT=""
+CF_TOKEN="${CF_TOKEN:-${CLOUDFLARE_API_TOKEN:-}}"
+CF_ACCOUNT="${CF_ACCOUNT:-${CLOUDFLARE_ACCOUNT_ID:-}}"
+for _d in ".secrets" "$HOME/.secrets"; do
+  [[ -z "${CF_TOKEN:-}" && -f "$_d/cf_token" ]] && read -r CF_TOKEN < "$_d/cf_token" || true
+  [[ -z "${CF_ACCOUNT:-}" && -f "$_d/cf_account" ]] && read -r CF_ACCOUNT < "$_d/cf_account" || true
+done
+export CF_TOKEN CF_ACCOUNT
 
+MODE=usage
+if [[ "${1:-}" == "--inventory" ]]; then MODE=inventory; shift;
+elif [[ "${1:-}" == "--usage" ]]; then shift;
+elif [[ -n "${1:-}" ]]; then MODE=inventory; fi
 HANDLES=("$@"); ((${#HANDLES[@]})) || HANDLES=(${HANDLE:-})
 
 api() { curl -s -m "${2:-30}" "https://api.cloudflare.com/client/v4${1}" -H "Authorization: Bearer ${CF_TOKEN}"; }
 
+if [[ -n "${CF_TOKEN:-}" && -z "${CF_ACCOUNT:-}" ]]; then
+  CF_ACCOUNT=$(api "/accounts?per_page=50" | jq -r '.result[0].id // empty' 2>/dev/null || true)
+fi
 if [[ -z "${CF_ACCOUNT:-}" ]]; then
   say "no Cloudflare token in env or ~/.secrets — this script prints nothing invented, so run it where one is readable"
   exit 2
 fi
+
+if [[ "$MODE" == "usage" ]]; then
+  CF_TOKEN="$CF_TOKEN" CF_ACCOUNT="$CF_ACCOUNT" WORKER_NAME="$WORKER_NAME" python3 - <<'PYQ'
+import datetime, json, os, urllib.request
+tok, acct = os.environ["CF_TOKEN"], os.environ["CF_ACCOUNT"]
+worker = os.environ.get("WORKER_NAME", "tapstall")
+end = datetime.date.today(); start = end - datetime.timedelta(days=6)
+def gql(q, vars):
+    body = json.dumps({"query": q, "variables": vars}).encode()
+    req = urllib.request.Request("https://api.cloudflare.com/client/v4/graphql", data=body, method="POST",
+        headers={"Authorization": "Bearer " + tok, "Content-Type": "application/json", "User-Agent": "tapstall-quota"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        out = json.load(r)
+    if out.get("errors"):
+        raise SystemExit("GraphQL refused: %s" % json.dumps(out["errors"])[:300])
+    accts = ((out.get("data") or {}).get("viewer") or {}).get("accounts") or []
+    return accts[0] if accts else {}
+kvq = """query($a:string!,$s:Date,$e:Date){viewer{accounts(filter:{accountTag:$a}){
+  kvOperationsAdaptiveGroups(limit:10000,filter:{date_geq:$s,date_leq:$e},orderBy:[date_DESC]){
+    sum{requests} dimensions{date actionType namespaceId}}}}}"""
+wq = """query($a:string!,$s:Date,$e:Date,$w:string){viewer{accounts(filter:{accountTag:$a}){
+  workersInvocationsAdaptive(limit:10000,filter:{date_geq:$s,date_leq:$e,scriptName:$w},orderBy:[date_DESC]){
+    sum{requests errors subrequests} dimensions{date status}}}}}"""
+kv = gql(kvq, {"a": acct, "s": str(start), "e": str(end)}).get("kvOperationsAdaptiveGroups") or []
+wk = gql(wq, {"a": acct, "s": str(start), "e": str(end), "w": worker}).get("workersInvocationsAdaptive") or []
+LIM = {"read": 100000, "write": 1000, "delete": 1000, "list": 1000}
+by_day, peak = {}, {}
+for g in kv:
+    d, a = g["dimensions"]["date"], g["dimensions"]["actionType"]
+    by_day.setdefault(d, {})[a] = by_day.setdefault(d, {}).get(a, 0) + g["sum"]["requests"]
+for d, acts in by_day.items():
+    for a, n in acts.items(): peak[a] = max(peak.get(a, 0), n)
+today = by_day.get(str(end), {})
+print("== Cloudflare free budgets — today (%s, UTC) vs the ceiling" % end)
+for a in ("write", "delete", "list", "read"):
+    n = today.get(a, 0)
+    print("   KV %-7s %6d / %-6d  (%4.1f%%)   7-day peak %d" % (a, n, LIM[a], 100.0 * n / LIM[a], peak.get(a, 0)))
+req_today = sum((g["sum"]["requests"] or 0) for g in wk if g["dimensions"]["date"] == str(end))
+req_peak = {}
+for g in wk:
+    d = g["dimensions"]["date"]; req_peak[d] = req_peak.get(d, 0) + (g["sum"]["requests"] or 0)
+print("   Worker requests %6d / 100000  (%4.1f%%)   7-day peak %d" % (req_today, req_today / 1000.0, max(req_peak.values() or [0])))
+print()
+print("== last 7 days, KV operations by day")
+for d in sorted(by_day):
+    acts = by_day[d]
+    print("   %s  write %-5d delete %-5d list %-5d read %-6d" % (d, acts.get("write", 0), acts.get("delete", 0), acts.get("list", 0), acts.get("read", 0)))
+print()
+print("Soft ceilings the Worker governs itself by (core QUOTA_RESERVE): automation stops at 800 writes,")
+print("telemetry at 700, operator saves at 925, security at 975 — the last writes belong to orders.")
+PYQ
+  cat <<'TXT'
+
+== what a pipeline run costs, from v1.3.0 on
+   a warm order                                   1 write    (the document; sequence is block-leased 1/50, buyer counters coalesce)
+   an unchanged feed refresh                      0 writes   (isolate memory; durable snapshot only on change / 6h)
+   a warm storefront view                         0 writes   (~1 KV read: the template-override check)
+   cron, healthy estate                           0 reads/shop (store metadata row) + 1 list/1000 shops per slot
+   a deploy, pages included                       0 KV writes (pages ride in the bundle)
+   this script (default mode)                     0 KV ops   (GraphQL analytics only)
+TXT
+  exit 0
+fi
+
+say "inventory mode: this spends KV list/read quota (two listings, then reads) — the default mode spends none"
 
 # The namespace ids are read off the Worker's own bindings rather than looked up by title: a title can
 # be duplicated or renamed, and these ids are the ones the running Worker is pointed at. (lib.sh's

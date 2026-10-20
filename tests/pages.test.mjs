@@ -129,6 +129,24 @@ test('the design surfaces all speak the same template list', () => {
   assert.match(worker, /templates: STOREFRONT_TEMPLATES/, 'the dashboard API carries the catalogue');
 });
 
+test('the quota redesign stays wired: indexed cron, one-write orders, zero-KV measurement', () => {
+  assert.match(worker, /metadata: storeMeta\(st\)/, 'a store write carries its cron/index row in the same write');
+  assert.match(worker, /storeMetaAction\(k\.metadata/, 'cron judges shops from list metadata before reading documents');
+  assert.ok(!/'term:' \+/.test(worker), 'the redundant term key (a read per storefront, a write per suspend) stayed deleted');
+  assert.match(worker, /const SEQ_BLOCK = 50/, 'order numbers are block-leased, not incremented per order');
+  assert.match(worker, /async function ledgerRowsAll/, 'owner state reads the order key space once, not once per shop');
+  assert.match(worker, /quotaGate\('writes', force \? 'operator' : 'automation'\)/, 'feed snapshots are governed writes');
+  const quota = readFileSync(join(root, 'scripts/quota.sh'), 'utf8');
+  assert.match(quota, /kvOperationsAdaptiveGroups/, 'quota measurement reads GraphQL counters');
+  assert.match(quota, /--inventory/, 'the KV-spending inventory is opt-in and says so');
+  const deploy = readFileSync(join(root, '.github/workflows/deploy.yml'), 'utf8');
+  assert.ok(!/ci heartbeat/.test(deploy), 'deploys no longer spend a bot commit announcing themselves');
+  assert.match(deploy, /publish the deploy log \(failures only\)[\s\S]{0,40}if: failure\(\)/, 'the deploy log commit is failure-only');
+  const monitor = readFileSync(join(root, '.github/workflows/monitor.yml'), 'utf8');
+  assert.match(monitor, /cron: '20 5 \* \* 1'[\s\S]{0,80}cron: '35 5 1 \* \*'/, 'the outside witness is weekly-light and monthly-full');
+  assert.match(monitor, /zero KV writes spent/, 'and the weekly witness says what it costs');
+});
+
 test('the pages that post money know what status the endpoint returns', () => {
   // register answers 201 and /api/mark 200; a page that compares against 200
   // alone reads a success as a failure, which is how this test was born

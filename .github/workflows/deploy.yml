@@ -4,18 +4,19 @@ name: deploy
 on:
   push:
     branches: [main]
-    paths-ignore: ['ci-deploy.log']
+    paths-ignore: ['ci-deploy.log', '**.md', 'docs/**']
   # No schedule here (v1.0.0). The Worker's own cron is the only clock in the system: it runs
   # the press windows, the term sweep, the chain watcher and the nightly exception digest in
   # slots. A GitHub schedule on this workflow used to redeploy identical code daily (two fresh
   # versions per Worker, a secret re-set, two log commits) while its prod-check job skipped
   # itself on an hour gate GitHub's delivery times never met — green runs, nothing checked.
-  # Looking in from outside still matters, so monitor.yml runs prod_check weekly against the
-  # sandbox store; dispatching work INTO Actions (leads-hunt) is the Worker's scheduler job.
+  # Looking in from outside still matters, so monitor.yml pings weekly (read-only) and runs
+  # the full prod_check monthly against the sandbox store; dispatching work INTO Actions
+  # (leads-hunt) is the Worker's scheduler job.
   workflow_dispatch: {}
 
 permissions:
-  contents: write      # deploy log + Pages
+  contents: write      # failure-only deploy log + Pages
   pages: write
   id-token: write
 
@@ -30,31 +31,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Announce the run through the contents API *before* anything that can
-      # fail, because a job whose logs the token cannot read is undiagnosable.
-      - name: heartbeat
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          printf 'worker job started %s run=%s sha=%s\n' "$(date -u +%FT%TZ)" "$GITHUB_RUN_ID" "${GITHUB_SHA:0:7}" > ci-deploy.log
-          sha=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
-            "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ci-deploy.log" \
-            | sed -n 's/.*"sha": "\([a-f0-9]*\)".*/\1/p')
-          body=$(python3 -c '
-          import base64,json,os,sys
-          raw=open("ci-deploy.log","rb").read()
-          out={"message":"ci heartbeat","content":base64.b64encode(raw).decode()}
-          if sys.argv[1]: out["sha"]=sys.argv[1]
-          print(json.dumps(out))' "$sha")
-          curl -s -o /tmp/hb.json -X PUT -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/$GITHUB_REPOSITORY/contents/ci-deploy.log" -d "$body"
-          head -c 200 /tmp/hb.json
+      # No heartbeat commit (v1.3.0): it cost a bot commit on every deploy and
+      # the run is diagnosable from Actions logs with a repo token. The deploy
+      # log below is still committed — but only when the deploy fails.
 
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: npm
       - run: npm ci          # devDependency: wrangler (owns the upload format + schedule)
       - run: node --test tests/
 
@@ -92,8 +76,8 @@ jobs:
           tail -40 /tmp/deploy.log
           exit $code
 
-      - name: publish the deploy log
-        if: always()
+      - name: publish the deploy log (failures only)
+        if: failure()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

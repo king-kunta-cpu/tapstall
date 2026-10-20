@@ -1,4 +1,56 @@
 # Tapstall — status
+## v1.3.0 (built 2026-10-20): the quota-first pipeline
+
+Owner instruction: redesign the entire pipeline to use the least quota while
+operating at full tilt. Measured first (Cloudflare GraphQL, zero KV ops to
+ask): the 7-day peak was 373 writes / 68 deletes / 184 lists / 4,482 reads /
+1,103 Worker requests in a day — comfortable today, but the *shape* was the
+risk: a normal order could spend 3–4 writes (order + sequence + buyer counter
++ a feed-cache rewrite of the whole store document), a busy shop's menu
+refresh alone could rewrite its store doc ~720×/day, cron read every shop
+document 4×/day and then the digest read them all again, owner state spent a
+list per shop, and every deploy committed two bot log commits.
+
+v1.3.0 spends in strict order — **memory, reads, indexed lists, writes only
+for facts that must survive the isolate** — under a reserve ladder in core
+(`QUOTA_LIMITS`/`QUOTA_RESERVE`/`quotaAllows`: automation stops at 800 of the
+1,000 daily writes, telemetry 700, operator saves 925, security 975; money
+may spend the last one; telemetry is also paced through the UTC day):
+
+- **One-write orders.** Sequence numbers are block-leased (1 write/50 orders,
+  unique-id fallback if the lease is refused), buyer counters coalesce in
+  memory (flush every 10, at the repeat threshold, or on cron), and the menu
+  lives in isolate memory — the durable feed snapshot persists only when the
+  rows/count/error changed, on an explicit fresh read, or every 6 hours.
+  A warm order's only KV write is the order document (asserted live).
+- **Indexed cron.** Every store write now carries a tiny metadata row
+  (`storeMeta`: paid_until, suspended, warned, crypto-watch, email hashes) in
+  the same write. Cron lists once per 1,000 shops and reads documents only
+  for shops the row says are due/expiring/watched (legacy rows backfill at
+  most 25/night); the digest reuses the sweep instead of rescanning; the
+  heartbeat is nightly; the redundant `term:` keys are gone (state derives
+  from the store doc). Whop's email fallback finds its candidate by metadata
+  hash instead of reading every shop.
+- **Cached hot reads.** Public store/config/feed reads, the rails catalogue,
+  ledgers (15s, invalidated by `saveOrder`), key listings and the
+  seller/lead/sale collections are isolate-cached clone-on-read; sale rows
+  ride in list metadata; owner state takes **one** order listing for the
+  whole estate. Authority/order/admin reads stay fresh, and a store with a
+  pending money change always bypasses the cache so its fold is clock-judged.
+- **Change-only automation.** Press queues/state write only when items or
+  rail outcomes actually changed (dry runs are read-only), dispatch writes
+  nothing when no token is bound, seller clicks flush every 50, auth counters
+  are local-first (KV written at 1/halfway/lock, read on the wrong-key path),
+  image pruning lists only for a count or a daily janitor pass, and the
+  selftest probe no longer spends a delete.
+- **Pipeline.** `quota.sh` defaults to GraphQL analytics (zero KV ops;
+  `--inventory` keeps the old listing mode and says it spends quota). Deploy
+  CI drops the per-run heartbeat commit (failure-only log commit), caches npm
+  and ignores docs-only pushes; the monitor is a zero-write weekly ping with
+  the full sandbox prod_check monthly; stdlib-only Actions jobs drop
+  setup-python; Workers invocation logs are off (selftest/ops-health are the
+  witness). 356 tests.
+
 ## v1.2.0 (built 2026-10-20, not yet deployed): shop outfits, owner UI stays out of the shelf
 
 The buyer page got its first deliberate outfit system. `STOREFRONT_TEMPLATES` in
