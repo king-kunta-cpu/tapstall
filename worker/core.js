@@ -3856,41 +3856,61 @@ async function meshDirectSend(it, press, fetcher, dry, now) {
  *  a question to anyone. The queue is their format, so a sender on their own box can drain it instead. */
 export async function meshPressFlush(items, press, opt) {
   const o = opt || {}, now = o.now || Date.now(), dry = !!o.dry, fetcher = o.fetch || (typeof fetch === 'function' ? fetch : null);
+  const posted = (o.posted && typeof o.posted === 'object') ? o.posted : {};
+  const marks = [];
   const results = [];
   for (const it of (Array.isArray(items) ? items : [])) {
+    // v1.5.3: settle on the record of what was already said. A queue write that lagged a
+    // successful send cannot make the same words go out twice, on any rail, on any handle.
+    const key = contentPostKey(it);
+    const seen = contentPosted(posted, key, { now: now, window_days: o.window_days });
+    if (seen) { results.push({ id: it.id, channel: it.channel, due: it.due, status: 'duplicate', sent: false, verified: false, key: key,
+      note: 'already posted on ' + it.channel + ' at ' + seen.at + ': the record says it went out, so it is not sent twice' }); continue; }
     if (Date.parse(it.due) > now) { results.push({ id: it.id, channel: it.channel, status: 'waiting', due: it.due }); continue; }
+    let res;
+    try { res = await pressAttempt(it, press, fetcher, dry, now); }
+    catch (e) { res = { status: 'failed', sent: false, verified: false, err: String(e && e.message || e).slice(0, 160) }; }
+    if (res.status === 'sent' && !dry) marks.push({ key: key, fp: contentFingerprint(it, press), at: new Date(now).toISOString(),
+      channel: String(it.channel || ''), id: String(it.id || '') });
+    results.push({ id: it.id, channel: it.channel, due: it.due, key: key, ...res });
+  }
+  return { results, posted: marks, sent: results.filter((r) => r.status === 'sent').length,
+    duplicates: results.filter((r) => r.status === 'duplicate').length,
+    queued: results.filter((r) => r.status === 'queued').length,
+    waiting: results.filter((r) => r.status === 'waiting').length, dry: dry, at: new Date(now).toISOString(),
+    note: 'A post is only called posted when the platform said yes. Everything else stays queued and says so.' };
+}
+
+/** One item, one attempt, one answer — and never an exception that takes the rest of the window
+ *  down with it (v1.5.3): a rail that throws costs its own item, not the batch behind it. */
+async function pressAttempt(it, press, fetcher, dry, now) {
     // Buffer is only for the rails Buffer can hold. An assist surface is a person with a phone,
     // and that one is not our call to make or to claim.
-    if (it.via === 'none') { results.push({ id: it.id, channel: it.channel, status: 'queued', sent: false, verified: false,
-      err: 'no API exists for ' + it.channel + ': the item is prepared for a person, and nothing is called posted until they do it' }); continue; }
+    if (it.via === 'none') return { status: 'queued', sent: false, verified: false,
+      err: 'no API exists for ' + it.channel + ': the item is prepared for a person, and nothing is called posted until they do it' };
     if (it.via === 'direct' || it.via === 'own') {
       // v1.0.0: direct rails send from here when the identity's credentials are bound as Worker
       // secrets — a sender that lives "on the owner's box" is an owner dependency with a power
       // supply. Unbound, the item stays honestly queued and names the missing secret.
       const direct = it.via === 'direct' ? await meshDirectSend(it, press, fetcher, dry, now) : null;
-      if (direct) { results.push({ id: it.id, channel: it.channel, due: it.due, ...direct }); continue; }
-      results.push({ id: it.id, channel: it.channel, status: 'queued', sent: false, verified: false,
+      if (direct) return direct;
+      return { status: 'queued', sent: false, verified: false,
         err: it.via === 'own' ? 'published on our own node: the feed is the post'
-          : 'no direct credential bound for ' + it.channel + ' (bind the identity secret, e.g. PRESS_<ID>_' + String(it.channel).toUpperCase() + '_…, and the cron sends it — nobody taps anything)' });
-      continue;
+          : 'no direct credential bound for ' + it.channel + ' (bind the identity secret, e.g. PRESS_<ID>_' + String(it.channel).toUpperCase() + '_…, and the cron sends it — nobody taps anything)' };
     }
     const call = meshBufferCall(press, it);
-    if (call.err) { results.push({ id: it.id, channel: it.channel, status: 'queued', sent: false, err: call.err, verified: false }); continue; }
-    if (dry) { results.push({ id: it.id, channel: it.channel, status: 'dry', url: call.call.url, due: it.due, chars: String(it.text).length, verified: false }); continue; }
-    if (!fetcher) { results.push({ id: it.id, channel: it.channel, status: 'queued', sent: false, err: 'no fetch in this runtime', verified: false }); continue; }
+    if (call.err) return { status: 'queued', sent: false, err: call.err, verified: false };
+    if (dry) return { status: 'dry', url: call.call.url, chars: String(it.text).length, verified: false };
+    if (!fetcher) return { status: 'queued', sent: false, err: 'no fetch in this runtime', verified: false };
     try {
       const r = await fetcher(call.call.url, { method: call.call.method || 'POST', headers: call.call.headers, body: call.call.body });
       const txt = await r.text();
       const ok = r.status >= 200 && r.status < 300 && !/"errors"\s*:\s*\[/.test(txt);
-      results.push({ id: it.id, channel: it.channel, status: ok ? 'sent' : 'failed', http: r.status, sent: ok,
-        verified: ok, note: ok ? 'the draft was accepted by Buffer' : txt.slice(0, 160) });
+      return { status: ok ? 'sent' : 'failed', http: r.status, sent: ok,
+        verified: ok, note: ok ? 'the draft was accepted by Buffer' : txt.slice(0, 160) };
     } catch (e) {
-      results.push({ id: it.id, channel: it.channel, status: 'failed', sent: false, err: String(e && e.message || e).slice(0, 160), verified: false });
+      return { status: 'failed', sent: false, err: String(e && e.message || e).slice(0, 160), verified: false };
     }
-  }
-  return { results, sent: results.filter((r) => r.status === 'sent').length, queued: results.filter((r) => r.status === 'queued').length,
-    waiting: results.filter((r) => r.status === 'waiting').length, dry: dry, at: new Date(now).toISOString(),
-    note: 'A post is only called posted when the platform said yes. Everything else stays queued and says so.' };
 }
 
 /* ── v0.9.6: the press registry — company accounts and seller accounts, and nobody else ─────────
@@ -3953,33 +3973,116 @@ export function applyContentLinkPolicy(beat, identityClass) {
   return b;
 }
 export const CONTENT_MEDIA_BASE = 'https://king-kunta-cpu.github.io/tapstall/brand/';
+
+/* ── v1.5.3: a post that was sent is never sent again ───────────────────────────
+ * The queue is a document, and a document write can fail after the platform already
+ * accepted the post (a governed write that ran out of budget, a tick that died between
+ * the send and the write). When that happened the item stayed in the queue and the next
+ * 20-minute tick posted it a second time — a live duplicate, twice, before it was seen.
+ *
+ * So the record of what was actually said lives beside the queue, not inside it: a
+ * fingerprint of exactly what goes on the wire (rail, handle, words, media) is written
+ * when a platform says yes, and any later item carrying a fingerprint still inside the
+ * repeat window is settled as a duplicate instead of being sent. The queue can lag; the
+ * feed cannot repeat itself.
+ */
+export const CONTENT_REPEAT_WINDOW_DAYS = 21;
+
+/** The wire identity of a post: channel, the handle it would come from, its words, its media.
+ *  Two ticks that compose the same thing produce the same fingerprint, which is the point. */
+export function contentFingerprint(item, press) {
+  const it = item || {}, p = press || {};
+  const handle = String((((p.direct || {})[it.channel] || {}).handle) || ((p.handles || {})[it.channel]) || '').toLowerCase();
+  const words = String(it.text || '').replace(/\s+/g, ' ').trim();
+  const media = String(it.video || it.image || '');
+  const key = [String(it.channel || ''), handle, words, media].join('\u241f');
+  let h1 = 2166136261, h2 = 0x9e3779b9;
+  for (let i = 0; i < key.length; i += 1) {
+    const c = key.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 16777619) >>> 0;
+    h2 = Math.imul(h2 ^ c, 2246822507) >>> 0;
+  }
+  const hex = (n) => n.toString(16).padStart(8, '0');
+  return 'fp' + hex(h1) + hex(h2) + 'x' + key.length.toString(36);
+}
+
+/** The key the posted log is written under: the rail plus the queue item's own id. A queue id carries
+ *  the day and the slot, so tomorrow's rotation is a different key and still posts, while a queue item
+ *  that outlived its own successful send is the same key and is refused. The handle is not in the key
+ *  on purpose: two identities sharing one account must not both post the same beat. */
+export function contentPostKey(item) {
+  const it = item || {};
+  const id = String(it.id || '');
+  // an item with no id is still guarded — by exactly what it would say — never by sharing one key
+  return String(it.channel || '') + '|' + (id || contentFingerprint(it));
+}
+
+/** Was this exact post already sent inside the window? Returns the log entry it matched, or null. */
+export function contentPosted(log, fp, opt) {
+  const o = opt || {}, l = (log && typeof log === 'object') ? log : {};
+  const hit = l[fp];
+  if (!hit) return null;
+  const at = Date.parse(typeof hit === 'string' ? hit : (hit && hit.at) || '');
+  if (!at) return null;
+  const days = Number(o.window_days || CONTENT_REPEAT_WINDOW_DAYS);
+  return (o.now || Date.now()) - at <= days * DAY_MS ? Object.assign({ at: new Date(at).toISOString() }, hit) : null;
+}
+
+/** Trim the posted log to the window, newest kept, and cap it so the document cannot grow forever. */
+export function contentPostedPrune(log, opt) {
+  const o = opt || {}, l = (log && typeof log === 'object') ? log : {}, now = o.now || Date.now();
+  const keep = Number(o.window_days || CONTENT_REPEAT_WINDOW_DAYS) * DAY_MS;
+  const rows = Object.entries(l).map(([key, v]) => ({ key, at: Date.parse(typeof v === 'string' ? v : (v && v.at) || '') || 0,
+    channel: String((v && v.channel) || ''), id: String((v && v.id) || '') }))
+    .filter((r) => r.at && now - r.at <= keep).sort((a, b) => b.at - a.at).slice(0, Number(o.max || 160));
+  return Object.fromEntries(rows.map((r) => [r.key, { at: new Date(r.at).toISOString(), channel: r.channel, id: r.id }]));
+}
 export const CONTENT_PILLARS = [
   { id: 'exact-amount', label: 'Exact Amount', card: 'exact-amount', lines: [
     { text: 'Two buyers can owe $12. Only one of them owes $12.43. Odd cents turn the amount itself into the reference — search the statement for the number, not the screenshot.', path: '/guide/payment-reference-matching' },
     { text: 'Before you mark anything paid, search the amount first and the name second. Names repeat; exact amounts do not.', path: '/guide/payment-reference-matching' },
-    { text: 'A proof-of-payment picture proves someone can edit a picture. A code from the paying app, matched to the exact amount, proves a payment.', path: '/guide/payment-reference-matching' } ] },
+    { text: 'A proof-of-payment picture proves someone can edit a picture. A code from the paying app, matched to the exact amount, proves a payment.', path: '/guide/payment-reference-matching' },
+    { text: 'Two payments of the same amount on the same day are one search, not two receipts. Note the time beside the amount when your app shows one — a clock is the tiebreaker that names the right buyer.', path: '/guide/payment-reference-matching' },
+    { text: 'When a buyer sends the screenshot instead of the money, answer with the exact amount and one line: "Searching for the 12.43 — read me the code on your confirmation." It comes back answered, or it does not come back.', path: '/guide/payment-reference-matching' } ] },
   { id: 'shop-math', label: 'Shop Math', card: 'shop-math', lines: [
     { text: 'Price with the rail in the room: transfer fee + IMTT + cash-out is the real cost of "free" mobile money. Decide who carries it before the buyer checks out, not after.', path: '/fees' },
     { text: 'If a payment method takes 3% and your margin is 10%, the rail is eating a third of the profit — not 3% of it. Do that division before you set the price.', path: '/fees' },
-    { text: 'A delivery fee that disappears over a threshold is not generosity, it is arithmetic: set the threshold where one extra item pays for the trip.', path: '/fees' } ] },
+    { text: 'A delivery fee that disappears over a threshold is not generosity, it is arithmetic: set the threshold where one extra item pays for the trip.', path: '/fees' },
+    { text: 'Cash-out fees are per trip, not per order. Four withdrawals a day cost four trips — batch the cash-out to the end of the day wherever the rail lets you.', path: '/fees' },
+    { text: 'A discount is a price change, not a plan. Ten percent off only works if the extra orders still leave enough margin per order to pay for the trip, the stock and your time.', path: '/fees' } ] },
   { id: 'till-tips', label: 'Till Tips', card: 'till-tips', lines: [
     { text: 'Count stock at close, not at crisis. Five quiet minutes with the shelf beats apologising to the third buyer tomorrow.', path: '/guide/whatsapp-shop-payments' },
     { text: 'Say sold out the moment it sells out. A buyer told today comes back tomorrow; a buyer who pays first and hears it later does not.', path: '/guide/whatsapp-shop-payments' },
-    { text: 'Put your hours where the order starts — on the shop link, not in a status from Tuesday. Half of "are you open?" chats are a signage problem.', path: '/onboard' } ] },
+    { text: 'Put your hours where the order starts — on the shop link, not in a status from Tuesday. Half of "are you open?" chats are a signage problem.', path: '/onboard' },
+    { text: 'Keep one stock list and update it once a day, at a fixed hour. Stock gossip in the group chat is how two buyers order the same last item and one of them learns it late.', path: '/guide/whatsapp-shop-payments' },
+    { text: 'Write the delivery promise inside the order: what goes out, when, and who pays the trip. A promise that lives in the chat scrollback is a promise nobody can find later.', path: '/guide/whatsapp-shop-payments' } ] },
   { id: 'buyer-trust', label: 'Buyer Trust', card: 'buyer-trust', lines: [
     { text: 'Show the name the buyer should expect on the payment confirmation. "Pay 0771… — it will say R. Moyo" ends most wrong-number fear before it starts.', path: '/guide/payment-reference-matching' },
     { text: 'Ask for the code their app printed, once, in the order — not five messages later in the chat. Where you ask decides whether they bother.', path: '/guide/payment-reference-matching' },
-    { text: 'A repeat buyer is not a discount waiting to happen. A thank-you that names what they last bought is worth more than 5% off everything.', path: '/guide/whatsapp-shop-payments' } ] },
+    { text: 'A repeat buyer is not a discount waiting to happen. A thank-you that names what they last bought is worth more than 5% off everything.', path: '/guide/whatsapp-shop-payments' },
+    { text: 'Answer the first message with the price, a picture and the delivery time in one go. Three questions answered in three messages reads like a shop that is guessing.', path: '/guide/whatsapp-shop-payments' },
+    { text: 'Say what happens when the wrong item arrives, before the sale. A returns line written up front is cheaper than the argument that replaces it.', path: '/guide/whatsapp-shop-payments' } ] },
   { id: 'menu-craft', label: 'Menu Craft', card: 'menu-craft', lines: [
     { text: 'Name the thing the way a buyer says it at the counter. Search on a shop page only finds the words you actually used.', path: '/onboard' },
     { text: 'One honest photo beats four borrowed ones. Buyers forgive a plain picture; they do not forgive a different product arriving.', path: '/onboard' },
-    { text: 'A description earns its place when it answers the first question: how big, how hot, how long, what comes with it. Everything else is decoration.', path: '/onboard' } ] },
+    { text: 'A description earns its place when it answers the first question: how big, how hot, how long, what comes with it. Everything else is decoration.', path: '/onboard' },
+    { text: 'A price with no unit is an invitation to negotiate. Say per plate, per kilo, per bundle on the line itself, and the haggling starts where you set it.', path: '/onboard' },
+    { text: 'Photograph the item the way it leaves the shop: same container, same quantity, same garnish. A styled photo that over-promises is a return you end up paying for.', path: '/onboard' } ] },
   { id: 'books', label: 'Books', card: 'books', lines: [
     { text: 'Cash basis counts the day money was marked; accrual counts the day the order arrived. Pick one per report and write it on the report — mixing them invents sales.', path: '/fees' },
     { text: 'VAT inside the price and VAT added on top are the same tax wearing two coats. Your till has to know which coat your prices wear.', path: '/fees' },
-    { text: 'The cheapest bookkeeping is the kind done by the order itself: item, amount, rail, reference, date — captured once, at the till, never re-typed at month-end.', path: '/guide/whatsapp-shop-payments' } ] },
+    { text: 'The cheapest bookkeeping is the kind done by the order itself: item, amount, rail, reference, date — captured once, at the till, never re-typed at month-end.', path: '/guide/whatsapp-shop-payments' },
+    { text: 'Record the rail a payment came through, not just that it came. At month-end the fees only reconcile if every row remembers which rail carried it.', path: '/fees' },
+    { text: 'A debt is an order with no matched amount yet. Write the date the money was promised beside it and the ledger tells you who to ask — instead of your memory.', path: '/guide/whatsapp-shop-payments' } ] },
 ];
-export const MESH_COMPANY_VALUE = CONTENT_PILLARS.flatMap((p) => p.lines.map((l) => ({ ...l, pillar: p.id })));
+/** The pool the rotation walks, dealt pillar-by-pillar rather than pillar-by-pillar-block: five lines
+ *  of shop math in a row is a lecture, and two different subjects a day is a feed. */
+export const MESH_COMPANY_VALUE = (() => {
+  const depth = Math.max(...CONTENT_PILLARS.map((p) => p.lines.length));
+  const out = [];
+  for (let j = 0; j < depth; j += 1) for (const p of CONTENT_PILLARS) if (p.lines[j]) out.push({ ...p.lines[j], pillar: p.id });
+  return out;
+})();
 
 /** The media a beat travels with. A shop beat keeps the product's own photo;
  *  a company beat takes its pillar card; one beat in six (deterministic by
@@ -4050,19 +4153,32 @@ export function meshCompanyBeats(identity, facts, opt) {
   const take = Math.max(1, per - 1);   // CONTENT_RATIO at per_day=3: two value beats, one promo
   const eco = RAILS.ecocash_usd || {};
   const fee10 = Math.round(10 * (((Number(eco.pct) || 0) + (Number(eco.imtt) || 0))) * 100) / 100;
-  const shopMath = {
-    pillar: 'shop-math', path: '/fees',
-    text: 'Shop math: on a $10 EcoCash USD payment, transfer + IMTT is about $' + fee10.toFixed(2)
+  // The live line: the fee is read from the tariff table, never typed — and the framing rotates so
+  // the same sentence does not arrive every third day (v1.5.3).
+  const feeText = '$' + fee10.toFixed(2);
+  const shopMathVoices = [
+    'Shop math: on a $10 EcoCash USD payment, transfer + IMTT is about ' + feeText
       + ' before cash-out. If your margin on that order is $1, the rail just took a third of it — price with the rail in the room.',
-  };
+    'Live tariff: $10 through EcoCash USD carries about ' + feeText + ' in transfer + IMTT before the cash-out fee. '
+      + 'That is the cost of "free" mobile money, and it is paid by somebody on every order.',
+    'The same $10 payment costs about ' + feeText + ' on the EcoCash USD rail today, before cash-out. '
+      + 'Build the price list on that number, not on the number the buyer sees at checkout.',
+  ];
+  const shopMath = { pillar: 'shop-math', path: '/fees',
+    text: shopMathVoices[Math.floor(day / 3) % shopMathVoices.length] };
   for (let i = 0; i < take; i += 1) {
     if (i === 0 && day % 3 === 0) {
-      out.push({ kind: 'value', pillar: 'shop-math', item_key: 'company:shop-math:' + Math.floor(day / 3), text: shopMath.text, source: shopMath.path, rail: 'bluesky' });
+      out.push({ kind: 'value', pillar: 'shop-math', item_key: 'company:shop-math:' + (day * take), text: shopMath.text, source: shopMath.path, rail: 'bluesky' });
       continue;
     }
-    const pillar = CONTENT_PILLARS[(day + i) % CONTENT_PILLARS.length];
-    const line = pillar.lines[Math.floor(day / CONTENT_PILLARS.length) % pillar.lines.length];
-    out.push({ kind: 'value', pillar: pillar.id, item_key: 'company:' + pillar.id + ':' + Math.floor(day / CONTENT_PILLARS.length),
+    // v1.5.3: the rotation walks the whole pool in order — two lines a day across thirty, so a line
+    // comes back once a fortnight instead of six lines looping every three days.
+    const slot = day * take + i;
+    const at = (k) => MESH_COMPANY_VALUE[((k % MESH_COMPANY_VALUE.length) + MESH_COMPANY_VALUE.length) % MESH_COMPANY_VALUE.length];
+    let line = at(slot);
+    // an override day already carries a live shop-math line; the pool slot steps past a second one
+    if (line.pillar === 'shop-math' && out.some((b) => b.pillar === 'shop-math')) line = at(slot + 1);
+    out.push({ kind: 'value', pillar: line.pillar, item_key: 'company:' + line.pillar + ':' + slot,
       text: line.text, source: line.path, rail: 'bluesky' });
   }
   if (Number(f.price_usd) > 0) {

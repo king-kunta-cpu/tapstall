@@ -599,3 +599,95 @@ test('1.0.0 direct rails send from the Worker when the identity secret is bound 
   const dry = await C.meshPressFlush([item], { direct: { bluesky: { handle: 'h', app_password: 'pw' } } }, { dry: true, fetch: async () => { throw new Error('dry must not call'); }, now: Date.now() });
   assert.equal(dry.results[0].status, 'dry', 'a dry run still calls nothing');
 });
+
+test('1.5.3 a post the platform accepted is never posted twice, even when the queue write lagged', async () => {
+  const C = await import('file://' + join(root, 'worker', 'core.js'));
+  const now = Date.now();
+  const press = { direct: { bluesky: { handle: 'stpi-official.bsky.social', app_password: 'pw' } } };
+  const item = { id: 'company:books:3457-20746', channel: 'bluesky', via: 'direct',
+    due: new Date(now - 60000).toISOString(), text: 'VAT inside the price and VAT added on top are the same tax wearing two coats.' };
+  let recordCalls = 0;
+  const stub = async (url) => {
+    if (String(url).includes('createSession')) return { status: 200, json: async () => ({ accessJwt: 'jwt', did: 'did:plc:x' }), text: async () => '{}' };
+    if (String(url).includes('uploadBlob')) return { status: 200, json: async () => ({ blob: { $type: 'blob', mimeType: 'image/png' } }), text: async () => '{}' };
+    if (String(url).includes('/brand/cards/')) return { status: 200, headers: { get: () => 'image/png' }, arrayBuffer: async () => new ArrayBuffer(8), json: async () => ({}), text: async () => '' };
+    recordCalls += 1;
+    return { status: 200, json: async () => ({ uri: 'at://did:plc:x/app.bsky.feed.post/1' }), text: async () => '{}' };
+  };
+  const first = await C.meshPressFlush([item], press, { fetch: stub, now });
+  assert.equal(first.sent, 1, JSON.stringify(first.results));
+  assert.equal(first.posted.length, 1, 'a send leaves a mark: the fingerprint of what actually went out');
+  assert.ok(C.contentPosted({ [first.posted[0].key]: first.posted[0] }, first.posted[0].key, { now }), 'the log is keyed by rail + queue id');
+
+  // the queue write failed, so the very same item is still sitting there on the next tick
+  const log = Object.fromEntries(first.posted.map((m) => [m.key, m]));
+  const second = await C.meshPressFlush([item], press, { fetch: stub, now: now + 40 * 60000, posted: log });
+  assert.equal(second.results[0].status, 'duplicate', 'the second send is refused, not repeated');
+  assert.equal(second.sent, 0);
+  assert.equal(recordCalls, 1, 'the platform was called once for one post');
+  assert.match(second.results[0].note, /already posted/);
+  assert.equal(second.posted.length, 0, 'a refusal writes no new mark');
+
+  // the same words in tomorrow's slot are new content, not a duplicate
+  const tomorrow = { ...item, id: 'company:books:3463-20747' };
+  const third = await C.meshPressFlush([tomorrow], press, { fetch: stub, now: now + 60000, posted: log });
+  assert.equal(third.sent, 1, 'the rotation keeps turning: a new slot is a new post');
+
+  // the same beat on a second account is the same beat: one item id, one post, whichever handle would
+  // have carried it — two identities sharing an account are already the reason this rule exists
+  const other = await C.meshPressFlush([item], { direct: { bluesky: { handle: 'a-seller.bsky.social', app_password: 'pw' } } },
+    { fetch: stub, now, posted: log });
+  assert.equal(other.results[0].status, 'duplicate', 'a beat that already went out is not repeated from a second account');
+  assert.equal(recordCalls, 2, 'one call for the first post, one for tomorrow\'s — nothing for the repeats');
+});
+
+test('1.5.3 the posted log ages out and stays small', async () => {
+  const C = await import('file://' + join(root, 'worker', 'core.js'));
+  const now = Date.now();
+  const old = new Date(now - 40 * 864e5).toISOString(), fresh = new Date(now - 2 * 864e5).toISOString();
+  const pruned = C.contentPostedPrune({ old: { at: old }, young: { at: fresh } }, { now });
+  assert.deepEqual(Object.keys(pruned), ['young'], 'a mark older than the window cannot block a post forever');
+  const many = {}; for (let i = 0; i < 300; i += 1) many['k' + i] = { at: new Date(now - i * 1000).toISOString() };
+  assert.equal(Object.keys(C.contentPostedPrune(many, { now })).length, 160, 'the document has a ceiling');
+  assert.equal(C.contentPosted({ k: { at: new Date(now - 30 * 864e5).toISOString() } }, 'k', { now }), null,
+    'twenty-one days is the repeat window, and it is measured, not assumed');
+});
+
+test('1.5.3 one rail throwing costs its own item, never the batch behind it', async () => {
+  const C = await import('file://' + join(root, 'worker', 'core.js'));
+  const now = Date.now();
+  const due = new Date(now - 1000).toISOString();
+  const items = [
+    { id: 'bad', channel: 'x', via: 'buffer', channel_id: 'c1', due, text: 'first' },
+    { id: 'good', channel: 'telegram', via: 'direct', due, text: 'second' },
+  ];
+  const flush = await C.meshPressFlush(items, { buffer_token: 't', direct: { telegram: { bot_token: 'tok', chat_id: '-1' } } }, {
+    now, fetch: async (url) => { if (String(url).startsWith('https://buffer.com')) throw new Error('rail on fire'); return { status: 200, json: async () => ({ ok: true }), text: async () => '{"ok":true}' }; } });
+  assert.equal(flush.results[0].status, 'failed');
+  assert.equal(flush.results[1].status, 'sent', 'the item behind a burning rail still goes out');
+  assert.equal(flush.posted.length, 1, 'only the post that actually happened is marked');
+});
+
+test('1.5.3 the value pool is deep enough to keep teaching for a fortnight, and every line cites its page', async () => {
+  const C = await import('file://' + join(root, 'worker', 'core.js'));
+  const lines = C.MESH_COMPANY_VALUE;
+  assert.ok(lines.length >= 30, 'six pillars, five lines each: a rotation that cannot repeat inside a fortnight');
+  for (const p of C.CONTENT_PILLARS) assert.ok(p.lines.length >= 5, p.id + ' carries at least five usable lines');
+  for (const l of lines) {
+    assert.ok(l.text.length <= 260, 'a line fits one post with room for the card: ' + l.text.slice(0, 40));
+    assert.match(l.path, /^\/[a-z0-9/-]+$/, 'a claim without a page is a claim we cannot stand behind');
+    assert.doesNotMatch(l.text, /https?:\/\//, 'value lines do not sell a link; the promo voice does that');
+  }
+  const base = Date.parse('2026-10-20T09:00:00Z');
+  const count = new Map();
+  const pillars = [];
+  for (let d = 0; d < 15; d += 1) {
+    const plan = C.meshCompanyBeats({ id: 'owner', rails: { bluesky: {} } }, { price_usd: 60, free_days: 60 },
+      { origin: 'https://tapstall.zlnew.workers.dev', now: base + d * 864e5 });
+    for (const b of plan.beats) if (b.kind === 'value') { count.set(b.text, (count.get(b.text) || 0) + 1); pillars.push(b.pillar); }
+  }
+  assert.ok(count.size >= 20, 'fifteen days of value posts are not the same sentences on a loop: ' + count.size);
+  assert.ok(Math.max(...count.values()) <= 2, 'no line is said more than twice a fortnight');
+  const repeats = pillars.filter((p, i) => i && p === pillars[i - 1]).length;
+  assert.ok(repeats <= 5, 'two subjects a day: a pillar rarely follows itself (' + repeats + ' in 30 posts)');
+});

@@ -35,7 +35,7 @@ import {
   MESH_AUTONOMY, MESH_AUTONOMY_V3, MESH_CHANNELS, MESH_OUTREACH, meshAccount, meshOutreachPlan,
   meshQueueItem, meshQueueMerge, meshPress, meshPressFlush, MESH_QUEUE_DEFAULTS, MESH_BUFFER_CHANNEL,
   meshRegister, meshCompanyIdentities, meshCompanyBeats, meshPressLedger, MESH_ID_CLASSES, MESH_ID_RAIL_DEFAULTS,
-  meshIdentityPlan,
+  meshIdentityPlan, contentPostedPrune, contentFingerprint,
   cleanSellerCode, allocateSeller, cleanLead, leadTransition, sellerBoard, commissionFor, SELLER_DEFAULT_PCT,
   whopEventKind, whopBuyer, whopMoney, whopTerm, SUBSCRIPTION_PLANS,
   MESH_PUBLISH, MESH_BUFFER_FREE, MESH_DRIP, meshRailsTotal, meshRailHealth, meshDrip,
@@ -48,7 +48,7 @@ import {
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '1.5.2';
+const VERSION = '1.5.3';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
@@ -3248,6 +3248,7 @@ async function runPress(env, origin, opt) {
     const e = reg[id];
     if (!e) { out.push({ id, ok: false, error: 'not registered' }); continue; }
     const press = { channels: Object.fromEntries(Object.entries(e.rails || {}).map(([k, v]) => [v.channel || k, v.channel_id || ''])),
+      handles: Object.fromEntries(Object.entries(e.rails || {}).map(([k, v]) => [v.channel || k, String(v.handle || '')])),
       buffer_token: env[e.token_env] || '', board: (e.rails && e.rails.pinterest && e.rails.pinterest.board) || '',
       direct: directCredsFor(env, e, id) };
     let plan;
@@ -3266,12 +3267,29 @@ async function runPress(env, origin, opt) {
     const prevQ = await env.ORDERS.get('press:queue:' + id, 'json').catch(() => null) || {};
     if (Array.isArray(prevQ.items)) prevQ.items = prevQ.items.map((it) => applyContentLinkPolicy(it, e.class));
     const merged = meshQueueMerge(prevQ, items, { store: id, landing: origin + '/fees', cadence: e.cadence || MESH_QUEUE_DEFAULTS });
-    const flush = await meshPressFlush(merged.items, press, { dry: dry, now: Date.now() });
-    const sent = new Set(flush.results.filter((r) => r.status === 'sent').map((r) => r.id));
-    const keptItems = merged.items.filter((i) => !sent.has(i.id));
+    // v1.5.3: the record of what actually went out, read before composing and written after
+    // sending, so a queue write that lagged a good send can never post the same words twice.
+    const postedLog = await env.ORDERS.get('press:posted', 'json').catch(() => null);
+    // First tick after the guard was armed: seed it from the rail ledger this identity already keeps,
+    // so a queue that lagged behind its own good send is not allowed one last repeat.
+    const seenLog = Object.assign({}, postedLog || {});
+    if (!postedLog) {
+      const st = await env.ORDERS.get('press:state:' + id, 'json').catch(() => null);
+      for (const [ch, v] of Object.entries((st && st.rails) || {})) {
+        if (v && v.ok && v.id) seenLog[ch + '|' + v.id] = { at: v.at || new Date().toISOString(), channel: ch, id: v.id, seeded: true };
+      }
+    }
+    const flush = await meshPressFlush(merged.items, press, { dry: dry, now: Date.now(), posted: seenLog });
+    const settled = new Set(flush.results.filter((r) => r.status === 'sent' || r.status === 'duplicate').map((r) => r.id));
+    const keptItems = merged.items.filter((i) => !settled.has(i.id));
     const queueChanged = JSON.stringify(((prevQ && prevQ.items) || [])) !== JSON.stringify(keptItems);
     if (!dry && queueChanged) {
       try { await governedPut(env.ORDERS, 'press:queue:' + id, JSON.stringify({ store: id, landing: origin + '/fees', at: new Date().toISOString(), items: keptItems }), null, 'automation'); } catch (e2) { /* a full queue is not worth failing the run for */ }
+    }
+    if (!dry && Array.isArray(flush.posted) && flush.posted.length) {
+      const next = Object.assign({}, postedLog || {});
+      for (const m of flush.posted) next[m.key] = { at: m.at, channel: m.channel, id: m.id };
+      try { await governedPut(env.ORDERS, 'press:posted', JSON.stringify(contentPostedPrune(next, { now: Date.now() })), null, 'automation'); } catch (e2) { /* the send already happened; the queue still removes it */ }
     }
     const prevState = await env.ORDERS.get('press:state:' + id, 'json').catch(() => null);
     const ledger = meshPressLedger(prevState, flush.results, { now: Date.now() });
@@ -3280,7 +3298,7 @@ async function runPress(env, origin, opt) {
       try { await governedPut(env.ORDERS, 'press:state:' + id, JSON.stringify(ledger), null, 'automation'); } catch (e2) { /* same */ }
     }
     out.push({ id, class: e.class, ok: true, dry: dry, composed: items.length, queued_now: merged.added, dropped: merged.dropped.length,
-      sent: flush.sent, waiting: flush.waiting, token_env: e.token_env, token_present: !!press.buffer_token,
+      sent: flush.sent, waiting: flush.waiting, duplicates: flush.duplicates || 0, token_env: e.token_env, token_present: !!press.buffer_token,
       results: flush.results.map((r) => ({ channel: r.channel, status: r.status, due: r.due, err: r.err || r.note || '' })),
       material: plan.source, fallback_from: plan.fallback_from || '', rail_health: meshRailHealth(ledger) });
   }
@@ -5112,7 +5130,8 @@ async function pressTick(env) {
   for (const r of ran) for (const x of (r.results || [])) statuses[x.status] = (statuses[x.status] || 0) + 1;
   const sum = { slot, at: new Date().toISOString(), triggered_by: 'cron', identities: ran.length,
     composed: ran.reduce((a, r) => a + (r.composed || 0), 0), sent: ran.reduce((a, r) => a + (r.sent || 0), 0),
-    waiting: ran.reduce((a, r) => a + (r.waiting || 0), 0), statuses,
+    waiting: ran.reduce((a, r) => a + (r.waiting || 0), 0),
+    duplicates: ran.reduce((a, r) => a + (r.duplicates || 0), 0), statuses,
     ran: ran.map((r) => ({ id: r.id, ok: r.ok, composed: r.composed || 0, sent: r.sent || 0, waiting: r.waiting || 0, token_present: !!r.token_present, error: r.error || '' })) };
   try { await env.ORDERS.put('press:last', JSON.stringify(sum)); } catch (e) { void e; }
   return sum;

@@ -1,4 +1,32 @@
 # Tapstall — status
+
+## v1.5.3 (2026-10-20): a post the platform accepted is never posted twice
+
+Two live duplicates appeared on the house Bluesky feed 40 minutes apart — the
+same value line, the same branded card. The cause is a class, not a typo: the
+queue is a document, and a document write can fail *after* the platform already
+accepted the post, so the item stayed queued and the next 20-minute tick posted
+it again. Fixed in three parts:
+
+- **A record of what actually went out.** Every accepted send writes a mark
+  under `press:posted` (keyed by rail + queue id, carrying the wire
+  fingerprint: handle, words, media). Any later item with a mark inside the
+  21-day window is settled as `duplicate` and removed from the queue instead of
+  being sent. The queue may lag; the feed cannot repeat itself. On the first
+  tick after deploy the log is seeded from the rail ledger already in
+  `press:state`, so the stale item is not given one last repeat.
+- **One rail cannot take the batch down.** Each item is attempted in isolation:
+  a sender that throws costs its own item, not the three behind it.
+- **A deeper, better-mixed value pool.** Six pillars now carry five lines each
+  (30 value lines, up from 18), dealt pillar-by-pillar so two different
+  subjects a day, and the rotation walks the whole pool in order — a line
+  returns in about a fortnight instead of six lines looping every three days.
+  The live shop-math line reads its tariff from `RAILS` and now rotates three
+  framings, so the same sentence does not arrive every third day.
+
+361 tests (new pins: no repeat inside the window, the mark ages out, a changed
+slot still posts, a throw is contained, pool depth and citation paths).
+
 ## v1.4.0 (deployed 2026-10-20): brand everywhere, professional storefront shelf
 
 Pipeline activation, checked live the same day and then armed with the
