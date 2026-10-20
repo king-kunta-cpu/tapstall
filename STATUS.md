@@ -1,4 +1,36 @@
 # Tapstall — status
+## v1.4.0 (deployed 2026-10-20): brand everywhere, professional storefront shelf
+
+Pipeline activation, checked live the same day: the **lead hunter is not on
+autopilot** (workflow exists and ran green by hand on 2026-10-19, but the
+Worker has no `GH_DISPATCH_TOKEN`/`GH_REPO` bound, health reports
+`gh_dispatch:false`, and the digest holds 0 leads) and **outreach has never
+run** (no workflow runs, no `GMAIL_*` mailbox secrets bound, 0 active
+sellers). The press cron *is* running — it composes every slot — but sends
+nothing: both registered identities are waiting with no press token present.
+Activating the trio needs exactly three owner-supplied credentials and
+nothing else: a scoped GitHub dispatch token (+ repo), seller/owner Gmail
+app passwords as Worker secrets, and a press rail token.
+
+Branding is now one system on every surface: the full mark as an inlined SVG
+favicon on all 21 shipped/mirror pages (a shop's own logo becomes its
+storefront favicon when set), lockups in every top bar, a derived icon set
+(`favicon.ico`, 16/32/48, apple-touch 180, 192/512) and banners
+(`og-banner.png` 1200×630, wide, square) in `brand/` mirrored to
+`pages/public/brand/` for OG/Twitter cards on the public pages; README wears
+the wide banner. Whop was already wearing the same outfit (verified live).
+
+The storefront shelf was redesigned around the same one tested checkout:
+responsive 2→4-column product grid, product-media cards with overlay
+popular/sold-out badges and branded no-image tiles, a sticky browse toolbar
+(section title, item count, search, categories), a trust strip, richer cover
+hero with actions, shop-initial avatar fallback, skeleton loading, a floating
+cart bar, a centred desktop sheet, template-specific rhythms (fashion
+portrait media, food hero, electronics mono prices, services accent rows)
+and a branded footer. Verified in a DOM against production (Mama Too: 4
+cards, zero page errors) and in the 7-template preview gallery. Deploy run
+`39456000995`; live `/__ping` reports 1.4.0. 357 tests.
+
 ## Login recovery (2026-10-20, after v1.3.0)
 
 Owner reported both UIs looping to sign-in. Server-side login was proven first
