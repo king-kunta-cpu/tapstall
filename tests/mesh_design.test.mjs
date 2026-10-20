@@ -359,7 +359,7 @@ test('a queued item is written in their keys, so their sender can drain ours', a
   const promo = core.meshQueueItem({ kind: 'promo', rail: 'x', item_key: 'p1', text: 'Nyama is 6.00 USD, available now', link: theirs.landing, max: 280 },
     { now: Date.parse(sample.due), landing: theirs.landing, store: theirs.store, channel_id: sample.channel_id });
   assert.equal(promo.link, theirs.landing, 'the shop-facts beat carries the store link, which is the whole point of it');
-  assert.equal(promo.image, '', 'no card, no fake card url');
+  assert.match(promo.image, /\/brand\/cards\/promo\.png$/, 'a social item with no product photo still travels with its branded pillar card');
   const pin = core.meshQueueItem({ kind: 'promo', rail: 'pinterest', item_key: 'p2', item: 'Nyama', text: 'Nyama is 6.00 USD', link: theirs.landing },
     { now: Date.parse(sample.due), store: theirs.store, board: 'hunta-boards' });
   assert.equal(pin.board, 'hunta-boards', 'and a pin needs the board, or Buffer answers Board not found from a stale cache');
@@ -444,6 +444,8 @@ test('company content is composed with the same provenance rule as a shop: no nu
   assert.equal(b.beats.length, core.MESH_QUEUE_DEFAULTS.per_day, 'three beats a day on a company account, the pipeline number');
   assert.equal(b.beats.filter((x) => x.kind === 'value').length, 2, 'two of them value');
   assert.equal(b.beats.filter((x) => x.kind === 'promo').length, 1, 'one company facts, with the price in it');
+  assert.deepEqual(core.CONTENT_RATIO, { value: 2, promo: 1 }, 'the 2:1 value-to-promo ratio is policy data, not a habit');
+  assert.ok(b.beats.every((x) => x.image && x.media_kind && x.pillar), 'every company beat travels with branded media and names its pillar');
   assert.equal(b.source, 'company', 'and the plan says what material it is, so a run can report it');
   assert.equal(b.beats[0].rails_from, 'identity', 'the rails come from the identity, not from a drafting surface');
   assert.match(JSON.stringify(b.beats), /60/, 'the price came from the facts handed in');
@@ -558,12 +560,16 @@ test('1.0.0 direct rails send from the Worker when the identity secret is bound 
   const stub = async (url, init) => {
     seen.push(String(url));
     if (String(url).includes('createSession')) return { status: 200, json: async () => ({ accessJwt: 'jwt', did: 'did:plc:x' }), text: async () => '{}' };
+    if (String(url).includes('uploadBlob')) return { status: 200, json: async () => ({ blob: { $type: 'blob', mimeType: 'image/png' } }), text: async () => '{}' };
+    if (String(url).includes('/brand/cards/')) return { status: 200, headers: { get: () => 'image/png' }, arrayBuffer: async () => new ArrayBuffer(8), json: async () => ({}), text: async () => '' };
+    const rec = JSON.parse(init.body || '{}');
+    assert.equal(rec.record.embed.$type, 'app.bsky.embed.images', 'the post carries its branded card, never bare text');
     return { status: 200, json: async () => ({ uri: 'at://did:plc:x/app.bsky.feed.post/1' }), text: async () => '{}' };
   };
   const sent = await C.meshPressFlush([item], { direct: { bluesky: { handle: 'house.bsky.social', app_password: 'pw' } } }, { fetch: stub, now: Date.now() });
   assert.equal(sent.sent, 1, JSON.stringify(sent.results));
   assert.equal(sent.results[0].verified, true, 'sent means the platform accepted it, on direct rails too');
-  assert.equal(seen.length, 2, 'session then record — the ATProto shape, in order');
+  assert.equal(seen.length, 4, 'session, media, blob, record — the ATProto media shape, in order');
   const queued = await C.meshPressFlush([item], {}, { now: Date.now() });
   assert.equal(queued.results[0].status, 'queued');
   assert.match(queued.results[0].err, /no direct credential bound/, 'unbound is a named missing secret, not a silent skip and not a tap owed');

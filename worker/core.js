@@ -3204,7 +3204,7 @@ export function meshValueBeats(st, products, facts, opt) {
     const text = meshClip(body, MESH_AUTONOMY.max_chars);
     const v = meshIsPitch(text, o);
     if (v.pitch) { beats.push({ kind, item_key: key, text, blocked: v.why }); return; }
-    beats.push({ kind, item_key: key, text, rail: 'whatsapp_status' });
+    beats.push({ kind, item_key: key, text, rail: 'whatsapp_status', pillar: 'menu-craft' });
   };
   const withWords = list.filter((p) => meshClip(p.desc || p.description || p.note || '', 20).length > 12);
   if (withWords.length) {
@@ -3440,7 +3440,7 @@ export function meshPromoBeats(st, products, facts, opt) {
     // the rail is chosen by length, because the limit is the platform's, not ours: a line that does
     // not fit a status update is not trimmed into nonsense, it goes where the sentence fits
     const rail = ['whatsapp_status', 'x', 'facebook_group', 'instagram'].find((r) => full.length <= (MESH_RAILS[r] || { max: 1e9 }).max) || 'counter';
-    out.push({ kind: kind || 'promo', rail, item_key: String(row.id || row.name).slice(0, 40), item: meshClip(row.name, 60),
+    out.push({ kind: kind || 'promo', pillar: 'promo', image: String(row.img || row.image || ''), rail, item_key: String(row.id || row.name).slice(0, 40), item: meshClip(row.name, 60),
       price: Number(row.price) || 0, text: full, sends: true });
   };
   const a = pool[day % pool.length];
@@ -3471,10 +3471,13 @@ export function meshSchedule(st, products, facts, opt) {
   const p = meshPromoBeats(st, products, facts, o);
   const ratio = MESH_AUTONOMY_V3.ratio, cap = MESH_AUTONOMY_V3.per_day;
   const chosen = [];
-  const allowPromo = (chosen.filter((b) => b.kind === 'promo').length < Math.max(1, Math.floor(cap * ratio.promo / (ratio.value + ratio.promo))));
-  const promos = allowPromo ? p.beats.slice(0, 1) : [];
-  for (const b of v.beats.slice(0, cap - promos.length)) if (fresh(b.item_key)) chosen.push(b);
-  for (const b of promos) if (fresh(b.item_key)) chosen.push(b);
+  for (const b of v.beats.slice(0, cap)) if (fresh(b.item_key)) chosen.push(b);
+  // The 2:1 rule is a gate, not a vibe: a promo is only scheduled into a plan
+  // that already carries two value beats, so a thin day stays useful instead
+  // of turning into an advert with garnish.
+  const values = chosen.filter((b) => b.kind !== 'promo').length;
+  const promos = values >= ratio.value ? p.beats.slice(0, ratio.promo) : [];
+  for (const b of promos) if (fresh(b.item_key) && chosen.length < cap) chosen.push(b);
   const chans = (st && st.mesh_channels && typeof st.mesh_channels === 'object') ? st.mesh_channels : {};
   const open = Object.keys(MESH_CHANNELS).filter((c) => chans[c] && chans[c].on);
   const beats = chosen.map((b, i) => {
@@ -3637,7 +3640,8 @@ export function meshQueueItem(beat, opt) {
     due: new Date(Math.ceil((now + 60000) / grid) * grid + n * grid).toISOString(),
     text: String((beat && beat.text) || '').slice(0, Number(beat && beat.max) || 300),
     link: beat && beat.kind === 'promo' ? String(beat.link || o.landing || '') : '',
-    image: String((beat && beat.image) || o.image || ''),
+    ...contentMediaFor({ ...(beat || {}), image: (beat && beat.image) || o.image || '' }, { now, media_base: o.media_base }),
+    pillar: String((beat && beat.pillar) || ''),
     board: rail === 'pinterest' ? String(o.board || '') : '',
     pin_title: rail === 'pinterest' ? meshClip((beat && beat.item) || '', 60) : '',
     landing: String(o.landing || ''), store: String(o.store || ''),
@@ -3727,9 +3731,32 @@ async function meshDirectSend(it, press, fetcher, dry, now) {
     try { if (r && typeof r.json === 'function') return await r.json(); } catch (e) { void e; }
     try { return JSON.parse(await r.text()); } catch (e) { return null; }
   };
+  const media = (it && (it.video || it.image)) ? it : Object.assign({}, it, contentMediaFor(it || {}, { now }));
+  const bytesOf = async (r) => {
+    if (r && typeof r.arrayBuffer === 'function') return await r.arrayBuffer();
+    if (r && r.body instanceof ArrayBuffer) return r.body;
+    if (r && typeof r.text === 'function') return new TextEncoder().encode(await r.text()).buffer;
+    return new ArrayBuffer(0);
+  };
+  const typeOf = (url, fallback) => {
+    const u = String(url || '').toLowerCase();
+    if (u.includes('.mp4')) return 'video/mp4';
+    if (u.includes('.gif')) return 'image/gif';
+    if (u.includes('.webp')) return 'image/webp';
+    if (u.includes('.jpg') || u.includes('.jpeg')) return 'image/jpeg';
+    return fallback || 'image/png';
+  };
+  const linkFacets = (text) => {
+    const m = String(text || '').match(/https?:\/\/[^\s]+/);
+    if (!m) return undefined;
+    const enc = new TextEncoder();
+    const start = enc.encode(String(text).slice(0, m.index)).length;
+    return [{ index: { byteStart: start, byteEnd: start + enc.encode(m[0]).length },
+      features: [{ $type: 'app.bsky.richtext.facet#link', uri: m[0] }] }];
+  };
   if (it.channel === 'bluesky' && d.bluesky && d.bluesky.handle && d.bluesky.app_password) {
     const url = 'https://bsky.social/xrpc/com.atproto.repo.createRecord';
-    if (dry) return { status: 'dry', url, due: it.due, chars: String(it.text).length, verified: false };
+    if (dry) return { status: 'dry', url, due: it.due, chars: String(it.text).length, media_kind: media.media_kind || 'image', media: media.video || media.image || '', verified: false };
     if (!fetcher) return { status: 'queued', sent: false, verified: false, err: 'no fetch in this runtime' };
     try {
       const s = await fetcher('https://bsky.social/xrpc/com.atproto.server.createSession', {
@@ -3737,25 +3764,88 @@ async function meshDirectSend(it, press, fetcher, dry, now) {
         body: JSON.stringify({ identifier: String(d.bluesky.handle), password: String(d.bluesky.app_password) }) });
       const sj = await asJson(s);
       if (!sj || !sj.accessJwt || !sj.did) return { status: 'failed', sent: false, verified: false, err: 'bluesky refused the session (handle or app password)' };
+      const auth = { authorization: 'Bearer ' + sj.accessJwt };
+      const fetchMedia = async (u) => {
+        const r = await fetcher(u);
+        if (!r || !(r.status >= 200 && r.status < 300)) throw new Error('branded media fetch failed (' + (r && r.status) + ')');
+        return r;
+      };
+      let embed = null, mediaNote = '';
+      if ((media.media_kind === 'video' && media.video) || media.image) {
+        if (media.media_kind === 'video' && media.video) {
+          try {
+            const svc = (((sj.didDoc || {}).service || []).find((x) => String(x.id || '').includes('atproto_pds')) || {}).serviceEndpoint || 'https://bsky.social';
+            const pdsHost = new URL(String(svc)).host;
+            const exp = Math.floor(now / 1000) + 1800;
+            const sa = await fetcher('https://bsky.social/xrpc/com.atproto.server.getServiceAuth?aud=' + encodeURIComponent('did:web:' + pdsHost)
+              + '&lxm=' + encodeURIComponent('com.atproto.repo.uploadBlob') + '&exp=' + exp, { headers: auth });
+            const saj = await asJson(sa);
+            if (!saj || !saj.token) throw new Error('no video service token');
+            const vr = await fetchMedia(media.video);
+            const vbytes = await bytesOf(vr);
+            const up = await fetcher('https://video.bsky.app/xrpc/app.bsky.video.uploadVideo?did=' + encodeURIComponent(sj.did)
+              + '&name=' + encodeURIComponent(String(media.video).split('/').pop() || 'tapstall.mp4'),
+              { method: 'POST', headers: { authorization: 'Bearer ' + saj.token, 'content-type': 'video/mp4', 'content-length': String(vbytes.byteLength) }, body: vbytes });
+            let job = await asJson(up);
+            let blob = (job && (job.blob || (job.jobStatus || {}).blob)) || null;
+            const jobId = job && (job.jobId || (job.jobStatus || {}).jobId);
+            for (let i = 0; !blob && jobId && i < 12; i += 1) {
+              await new Promise((res) => setTimeout(res, 1500));
+              const st = await fetcher('https://video.bsky.app/xrpc/app.bsky.video.getJobStatus?jobId=' + encodeURIComponent(jobId), { headers: auth });
+              const stj = await asJson(st);
+              blob = (stj && (stj.blob || (stj.jobStatus || {}).blob)) || null;
+              if (stj && (((stj.jobStatus || {}).state || stj.state) === 'JOB_STATE_FAILED')) break;
+            }
+            if (!blob) throw new Error('video processing did not return a blob');
+            embed = { $type: 'app.bsky.embed.video', video: blob, alt: String(media.alt || it.text).slice(0, 300),
+              aspectRatio: { width: Number(media.media_w) || 960, height: Number(media.media_h) || 544 } };
+            mediaNote = ' + video';
+          } catch (ve) {
+            // A post must never go bare: if the video service refuses, the
+            // branded poster card carries the same message as a still.
+            mediaNote = ' (video refused, poster card sent: ' + String(ve && ve.message || ve).slice(0, 80) + ')';
+          }
+        }
+        if (!embed) {
+          const imgUrl = media.image;
+          if (!imgUrl) return { status: 'failed', sent: false, verified: false, err: 'no branded media on social item' };
+          const ir = await fetchMedia(imgUrl);
+          const ibytes = await bytesOf(ir);
+          const ct = (ir.headers && typeof ir.headers.get === 'function' && ir.headers.get('content-type')) || typeOf(imgUrl, 'image/png');
+          const up = await fetcher('https://bsky.social/xrpc/com.atproto.repo.uploadBlob', {
+            method: 'POST', headers: { ...auth, 'content-type': String(ct).split(';')[0] }, body: ibytes });
+          const uj = await asJson(up);
+          if (!uj || !uj.blob) return { status: 'failed', sent: false, verified: false, err: 'bluesky refused the branded image upload' };
+          embed = { $type: 'app.bsky.embed.images', images: [{ alt: String(media.alt || it.text).slice(0, 300), image: uj.blob,
+            aspectRatio: { width: Number(media.media_w) || 1200, height: Number(media.media_h) || 630 } }] };
+          mediaNote = ' + branded card' + mediaNote;
+        }
+      }
+      const text = String(it.text).slice(0, 300);
+      const facets = linkFacets(text);
       const r = await fetcher(url, {
         method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + sj.accessJwt },
         body: JSON.stringify({ repo: sj.did, collection: 'app.bsky.feed.post',
-          record: { $type: 'app.bsky.feed.post', text: String(it.text).slice(0, 300), createdAt: new Date(now).toISOString() } }) });
+          record: { $type: 'app.bsky.feed.post', text, ...(facets ? { facets } : {}), ...(embed ? { embed } : {}), createdAt: new Date(now).toISOString() } }) });
       const ok = r.status >= 200 && r.status < 300;
-      return { status: ok ? 'sent' : 'failed', sent: ok, verified: ok, http: r.status, note: ok ? 'accepted by Bluesky' : 'bluesky refused the post' };
+      return { status: ok ? 'sent' : 'failed', sent: ok, verified: ok, http: r.status, note: ok ? 'accepted by Bluesky' + mediaNote : 'bluesky refused the post' };
     } catch (e) { return { status: 'failed', sent: false, verified: false, err: String(e && e.message || e).slice(0, 160) }; }
   }
   if (it.channel === 'telegram' && d.telegram && d.telegram.bot_token && d.telegram.chat_id) {
-    const url = 'https://api.telegram.org/bot' + String(d.telegram.bot_token).slice(0, 120) + '/sendMessage';
-    if (dry) return { status: 'dry', url: 'https://api.telegram.org/bot…/sendMessage', due: it.due, chars: String(it.text).length, verified: false };
+    const base = 'https://api.telegram.org/bot' + String(d.telegram.bot_token).slice(0, 120);
+    const isVideo = media.media_kind === 'video' && media.video;
+    const url = base + (isVideo ? '/sendVideo' : '/sendPhoto');
+    if (dry) return { status: 'dry', url: base + (isVideo ? '/sendVideo' : '/sendPhoto'), due: it.due, chars: String(it.text).length, media_kind: isVideo ? 'video' : 'image', verified: false };
     if (!fetcher) return { status: 'queued', sent: false, verified: false, err: 'no fetch in this runtime' };
+    if (!media.image && !media.video) return { status: 'failed', sent: false, verified: false, err: 'no branded media on social item' };
     try {
-      const r = await fetcher(url, {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ chat_id: String(d.telegram.chat_id), text: String(it.text).slice(0, 1024) }) });
+      const payload = isVideo
+        ? { chat_id: String(d.telegram.chat_id), video: media.video, caption: String(it.text).slice(0, 1024) }
+        : { chat_id: String(d.telegram.chat_id), photo: media.image, caption: String(it.text).slice(0, 1024) };
+      const r = await fetcher(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
       const j = await asJson(r);
       const ok = r.status >= 200 && r.status < 300 && !(j && j.ok === false);
-      return { status: ok ? 'sent' : 'failed', sent: ok, verified: ok, http: r.status, note: ok ? 'accepted by Telegram' : 'telegram refused the post' };
+      return { status: ok ? 'sent' : 'failed', sent: ok, verified: ok, http: r.status, note: ok ? 'accepted by Telegram with media' : 'telegram refused the post' };
     } catch (e) { return { status: 'failed', sent: false, verified: false, err: String(e && e.message || e).slice(0, 160) }; }
   }
   return null;
@@ -3821,14 +3911,66 @@ export const MESH_ID_RAIL_DEFAULTS = { owner: ['x', 'bluesky', 'nostr', 'devto',
 /** The company's own material, as data with a source path: the value half for a company account is the
  *  thing the platform teaches (nodes, provenance, ledger-first books), and it must cite where it is
  *  true, same rule as a shop's facts. A line with no `path` cannot be composed. */
-export const MESH_COMPANY_VALUE = [
-  { text: 'A shop front that is a URL, a photo and a phone number: no app store, no card terminal, nothing for the customer to install.', path: '/onboard' },
-  { text: 'Every post we make is written from a row that was read today. If the menu did not answer, no price appears anywhere in the feed.', path: '/s/<handle>/mesh.json' },
-  { text: 'Books that come out of orders rather than a Sunday evening: the ledger is the record, the receipt is the proof.', path: '/api/books' },
-  { text: 'VAT is a percentage of what you actually sold, and the split is done where the order is taken, not in a spreadsheet later.', path: '/fees' },
-  { text: 'A pricing page that doubles as a calendar: the renewal dates are a file any app can subscribe to.', path: '/fees.ics' },
-  { text: 'Free nodes, not a subscription to reach your own customers: a feed, a sitemap, a plain-text page, and the shop keeps the copy.', path: '/rails' },
+/* ── Tapstall content studio (v1.4.0) ────────────────────────────────────────
+ * Our own path, deliberately not a topic-scrape or a borrowed cadence file:
+ * content is generated from the till outward — the rail tariffs in RAILS,
+ * the exact-amount payment fingerprint, menu/stock facts a shop already
+ * holds, and the books the ledger can prove. Six value pillars teach a
+ * WhatsApp seller something usable; promo is the seventh voice and is
+ * rationed by CONTENT_RATIO below. Every beat names its pillar, and the
+ * queue gives it a branded card (or, in rotation, the motion loop), so a
+ * social post is never bare text. Email is the one exception: it stays
+ * plain text by design (deliverability), and the policy says so.
+ */
+export const CONTENT_RATIO = { value: 2, promo: 1 };
+export const CONTENT_MEDIA_BASE = 'https://king-kunta-cpu.github.io/tapstall/brand/';
+export const CONTENT_PILLARS = [
+  { id: 'exact-amount', label: 'Exact Amount', card: 'exact-amount', lines: [
+    { text: 'Two buyers can owe $12. Only one of them owes $12.43. Odd cents turn the amount itself into the reference — search the statement for the number, not the screenshot.', path: '/guide/payment-reference-matching' },
+    { text: 'Before you mark anything paid, search the amount first and the name second. Names repeat; exact amounts do not.', path: '/guide/payment-reference-matching' },
+    { text: 'A proof-of-payment picture proves someone can edit a picture. A code from the paying app, matched to the exact amount, proves a payment.', path: '/guide/payment-reference-matching' } ] },
+  { id: 'shop-math', label: 'Shop Math', card: 'shop-math', lines: [
+    { text: 'Price with the rail in the room: transfer fee + IMTT + cash-out is the real cost of "free" mobile money. Decide who carries it before the buyer checks out, not after.', path: '/fees' },
+    { text: 'If a payment method takes 3% and your margin is 10%, the rail is eating a third of the profit — not 3% of it. Do that division before you set the price.', path: '/fees' },
+    { text: 'A delivery fee that disappears over a threshold is not generosity, it is arithmetic: set the threshold where one extra item pays for the trip.', path: '/fees' } ] },
+  { id: 'till-tips', label: 'Till Tips', card: 'till-tips', lines: [
+    { text: 'Count stock at close, not at crisis. Five quiet minutes with the shelf beats apologising to the third buyer tomorrow.', path: '/guide/whatsapp-shop-payments' },
+    { text: 'Say sold out the moment it sells out. A buyer told today comes back tomorrow; a buyer who pays first and hears it later does not.', path: '/guide/whatsapp-shop-payments' },
+    { text: 'Put your hours where the order starts — on the shop link, not in a status from Tuesday. Half of "are you open?" chats are a signage problem.', path: '/onboard' } ] },
+  { id: 'buyer-trust', label: 'Buyer Trust', card: 'buyer-trust', lines: [
+    { text: 'Show the name the buyer should expect on the payment confirmation. "Pay 0771… — it will say R. Moyo" ends most wrong-number fear before it starts.', path: '/guide/payment-reference-matching' },
+    { text: 'Ask for the code their app printed, once, in the order — not five messages later in the chat. Where you ask decides whether they bother.', path: '/guide/payment-reference-matching' },
+    { text: 'A repeat buyer is not a discount waiting to happen. A thank-you that names what they last bought is worth more than 5% off everything.', path: '/guide/whatsapp-shop-payments' } ] },
+  { id: 'menu-craft', label: 'Menu Craft', card: 'menu-craft', lines: [
+    { text: 'Name the thing the way a buyer says it at the counter. Search on a shop page only finds the words you actually used.', path: '/onboard' },
+    { text: 'One honest photo beats four borrowed ones. Buyers forgive a plain picture; they do not forgive a different product arriving.', path: '/onboard' },
+    { text: 'A description earns its place when it answers the first question: how big, how hot, how long, what comes with it. Everything else is decoration.', path: '/onboard' } ] },
+  { id: 'books', label: 'Books', card: 'books', lines: [
+    { text: 'Cash basis counts the day money was marked; accrual counts the day the order arrived. Pick one per report and write it on the report — mixing them invents sales.', path: '/fees' },
+    { text: 'VAT inside the price and VAT added on top are the same tax wearing two coats. Your till has to know which coat your prices wear.', path: '/fees' },
+    { text: 'The cheapest bookkeeping is the kind done by the order itself: item, amount, rail, reference, date — captured once, at the till, never re-typed at month-end.', path: '/guide/whatsapp-shop-payments' } ] },
 ];
+export const MESH_COMPANY_VALUE = CONTENT_PILLARS.flatMap((p) => p.lines.map((l) => ({ ...l, pillar: p.id })));
+
+/** The media a beat travels with. A shop beat keeps the product's own photo;
+ *  a company beat takes its pillar card; one beat in six (deterministic by
+ *  day+key, so a re-run agrees with itself) takes the exact-amount motion
+ *  loop instead of a still. Nothing social leaves bare. */
+export function contentMediaFor(beat, opt) {
+  const o = opt || {}, b = beat || {};
+  const base = String(o.media_base || CONTENT_MEDIA_BASE).replace(/\/+$/, '') + '/';
+  const pillar = String(b.pillar || (b.kind === 'promo' ? 'promo' : 'menu-craft'));
+  const cardName = (CONTENT_PILLARS.find((p) => p.id === pillar) || {}).card || (b.kind === 'promo' ? 'promo' : 'menu-craft');
+  const card = base + 'cards/' + cardName + '.png';
+  if (b.video) return { media_kind: 'video', image: String(b.image || card), video: String(b.video), alt: String(b.alt || b.text || 'Tapstall motion card').slice(0, 300), media_w: 960, media_h: 544 };
+  if (b.image) return { media_kind: 'image', image: String(b.image), video: '', alt: String(b.alt || b.item || b.text || 'Shop photo').slice(0, 300), media_w: 0, media_h: 0 };
+  let h = 2166136261;
+  const seed = String(b.item_key || b.text || '') + ':' + Math.floor((o.now || Date.now()) / DAY_MS);
+  for (let i = 0; i < seed.length; i++) { h ^= seed.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  if (h % 6 === 0) return { media_kind: 'video', image: card, video: base + 'motion/exact-amount.mp4', alt: 'Tapstall: an order total of $12.00 becomes an exact $12.43 to pay — the amount is the reference.', media_w: 960, media_h: 544 };
+  return { media_kind: 'image', image: card, video: '', alt: String(b.alt || b.text || 'Tapstall card').slice(0, 300), media_w: 1200, media_h: 630 };
+}
+
 
 export function meshCompanyIdentities(reg) {
   const r = (reg && typeof reg === 'object') ? reg : {};
@@ -3872,23 +4014,38 @@ export function meshRegister(reg, rec, opt) {
  *  carry it, and a value line cites the place it is true. */
 export function meshCompanyBeats(identity, facts, opt) {
   const o = opt || {}, f = facts || {}, now = o.now || Date.now(), day = Math.floor(now / DAY_MS);
-  const lines = MESH_COMPANY_VALUE.filter((l) => l.path);
   const out = [];
   const per = Number(MESH_QUEUE_DEFAULTS.per_day) || 3;
-  const take = Math.max(1, per - 1);
+  const take = Math.max(1, per - 1);   // CONTENT_RATIO at per_day=3: two value beats, one promo
+  const eco = RAILS.ecocash_usd || {};
+  const fee10 = Math.round(10 * (((Number(eco.pct) || 0) + (Number(eco.imtt) || 0))) * 100) / 100;
+  const shopMath = {
+    pillar: 'shop-math', path: '/fees',
+    text: 'Shop math: on a $10 EcoCash USD payment, transfer + IMTT is about $' + fee10.toFixed(2)
+      + ' before cash-out. If your margin on that order is $1, the rail just took a third of it — price with the rail in the room.',
+  };
   for (let i = 0; i < take; i += 1) {
-    const l = lines[(day + i) % lines.length];
-    out.push({ kind: 'value', item_key: 'company:' + (day + i) % lines.length, text: l.text + ' — ' + l.path, source: l.path, rail: 'bluesky' });
+    if (i === 0 && day % 3 === 0) {
+      out.push({ kind: 'value', pillar: 'shop-math', item_key: 'company:shop-math:' + Math.floor(day / 3), text: shopMath.text + ' — ' + String(o.origin || '') + shopMath.path, source: shopMath.path, rail: 'bluesky' });
+      continue;
+    }
+    const pillar = CONTENT_PILLARS[(day + i) % CONTENT_PILLARS.length];
+    const line = pillar.lines[Math.floor(day / CONTENT_PILLARS.length) % pillar.lines.length];
+    out.push({ kind: 'value', pillar: pillar.id, item_key: 'company:' + pillar.id + ':' + Math.floor(day / CONTENT_PILLARS.length),
+      text: line.text + ' — ' + String(o.origin || '') + line.path, source: line.path, rail: 'bluesky' });
   }
   if (Number(f.price_usd) > 0) {
-    out.push({ kind: 'promo', item_key: 'company:price', rail: 'x',
-      text: 'A storefront, orders on WhatsApp, books from the ledger, for ' + (Number(f.price_usd) || 0).toFixed(0) + ' US dollars a year'
-        + (Number(f.free_days) > 0 ? ', with ' + f.free_days + ' days free first' : '') + '. ' + String(o.origin || '') + '/fees',
-      posted_by: 'shop facts' });
+    const promos = [
+      'A storefront, orders on WhatsApp, books from the ledger — free for ' + (Number(f.free_days) || 60) + ' days, then $' + (Number(f.price_usd) || 0).toFixed(0) + '/year or $7/month. No commission on your sales.',
+      'Your menu on one link, payments straight to your own account, every order identified by its exact amount. Free for ' + (Number(f.free_days) || 60) + ' days.',
+      'Stop running the shop from chat scrollback: one link, your own payment numbers, a dashboard you own. $' + (Number(f.price_usd) || 0).toFixed(0) + ' a year after the free days.',
+    ];
+    out.push({ kind: 'promo', pillar: 'promo', item_key: 'company:price', rail: 'bluesky',
+      text: promos[day % promos.length] + ' ' + String(o.origin || '') + '/onboard', posted_by: 'shop facts' });
   }
   const rails = Object.keys((identity && identity.rails) || {});
-  const beats = out.map((b) => ({ ...b, to: rails.length ? rails : ['bluesky'], rails_from: rails.length ? 'identity' : 'default', auto_send: rails.some((r) => (MESH_PUBLISH[r] || {}).via === 'buffer' || (MESH_PUBLISH[r] || {}).via === 'direct') }));
-  return { on: true, source: 'company', beats: beats.slice(0, per), blocked: Number(f.price_usd) > 0 ? [] : [{ why: 'no price in facts: a company promo cannot invent one either' }],
+  const beats = out.map((b) => ({ ...b, ...contentMediaFor(b, { now, media_base: o.media_base }), to: rails.length ? rails : ['bluesky'], rails_from: rails.length ? 'identity' : 'default', auto_send: rails.some((r) => (MESH_PUBLISH[r] || {}).via === 'buffer' || (MESH_PUBLISH[r] || {}).via === 'direct') }));
+  return { on: true, source: 'company', beats: beats.slice(0, per), ratio: CONTENT_RATIO, blocked: Number(f.price_usd) > 0 ? [] : [{ why: 'no price in facts: a company promo cannot invent one either' }],
     human: 'replies_only', identity: (identity && identity.id) || 'owner' };
 }
 
