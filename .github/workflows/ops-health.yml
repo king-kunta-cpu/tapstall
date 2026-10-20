@@ -41,7 +41,11 @@ jobs:
                   origin + path,
                   data=body,
                   method="POST" if data is not None else "GET",
-                  headers={"Accept": "application/json", **(headers or {})},
+                  headers={
+                      "Accept": "application/json",
+                      "User-Agent": "Mozilla/5.0 (Tapstall ops-health)",
+                      **(headers or {}),
+                  },
               )
               try:
                   with urllib.request.urlopen(req, timeout=90) as resp:
@@ -62,7 +66,14 @@ jobs:
           cookies = " ".join(headers.get_all("Set-Cookie", []))
           match = re.search(r"tp_ops=([^;]+)", cookies)
           if status != 200 or not login.get("ok") or not match:
-              print(json.dumps({"login_status": status, "login_ok": bool(login.get("ok"))}))
+              print(json.dumps({
+                  "login_status": status,
+                  "login_ok": bool(login.get("ok")),
+                  "login_error": login.get("error") or ("non_json_response" if login.get("raw") else None),
+                  "tries_left": login.get("tries_left"),
+                  "secret_len": len(secret),
+                  "secret_stripped_len": len(secret.strip()),
+              }, sort_keys=True))
               raise SystemExit("owner-console login did not produce a session")
 
           status, _, health = call(
