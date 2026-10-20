@@ -1,5 +1,5 @@
 # Tapstall — status
-## v1.3.0 (built 2026-10-20): the quota-first pipeline
+## v1.3.0 (deployed 2026-10-20): the quota-first pipeline
 
 Owner instruction: redesign the entire pipeline to use the least quota while
 operating at full tilt. Measured first (Cloudflare GraphQL, zero KV ops to
@@ -49,9 +49,11 @@ may spend the last one; telemetry is also paced through the UTC day):
   and ignores docs-only pushes; the monitor is a zero-write weekly ping with
   the full sandbox prod_check monthly; stdlib-only Actions jobs drop
   setup-python; Workers invocation logs are off (selftest/ops-health are the
-  witness). 356 tests.
+  witness). 356 tests. **Deployed 2026-10-20** in GitHub run `39432132615`
+  (worker + pages green, no bot log commit); live `/__ping` reports 1.3.0 and
+  the manual ops-health run `39432346205` succeeded against it.
 
-## v1.2.0 (built 2026-10-20, not yet deployed): shop outfits, owner UI stays out of the shelf
+## v1.2.0 (deployed 2026-10-20, in the same run as v1.3.0): shop outfits, owner UI stays out of the shelf
 
 The buyer page got its first deliberate outfit system. `STOREFRONT_TEMPLATES` in
 `core.js` carries the common WhatsApp-shop shapes — general retail, food/bakery,
@@ -76,7 +78,7 @@ facts an owner needs (item count/feed error, orders, plan, logs and levers);
 operators manage rows in their own dashboard. The authenticated ops API's
 `menu`/`menu_revert` patch actions remain as scripted support doors, with no
 buttons or item list in the owner UI, and the pages suite pins that split.
-352 tests green locally; deployment still needs the usual push-to-`main` run.
+352 tests green at build; shipped live with v1.3.0 in deploy run `39432132615`.
 
 ## v1.1.0 (deployed 2026-10-20): Whop activates, sellers send, one brand
 
