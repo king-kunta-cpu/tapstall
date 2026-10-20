@@ -27,7 +27,7 @@ binding = "ORDERS"
 id = "{oid}"
 
 [triggers]
-crons = ["15 6,12,18,0 * * *"]
+crons = ["15 6,12,18,0 * * *", "5,25,45 * * * *"]
 
 [observability]
 # Quota-first: invocation logs are off; /__selftest + ops health are the witness.

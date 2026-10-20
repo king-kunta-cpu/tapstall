@@ -449,7 +449,21 @@ test('company content is composed with the same provenance rule as a shop: no nu
   assert.equal(b.source, 'company', 'and the plan says what material it is, so a run can report it');
   assert.equal(b.beats[0].rails_from, 'identity', 'the rails come from the identity, not from a drafting surface');
   assert.match(JSON.stringify(b.beats), /60/, 'the price came from the facts handed in');
-  for (const v of b.beats.filter((x) => x.kind === 'value')) assert.match(v.text, /\/[a-z.]+$/, 'and every value line cites where it is true: ' + v.text.slice(-24));
+  for (const v of b.beats.filter((x) => x.kind === 'value')) {
+    assert.match(v.source, /^\//, 'every value line keeps its citation as provenance');
+    assert.ok(!/https?:\/\//.test(v.text), 'but the post itself is native: no naked URL in a value post');
+  }
+  assert.deepEqual(core.CONTENT_STUDIO_POLICY.post_to, ['owner', 'seller'], 'the studio posts to company + seller accounts only');
+  assert.ok(core.CONTENT_STUDIO_POLICY.never_post_to.includes('operator'), 'operators are tenants, never a posting surface');
+  const sellerPlan = core.meshIdentityPlan({ id: 'seller:a', class: 'seller', rails: { bluesky: {} }, source: {} }, { beats: [] },
+    { price_usd: 60, free_days: 60 }, { origin: 'https://tapstall.zlnew.workers.dev', now: Date.parse('2026-10-14T06:00:00Z') });
+  const sellerPromo = sellerPlan.beats.find((x) => x.kind === 'promo');
+  assert.ok(sellerPromo && !/https?:\/\//.test(sellerPromo.text) && /Link in bio\.$/.test(sellerPromo.text),
+    'a seller promo carries no link ever — it says Link in bio: ' + (sellerPromo && sellerPromo.text));
+  const ownerPromo = b.beats.find((x) => x.kind === 'promo');
+  assert.match(ownerPromo.text, /https:\/\/tapstall\.zlnew\.workers\.dev\/onboard/, 'a company promo may carry the actual URL');
+  const overdue = core.meshQueueMerge({ items: [{ id: 'due:1', channel: 'bluesky', due: new Date(Date.now() - 3600e3).toISOString(), kind: 'value' }] }, [], { now: Date.now() });
+  assert.equal(overdue.items.length, 1, 'an item an hour overdue is kept for the next tick to send, not silently dropped at merge');
   assert.ok(!/discount|%\s?off|free trial month/i.test(JSON.stringify(b.beats)), 'no invented offer on a company promo either');
   const noPrice = core.meshCompanyBeats(idn, {}, { now: Date.parse('2026-10-14T06:00:00Z') });
   assert.equal(noPrice.beats.filter((x) => x.kind === 'promo').length, 0, 'with no price in the facts, the promo is not written');

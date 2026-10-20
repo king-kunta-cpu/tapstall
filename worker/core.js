@@ -3639,8 +3639,8 @@ export function meshQueueItem(beat, opt) {
     channel: chan, channel_id: String((o.channel_id || '') || '').slice(0, 40),
     due: new Date(Math.ceil((now + 60000) / grid) * grid + n * grid).toISOString(),
     text: String((beat && beat.text) || '').slice(0, Number(beat && beat.max) || 300),
-    link: beat && beat.kind === 'promo' ? String(beat.link || o.landing || '') : '',
-    ...contentMediaFor({ ...(beat || {}), image: (beat && beat.image) || o.image || '' }, { now, media_base: o.media_base }),
+    link: o.no_links ? '' : (beat && beat.kind === 'promo' ? String(beat.link || o.landing || '') : ''),
+    ...contentMediaFor({ ...(beat || {}), image: (beat && beat.image) || o.image || '' }, { now, seq: n, media_base: o.media_base }),
     pillar: String((beat && beat.pillar) || ''),
     board: rail === 'pinterest' ? String(o.board || '') : '',
     pin_title: rail === 'pinterest' ? meshClip((beat && beat.item) || '', 60) : '',
@@ -3654,7 +3654,7 @@ export function meshQueueItem(beat, opt) {
  *  not an error, so it reports how much it dropped instead of failing. */
 export function meshQueueMerge(prev, items, opt) {
   const o = opt || {}, now = o.now || Date.now(), cad = o.cadence || MESH_QUEUE_DEFAULTS;
-  const keep = ((prev && prev.items) || []).filter((it) => it && it.due && Date.parse(it.due) > now - 60000);
+  const keep = ((prev && prev.items) || []).filter((it) => it && it.due && Date.parse(it.due) > now - 7 * DAY_MS);
   const byId = new Set(keep.map((i) => i.id));
   const day = Math.floor(now / DAY_MS);
   const perRail = {}; const promoGap = {};
@@ -3923,6 +3923,35 @@ export const MESH_ID_RAIL_DEFAULTS = { owner: ['x', 'bluesky', 'nostr', 'devto',
  * plain text by design (deliverability), and the policy says so.
  */
 export const CONTENT_RATIO = { value: 2, promo: 1 };
+export const CONTENT_STUDIO_POLICY = {
+  post_to: ['owner', 'seller'],
+  never_post_to: ['operator', 'trial'],
+  ratio: CONTENT_RATIO,
+  media: 'text + branded image on every social send; motion in rotation; email is plain text',
+  links: { owner: 'promo may carry a URL', seller: 'no links ever — promo says "Link in bio."', value: 'native, no URL in the post text' },
+  autonomous: 'creation, scheduling and sending run on the cron under standing policy; a human is for replies and exceptions',
+};
+/** The link rule, applied where an identity's plan becomes posts. Company
+ *  (owner) promos may carry the actual URL; seller posts never carry a link
+ *  in text or in the queue item — the promo says "Link in bio." and the
+ *  seller's profile does the rest. Value posts are native: no URL either way. */
+export function applyContentLinkPolicy(beat, identityClass) {
+  const b = { ...(beat || {}) };
+  const cls = String(identityClass || '');
+  const strip = (t) => String(t || '')
+    .replace(/https?:\/\/[^\s]+/g, '')
+    .replace(/\s+—\s+\/[a-z0-9._/-]*/gi, '')
+    .replace(/\s{2,}/g, ' ').trim();
+  if (cls === 'seller') {
+    b.text = strip(b.text);
+    if (b.kind === 'promo' && !/link in bio/i.test(b.text)) b.text = (b.text + ' Link in bio.').trim();
+    b.link = '';
+  } else if (b.kind !== 'promo') {
+    b.text = strip(b.text);
+    b.link = '';
+  }
+  return b;
+}
 export const CONTENT_MEDIA_BASE = 'https://king-kunta-cpu.github.io/tapstall/brand/';
 export const CONTENT_PILLARS = [
   { id: 'exact-amount', label: 'Exact Amount', card: 'exact-amount', lines: [
@@ -4026,13 +4055,13 @@ export function meshCompanyBeats(identity, facts, opt) {
   };
   for (let i = 0; i < take; i += 1) {
     if (i === 0 && day % 3 === 0) {
-      out.push({ kind: 'value', pillar: 'shop-math', item_key: 'company:shop-math:' + Math.floor(day / 3), text: shopMath.text + ' — ' + String(o.origin || '') + shopMath.path, source: shopMath.path, rail: 'bluesky' });
+      out.push({ kind: 'value', pillar: 'shop-math', item_key: 'company:shop-math:' + Math.floor(day / 3), text: shopMath.text, source: shopMath.path, rail: 'bluesky' });
       continue;
     }
     const pillar = CONTENT_PILLARS[(day + i) % CONTENT_PILLARS.length];
     const line = pillar.lines[Math.floor(day / CONTENT_PILLARS.length) % pillar.lines.length];
     out.push({ kind: 'value', pillar: pillar.id, item_key: 'company:' + pillar.id + ':' + Math.floor(day / CONTENT_PILLARS.length),
-      text: line.text + ' — ' + String(o.origin || '') + line.path, source: line.path, rail: 'bluesky' });
+      text: line.text, source: line.path, rail: 'bluesky' });
   }
   if (Number(f.price_usd) > 0) {
     const promos = [
@@ -4072,9 +4101,10 @@ export function meshPressLedger(prev, results, opt) {
 export function meshIdentityPlan(identity, storePlan, facts, opt) {
   const o = opt || {}, e = identity || {};
   const fromStore = (storePlan && Array.isArray(storePlan.beats)) ? storePlan.beats.filter((b) => b && b.text) : [];
-  if (fromStore.length) return Object.assign({ source: 'store', identity: e.id || '' }, storePlan, { beats: fromStore });
+  if (fromStore.length) return Object.assign({ source: 'store', identity: e.id || '' }, storePlan,
+    { beats: fromStore.map((b) => applyContentLinkPolicy(b, e.class)) });
   const comp = meshCompanyBeats(e, facts, o);
-  return Object.assign({}, comp, { source: 'company', fallback_from: (storePlan && e.source && e.source.store) ? String(e.source.store) : '',
+  return Object.assign({}, comp, { beats: (comp.beats || []).map((b) => applyContentLinkPolicy(b, e.class)), source: 'company', fallback_from: (storePlan && e.source && e.source.store) ? String(e.source.store) : '',
     blocked: (comp.blocked || []).concat((storePlan && storePlan.blocked) || []) });
 }
 

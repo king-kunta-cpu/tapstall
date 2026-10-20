@@ -16,7 +16,7 @@ import urllib.error
 import urllib.request
 
 API = "https://api.cloudflare.com/client/v4"
-CRON = "15 6,12,18,0 * * *"
+CRONS = ["15 6,12,18,0 * * *", "5,25,45 * * * *"]
 COMPAT_DATE = os.environ.get("COMPAT_DATE", "2025-06-01")
 CT = {
     ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript",
@@ -118,7 +118,7 @@ def main():
         "compatibility_date": COMPAT_DATE,
         "compatibility_flags": ["nodejs_compat"],
         "main_module": "worker.js",
-        "triggers": {"crons": [CRON]},
+        "triggers": {"crons": CRONS},
         "bindings": bindings,
         "observability": {"enabled": False, "head_sampling_rate": 0.01},
     }

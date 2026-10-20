@@ -48,11 +48,12 @@ import {
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '1.5.0';
+const VERSION = '1.5.1';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
 const RL = { windowSec: 60, max: 8 };
+const PRESS_CRON = '5,25,45 * * * *';   // 20-minute press flush; the 6-hourly sweep is the other trigger
 
 /* ------------------------------------------------------ quota-first runtime
  * The cheapest KV operation is the one this isolate already knows the answer
@@ -202,6 +203,12 @@ export default {
     }
   },
   async scheduled(event, env, ctx) {
+    // Two clocks, two jobs: the 6-hourly sweep owns terms/dispatch/digest;
+    // the hourly tick exists only to flush due press items near their grid
+    // time (a direct rail sends when a tick sees it due, unlike Buffer,
+    // which schedules the draft itself). Press-only costs a handful of
+    // reads an hour and no store list at all.
+    if (event && event.cron === PRESS_CRON) { ctx.waitUntil(pressTick(env)); return; }
     ctx.waitUntil(runCron(env));
   },
 };
@@ -3255,8 +3262,9 @@ async function runPress(env, origin, opt) {
     }
     const idRails = Object.keys(e.rails || {});
     const items = (plan.beats || []).map((beat, i) => meshQueueItem(Object.assign({}, beat, { seq: i, to: idRails.length ? idRails : (beat.to || []) }), { landing: origin + '/fees', store: id, now: Date.now(),
-      channel_id: ((e.rails || {})[beat.rail] || {}).channel_id || press.channels[beat.rail] || '', board: press.board }));
+      channel_id: ((e.rails || {})[beat.rail] || {}).channel_id || press.channels[beat.rail] || '', board: press.board, no_links: e.class === 'seller' }));
     const prevQ = await env.ORDERS.get('press:queue:' + id, 'json').catch(() => null) || {};
+    if (Array.isArray(prevQ.items)) prevQ.items = prevQ.items.map((it) => applyContentLinkPolicy(it, e.class));
     const merged = meshQueueMerge(prevQ, items, { store: id, landing: origin + '/fees', cadence: e.cadence || MESH_QUEUE_DEFAULTS });
     const flush = await meshPressFlush(merged.items, press, { dry: dry, now: Date.now() });
     const sent = new Set(flush.results.filter((r) => r.status === 'sent').map((r) => r.id));
@@ -3334,6 +3342,7 @@ async function meshPublish(req, env) {
     channel_id: (pr.channels || {})[MESH_BUFFER_CHANNEL[beat.rail] || beat.rail] || '', board: pr.board,
     image: pr.image_base && beat.image ? String(pr.image_base) + String(beat.image) : '' }));
   const prevQ = await env.ORDERS.get('press:queue:' + handle, 'json').catch(() => null) || {};
+  if (Array.isArray(prevQ.items)) prevQ.items = prevQ.items.map((it) => applyContentLinkPolicy(it, 'operator'));
   const merged = meshQueueMerge(prevQ, items, { store: handle, landing: origin + '/s/' + handle, cadence: pr.cadence || MESH_QUEUE_DEFAULTS });
   const flush = await meshPressFlush(merged.items, pr, { dry: dry, now: Date.now() });
   const sent = new Set(flush.results.filter((r) => r.status === 'sent').map((r) => r.id));
@@ -5095,7 +5104,7 @@ async function pressTick(env) {
   if (!env.ORDERS) return { ran: 0, why: 'no ORDERS binding' };
   const reg = await pressRegistry(env);
   if (!Object.keys(reg).length) return { ran: 0, why: 'no press identities registered' };
-  const slot = new Date().toISOString().slice(0, 13);
+  const slot = new Date().toISOString().slice(0, 16);   // minute bucket: a retried tick in the same minute is one run; the next 20-min tick is a new flush
   const last = await env.ORDERS.get('press:last', 'json').catch(() => null);
   if (last && last.slot === slot) return { skipped: 'this hour already ran', slot };
   const ran = await runPress(env, env.PUBLIC_ORIGIN || PRESS_ORIGIN_FALLBACK, { dry: false });
