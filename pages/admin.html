@@ -474,7 +474,8 @@ details.box .in{padding:.5rem 0 .7rem}
 </div>
 </div></main>
 <script>
-var S = { handle: '', orders: [], store: {}, filter: 'all', pendTimer: null, loadRetry: 0, justIn: 0 };
+var S = { handle: '', orders: [], store: {}, filter: 'all', pendTimer: null, loadRetry: 0, justIn: 0, loadSeq: 0, loadTimer: null };
+var MDRAFT = null;   // the menu draft being edited; declared here because menuRows() reads it on the very first dashboard load, before any edit has assigned it — an undeclared read threw, load()'s catch resurrected the login card over the opened dashboard, and the merchant was asked to sign in over their own orders
 var q = function (s) { return document.querySelector(s); };
 var qa = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
 function esc(x) { return String(x == null ? '' : x).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
@@ -571,7 +572,10 @@ function signOut(e) { if (e) e.preventDefault(); api('/api/logout', {}).then(fun
 
 function load() {
   if (!S.handle) return;   // a boot with no store name has nothing to ask; the form is already on screen
+  if (S.loadTimer) { clearTimeout(S.loadTimer); S.loadTimer = null; }
+  var seq = ++S.loadSeq, opened = false;
   api('/api/admin?handle=' + encodeURIComponent(S.handle)).then(function (res) {
+    if (seq !== S.loadSeq) return;   // a newer load (or a second sign-in) superseded this one; its answer must not move the panels
     var j = res.j;
     if (!j || !j.ok) {
       var dead = res.s === 401 || (j && j.need_login);
@@ -583,7 +587,7 @@ function load() {
         // a momentary 500 at the edge is the same apology. A bounce for a real
         // expiry still follows — after the second look, with words attached.
         S.loadRetry++;
-        setTimeout(load, 1000);
+        S.loadTimer = setTimeout(function () { S.loadTimer = null; load(); }, 1000);
         return;
       }
       q('#login').classList.remove('hide'); q('#app').classList.add('hide');
@@ -599,6 +603,7 @@ function load() {
       }
       return;
     }
+    opened = true;
     q('#login').classList.add('hide'); q('#app').classList.remove('hide');
     S.justIn = 0; S.loadRetry = 0;
     S.store = j.store || {}; S.store.pending = j.pending || null;
@@ -630,7 +635,18 @@ function load() {
     // card is not lying about an empty menu before the first re-read
     api('/s/' + S.handle + '/feed.json').then(function (r) { S.feed = (r.j && r.j.products) || []; renderShop(); });
     renderFields(); renderPending(); renderOrders(); renderShop(); renderPlan(); renderShare(); renderAudit(); renderBooks();
-  }).catch(function () { q('#login').classList.remove('hide'); });
+  }).catch(function (e) {
+    if (seq !== S.loadSeq) return;
+    if (opened) {
+      // The dashboard already opened: a render error after that point must
+      // never resurrect the sign-in card over it (that is the two-panels-at-
+      // once screen this replaces). Keep the app up and say so in console.
+      q('#login').classList.add('hide'); q('#app').classList.remove('hide');
+      if (window.console && console.error) console.error('dashboard render after open failed', e);
+      return;
+    }
+    q('#login').classList.remove('hide'); q('#app').classList.add('hide');
+  });
 }
 function reFeed() {
   var b = q('#menuReload'); b.textContent = 'reading…';

@@ -523,8 +523,12 @@ test('0.9.12 the login form asks once — a second time has a reason, and the sh
   const shop = read('pages/admin.html');
   assert.match(shop, /if \(!S\.handle\) return;\s*\/\/ a boot with no store name/,
     'a boot with nothing typed in asks the server nothing, so the login card is never greeted by an error');
-  assert.match(shop, /\(authed \|\| S\.justIn\) && S\.loadRetry < 2[\s\S]{0,900}S\.loadRetry\+\+;\s*setTimeout\(load, 1000\);/,
+  assert.match(shop, /\(authed \|\| S\.justIn\) && S\.loadRetry < 2[\s\S]{0,900}S\.loadRetry\+\+;\s*S\.loadTimer = setTimeout\(/,
     'a failure while the dashboard is open — or on the first load after sign-in — buys quiet retries before anyone is bounced');
+  assert.match(shop, /var MDRAFT = null;/,
+    'the menu draft is declared before menuRows() reads it on the first load — an undeclared read threw, and load()\'s catch put the sign-in card back over the opened dashboard');
+  assert.match(shop, /if \(opened\) \{[\s\S]{0,240}q\('#login'\)\.classList\.add\('hide'\)/,
+    'and a render error after the dashboard has opened can never resurrect the sign-in card over it');
   assert.match(shop, /stopped working mid-look/, 'and if it does bounce, the page says what happened and what did not');
   assert.match(shop, /q\('#fK'\)\.value = S\.handle;\s*\/\/ the store name they typed, kept; only the PIN is ever theirs/,
     'the store name they typed is re-filled — they re-enter a PIN, not their identity');
