@@ -446,6 +446,11 @@ test('company content is composed with the same provenance rule as a shop: no nu
   assert.equal(b.beats.filter((x) => x.kind === 'promo').length, 1, 'one company facts, with the price in it');
   assert.deepEqual(core.CONTENT_RATIO, { value: 2, promo: 1 }, 'the 2:1 value-to-promo ratio is policy data, not a habit');
   assert.ok(b.beats.every((x) => x.image && x.media_kind && x.pillar), 'every company beat travels with branded media and names its pillar');
+  const cardUrl = core.CONTENT_MEDIA_BASE + 'cards/books.png';
+  const motionDay = Date.parse('2026-10-25T06:00:00Z');
+  assert.equal(core.contentMediaFor({ pillar: 'books', image: cardUrl }, { now: motionDay, seq: 0 }).media_kind, 'video', 'motion takes the first slot every third day');
+  assert.equal(core.contentMediaFor({ pillar: 'books', image: cardUrl }, { now: motionDay, seq: 1 }).media_kind, 'image', 'and only that slot: videos here and there, not a wall of them');
+  assert.equal(core.contentMediaFor({ pillar: 'books', image: cardUrl }, { now: motionDay + 864e5, seq: 0 }).media_kind, 'image', 'the next day is stills again');
   assert.equal(b.source, 'company', 'and the plan says what material it is, so a run can report it');
   assert.equal(b.beats[0].rails_from, 'identity', 'the rails come from the identity, not from a drafting surface');
   assert.match(JSON.stringify(b.beats), /60/, 'the price came from the facts handed in');

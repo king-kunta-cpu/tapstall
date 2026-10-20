@@ -3992,11 +3992,13 @@ export function contentMediaFor(beat, opt) {
   const cardName = (CONTENT_PILLARS.find((p) => p.id === pillar) || {}).card || (b.kind === 'promo' ? 'promo' : 'menu-craft');
   const card = base + 'cards/' + cardName + '.png';
   if (b.video) return { media_kind: 'video', image: String(b.image || card), video: String(b.video), alt: String(b.alt || b.text || 'Tapstall motion card').slice(0, 300), media_w: 960, media_h: 544 };
-  if (b.image) return { media_kind: 'image', image: String(b.image), video: '', alt: String(b.alt || b.item || b.text || 'Shop photo').slice(0, 300), media_w: 0, media_h: 0 };
-  let h = 2166136261;
-  const seed = String(b.item_key || b.text || '') + ':' + Math.floor((o.now || Date.now()) / DAY_MS);
-  for (let i = 0; i < seed.length; i++) { h ^= seed.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
-  if (h % 6 === 0) return { media_kind: 'video', image: card, video: base + 'motion/exact-amount.mp4', alt: 'Tapstall: an order total of $12.00 becomes an exact $12.43 to pay — the amount is the reference.', media_w: 960, media_h: 544 };
+  // Motion is a cadence, not a lottery: the first slot of every third day
+  // carries the loop (with its pillar card as poster), every other branded
+  // item is a still. A shop's own product photo is never replaced by it.
+  const day = Math.floor((o.now || Date.now()) / DAY_MS);
+  const isCard = String(b.image || '').includes('/brand/cards/');
+  if (Number(o.seq) === 0 && day % 3 === 0 && (isCard || !b.image)) return { media_kind: 'video', image: card, video: base + 'motion/exact-amount.mp4', alt: 'Tapstall: an order total of $12.00 becomes an exact $12.43 to pay — the amount is the reference.', media_w: 960, media_h: 544 };
+  if (b.image) return { media_kind: 'image', image: String(b.image), video: '', alt: String(b.alt || b.item || b.text || 'Shop photo').slice(0, 300), media_w: isCard ? 1200 : 0, media_h: isCard ? 630 : 0 };
   return { media_kind: 'image', image: card, video: '', alt: String(b.alt || b.text || 'Tapstall card').slice(0, 300), media_w: 1200, media_h: 630 };
 }
 
@@ -4070,7 +4072,7 @@ export function meshCompanyBeats(identity, facts, opt) {
       'Stop running the shop from chat scrollback: one link, your own payment numbers, a dashboard you own. $' + (Number(f.price_usd) || 0).toFixed(0) + ' a year after the free days.',
     ];
     out.push({ kind: 'promo', pillar: 'promo', item_key: 'company:price', rail: 'bluesky',
-      text: promos[day % promos.length] + ' ' + String(o.origin || '') + '/onboard', posted_by: 'shop facts' });
+      text: promos[day % promos.length] + ' ' + String(o.origin || '') + '/onboard', link: String(o.origin || '') + '/onboard', posted_by: 'shop facts' });
   }
   const rails = Object.keys((identity && identity.rails) || {});
   const beats = out.map((b) => ({ ...b, ...contentMediaFor(b, { now, media_base: o.media_base }), to: rails.length ? rails : ['bluesky'], rails_from: rails.length ? 'identity' : 'default', auto_send: rails.some((r) => (MESH_PUBLISH[r] || {}).via === 'buffer' || (MESH_PUBLISH[r] || {}).via === 'direct') }));
