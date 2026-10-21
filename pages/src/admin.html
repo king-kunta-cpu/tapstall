@@ -737,7 +737,7 @@ function designPanel() {
     : ['general', 'food', 'fashion', 'grocery', 'electronics', 'home', 'services'];
   var type = S.store.business_type || d.template || 'general';
   var tpl = templates[type] || {};
-  var layout = S.store.store_layout || d.layout || tpl.layout || 'grid';
+  var layout = S.store.store_layout || d.layout || d.suggested_layout || 'collection';
   var hero = S.store.hero_style || d.hero || tpl.hero || 'classic';
   var sort = S.store.sort_mode || d.sort || 'popular';
   var show = function (k, resolved) { return S.store[k] || (resolved === false ? 'hide' : 'show'); };
@@ -751,7 +751,7 @@ function designPanel() {
     + picHtml(S.store.cover_image || '', 'cover image link, or drop a file', 'data-which="cover"', 'data-k="cover_image" data-default=""') + '</div>'
     + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(10rem,1fr));gap:.5rem">'
     + '<div class="f"><label>' + esc(LABEL.accent_color) + '</label><span style="display:flex;gap:.4rem;align-items:center"><input data-k="accent_color" data-default="" value="' + esc(S.store.accent_color || '') + '" placeholder="' + esc(d.accent || '#0a6b33') + '" style="flex:1"><input type="color" id="accentPick" value="' + esc(d.accent || '#0a6b33') + '" style="width:3rem;padding:.15rem"></span><p class="hint">Blank keeps the template colour.</p></div>'
-    + '<div class="f"><label>' + esc(LABEL.store_layout) + '</label><select data-k="store_layout" data-default="' + esc(layout) + '">' + designOpts([['grid', 'Cards, two across'], ['list', 'Rows, one by one'], ['compact', 'Compact cards']], layout) + '</select></div>'
+    + '<div class="f"><label>' + esc(LABEL.store_layout) + '</label><select data-k="store_layout" data-default="' + esc(layout) + '">' + designOpts([['collection', 'Collection — one item on a stage, swipe for more'], ['grid', 'Cards, two across'], ['list', 'Rows, one by one'], ['compact', 'Compact cards']], layout) + '</select></div>'
     + '<div class="f"><label>' + esc(LABEL.hero_style) + '</label><select data-k="hero_style" data-default="' + esc(hero) + '">' + designOpts([['classic', 'Dark header'], ['cover', 'Cover picture header'], ['minimal', 'Light minimal header']], hero) + '</select></div>'
     + '<div class="f"><label>' + esc(LABEL.sort_mode) + '</label><select data-k="sort_mode" data-default="' + esc(sort) + '">' + designOpts([['popular', 'Popular first'], ['menu', 'My menu order'], ['price_low', 'Price: low to high'], ['price_high', 'Price: high to low'], ['name', 'Name A–Z']], sort) + '</select></div>'
     + '<div class="f"><label>' + esc(LABEL.cta_label) + '</label><input data-k="cta_label" data-default="" value="' + esc(S.store.cta_label || '') + '" placeholder="' + esc(d.cta || 'Add') + '" maxlength="18"></div>'
@@ -779,7 +779,7 @@ function wireDesign() {
     // If layout/hero were only template defaults, show the new template's
     // defaults as the defaults — so what the operator sees selected is what
     // buyers get, while an explicit choice they made earlier is left alone.
-    [['store_layout', t.layout], ['hero_style', t.hero]].forEach(function (pair) {
+    [['store_layout', d.suggested_layout || t.layout], ['hero_style', t.hero]].forEach(function (pair) {
       var el = q('[data-k="' + pair[0] + '"]');
       if (el && pair[1] && S.store[pair[0]] === undefined) { el.value = pair[1]; el.setAttribute('data-default', pair[1]); }
     });

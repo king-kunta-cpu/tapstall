@@ -242,7 +242,10 @@ test('storefront templates cover the common shop shapes and resolve safely', () 
     cover_image: '/i/other/cover1', welcome_message: 'Hot kotas from 10', about: 'By the rank',
   });
   assert.equal(food.accent, '#aabbcc', 'a short hex colour is expanded, never passed through as CSS text');
-  assert.equal(food.layout, 'grid', 'an unknown layout falls back to the food template, not to a broken class');
+  assert.equal(food.layout, 'collection', 'an unknown layout falls back to the default shelf, not to a broken class');
+  assert.equal(food.suggested_layout, 'grid', 'the template still offers its own suggestion to the dashboard');
+  assert.equal(C.storefrontDesign({ handle: 'g', business_type: 'food', store_layout: 'grid' }).layout, 'grid',
+    'a merchant who picked a layout keeps it — the new default never overrides a choice');
   assert.equal(food.cta, 'Order'); assert.equal(food.popular_label, 'Most ordered');
   assert.equal(food.search, false); assert.equal(food.whatsapp_button, true);
   assert.equal(food.cover_image, '', 'another store’s uploaded cover is not this store’s cover');

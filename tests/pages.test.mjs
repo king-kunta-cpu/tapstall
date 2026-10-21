@@ -1148,3 +1148,36 @@ test('0.9.1 the floor still has the true sentence, even though a deploy makes it
   assert.match(closedFloor, /closed its links/);
   assert.ok(!/id=pay/.test(closedFloor), 'a closed link renders no way to pay through it');
 });
+
+test('1.5.4 the collection shelf is the default storefront, and it is wired to the tested doors', () => {
+  const store = page('store');
+  // the shelf itself
+  for (const needle of ['class="coll" id="coll"', 'id="cstage"', 'id="cthumbs"', 'class="rail" id="collRail"',
+                        'id="collPrev"', 'id="collNext"', 'id="cadd"', 'id="cask"', 'id="cdName"', 'id="railNext"']) {
+    assert.ok(store.includes(needle), 'collection shelf is missing ' + needle);
+  }
+  // the swipe: pointer drag with a decision threshold, and a finger's own pan is not stolen
+  assert.match(store, /Math\.abs\(dx\) > 44/, 'a swipe has a threshold, not a hair trigger');
+  assert.match(store, /pointerType === 'touch'/, 'the row lets a finger scroll natively and only helps a mouse');
+  // the grid stays in the page for the other layouts, and a collection shop hides it
+  assert.match(store, /body\.layout-collection \.grid\{display:none!important\}/,
+    'a collection shop must not paint the old grid underneath the shelf');
+  assert.match(store, /\.hero\[hidden\][^{]*\{display:none\}/, 'a hidden hero must actually be hidden (display:flex beat [hidden])');
+  // every door into an order is the reviewed one
+  assert.match(store, /add\.onclick = function \(\) \{ if \(!soldOut\) openItem\(p\); \}/,
+    'the stage adds through openItem, so options, add-ons, VAT and the receipt are unchanged');
+  assert.match(store, /if \(p && p\.available !== false\) openItem\(p\)/, 'the row adds through the same door');
+  // the shelf holds its item by id, not by position, so a filter cannot make the page jump
+  assert.match(store, /var collCur = ''/, 'the chosen item is an id');
+  // the template's own words and the shop's own rail are used, never invented
+  assert.match(store, /D\.popular_label/, 'the popular badge still speaks the template language');
+  assert.match(store, /CFG\.rail_info/, 'the shelf says how this shop takes money');
+  // the chrome above the shelf gets out of the way on a collection page
+  assert.match(store, /body\.layout-collection header\{position:static\}/);
+  assert.match(store, /typeof CFG\.hours === 'string'/, 'a week object must never be printed as [object Object]');
+  // admin can choose the shelf
+  const admin = src('admin');
+  assert.match(admin, /\['collection', 'Collection/, 'the dashboard offers the collection layout');
+  assert.equal(CORE.STOREFRONT_LAYOUTS[0], 'collection', 'collection is the layout a shop that never chose gets');
+  assert.equal(CORE.STOREFRONT_DEFAULT_LAYOUT, 'collection');
+});

@@ -41,6 +41,7 @@ a.chip:active,a.chip:hover{background:#243342}
 .pfbar a{color:#0b4a86;font-weight:600}
 .pfbar .x{margin-left:auto;background:none;border:0;color:#65788b;font:inherit;padding:0 .15rem;cursor:pointer}
 .pfbar[hidden]{display:none}
+.hero[hidden],.about[hidden],.toolbar[hidden],.cats[hidden],.tools[hidden],.coll[hidden],.more[hidden],.notice[hidden],.welcome[hidden]{display:none}
 .notice{margin:.7rem 1rem 0;background:#fff7e6;border:1px solid #f0d9a8;color:#6b4d09;font-size:.8rem;padding:.55rem .7rem;border-radius:10px}
 .cats{display:flex;gap:.4rem;overflow-x:auto;padding:.75rem 1rem .3rem;scrollbar-width:none}
 .cats::-webkit-scrollbar{display:none}
@@ -180,6 +181,148 @@ body.tpl-food .hero{min-height:16rem}
 body.tpl-electronics .price{font-family:ui-monospace,Menlo,monospace}
 body.tpl-services.layout-list .card{border-left:5px solid var(--accent)}
 body.tpl-grocery.layout-compact .media{aspect-ratio:16/10}
+
+/* ---- v1.5.4 the collection shelf ------------------------------------------------------------
+ * The default storefront: one item on a stage with its words beside it, the rest of the shop
+ * in a swipeable row underneath. Presentation only — the sheet, cart, checkout and receipt
+ * below this layer are untouched. */
+.coll{margin:.85rem 0 0}
+.coll-head{display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;padding:.1rem 0 .7rem}
+.coll-head .kick{display:inline-block;background:#fff8ef;border:1px solid #ead3b7;color:#a8420f;border-radius:999px;padding:.22rem .6rem;
+  font-size:.68rem;font-weight:800;text-transform:uppercase;letter-spacing:.1em}
+.coll-head h2{font-size:clamp(1.2rem,3vw,1.6rem);letter-spacing:-.025em;margin:.35rem 0 0}
+.coll-nav{display:flex;gap:.5rem}
+.cnbtn{width:2.6rem;height:2.6rem;border-radius:999px;border:1px solid #e6d1b7;background:#fff9f1;color:#a8420f;font-size:1.2rem;font-weight:700;
+  display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform .15s,background .15s,color .15s}
+.cnbtn:hover{background:var(--accent);border-color:var(--accent);color:var(--on-accent);transform:scale(1.05)}
+.coll-grid{display:grid;grid-template-columns:minmax(0,400px) minmax(0,1fr);gap:1.4rem;align-items:start;background:#fffdf8;border:1px solid #efe0c8;
+  border-radius:22px;padding:1rem;box-shadow:0 18px 44px -30px rgba(90,55,20,.5)}
+.coll-side{min-width:0}
+.coll-hint{display:flex;align-items:center;justify-content:center;gap:.5rem;margin-bottom:.6rem;padding:.5rem .8rem;border:2px dashed #dcc09a;
+  border-radius:12px;background:linear-gradient(90deg,#fff4dd,#fffdf8 50%,#fff4dd);color:var(--accent-dark);font-size:.68rem;font-weight:800;
+  text-transform:uppercase;letter-spacing:.08em;transition:opacity .4s}
+.coll-hint.quiet{opacity:.45}
+.coll-hint .ar{color:#a8420f;animation:cnudge 1.3s infinite alternate}
+@keyframes cnudge{from{transform:translateX(-4px)}to{transform:translateX(4px)}}
+.cstage{position:relative;background:linear-gradient(180deg,#f7eddd,#f3e6d1);border:1px solid #e8d6bd;border-radius:16px;padding:.55rem;
+  touch-action:pan-y;user-select:none;cursor:grab;overflow:hidden}
+.cstage.dragging{cursor:grabbing}
+.cstage .cbadge{position:absolute;top:1rem;left:1rem;z-index:3;background:var(--accent-dark);color:#fff;padding:.24rem .55rem;border-radius:999px;
+  font-size:.62rem;font-weight:800;letter-spacing:.09em;text-transform:uppercase;box-shadow:0 8px 16px -8px rgba(0,0,0,.6)}
+.cstage .cbadge.hot{background:#a8420f}
+.cstage .cside{position:absolute;top:50%;transform:translateY(-50%);width:2.3rem;height:3.2rem;background:rgba(255,253,248,.96);border:1px solid #e6d1b7;
+  border-radius:12px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:1.15rem;color:#a8420f;z-index:3;
+  box-shadow:0 6px 16px -8px rgba(0,0,0,.5);transition:background .15s,color .15s}
+.cstage .cside:hover{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.cstage .cside.prev{left:-.5rem}.cstage .cside.next{right:-.5rem}
+.cframe{position:relative;aspect-ratio:3/4;border-radius:12px;overflow:hidden;background:#eadcc8}
+.cframe img{width:100%;height:100%;object-fit:cover;pointer-events:none;transition:opacity .22s ease,transform .3s ease}
+.cframe img.fade{opacity:.15}
+.cframe .cnoimg{width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:3.4rem;font-weight:800;
+  color:var(--accent-dark);opacity:.25;background:linear-gradient(135deg,var(--accent-soft),#efe3d1)}
+.cframe .cov{position:absolute;left:0;right:0;bottom:0;padding:.85rem .8rem .75rem;color:#fff;
+  background:linear-gradient(to top,rgba(16,10,4,.92),rgba(16,10,4,.45) 55%,transparent)}
+.cframe .cov .t{font-size:.6rem;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:#ffd79a}
+.cframe .cov h3{margin:.22rem 0 .18rem;font-size:1.12rem;line-height:1.14;color:#fff}
+.cframe .cov .p{margin:0;font-size:.85rem;font-weight:800;color:#ffe4bb;font-variant-numeric:tabular-nums}
+.cthumbs{display:grid;grid-template-columns:repeat(6,1fr);gap:.4rem;margin-top:.6rem}
+.cthumb{position:relative;border:2px solid transparent;border-radius:9px;overflow:hidden;cursor:pointer;background:#f2e7d7;aspect-ratio:3/4;padding:0;
+  transition:transform .12s,border-color .15s,box-shadow .15s}
+.cthumb img{width:100%;height:100%;object-fit:cover;opacity:.78;transition:opacity .15s}
+.cthumb:hover{transform:translateY(-2px)}.cthumb:hover img{opacity:1}
+.cthumb.on{border-color:#a8420f;box-shadow:0 0 0 3px rgba(168,66,15,.14)}.cthumb.on img{opacity:1}
+.cthumb:disabled{opacity:.35;cursor:default}
+.cmeta{display:grid;grid-template-columns:repeat(3,1fr);gap:.4rem;margin-top:.6rem}
+.cmeta div{background:#faf6ef;border:1px solid #ece0cd;border-radius:10px;text-align:center;padding:.45rem .3rem}
+.cmeta em{display:block;font-size:.56rem;font-weight:800;font-style:normal;color:#8b7860;text-transform:uppercase;letter-spacing:.08em;margin-bottom:.1rem}
+.cmeta strong{font-size:.76rem;color:#2f241a;font-variant-numeric:tabular-nums}
+.cmeta strong.ok{color:var(--accent-dark)}
+.cdetail{min-width:0}
+.cdetail .ccat{display:inline-block;padding:.22rem .55rem;border-radius:999px;background:rgba(168,66,15,.08);color:#a8420f;font-size:.64rem;
+  font-weight:800;text-transform:uppercase;letter-spacing:.08em;margin-bottom:.45rem}
+.cdetail h4{font-size:clamp(1.25rem,2.6vw,1.7rem);line-height:1.08;letter-spacing:-.02em;margin:0;color:var(--accent-dark);text-transform:none;font-weight:800}
+.cdetail .cprice{display:flex;align-items:baseline;gap:.4rem;margin:.35rem 0 .6rem;color:#a8420f;font-size:1.15rem;font-weight:800;font-variant-numeric:tabular-nums}
+.cdetail .cprice small{font-size:.72rem;font-weight:600;color:#8b7860;letter-spacing:0}
+.cdetail .cdesc{margin:0 0 .5rem;font-size:.9rem;line-height:1.5;color:#3f342a;font-weight:600}
+.cdetail .clong{margin:0 0 .8rem;padding-bottom:.7rem;border-bottom:1px solid #f1e5ce;font-size:.82rem;line-height:1.7;color:#6a5b4d;font-style:italic}
+.cdetail .cold{font-size:.8rem;color:#6a5b4d;margin:0 0 .8rem}
+.cdetail .cold b{color:var(--accent-dark)}
+.ccallouts{display:grid;gap:.5rem;margin-bottom:.85rem}
+.ccall{border-radius:12px;padding:.6rem .75rem;border:1px dashed;font-size:.8rem;line-height:1.55;color:#5c5044;background:#fbf7ef;border-color:#e5d3b8}
+.ccall b{display:block;font-size:.6rem;text-transform:uppercase;letter-spacing:.09em;margin-bottom:.15rem;color:#8a6209}
+.ccall.pair{background:#f4f0fb;border-color:#d6c6ee;color:#54406f}.ccall.pair b{color:#5b3d84}
+.ccta{display:grid;grid-template-columns:1fr auto;gap:.5rem}
+.cadd{border:0;border-radius:12px;padding:.85rem 1rem;background:linear-gradient(135deg,#c2501b,#8d2318);color:#fff;font-size:.9rem;font-weight:800;
+  letter-spacing:.02em;cursor:pointer;border-bottom:3px solid rgba(0,0,0,.16);transition:transform .1s,filter .15s}
+.cadd:hover{filter:brightness(1.06)}.cadd:active{transform:translateY(2px);border-bottom-width:1px}
+.cadd[disabled]{background:#c3ccd5;border-bottom-color:rgba(0,0,0,.1);cursor:default;filter:none}
+.cask{display:inline-flex;align-items:center;justify-content:center;gap:.35rem;border-radius:12px;padding:0 1rem;background:#fff;border:1px solid #d9c8ae;
+  color:var(--accent-dark);font-size:.78rem;font-weight:800;text-transform:uppercase;letter-spacing:.03em;text-decoration:none;white-space:nowrap;min-width:6.2rem}
+.cask:hover{background:#f4faf6;border-color:#bcd9c7}
+.cproof{display:flex;gap:.7rem;flex-wrap:wrap;margin-top:.55rem;font-size:.6rem;font-weight:800;color:#8b7860;text-transform:uppercase;letter-spacing:.05em}
+.cproof span{display:inline-flex;align-items:center;gap:.2rem}.cproof i{font-style:normal;color:var(--accent)}
+/* the row under the card */
+.more{margin:1rem 0 1.4rem}
+.more-head{display:flex;align-items:flex-end;justify-content:space-between;gap:.75rem;margin-bottom:.6rem}
+.more-head h3{font-size:clamp(1.05rem,2.4vw,1.3rem);letter-spacing:-.02em}
+.more-head p{margin:.15rem 0 0;color:#65788b;font-size:.78rem}
+.more-nav{display:flex;gap:.4rem}
+.sbtn{width:2.1rem;height:2.1rem;border-radius:999px;border:1px solid #e6d1b7;background:#fff9f1;color:#a8420f;font-size:1rem;font-weight:700;
+  display:flex;align-items:center;justify-content:center;cursor:pointer}
+.sbtn:hover{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.sbtn[disabled]{opacity:.35;cursor:default;background:#fff9f1;border-color:#e6d1b7;color:#a8420f}
+.rail{display:flex;gap:.6rem;overflow-x:auto;scroll-snap-type:x mandatory;padding:.1rem 3.5rem .5rem .1rem;cursor:grab;scrollbar-width:none;
+  touch-action:pan-x;-webkit-overflow-scrolling:touch}
+.rail::-webkit-scrollbar{display:none}
+.rail.drag{cursor:grabbing;scroll-snap-type:none}
+.rcard{flex:0 0 clamp(9rem,22vw,12rem);scroll-snap-align:start;background:#fffdf8;border:1px solid #efe0c8;border-radius:14px;overflow:hidden;
+  box-shadow:0 8px 20px -14px rgba(90,55,20,.55);text-align:left;padding:0;cursor:pointer;transition:transform .15s,box-shadow .15s,border-color .15s}
+.rcard:hover{transform:translateY(-3px);border-color:#dcc7a8}
+.rcard.on{border-color:#a8420f;box-shadow:0 0 0 2px rgba(168,66,15,.16)}
+.rcard .rm{position:relative}
+.rcard img{width:100%;aspect-ratio:4/3;object-fit:cover;background:#efe3d1}
+.rcard .rno{width:100%;aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;font-size:1.6rem;font-weight:800;color:var(--accent-dark);opacity:.3;
+  background:linear-gradient(135deg,var(--accent-soft),#efe3d1)}
+.rcard .rb{padding:.45rem .55rem .55rem}
+.rcard .rc{font-size:.55rem;font-weight:800;color:#8b7860;text-transform:uppercase;letter-spacing:.09em}
+.rcard .rn{font-size:.76rem;font-weight:700;color:var(--accent-dark);line-height:1.25;margin:.12rem 0 .3rem;min-height:2.4em}
+.rcard .rr{display:flex;align-items:center;justify-content:space-between;gap:.3rem}
+.rcard .rp{font-size:.76rem;font-weight:800;color:#a8420f;font-variant-numeric:tabular-nums}
+.rcard .rplus{display:inline-flex;align-items:center;justify-content:center;width:1.6rem;height:1.6rem;border-radius:999px;background:var(--accent);
+  color:var(--on-accent);font-size:.9rem;font-weight:800;border:0;cursor:pointer}
+.rcard .rplus[disabled]{background:#c3ccd5;cursor:default}
+@media (max-width:900px){.coll-grid{grid-template-columns:1fr;gap:1rem;padding:.75rem}
+  .cframe{aspect-ratio:4/5}.cstage .cside{display:none}}
+@media (max-width:520px){.coll-grid{border-radius:16px}.cthumbs{grid-template-columns:repeat(6,1fr);gap:.3rem}
+  .ccta{grid-template-columns:1fr}.cask{min-height:2.8rem}.cmeta strong{font-size:.72rem}}
+body.layout-collection .grid{display:none!important}
+/* a collection page has its own navigation, so the chrome above it gets out of the way:
+   the brand bar stops pinning itself, the browse heading collapses into the filter row,
+   and the hero tightens to a strip so the first thing a buyer sees is the shelf. */
+body.layout-collection header{position:static}
+body.layout-collection header h1,body.layout-collection header .tag{display:none}
+body.layout-collection header .logo,body.layout-collection header .avatarFallback{width:42px;height:42px;border-radius:13px}
+body.layout-collection .service-strip{display:none}
+body.layout-collection .welcome{margin:.6rem 0 0}
+body.layout-collection .hero-actions .hero-cta{display:none}
+body.layout-collection .hero{min-height:0;border-radius:0 0 20px 20px}
+body.layout-collection .hero .kicker{display:none}
+body.layout-collection .hero h1{margin:0}
+body.layout-collection .hero-in{padding:1.15rem clamp(1rem,3vw,1.5rem)}
+body.layout-collection .hero-title{font-size:clamp(1.65rem,4vw,2.7rem);letter-spacing:-.03em}
+body.layout-collection .hero-in p{font-size:.88rem}
+body.layout-collection .toolbar{position:static;background:transparent;border:0;box-shadow:none;padding:0;margin:.55rem 0 0;backdrop-filter:none}
+body.layout-collection .toolbar .section-head{display:none}
+body.layout-collection .toolbar .tools{padding:0}
+body.layout-collection .toolbar .tools input{background:#fffdf8;border-color:#efe0c8}
+body.layout-collection .toolbar .cats{padding:.5rem 0 .1rem}
+body.layout-collection .toolbar .cat{background:#fffdf8;border-color:#efe0c8;color:#5f4d3a}
+body.layout-collection .toolbar .cat.on{background:var(--accent-dark);border-color:var(--accent-dark);color:#fff;box-shadow:0 8px 18px -14px rgba(16,24,32,.55)}
+body.layout-collection .bar{background:rgba(20,14,7,.96);border-color:transparent;color:#fff}
+body.layout-collection .bar .t{color:#ffd899}
+body.layout-collection .bar .n{color:#cbbba6}
+body.layout-collection .bar .cta{background:#ffd899;color:#3a2606}
+@media (min-width:700px){body.layout-collection .bar{background:rgba(20,14,7,.97)}}
 button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 @media (prefers-reduced-motion:reduce){.card{transition:none}.skel{animation:none}}
 </style>
@@ -225,6 +368,70 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
     <div class="cats" id="cats" hidden></div>
   </section>
   <div class="grid" id="grid" aria-live="polite"><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>
+
+  <!-- v1.5.4: the collection shelf. One item on a stage, its words beside it, the rest of the
+       shop in a swipeable row underneath. The grid below stays in the page for the other
+       layouts; a collection shop hides it. -->
+  <section class="coll" id="coll" hidden>
+    <div class="coll-head">
+      <div>
+        <span class="kick">Item <b id="collNow">1</b> of <b id="collAll">1</b></span>
+        <h2 id="collTitle">Browse the collection</h2>
+      </div>
+      <div class="coll-nav">
+        <button class="cnbtn" id="collPrev" aria-label="Previous item">‹</button>
+        <button class="cnbtn" id="collNext" aria-label="Next item">›</button>
+      </div>
+    </div>
+    <div class="coll-grid">
+      <div class="coll-side">
+        <div class="coll-hint" id="collHint"><span class="ar">⇠</span> Swipe or drag for more <span class="ar">⇢</span></div>
+        <div class="cstage" id="cstage">
+          <div class="cbadge" id="cbadge">Swipe or drag</div>
+          <div class="cside prev" id="csidePrev" role="button" tabindex="-1" aria-label="Previous">‹</div>
+          <div class="cside next" id="csideNext" role="button" tabindex="-1" aria-label="Next">›</div>
+          <div class="cframe" id="cframe">
+            <img id="cpic" alt="" src="" draggable="false">
+            <div class="cov"><div class="t" id="covCat"></div><h3 id="covName"></h3><p class="p" id="covPrice"></p></div>
+          </div>
+        </div>
+        <div class="cthumbs" id="cthumbs" role="tablist" aria-label="More items"></div>
+        <div class="cmeta">
+          <div><em>In stock</em><strong class="ok" id="cmStock">Yes</strong></div>
+          <div><em id="cmTwoLabel">Ready</em><strong id="cmTwo">—</strong></div>
+          <div><em id="cmThreeLabel">In your order</em><strong id="cmThree">0</strong></div>
+        </div>
+      </div>
+      <div class="cdetail" id="cdetail" aria-live="polite">
+        <span class="ccat" id="cdCat"></span>
+        <h4 id="cdName"></h4>
+        <div class="cprice"><span id="cdPrice"></span><small id="cdUnit"></small></div>
+        <p class="cdesc" id="cdShort"></p>
+        <p class="clong" id="cdLong"></p>
+        <p class="cold" id="cdOpts"></p>
+        <div class="ccallouts" id="cdCalls"></div>
+        <div class="ccta">
+          <button class="cadd" id="cadd"></button>
+          <a class="cask" id="cask" href="#" hidden><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.5 8.5 0 0 1-12.3 7.6L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5z"/></svg> Ask</a>
+        </div>
+        <div class="cproof"><span><i>✓</i> No card needed</span><span><i>✓</i> Exact amount to pay</span><span><i>✓</i> Pay from your own wallet</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="more" id="collMore" hidden aria-label="More from this shop">
+    <div class="more-head">
+      <div>
+        <h3 id="collMoreTitle">More from this shop</h3>
+        <p id="collMoreSub">Swipe the row — tap an item to put it on the stage above.</p>
+      </div>
+      <div class="more-nav">
+        <button class="sbtn" id="railPrev" aria-label="Scroll left">‹</button>
+        <button class="sbtn" id="railNext" aria-label="Scroll right">›</button>
+      </div>
+    </div>
+    <div class="rail" id="collRail"></div>
+  </section>
   <div class="empty" id="empty" hidden></div>
   <section class="about" id="about" hidden><h2 id="aboutTitle">About this shop</h2><p id="aboutText"></p></section>
 
@@ -348,8 +555,11 @@ var TERM = /*__TAPSTALL_TERM__*/null;
   // the store's week, so a phone in another zone still reads the truth.
   if (CFG.hours || (CFG.open && CFG.open.known)) {
     var ch = $('chours'), o = CFG.open || {};
+    // `hours` can be a week object, and an object printed into a chip is "[object Object]"; the
+    // server's own `open.label` already says the useful sentence ("Open until 20:00").
+    var hoursText = typeof CFG.hours === 'string' ? CFG.hours : '';
     ch.textContent = (o.known && !o.open) ? '\u25cf ' + (o.label || 'Closed')
-      : (o.label ? '\u25cf ' + o.label + ' \u00b7 ' : '') + (CFG.hours || '');
+      : (o.label ? '\u25cf ' + o.label + (hoursText ? ' \u00b7 ' + hoursText : '') : (hoursText ? '\u25cf ' + hoursText : '\u25cf Open'));
     ch.style.color = (o.known && !o.open) ? '#a2141f' : '#0a6b33';
     ch.hidden = false;
   }
@@ -464,9 +674,246 @@ var TERM = /*__TAPSTALL_TERM__*/null;
     Array.prototype.forEach.call($('grid').querySelectorAll('.add'), function (b) {
       b.onclick = function () { openItem(PRODUCTS[Number(b.getAttribute('data-i'))]); };
     });
+    renderCollection(list);
     updateBar();
   }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
+
+  /* ---- v1.5.4 the collection shelf ------------------------------------------------------------
+   * One item on the stage with its own words beside it, the rest of the shop in a row below.
+   * The chosen item is held by id, not by position, so a search or a category tap never makes
+   * the page jump to something the buyer did not ask for. Every door into an order still goes
+   * through openItem(), so options, add-ons, VAT preview and the receipt are the ones that
+   * were already tested — this layer decides which item is on show, never what it costs. */
+  var collCur = '';
+  var collList = [];
+  function collItemOf(id) {
+    for (var i = 0; i < collList.length; i++) if (collList[i].id === id) return collList[i];
+    return null;
+  }
+  function collIdx() {
+    for (var i = 0; i < collList.length; i++) if (collList[i].id === collCur) return i;
+    return 0;
+  }
+  function renderCollection(list) {
+    collList = list || [];
+    var on = D.layout === 'collection' && collList.length > 0;
+    $('coll').hidden = !on;
+    $('collMore').hidden = !on;
+    document.body.classList.toggle('layout-collection', !!on);
+    if (!on) return;
+    // a collection page opens on the shelf, not on a second banner: the shop's own banner is put
+    // away (the identity bar above already carries the name, hours and links) and the welcome
+    // message it was showing moves into the note above the shelf, so nothing is lost by hiding it
+    var heroEl = $('hero');
+    if (heroEl && !heroEl.hidden) heroEl.hidden = true;
+    if (D.welcome_message && $('welcome') && $('welcome').hidden && (!heroEl || heroEl.hidden)) {
+      $('welcome').textContent = D.welcome_message; $('welcome').hidden = false;
+    }
+    if (!collItemOf(collCur)) collCur = collList[0].id;
+    paintColl();
+    renderCollRail();
+    railState();
+  }
+  function paintColl() {
+    var i = collIdx(), p = collList[i] || {};
+    if (!p.id) return;
+    var soldOut = p.available === false;
+    var pic = $('cpic');
+    pic.classList.add('fade');
+    var img = p.img || '';
+    if (img) {
+      pic.hidden = false;
+      if (pic.getAttribute('src') !== img) setTimeout(function () { pic.src = img; }, 80);
+    } else {
+      pic.hidden = true;
+    }
+    pic.alt = p.name ? (p.name + (p.desc ? ' — ' + p.desc : '')) : '';
+    pic.onload = function () { pic.classList.remove('fade'); };
+    setTimeout(function () { pic.classList.remove('fade'); }, 260);
+
+    $('cbadge').textContent = soldOut ? 'Sold out' : (p.popular ? D.popular_label : 'In the shop today');
+    $('cbadge').className = 'cbadge' + (p.popular && !soldOut ? ' hot' : '');
+    $('covCat').textContent = p.cat || (CFG.shop_name || 'Item');
+    $('covName').textContent = p.name || '';
+    $('covPrice').textContent = money(p.price);
+
+    $('collNow').textContent = String(i + 1);
+    $('collAll').textContent = String(collList.length);
+    $('cdCat').textContent = p.cat || 'Item';
+    $('cdName').textContent = p.name || '';
+    $('cdPrice').textContent = money(p.price);
+    $('cdUnit').textContent = p.cat ? '· ' + p.cat : '';
+    $('cdShort').textContent = (D.descriptions && p.desc) ? p.desc : '';
+    $('cdShort').hidden = !(D.descriptions && p.desc);
+    $('cdLong').hidden = true;
+    var optBits = [];
+    (p.opts || []).forEach(function (o) { optBits.push(o.name); });
+    (p.addons || []).forEach(function (a) { optBits.push(a.name + ' +' + money(a.price)); });
+    $('cdOpts').innerHTML = optBits.length ? '<b>Choices:</b> ' + esc(optBits.join(' · ')) : '';
+    $('cdOpts').hidden = !optBits.length;
+
+    var calls = [];
+    if (soldOut) calls.push('<div class="ccall"><b>Sold out today</b>Ask us when the next batch lands — we will not take an order we cannot fill.</div>');
+    else if (p.popular) calls.push('<div class="ccall"><b>' + esc(D.popular_label) + '</b>This one leaves the kitchen most often. If you are ordering for a group, it is the safe pick.</div>');
+    if (p.cat) calls.push('<div class="ccall pair"><b>More ' + esc(p.cat) + '</b>The rest of the ' + esc(p.cat) + ' shelf is in the row below — swipe it, or tap an item to put it up here.</div>');
+    $('cdCalls').innerHTML = calls.join('');
+
+    var add = $('cadd');
+    add.disabled = !!soldOut;
+    add.textContent = soldOut ? 'Sold out' : ((p.opts && p.opts.length) || (p.addons && p.addons.length) ? 'Choose options · ' + money(p.price) : 'Add to order · ' + money(p.price));
+    add.onclick = function () { if (!soldOut) openItem(p); };
+
+    var wa = $('cask');
+    if (CFG.whatsapp) {
+      wa.hidden = false;
+      wa.href = waLink('Hi ' + (CFG.shop_name || '') + ', I have a question about ' + (p.name || 'this item') + '.');
+    } else { wa.hidden = true; }
+
+    var inCart = cart.reduce(function (a, c) { return a + ((c.id === p.id) ? c.qty : 0); }, 0);
+    $('cmStock').textContent = soldOut ? 'Sold out' : 'Yes';
+    $('cmStock').className = soldOut ? '' : 'ok';
+    $('cmTwoLabel').textContent = 'Pay with';
+    $('cmTwo').textContent = (CFG.rail_info && CFG.rail_info.label) ? CFG.rail_info.label : String(CFG.rail || 'cash').replace(/_/g, ' ');
+    $('cmThree').textContent = String(inCart);
+
+    var t = $('cthumbs').children;
+    for (var k = 0; k < t.length; k++) {
+      t[k].classList.toggle('on', t[k].getAttribute('data-id') === p.id);
+      t[k].setAttribute('aria-selected', String(t[k].getAttribute('data-id') === p.id));
+    }
+    var r = $('collRail').children;
+    for (var m = 0; m < r.length; m++) r[m].classList.toggle('on', r[m].getAttribute('data-id') === p.id);
+  }
+  function waLink(text) {
+    var num = String(CFG.whatsapp || '').replace(/[^0-9]/g, '');
+    return 'https://wa.me/' + num + '?text=' + encodeURIComponent(text);
+  }
+  function thumbHtml(p, i) {
+    var img = p.img ? '<img loading="lazy" decoding="async" src="' + esc(p.img) + '" alt="">' : '';
+    return '<button class="cthumb" role="tab" data-id="' + esc(p.id) + '" aria-selected="false" aria-label="' + esc(p.name) + '">' + img + '</button>';
+  }
+  function renderCollThumbs() {
+    // the strip under the stage holds the first six items of what is on screen, exactly as the
+    // collection reads: a small map of the shelf, not another shop
+    $('cthumbs').innerHTML = collList.slice(0, 6).map(thumbHtml).join('');
+    Array.prototype.forEach.call($('cthumbs').children, function (b) {
+      b.onclick = function () { collCur = b.getAttribute('data-id'); paintColl(); };
+    });
+  }
+  function renderCollRail() {
+    renderCollThumbs();
+    $('collRail').innerHTML = collList.map(function (p, i) {
+      var media = p.img ? '<img loading="lazy" decoding="async" src="' + esc(p.img) + '" alt="">'
+        : '<div class="rno">' + esc(String(p.name || '?').trim().charAt(0).toUpperCase()) + '</div>';
+      var soldOut = p.available === false;
+      return '<button class="rcard" data-id="' + esc(p.id) + '" aria-label="' + esc(p.name) + '">'
+        + '<div class="rm">' + media + '</div>'
+        + '<div class="rb"><div class="rc">' + esc(p.cat || '') + '</div><div class="rn">' + esc(p.name) + '</div>'
+        + '<div class="rr"><span class="rp">' + money(p.price) + '</span>'
+        + '<span class="rplus" data-add="' + esc(p.id) + '" role="button" aria-label="Add ' + esc(p.name) + '"' + (soldOut ? '' : '') + '>+</span></div></div></button>';
+    }).join('');
+    Array.prototype.forEach.call($('collRail').children, function (b) {
+      b.onclick = function (e) {
+        var addId = e.target && e.target.getAttribute && e.target.getAttribute('data-add');
+        if (addId) {
+          var p = collItemOf(addId);
+          if (p && p.available !== false) openItem(p);
+          return;
+        }
+        collCur = b.getAttribute('data-id');
+        paintColl();
+        $('coll').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      };
+    });
+  }
+  function collStep(dir) {
+    if (!collList.length) return;
+    var i = collIdx() + dir;
+    if (i < 0) i = collList.length - 1;
+    if (i >= collList.length) i = 0;
+    collCur = collList[i].id;
+    paintColl();
+    $('collHint').classList.add('quiet');
+  }
+  $('collPrev').onclick = function () { collStep(-1); };
+  $('collNext').onclick = function () { collStep(1); };
+  $('csidePrev').onclick = function () { collStep(-1); };
+  $('csideNext').onclick = function () { collStep(1); };
+  document.addEventListener('keydown', function (e) {
+    if (D.layout !== 'collection' || $('coll').hidden) return;
+    if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+    if (e.key === 'ArrowLeft') collStep(-1);
+    else if (e.key === 'ArrowRight') collStep(1);
+  });
+  /* swipe: a pointer drag with a little follow, then a decision at 44px. A finger's native
+     pan still wins vertically, because the stage only claims horizontal movement. */
+  (function () {
+    var stage = $('cstage'), pic = $('cpic'), down = false, x0 = 0, dx = 0, pid = null, claimed = false;
+    if (!stage) return;
+    stage.addEventListener('pointerdown', function (e) {
+      if (e.target.classList.contains('cside')) return;
+      down = true; x0 = e.clientX; dx = 0; claimed = false; pid = e.pointerId;
+    });
+    stage.addEventListener('pointermove', function (e) {
+      if (!down || e.pointerId !== pid) return;
+      dx = e.clientX - x0;
+      if (!claimed && Math.abs(dx) > 8) {
+        claimed = true; stage.classList.add('dragging'); pic.style.transition = 'none';
+        try { stage.setPointerCapture(e.pointerId); } catch (err) {}
+      }
+      if (!claimed) return;
+      var damp = Math.max(-90, Math.min(90, dx * 0.5));
+      pic.style.transform = 'translateX(' + damp + 'px) rotate(' + (damp / 90) + 'deg)';
+    });
+    function up() {
+      if (!down) return;
+      down = false; stage.classList.remove('dragging');
+      pic.style.transition = 'transform .3s cubic-bezier(.22,.8,.3,1), opacity .22s ease';
+      pic.style.transform = 'translateX(0) rotate(0)';
+      if (claimed && Math.abs(dx) > 44) collStep(dx < 0 ? 1 : -1);
+      dx = 0; claimed = false;
+    }
+    stage.addEventListener('pointerup', up);
+    stage.addEventListener('pointercancel', up);
+    stage.addEventListener('pointerleave', function () { if (down) up(); });
+  })();
+  /* the row: native on touch, translated for a mouse, with arrows for both */
+  (function () {
+    var rail = $('collRail');
+    function step(dir) {
+      var card = rail.children[0];
+      var w = card ? card.getBoundingClientRect().width + 10 : 160;
+      rail.scrollBy({ left: dir * w * 2, behavior: 'smooth' });
+    }
+    $('railPrev').onclick = function () { step(-1); };
+    $('railNext').onclick = function () { step(1); };
+    rail.addEventListener('scroll', railState, { passive: true });
+    var rd = false, rx = 0, rl = 0, captured = false;
+    rail.addEventListener('pointerdown', function (e) {
+      if (e.pointerType === 'touch') return;
+      rd = true; rx = e.clientX; rl = rail.scrollLeft; captured = false;
+    });
+    rail.addEventListener('pointermove', function (e) {
+      if (!rd) return;
+      var d = e.clientX - rx;
+      if (!captured && Math.abs(d) > 6) {
+        captured = true; rail.classList.add('drag');
+        try { rail.setPointerCapture(e.pointerId); } catch (err) {}
+      }
+      if (captured) rail.scrollLeft = rl - d;
+    });
+    function railUp() { rd = false; captured = false; rail.classList.remove('drag'); }
+    rail.addEventListener('pointerup', railUp);
+    rail.addEventListener('pointercancel', railUp);
+  })();
+  function railState() {
+    var rail = $('collRail');
+    if (!rail) return;
+    var max = rail.scrollWidth - rail.clientWidth - 2;
+    $('railPrev').disabled = rail.scrollLeft <= 2;
+    $('railNext').disabled = rail.scrollLeft >= max;
+  }
 
   /* ---- item sheet */
   var draft = null;
@@ -538,6 +985,13 @@ var TERM = /*__TAPSTALL_TERM__*/null;
   }
   function updateBar() {
     var on = cart.length > 0;
+    if (D.layout === 'collection' && collCur && !$('coll').hidden) {
+      var p = collItemOf(collCur);
+      if (p) {
+        var n = cart.reduce(function (a, c) { return a + ((c.id === p.id) ? c.qty : 0); }, 0);
+        $('cmThree').textContent = String(n);
+      }
+    }
     $('bar').classList.toggle('on', on);
     if (on) {
       $('barTotal').textContent = money(Math.round(cartTotal() * 100) / 100);

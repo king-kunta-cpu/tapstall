@@ -1283,7 +1283,11 @@ export const STOREFRONT_TEMPLATES = {
     blurb: 'List layout and a Book button for salons, repairs and services.',
   },
 };
-export const STOREFRONT_LAYOUTS = ['grid', 'list', 'compact'];
+/* v1.5.4: `collection` is the default shelf — one item on a stage, its words beside it, the
+ * rest of the shop in a swipeable row underneath. The three older layouts stay selectable
+ * (a merchant who chose one keeps it), but a shop that never chose now opens as a collection. */
+export const STOREFRONT_LAYOUTS = ['collection', 'grid', 'list', 'compact'];
+export const STOREFRONT_DEFAULT_LAYOUT = 'collection';
 export const STOREFRONT_HEROES = ['classic', 'cover', 'minimal'];
 export const STOREFRONT_SORTS = ['popular', 'menu', 'price_low', 'price_high', 'name'];
 
@@ -1330,7 +1334,8 @@ export function storefrontDesign(st) {
     accent_dark: mixHex(accent, '#07111f', 0.58),
     accent_soft: mixHex(accent, '#ffffff', 0.88),
     on_accent: onHex(accent),
-    layout: designEnum(s.store_layout, STOREFRONT_LAYOUTS, t.layout),
+    layout: designEnum(s.store_layout, STOREFRONT_LAYOUTS, STOREFRONT_DEFAULT_LAYOUT),
+    suggested_layout: t.layout,   // the template's own idea, offered in the dashboard, never imposed
     hero: designEnum(s.hero_style, STOREFRONT_HEROES, t.hero),
     sort: designEnum(s.sort_mode, STOREFRONT_SORTS, 'popular'),
     cta: String(s.cta_label || '').trim().slice(0, 18) || t.cta,

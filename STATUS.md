@@ -1,5 +1,38 @@
 # Tapstall — status
 
+## v1.5.4 (2026-10-20): the collection shelf is the storefront
+
+The owner rejected the v1.4 shelf as ugly and pointed at a reference layout he owns: one
+item on a wide stage, its description beside it, a strip of thumbnails, the rest of the
+collection in a swipeable row underneath, arrows at both ends. That is now the default
+storefront.
+
+- **`collection` layout**, resolved by `storefrontDesign` as `STOREFRONT_DEFAULT_LAYOUT`.
+  A shop that never picked a layout gets it; a shop that picked `grid`, `list` or
+  `compact` keeps its choice (pinned by test). Templates keep their own
+  `suggested_layout`, which the dashboard offers without imposing.
+- **The shelf**: stage with the item on it (3:4 photo, category, name, price over the
+  image), six thumbnails, three facts (in stock / pay with / in your order), and the
+  detail panel beside it — category, name, price, description, choices, one honest
+  callout and the add button. Arrows, arrow keys, and a pointer swipe with a 44px
+  decision threshold all move it; a finger's own vertical pan is never stolen.
+- **The row underneath** ("More from this shop"): every item in the filtered shop,
+  native horizontal scroll on touch, translated drag for a mouse, arrow buttons for
+  both, and a `+` that adds straight to the order.
+- **Wired to the reviewed doors.** Everything still enters an order through
+  `openItem()`, so options, add-ons, the VAT preview, the trolley and the receipt are
+  the code that was already tested. The shelf decides which item is on show, never
+  what it costs. Sold-out items say so and cannot be added.
+- **Chrome gets out of the way** on a collection page: the shop banner folds to a
+  strip (the identity bar already carries the name and links), the duplicate proof
+  row is hidden, the browse heading collapses into the filter row, the brand bar stops
+  pinning itself. Fixed in passing: a hidden hero rendered anyway (`display:flex`
+  outranked `[hidden]`), and the hours chip printed a week object as `[object Object]`.
+
+Built and checked in a browser before shipping — desktop and 390px mobile, no console
+errors, no horizontal overflow, the cart, the sheet, the category chips and the
+sold-out path all exercised. 364 tests.
+
 ## v1.5.3 (2026-10-20): a post the platform accepted is never posted twice
 
 Two live duplicates appeared on the house Bluesky feed 40 minutes apart — the
