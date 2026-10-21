@@ -732,7 +732,7 @@ var TERM = /*__TAPSTALL_TERM__*/null;
   }
   if (CFG.location) { $('cloc').textContent = CFG.location; $('cloc').hidden = false; $('clocSep').hidden = false; }
   $('curnow').textContent = 'Prices in ' + CUR + (ZIG ? ' + ZiG' : '');
-  $('powered').innerHTML = 'Runs on <a href="/onboard">Tapstall</a> — free store for your WhatsApp business, no monthly bill.';
+  $('powered').innerHTML = 'Runs on <a href="/onboard">Tapstall</a> — a shop link built in Harare for the shops the big platforms skip. Free for 60 days, no monthly bill to start.';
   if (D.hero === 'cover') {
     var hero = $('hero');
     hero.hidden = false;
@@ -1410,6 +1410,7 @@ var TERM = /*__TAPSTALL_TERM__*/null;
     var h = '<div class="done"><div class="tick">✓</div>' +
       '<b>Order ' + esc(o.order.code) + ' received</b>' +
       '<div class="badge">Stored with the shop — no screenshot needed</div>' +
+      '<p class="hint" style="color:#cfe0d6;margin:.45rem 0 0">You paid from your own wallet, and the exact amount is already on this order — so the shop can find your payment itself. Nothing to screenshot, nothing to argue about.</p>' +
       '<div class="paybox">' +
       '<div style="font-size:.78rem;color:#9fb2c4">Pay exactly</div>' +
       '<div class="big">' + (pay.amount || pr.pay_now) + ' ' + esc(pay.crypto ? (pay.crypto.asset || 'USDT') : CUR) + '</div>' +

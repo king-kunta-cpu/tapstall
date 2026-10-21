@@ -1,38 +1,96 @@
 <!doctype html><html lang=en><head><meta charset=utf-8>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Tapstall — a WhatsApp store your customers can actually pay</title>
+<title>Tapstall — a shop link for the markets the big platforms skip</title>
 <meta property="og:image" content="https://king-kunta-cpu.github.io/tapstall/brand/og-banner.png"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:image" content="https://king-kunta-cpu.github.io/tapstall/brand/og-banner.png">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20128%20128%22%20aria-hidden%3D%22true%22%3E%3Crect%20x%3D%224%22%20y%3D%224%22%20width%3D%22120%22%20height%3D%22120%22%20rx%3D%2228%22%20fill%3D%22%230B5B34%22%2F%3E%3Cpath%20d%3D%22M24%2052%20L40%2028%20H88%20L104%2052%20Z%22%20fill%3D%22%23FFB01E%22%2F%3E%3Ccircle%20cx%3D%2229%22%20cy%3D%2252%22%20r%3D%227.5%22%20fill%3D%22%23FFB01E%22%2F%3E%3Ccircle%20cx%3D%2246.5%22%20cy%3D%2252%22%20r%3D%227.5%22%20fill%3D%22%23FFFFFF%22%2F%3E%3Ccircle%20cx%3D%2264%22%20cy%3D%2252%22%20r%3D%227.5%22%20fill%3D%22%23FFB01E%22%2F%3E%3Ccircle%20cx%3D%2281.5%22%20cy%3D%2252%22%20r%3D%227.5%22%20fill%3D%22%23FFFFFF%22%2F%3E%3Ccircle%20cx%3D%2299%22%20cy%3D%2252%22%20r%3D%227.5%22%20fill%3D%22%23FFB01E%22%2F%3E%3Crect%20x%3D%2228%22%20y%3D%2254%22%20width%3D%227%22%20height%3D%2238%22%20rx%3D%223%22%20fill%3D%22%23E8F7EF%22%2F%3E%3Crect%20x%3D%2293%22%20y%3D%2254%22%20width%3D%227%22%20height%3D%2238%22%20rx%3D%223%22%20fill%3D%22%23E8F7EF%22%2F%3E%3Crect%20x%3D%2220%22%20y%3D%2292%22%20width%3D%2288%22%20height%3D%2210%22%20rx%3D%225%22%20fill%3D%22%23FFFFFF%22%2F%3E%3Ccircle%20cx%3D%2264%22%20cy%3D%2273%22%20r%3D%2212%22%20fill%3D%22none%22%20stroke%3D%22%23FFFFFF%22%20stroke-width%3D%226%22%2F%3E%3Ccircle%20cx%3D%2264%22%20cy%3D%2273%22%20r%3D%224.5%22%20fill%3D%22%23FFB01E%22%2F%3E%3C%2Fsvg%3E"><link rel="apple-touch-icon" href="https://king-kunta-cpu.github.io/tapstall/brand/apple-touch-icon.png">
 <meta name="theme-color" content="#0B5B34">
-<meta name="description" content="Free storefront link for Zimbabwe and South African micro-merchants. EcoCash/InnBucks/PayShap, unique-amount payment matching, no order cap, no USD subscription.">
+<meta name="description" content="A storefront link for shops in the markets the big platforms skip: EcoCash, InnBucks and PayShap understood, exact-amount payment matching, your own Google Sheet, no card needed to open. Free for 60 days.">
 <style>
-*{box-sizing:border-box}body{margin:0;font:16px/1.6 -apple-system,BlinkMacSystemFont,Roboto,sans-serif;background:#0b0f14;color:#eef3f8}
-.w{max-width:38rem;margin:0 auto;padding:3rem 1.1rem}
-h1{font-size:1.9rem;line-height:1.15;letter-spacing:-.02em;margin:0 0 .6rem}
-p{color:#aebbc7}
-.pill{display:inline-block;border:1px solid #26333f;background:#16202b;border-radius:999px;padding:.18rem .6rem;font-size:.75rem;color:#cfe0ee;margin:.25rem .3rem 0 0}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:.6rem;margin:1.4rem 0}
-.c{background:#111a24;border:1px solid #1e2a36;border-radius:14px;padding:.8rem}
-.c b{display:block;color:#fff;font-size:.9rem}
-.c span{font-size:.78rem;color:#8fa0af}
-a.cta{display:block;background:#fff;color:#0b0f14;text-decoration:none;border-radius:12px;padding:.85rem;font-weight:700;text-align:center;margin:1rem 0 .4rem}
-a.ghost{display:block;text-align:center;color:#8fd4ff;font-size:.9rem;text-decoration:none}
-footer{color:#5b6c7d;font-size:.72rem;margin-top:2.5rem;text-align:center}
+*{box-sizing:border-box}
+body{margin:0;font:16px/1.6 -apple-system,BlinkMacSystemFont,Roboto,"Segoe UI",sans-serif;background:#08120e;color:#eef3f8}
+.w{max-width:44rem;margin:0 auto;padding:2.6rem 1.15rem 3.5rem}
+.lock{display:flex;align-items:center;gap:.65rem;margin-bottom:2rem}
+.lock b{font-size:1.15rem;color:#fff;letter-spacing:-.01em}
+.kick{display:inline-block;border:1px solid #234a37;background:#0e2018;color:#b9e6c9;border-radius:999px;padding:.25rem .7rem;font-size:.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
+h1{font-family:Georgia,"Times New Roman",serif;font-size:clamp(1.85rem,5vw,2.7rem);line-height:1.08;letter-spacing:-.02em;margin:.8rem 0 .7rem;color:#fff}
+h1 em{font-style:normal;color:#ffb01e}
+.lede{font-size:1.05rem;color:#c9d6cf;max-width:38rem}
+.lede b{color:#fff}
+.wound{margin:1.2rem 0 0;padding:.85rem 1rem;border-left:3px solid #b3441c;background:#120f0c;border-radius:0 12px 12px 0;color:#f0d8cc;font-size:.95rem}
+.wound b{color:#ffb01e}
+.pills{margin:1.1rem 0 0}
+.pill{display:inline-block;border:1px solid #23402f;background:#0f1d16;border-radius:999px;padding:.2rem .62rem;font-size:.75rem;color:#cfe6d7;margin:.25rem .3rem 0 0}
+h2{font-size:1.05rem;letter-spacing:.09em;text-transform:uppercase;color:#8fb9a1;margin:2.4rem 0 .8rem;font-weight:800}
+.lever{background:#0e1a15;border:1px solid #1d3328;border-radius:16px;padding:1rem 1.05rem;margin:.6rem 0}
+.lever h3{margin:0 0 .3rem;font-size:1.02rem;color:#fff;display:flex;align-items:center;gap:.5rem}
+.lever h3 i{font-style:normal;width:1.55rem;height:1.55rem;flex:0 0 1.55rem;border-radius:999px;background:#12301f;color:#ffb01e;display:inline-flex;align-items:center;justify-content:center;font-size:.8rem;font-weight:800}
+.lever p{margin:.25rem 0 0;color:#a9bcb2;font-size:.92rem}
+.lever p b{color:#e8f2ec}
+.lever .serve{color:#d7e8dd}
+.quote{margin:2.2rem 0 0;padding:1.15rem 1.2rem;border-radius:18px;background:linear-gradient(150deg,#0f2d1f,#0a1712);border:1px solid #1f4130;color:#e6f2ea}
+.quote p{margin:0;font-family:Georgia,"Times New Roman",serif;font-size:1.06rem;line-height:1.5}
+.quote .who{display:block;margin-top:.6rem;font:700 .72rem/1.3 -apple-system,BlinkMacSystemFont,Roboto,sans-serif;letter-spacing:.12em;text-transform:uppercase;color:#8fb9a1}
+.turn{margin:1.6rem 0 0;padding:1rem 1.1rem;border:1px dashed #2c4b39;border-radius:16px;background:#0b1712}
+.turn p{margin:0;color:#cfe0d6;font-size:.95rem}
+.turn p+p{margin-top:.5rem}
+.turn b{color:#ffb01e}
+a.cta{display:block;background:#ffb01e;color:#141005;text-decoration:none;border-radius:14px;padding:1rem;font-weight:800;text-align:center;margin:1.6rem 0 .5rem;font-size:1.02rem;box-shadow:0 18px 40px -26px rgba(255,176,30,.8)}
+a.cta small{display:block;font-weight:600;font-size:.78rem;opacity:.72;margin-top:.15rem}
+a.ghost{display:block;text-align:center;color:#8fd4ff;font-size:.9rem;text-decoration:none;margin:.3rem 0 0}
+.pledge{margin:1.6rem 0 0;font-size:.8rem;color:#7e9689;border-top:1px solid #1a2c23;padding-top:1rem}
+.pledge b{color:#b9cdc1}
+footer{color:#647d70;font-size:.72rem;margin-top:1.6rem;text-align:center;line-height:1.7}
+footer a{color:#8fb9a1}
 </style></head><body><div class="w">
-<div style="display:flex;align-items:center;gap:.65rem;margin-bottom:1.4rem"><svg width="46" height="46" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" aria-hidden="true"><rect x="4" y="4" width="120" height="120" rx="28" fill="#0B5B34"/><path d="M24 52 L40 28 H88 L104 52 Z" fill="#FFB01E"/><circle cx="29" cy="52" r="7.5" fill="#FFB01E"/><circle cx="46.5" cy="52" r="7.5" fill="#FFFFFF"/><circle cx="64" cy="52" r="7.5" fill="#FFB01E"/><circle cx="81.5" cy="52" r="7.5" fill="#FFFFFF"/><circle cx="99" cy="52" r="7.5" fill="#FFB01E"/><rect x="28" y="54" width="7" height="38" rx="3" fill="#E8F7EF"/><rect x="93" y="54" width="7" height="38" rx="3" fill="#E8F7EF"/><rect x="20" y="92" width="88" height="10" rx="5" fill="#FFFFFF"/><circle cx="64" cy="73" r="12" fill="none" stroke="#FFFFFF" stroke-width="6"/><circle cx="64" cy="73" r="4.5" fill="#FFB01E"/></svg><b style="font-size:1.15rem;color:#fff;letter-spacing:-.01em">Tapstall</b></div>
-<h1>Your WhatsApp orders stop living in the chat.</h1>
-<p>A store link your customer taps, picks from and pays for. The order — name, number, address, exact amount — lands in a dashboard you own. Built for how micro-businesses in Zimbabwe and South Africa actually get paid.</p>
-<div><span class="pill">Free for 60 days</span><span class="pill">No order cap</span><span class="pill">No USD subscription</span><span class="pill">EcoCash · InnBucks · PayShap</span><span class="pill">You edit a Google Sheet</span></div>
-<div class="grid">
- <div class="c"><b>Fake proof of payment ends</b><span>Every order has a unique amount down to the cent. The money identifies the order — no screenshots, no “I paid you, look”.</span></div>
- <div class="c"><b>No 50-order cliff</b><span>Free plans that stop working once you get busy are a trap. Yours keeps taking orders.</span></div>
- <div class="c"><b>The fee, decided not suffered</b><span>1.4% EcoCash + 2% IMTT per order: see it, absorb it on purpose, or add it at checkout.</span></div>
- <div class="c"><b>One bill a year, in cash</b><span>No foreign-card subscription that gets hit with 15% withholding before it even leaves the country.</span></div>
+<div class="lock"><svg width="46" height="46" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" aria-hidden="true"><rect x="4" y="4" width="120" height="120" rx="28" fill="#0B5B34"/><path d="M24 52 L40 28 H88 L104 52 Z" fill="#FFB01E"/><circle cx="29" cy="52" r="7.5" fill="#FFB01E"/><circle cx="46.5" cy="52" r="7.5" fill="#FFFFFF"/><circle cx="64" cy="52" r="7.5" fill="#FFB01E"/><circle cx="81.5" cy="52" r="7.5" fill="#FFFFFF"/><circle cx="99" cy="52" r="7.5" fill="#FFB01E"/><rect x="28" y="54" width="7" height="38" rx="3" fill="#E8F7EF"/><rect x="93" y="54" width="7" height="38" rx="3" fill="#E8F7EF"/><rect x="20" y="92" width="88" height="10" rx="5" fill="#FFFFFF"/><circle cx="64" cy="73" r="12" fill="none" stroke="#FFFFFF" stroke-width="6"/><circle cx="64" cy="73" r="4.5" fill="#FFB01E"/></svg><b>Tapstall</b></div>
+
+<span class="kick">Built here · priced here · yours</span>
+<h1>They built for Silicon Valley.<br>This one was engineered for <em>your shop</em>.</h1>
+<p class="lede">A store link your customer taps, picks from and pays for — and the order lands in a dashboard you own: name, number, address, items, <b>the exact amount</b>. For shops in Zimbabwe and South Africa that the big platforms were never going to serve.</p>
+
+<div class="wound"><b>The part nobody says out loud:</b> the mainstream providers do not want to work with us. Our cards get declined, our countries are “not supported”, our money rails are ignored, and the subscription is priced for California salaries. So we built the shop that works with our rails, here, and priced it for a counter in Harare.</div>
+
+<div class="pills"><span class="pill">Free for 60 days</span><span class="pill">No order cap</span><span class="pill">No card to open</span><span class="pill">EcoCash · InnBucks · PayShap · ZIPIT</span><span class="pill">Your own Google Sheet</span></div>
+
+<h2>Five things this takes off your morning</h2>
+
+<div class="lever"><h3><i>1</i>Sovereign pride: it was built for this market</h3>
+<p><b>The wound:</b> every time you try to buy software abroad — <i>card declined, country not supported, priced for San Francisco</i>.</p>
+<p class="serve"><b>What we did about it:</b> EcoCash, InnBucks, PayShap and ZIPIT are first-class rails here, not an afterthought. One bill a year, in cash or card or transfer — no USD subscription bleeding 15% in withholding before it lands. A price a Harare shop can carry: $7 a month, $60 for a founding year.</p></div>
+
+<div class="lever"><h3><i>2</i>Morning relief: your orders stop living in the chat</h3>
+<p><b>The wound:</b> the 07:00 knot in the stomach — forty messages, three addresses typed twice, six “I paid you, look” screenshots to match by hand.</p>
+<p class="serve"><b>What we did about it:</b> one link takes the whole order, with a unique amount down to the cent, so the money identifies itself. Your morning becomes a scan, not a hunt.</p></div>
+
+<div class="lever"><h3><i>3</i>Territorial urgency: first to answer gets paid</h3>
+<p><b>The wound:</b> in a market this small, second place gets nothing. The shop two streets away answers while you are still typing.</p>
+<p class="serve"><b>What we did about it:</b> your shop is live in about 90 seconds, a price change takes two minutes from your own sheet, and an order arrives already written down. <b>Which shop do you want to be at 08:30?</b></p></div>
+
+<div class="lever"><h3><i>4</i>Ownership: no hostage data, no silent bots</h3>
+<p><b>The wound:</b> tools that hold your client list behind a login, speak in your name without asking, and vanish the day you stop paying.</p>
+<p class="serve"><b>What we did about it:</b> the shop lives in <b>your own Google Sheet and your own account</b>, the CSV is yours to hand to anyone, nothing is posted or sent in your name unless you choose it, and a paused month does not delete your menu.</p></div>
+
+<div class="lever"><h3><i>5</i>Reciprocity: something real before a cent</h3>
+<p><b>The wound:</b> every other vendor wants a 30-minute discovery call before giving you a shred of value.</p>
+<p class="serve"><b>What we did about it:</b> your store is live and taking orders before you pay anything — free for 60 days, no order cap, no “upgrade to keep selling” cliff.</p></div>
+
+<div class="quote">
+<p>Mainstream providers don’t want to work with firms in our markets — they block our cards, ignore our registries, and price for California. We engineered this for our markets. We are the only emotional and logical choice built for your shop — and for the shop that thinks it has your customers.</p>
+<span class="who">The leverage, said plainly</span>
 </div>
-<a class="cta" href="/onboard">Create my store — 90 seconds</a>
-<a class="ghost" href="fees.html">Or see what your current setup is costing you →</a>
-<footer><p>Guides, for the questions the shop cannot answer for itself: <a href="/guide/whatsapp-shop-payments">taking payment for a WhatsApp shop</a> · <a href="/guide/payment-reference-matching">matching a payment to an order</a>.</p>
-<footer>Independent. Not affiliated with take.app, Meta, Econet or Ozow. Data lives in your own Google Sheet and your own account.</footer>
+
+<div class="turn">
+<p><b>The shops on your street will answer at 16:00, by hand.</b> Yours answers the minute the order lands — with the amount already worked out, and the delivery already priced.</p>
+<p>Nothing to install. Nothing to pay today. Your shop is live before you decide.</p>
+</div>
+
+<a class="cta" href="/onboard">Create my store — 90 seconds<small>Free for 60 days · no card · nothing to install</small></a>
+<a class="ghost" href="fees.html">Or see what your current setup is really costing you →</a>
+
+<p class="pledge"><b>Our promise about promises:</b> no countdown timers, no invented stock numbers, no pretend testimonials, no fake “someone is looking at this right now” — the urgency above is the one your market already has, not one we manufactured. Prices, fees and the exact amount a buyer owes are always the truth, never softened by copy.</p>
+
+<footer><p>Guides, for the questions a shop cannot answer for itself: <a href="/guide/whatsapp-shop-payments">taking payment for a WhatsApp shop</a> · <a href="/guide/payment-reference-matching">matching a payment to an order</a>.</p>
+<p>Independent. Not affiliated with take.app, Meta, Econet or Ozow. Data lives in your own Google Sheet and your own account.</p></footer>
 </div>
 <script>
 // A seller's code survives the hop from this page to onboarding, the same way it survives

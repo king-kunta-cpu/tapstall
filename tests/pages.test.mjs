@@ -1225,3 +1225,39 @@ test('1.5.6 the header is a card from the same paper as the shelf, not a row of 
   // the tagline is identity, so a collection page keeps it now that the banner is folded away
   assert.match(store, /body\.layout-collection header \.tag\{display:block\}/);
 });
+
+test('1.6.0 the emotion doctrine is written down, wired in, and never faked', () => {
+  const doc = readFileSync(join(root, 'docs/EMOTION.md'), 'utf8');
+  // the doctrine itself: five levers, the buyer's five, and the honesty clause that binds them
+  for (const lever of ['Righteous resentment', 'Morning relief', 'Territorial urgency', 'Ownership', 'Reciprocity']) {
+    assert.ok(doc.includes(lever), 'the doctrine keeps its lever: ' + lever);
+  }
+  assert.match(doc, /honesty clause/i, 'emotion is invoked, never faked — the clause is part of the doctrine');
+  assert.match(doc, /only emotional \*and\* logical choice/, 'the leverage is stated in the doctrine');
+  // the leverage is on the page a stranger lands on, not just in a document
+  const home = page('index');
+  assert.match(home, /They built for Silicon Valley/, 'the landing page names the wound before it sells anything');
+  assert.match(home, /only emotional and logical choice built for your shop/, 'and carries the leverage line');
+  assert.match(home, /card declined|Card declined/, 'in the market’s own words');
+  assert.match(home, /engineered for/, 'and the sovereign-pride answer');
+  // the five levers are actually on the page
+  for (const beat of ['Sovereign pride', 'Morning relief', 'Territorial urgency', 'Ownership', 'Reciprocity']) {
+    assert.ok(home.includes(beat), 'the landing page drops a lever: ' + beat);
+  }
+  // give before asking: the ask is followed by what it costs today (nothing)
+  assert.match(home, /Nothing to install\. Nothing to pay today\./, 'reciprocity, in that order');
+  // the buyer is served too, not shamed
+  const store = page('store');
+  assert.match(store, /You paid from your own wallet, and the exact amount is already on this order/, 'the receipt speaks to the buyer, not about them');
+  assert.match(store, /for the shops the big platforms skip/, 'the footer says who built this');
+  // ownership is the lever where money is asked for
+  assert.match(page('renew'), /Nothing of yours is a hostage/, 'renewal is where a merchant is most afraid of losing their data');
+  assert.match(page('admin'), /scan, tick, done/, 'the order desk sells the calm morning');
+  assert.match(page('onboard'), /ninety seconds from a shop that takes its own orders/, 'onboarding is the relief, not a project');
+  // and the promise about promises: no manufactured scarcity anywhere a buyer or merchant looks
+  const fake = /hurry|limited time only|only \d+ left|act now|people are viewing|last chance|ends tonight/i;
+  for (const name of ['index', 'fees', 'onboard', 'renew', 'confirm', 'store']) {
+    assert.ok(!fake.test(page(name)), name + ' manufactures scarcity, which the doctrine forbids');
+  }
+  assert.match(home, /no countdown timers/, 'and the page says so out loud, so the promise is checkable');
+});

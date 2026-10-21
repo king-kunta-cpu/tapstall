@@ -1316,8 +1316,8 @@ function renderOrders() {
   q('#sFw').className = 'stat' + (fl ? ' bad' : '');
   q('#allSum').textContent = 'All orders (' + S.orders.length + ')';
   q('#toDo').innerHTML = due.length ? due.slice(0, 12).map(row).join('')
-    : (S.orders.length ? '<div class="hint" style="padding:.3rem 0">Nothing waiting. Every order today is either paid or cancelled.</div>'
-      : '<div class="empty">No orders yet.<br><button class="sm" id="firstShare" style="margin-top:.4rem">Copy my store link</button></div>');
+    : (S.orders.length ? '<div class="hint" style="padding:.3rem 0">Nothing waiting — every order today is paid or cancelled. That is the whole morning: scan, tick, done.</div>'
+      : '<div class="empty">No orders yet — which is the quiet before the good part.<br>A shop with the link in its WhatsApp bio stops taking orders by hand; the first one usually lands the same day you share it.<br><button class="sm" id="firstShare" style="margin-top:.4rem">Copy my store link</button></div>');
   if (q('#firstShare')) q('#firstShare').onclick = function () { copyText(storeUrl()); this.textContent = 'Copied ✓'; };
   q('#list').innerHTML = rowsShown().length ? rowsShown().map(row).join('')
     : '<div class="empty">Nothing in this view.</div>';

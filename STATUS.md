@@ -1,5 +1,34 @@
 # Tapstall — status
 
+## v1.6.0 (2026-10-21): the Emotion Doctrine, wired in
+
+The owner's standing rule: every touchpoint must *invoke* a true feeling and then *serve* it —
+for the seller and for that seller's buyer. The doctrine is now written down and, more
+importantly, shipped.
+
+- **`docs/EMOTION.md`** — the five levers translated from DeskOS to shopkeepers (righteous
+  resentment & sovereign pride, morning relief, territorial urgency, ownership & control,
+  reciprocity & status), the buyer's own five, a per-touchpoint map, and a **honesty clause**
+  with seven non-negotiables: no invented scarcity, no invented social proof, urgency must be
+  real, never shame a buyer, give before asking, emotion never overrules arithmetic, and never
+  put our politics in a merchant's mouth.
+- **The leverage, on the page a stranger lands on.** `pages/index.html` is rebuilt around it:
+  the wound first (*card declined, country not supported, priced for California*), then the
+  sovereign answer, the five levers as five cards, and the line — *“we are the only emotional
+  and logical choice built for your shop — and for the shop that thinks it has your
+  customers.”* The CTA keeps reciprocity in order: nothing to install, nothing to pay today.
+- **Where money is asked for, ownership is the lever.** `renew.html` gains “Nothing of yours is
+  a hostage” — your sheet, your CSV, a paused month that deletes nothing.
+- **The calm morning, in the product.** `admin` says it in the order desk (“that is the whole
+  morning: scan, tick, done”, and a first-run empty state that is a beginning, not a scolding);
+  `onboard` opens with ninety seconds against a street still typing by hand.
+- **The buyer is served, not shamed.** The receipt now says *“You paid from your own wallet, and
+  the exact amount is already on this order — so the shop can find your payment itself. Nothing
+  to screenshot, nothing to argue about.”* The store footer says who built this and for whom.
+- **The promise about promises** is printed on the landing page so it can be checked: no
+  countdowns, no invented stock numbers, no pretend testimonials, no fake “someone is viewing”.
+  A test greps every public page for manufactured-scarcity language and fails the build.
+
 ## v1.5.6 (2026-10-21): the identity plate
 
 The owner's last note was blunt: “the only ugly thing left on the storefronts is your
