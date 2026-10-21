@@ -17,6 +17,7 @@ import {
   stripTags, usableHost, hostOf, businessFromTitle, hookFor, readPageEvidence, candidateLead,
   discoverySummary, runDiscovery, placeOf, COUNTRY_NAMES, admitCandidate, phonePlausible,
   marketMention, MARKET_CITIES, overpassQuery, parseOverpass, OSM_TAGS, OSM_CITIES, OVERPASS_URL,
+  OVERPASS_MIRRORS,
 } from '../worker/discover.js';
 import { LEAD_SEGMENTS, PARTNER_TIERS, PARTNER_TIER_KEYS, cleanLead, cleanLeadEvidence } from '../worker/core.js';
 
@@ -355,6 +356,36 @@ test('the map is asked about the segments it can describe, and a month of passes
   assert.ok(![...seen].some((k) => k.startsWith('osm:social_merchants')),
     'the map is never asked about a segment it cannot describe: no query full of nothing');
   assert.ok(done.length >= firstPass.total, 'a month of passes eventually touches every query in the pool');
+});
+
+test('one Overpass mirror at capacity is not a lost day: fall through, then fall back to the cache', async () => {
+  assert.ok(OVERPASS_MIRRORS.length >= 3, 'there is more than one server to ask: ' + OVERPASS_MIRRORS.join(', '));
+  const osm = { elements: [{ type: 'node', id: 7, tags: { name: 'Harare Web Studio', office: 'it', phone: '+263 77 111 2223' } }] };
+  const store = {};
+  const asked = [];
+  const fetcher = async (url) => {
+    const u = String(url);
+    asked.push(u);
+    if (u.includes('overpass-api.de')) return { ok: false, status: 502, text: async () => 'at capacity' };
+    if (u.includes('overpass')) return { ok: true, text: async () => JSON.stringify(osm) };
+    return { ok: true, text: async () => '<rss><channel></channel></rss>' };
+  };
+  const cv = { cacheGet: async (k) => store[k], cachePut: async (k, v) => { store[k] = v; } };
+  const first = await runDiscovery({ fetch: fetcher, perRun: 1, limit: 4, countries: ['ZW'], nowMs: 20747 * 864e5, ...cv });
+  assert.equal(first.candidates.length, 1, 'the second mirror answered where the first refused');
+  assert.match(first.ran[0].mirror, /private\.coffee|osm\.ch|osm\.jp/, 'and the run says which one: ' + first.ran[0].mirror);
+  assert.ok(asked.some((u) => u.includes('overpass-api.de')), 'the failed mirror was actually tried first');
+
+  // every mirror down, but the answer from earlier today is in KV: the list still gets built
+  const down = async () => ({ ok: false, status: 502, text: async () => '' });
+  const second = await runDiscovery({ fetch: down, perRun: 1, limit: 4, countries: ['ZW'], nowMs: 20747 * 864e5, ...cv });
+  assert.equal(second.candidates.length, 1, 'a capacity spike must not empty the queue for the day');
+  assert.equal(second.ran[0].cached, true, 'and the run is honest that the answer came from the cache');
+
+  // with no cache and no server, the failure is named, not hidden
+  const bare = await runDiscovery({ fetch: down, perRun: 1, limit: 4, countries: ['ZW'], nowMs: 20747 * 864e5 });
+  assert.equal(bare.candidates.length, 0);
+  assert.match(bare.errors[0].error, /all_mirrors_failed/, 'the error the state document keeps says what happened: ' + JSON.stringify(bare.errors));
 });
 
 test('the three tiers are flat prices in data', () => {

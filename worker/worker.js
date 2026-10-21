@@ -57,7 +57,7 @@ import {
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '1.7.2';
+const VERSION = '1.7.3';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
@@ -5395,6 +5395,14 @@ async function discoveryPass(env, opts = {}) {
     perRun: Math.max(1, Math.min(8, Number(opts.perRun) || DISC_PER_RUN_DEFAULT)),
     limit: Math.max(1, Math.min(24, Number(opts.limit) || DISC_LIMIT_DEFAULT)),
     perQuery: 3, done: st.done || [],
+    // The map is answered once a day per segment and kept for twenty hours: a capacity spike at
+    // Overpass must not cost the day's list, and the data changes at map speed, not shop speed.
+    cacheGet: async (k) => {
+      try { return await env.ORDERS.get('osm:' + k, 'json'); } catch (e) { return null; }
+    },
+    cachePut: async (k, v) => {
+      try { await env.ORDERS.put('osm:' + k, JSON.stringify(v), { expirationTtl: 20 * 3600 }); quotaNote('writes', 'automation'); } catch (e) { void e; }
+    },
   });
   const summary = discoverySummary(run.candidates);
   const budget = Math.max(0, Math.min(DISC_WRITES_MAX, Number(opts.writes) || DISC_WRITES_MAX) - (st.added_today || 0));
@@ -5417,6 +5425,8 @@ async function discoveryPass(env, opts = {}) {
       by_segment: summary.by_segment, errors: run.errors.length,
       // what the gate refused, so "a quiet morning" and "a broken gate" look different in the log
       rejected: run.rejected || {},
+      // the text of what went wrong, not only the count: "errors: 1" diagnoses nothing
+      last_errors: run.errors.slice(0, 3),
     }].slice(-30),
   };
   if (env.ORDERS && (ingest.counts.added || run.ran.length)) {

@@ -1,5 +1,25 @@
 # Tapstall — status
 
+## v1.7.3 (2026-10-21): four mirrors and a cached answer — Overpass says when it is full
+
+The first pass under v1.7.2 did the right thing and produced nothing: five jobs ran, nine candidates
+were refused by the gate (`unverified` 6, `no_local_signal` 3 — Bing's junk, correctly refused), and
+the one source that could have found real Harare businesses returned a single error. Read back, the
+error was not a code bug:
+
+    # 502 Gateway Timeout
+    This Overpass API server is currently at capacity. All query workers are busy
+
+- **`OVERPASS_MIRRORS`** — four servers, twelve seconds each, tried in order (`overpass-api.de`,
+  `overpass.private.coffee`, `overpass.osm.ch`, `overpass.osm.jp`), with the mirror that answered
+  named in the run log. One server being busy is now a slower morning, not an empty one.
+- **The answered query is cached for twenty hours** in KV (`osm:<segment>|<country>`), because map
+  data changes at map speed, not shop speed. If every mirror is down, the day is built from the
+  answer already in hand and the run says `cached: true` rather than pretending it was fetched.
+- **`last_errors`** now goes into `disc:state` with the text of up to three failures — `errors: 1`
+  diagnoses nothing, and the whole point of the exception report is that a human can read it.
+- Tests: 400/400.
+
 ## v1.7.2 (2026-10-21): the gate — what the first live pass taught, in production
 
 v1.7.1 shipped at 12:26 UTC. At 12:47 the cron body ran for the first time and filed eight leads.

@@ -106,7 +106,18 @@ export function segmentFor(key) {
  * that a mapper stood in front of and typed in. Every candidate is checkable at a URL anybody can
  * open, which is the same standard the hook is held to.
  */
+// One Overpass server is a single point of failure, and the main one says so out loud: the first
+// production pass got `502 This Overpass API server is currently at capacity`. So the reader tries
+// several mirrors with a short clock on each, and a day that finds none falls back to yesterday's
+// answered query from KV rather than losing the segment.
 export const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
+export const OVERPASS_MIRRORS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
+  'https://overpass.osm.ch/api/interpreter',
+  'https://overpass.osm.jp/api/interpreter',
+];
+export const OSM_TIMEOUT_MS = 12000;
 
 export const OSM_CITIES = {
   ZW: [['Harare', -17.83, 31.05], ['Bulawayo', -20.15, 28.58]],
@@ -163,22 +174,36 @@ export function parseOverpass(doc, segment) {
   return out;
 }
 
-async function runOverpass(fetcher, job, limit) {
-  const cities = OSM_CITIES[String(job.country || '').toUpperCase()] || [];
-  if (!cities.length) return { items: [], error: 'no_city_for_' + job.country };
+async function runOverpass(fetcher, job, limit, opts = {}) {
+  const cc = String(job.country || '').toUpperCase();
+  const cities = OSM_CITIES[cc] || [];
+  if (!cities.length) return { items: [], error: 'no_city_' + cc };
+  const cacheKey = 'osm|' + job.segment + '|' + cc;
   const picked = cities[Math.abs(Number(job.day) || 0) % cities.length];
   const q = overpassQuery(picked[0], picked[1], picked[2], job.segment);
   if (!q) return { items: [], error: 'no_osm_tags' };
-  try {
-    const r = await fetcher(OVERPASS_URL + '?data=' + encodeURIComponent(q), {
-      headers: { 'user-agent': 'Tapstall discovery (harmless, once a day)', accept: 'application/json' },
-    });
-    if (!r.ok) return { items: [], error: 'status_' + r.status };
-    const items = parseOverpass(JSON.parse(await r.text()), job.segment).slice(0, limit);
-    return { items, city: picked[0], count: items.length };
-  } catch (e) {
-    return { items: [], error: String(e && e.message || e).slice(0, 80) };
+  if (opts.cacheGet) {
+    try {
+      const hit = await opts.cacheGet(cacheKey);
+      if (hit && Array.isArray(hit.items) && hit.items.length) {
+        return { items: hit.items.slice(0, limit), city: hit.city || picked[0], cached: true, count: hit.items.length };
+      }
+    } catch (e) { /* a cache that cannot be read is not a reason to fail a pass */ }
   }
+  const tried = [];
+  for (const mirror of OVERPASS_MIRRORS) {
+    try {
+      const r = await fetcher(mirror + '?data=' + encodeURIComponent(q), {
+        headers: { 'user-agent': 'Tapstall discovery (harmless, once a day)', accept: 'application/json' },
+        signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(OSM_TIMEOUT_MS) : undefined,
+      });
+      if (!r.ok) { tried.push(mirror + ' ' + r.status); continue; }
+      const items = parseOverpass(JSON.parse(await r.text()), job.segment).slice(0, limit);
+      if (opts.cachePut && items.length) { try { await opts.cachePut(cacheKey, { at: Date.now(), city: picked[0], items }); } catch (e) { /* next day */ } }
+      return { items, city: picked[0], count: items.length, mirror };
+    } catch (e) { tried.push(mirror.replace(/^https:\/\//, '').split('/')[0] + ' ' + String(e && e.message || e).slice(0, 40)); }
+  }
+  return { items: [], error: 'all_mirrors_failed: ' + tried.join('; ').slice(0, 160) };
 }
 
 /* --------------------------------------------------------------- the rotation
@@ -466,10 +491,10 @@ export async function runDiscovery(opts = {}) {
     const jobWithDay = { ...job, day: plan.day };
     let items = [];
     if (job.source === 'osm') {
-      const map = await runOverpass(fetcher, jobWithDay, Math.min(limit, perQuery * 4));
+      const map = await runOverpass(fetcher, jobWithDay, Math.min(limit, perQuery * 4), { cacheGet: opts.cacheGet, cachePut: opts.cachePut });
       if (map.error) out.errors.push({ job: job.key, error: map.error });
       items = map.items || [];
-      out.ran.push({ ...job, results: items.length, city: map.city || '' });
+      out.ran.push({ ...job, results: items.length, city: map.city || '', cached: !!map.cached, mirror: map.mirror || '' });
     } else {
       const q = encodeURIComponent(job.query + ' ' + job.country);
       const url = 'https://www.bing.com/search?format=rss&count=20&q=' + q;
