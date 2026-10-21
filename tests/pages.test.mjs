@@ -1203,3 +1203,25 @@ test('1.5.5 every trade gets its own storefront, and the space under the details
   assert.match(admin, /function lookName/, 'the dashboard knows the trade looks by name');
   assert.match(admin, /template draws/, 'and says which one this shop gets');
 });
+
+test('1.5.6 the header is a card from the same paper as the shelf, not a row of grey pills', () => {
+  const store = page('store');
+  // the identity plate: monogram, name, one status pill, quiet facts, two small actions
+  assert.match(store, /<div class="avatarFallback"[^>]*>[^<]*<\/div>/, 'the shop still carries a mark');
+  assert.match(store, /<div class="idtext">/, 'and a column for its name');
+  assert.match(store, /<span class="pill" id="chours" hidden><\/span>/, 'the clock is one pill, not a debug chip');
+  assert.match(store, /header \.pill\.shut\{/, 'a closed shop is said in colour, not in a bullet character');
+  assert.match(store, /ch\.className = 'pill ' \+ \(shut \? 'shut' : 'open'\)/, 'and the state is a class the template can style');
+  assert.ok(!/\\u25cf/.test(store), 'no literal bullet inside the sentence');
+  // share and WhatsApp are actions with a spoken label, and the phone shows only the mark
+  assert.match(store, /<a class="mact" id="shareChip" href="share\.txt" aria-label="Share this shop"/);
+  assert.match(store, /header \.mact \.lbl\{display:none\}/, 'the label folds away on a phone, the aria-label does not');
+  // the plate follows the trade
+  for (const v of ['lookbook', 'gallery', 'service', 'spec', 'shelf']) {
+    assert.ok(store.includes('body.coll-' + v + ' header'), 'the header does not follow the ' + v + ' rhythm');
+  }
+  // a monogram is two initials, because one letter reads as a placeholder
+  assert.match(store, /words\.slice\(0, 2\)/, 'the mark is up to two initials');
+  // the tagline is identity, so a collection page keeps it now that the banner is folded away
+  assert.match(store, /body\.layout-collection header \.tag\{display:block\}/);
+});

@@ -2597,7 +2597,8 @@ test('a shop can hand itself to a group chat without the merchant writing a word
 
   // and the shop itself carries the door, without a script having to run first
   const page = await call('/s/' + h);
-  assert.match(page.text, /<a class="chip" href="share\.txt">Share this shop<\/a>/, 'a relative link, so it is this store’s file');
+  assert.match(page.text, /<a class="mact" id="shareChip" href="share\.txt"[^>]*aria-label="Share this shop"/,
+    'a relative link with a spoken label, so it is this store’s file and a reader still hears what it does');
   assert.ok(page.text.indexOf('share.txt') < page.text.indexOf('</head>') || page.text.includes('share.txt'), 'and it is in the bytes');
   const gone = await call('/s/zznoshare/share.txt');
   assert.equal(gone.status, 404);

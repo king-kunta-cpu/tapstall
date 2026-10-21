@@ -1,5 +1,31 @@
 # Tapstall — status
 
+## v1.5.6 (2026-10-21): the identity plate
+
+The owner's last note was blunt: “the only ugly thing left on the storefronts is your
+headers.” He was right — the bar was a dark strip holding a lonely monogram and a row of
+grey pills that read like debug output: `Prices in USD` · `● Closed — opens Mon at 09:00` ·
+`Share this shop`.
+
+- **A card, not a strip.** The header is now cut from the same paper as the shelf —
+  `#fffdf8` over `#efe0c8`, a soft shadow, a blurred cream backdrop when it pins — and it
+  tints itself per trade (violet for bookings, cool blue for hardware, green for a shelf).
+- **A mark, not a placeholder.** The monogram is up to **two initials** ("MT" for Mama Too
+  Catering) in the template's face on the shop's own accent, with a hairline ring. A real
+  logo still replaces it.
+- **A name with its byline.** The trading name is the loudest thing in the bar and the
+  tagline sits under it — the tagline now stays on a collection page too, because the
+  banner there is folded away and identity is the one thing a folded page must keep.
+- **One honest status pill.** Open / closed is a pill with a dot, a colour and the
+  server's own sentence (`Closed — opens Mon at 09:00`); the shop's week moves into the
+  tooltip instead of being pasted into the sentence. No bullet character in the copy.
+- **Quiet facts, two small actions.** `Prices in USD` and the place are plain muted text
+  separated by a middle dot; Share and WhatsApp are small outline pills with icons — icon
+  only on a phone, with the label kept for a screen reader (`aria-label="Share this shop"`).
+- Tested at 1280 / 820 / 390 / 360 px with a long trading name, no tagline, no place and a
+  closed week: header height 77 px on desktop, 114 px when a name needs two lines, no
+  horizontal overflow anywhere.
+
 ## v1.5.5 (2026-10-21): one storefront per trade
 
 The owner's objection was that every shop got the same card in a different colour. A food

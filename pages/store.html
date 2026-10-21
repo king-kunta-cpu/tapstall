@@ -422,6 +422,58 @@ body.layout-collection .bar .t{color:#ffd899}
 body.layout-collection .bar .n{color:#cbbba6}
 body.layout-collection .bar .cta{background:#ffd899;color:#3a2606}
 @media (min-width:700px){body.layout-collection .bar{background:rgba(20,14,7,.97)}}
+
+/* ---- v1.5.6 the identity plate --------------------------------------------------------------
+ * The bar above the shelf was a dark strip with a lonely monogram and a row of grey pills that
+ * read like debug output: "Prices in USD" next to "Closed" next to "Share this shop". It is now
+ * a card cut from the same paper as the shelf — a monogram in the shop's own colour, the name in
+ * the template's face, one honest status pill (open until / closed, and when it opens), and the
+ * quiet facts below it. Share and WhatsApp become two small actions, not two more pills. */
+header{position:sticky;top:0;z-index:6;color:#191410;padding:.62rem clamp(.75rem,3vw,1.5rem) .66rem;
+  background:linear-gradient(180deg,rgba(255,253,248,.97),rgba(255,253,248,.93));
+  -webkit-backdrop-filter:saturate(1.15) blur(10px);backdrop-filter:saturate(1.15) blur(10px);
+  border-bottom:1px solid #efe0c8;box-shadow:0 14px 30px -30px rgba(60,32,10,.55)}
+header .brand{max-width:73rem;margin:0 auto;display:flex;align-items:center;gap:.7rem}
+.logo,.avatarFallback{width:46px;height:46px;border-radius:14px;flex:0 0 auto}
+.logo{border:1px solid #e6d6c0;object-fit:cover;background:#f3e6d1;box-shadow:0 6px 16px -12px rgba(60,32,10,.5)}
+.avatarFallback{display:flex;align-items:center;justify-content:center;font-size:1.15rem;font-weight:800;letter-spacing:.02em;
+  font-family:Georgia,'Times New Roman',serif;background:linear-gradient(150deg,var(--accent),var(--accent-dark));
+  color:var(--on-accent);box-shadow:inset 0 0 0 1px rgba(255,255,255,.18),0 6px 16px -12px rgba(10,18,24,.7)}
+header .idtext{min-width:0;flex:1}
+header .idtop{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+header h1{font-size:clamp(1.08rem,2.5vw,1.34rem);line-height:1.12;letter-spacing:-.02em;margin:0;color:#191410}
+header .pill{display:inline-flex;align-items:center;gap:.34rem;font-size:.7rem;font-weight:600;line-height:1.2;
+  border-radius:999px;padding:.2rem .52rem;border:1px solid transparent;white-space:nowrap;max-width:100%}
+header .pill::before{content:'';width:.4rem;height:.4rem;border-radius:999px;background:currentColor;flex:0 0 auto}
+header .pill.open{background:#e9f6ee;color:#0a6b33;border-color:#c8e6d4}
+header .pill.shut{background:#fdeeec;color:#8f1a24;border-color:#f3cdc7}
+header .tag{margin:.22rem 0 0;font-size:.8rem;color:#6f6357;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+header .meta{margin:.34rem 0 0;display:flex;align-items:center;gap:.4rem .5rem;flex-wrap:wrap;font-size:.75rem;color:#9a8a76}
+header .meta .sep{opacity:.45}
+header .mact{display:inline-flex;align-items:center;gap:.3rem;font:inherit;font-size:.75rem;font-weight:700;text-decoration:none;
+  color:#6f6357;background:#fffaf2;border:1px solid #e6d6c0;border-radius:999px;padding:.22rem .55rem;cursor:pointer;line-height:1.3}
+header .mact:hover{border-color:var(--accent);color:var(--accent)}
+header .mact svg{width:12px;height:12px;flex:0 0 auto}
+header .mact.wa{background:#128c4a;border-color:#128c4a;color:#fff}
+header .mact.wa:hover{background:#0e7540;border-color:#0e7540;color:#fff}
+body.layout-collection header .tag{display:block}
+body.layout-collection header h1{font-size:clamp(1.02rem,2.3vw,1.24rem)}
+body.hero-minimal header{background:linear-gradient(180deg,rgba(255,253,248,.98),rgba(255,253,248,.95));color:#191410;
+  border-bottom:1px solid #efe0c8;box-shadow:none}
+body.coll-lookbook header h1,body.coll-gallery header h1{font-family:Georgia,'Times New Roman',serif;letter-spacing:-.01em}
+body.coll-lookbook .avatarFallback,body.coll-lookbook .logo{border-radius:2px}
+body.coll-gallery .avatarFallback,body.coll-gallery .logo{border-radius:17px}
+body.coll-service header{background:linear-gradient(180deg,rgba(250,248,255,.97),rgba(250,248,255,.93));border-bottom-color:#e7dff6}
+body.coll-spec header{background:linear-gradient(180deg,rgba(250,252,255,.97),rgba(250,252,255,.93));border-bottom-color:#dde7f4}
+body.coll-shelf header{background:linear-gradient(180deg,rgba(250,253,250,.97),rgba(250,253,250,.93));border-bottom-color:#dfeade}
+@media (max-width:640px){
+  header{padding-top:.55rem;padding-bottom:.6rem}
+  header .idtop{row-gap:.22rem}
+  .logo,.avatarFallback{width:40px;height:40px;border-radius:12px}
+  header .mact{padding:.3rem .42rem}
+  header .mact .lbl{display:none}                 /* icon only on a phone; the label stays for a reader */
+  header .tag{font-size:.75rem}
+}
 button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 @media (prefers-reduced-motion:reduce){.card{transition:none}.skel{animation:none}}
 </style>
@@ -439,17 +491,20 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
   <header>
     <div class="brand">
       <img class="logo" id="logo" alt="" hidden><div class="avatarFallback" id="avatarFallback" aria-hidden="true">S</div>
-      <div style="min-width:0">
-        <h1 id="sname">Store</h1>
+      <div class="idtext">
+        <div class="idtop">
+          <h1 id="sname">Store</h1>
+          <span class="pill" id="chours" hidden></span>
+        </div>
         <p class="tag" id="stag"></p>
         <div class="meta">
-          <span class="chip" id="curnow"></span>
-          <span class="chip" id="chours" hidden></span>
-          <span class="chip" id="cloc" hidden></span>
+          <span id="curnow"></span>
+          <span class="sep" id="clocSep" hidden>·</span>
+          <span id="cloc" hidden></span>
           <!-- relative on purpose: this page is /s/<handle>, so this is /s/<handle>/share.txt,
                and a link the merchant can forward from the shop itself needs no script -->
-          <a class="chip" href="share.txt">Share this shop</a>
-          <a class="chip" id="waChip" href="#" hidden>WhatsApp us</a>
+          <a class="mact" id="shareChip" href="share.txt" aria-label="Share this shop" title="Share this shop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg><span class="lbl">Share</span></a>
+          <a class="mact wa" id="waChip" href="#" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.5 8.5 0 0 1-12.3 7.6L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5z"/></svg><span class="lbl">WhatsApp</span></a>
         </div>
       </div>
     </div>
@@ -647,7 +702,11 @@ var TERM = /*__TAPSTALL_TERM__*/null;
   $('sname').textContent = CFG.shop_name;
   if (CFG.tagline) $('stag').textContent = CFG.tagline;
   var av = $('avatarFallback');
-  if (av) av.textContent = String(CFG.shop_name || 'S').trim().charAt(0).toUpperCase() || 'S';
+  if (av) {
+    var words = String(CFG.shop_name || 'S').trim().split(/\s+/).filter(Boolean);
+    var mark = words.slice(0, 2).map(function (wd) { return wd.charAt(0).toUpperCase(); }).join('');
+    av.textContent = mark || 'S';
+  }
   if (CFG.logo) {
     var L = $('logo'); L.src = CFG.logo; L.hidden = false; if (av) av.hidden = true;
     var fav = document.querySelector('link[rel="icon"]'); if (fav) fav.href = CFG.logo;
@@ -663,12 +722,15 @@ var TERM = /*__TAPSTALL_TERM__*/null;
     // `hours` can be a week object, and an object printed into a chip is "[object Object]"; the
     // server's own `open.label` already says the useful sentence ("Open until 20:00").
     var hoursText = typeof CFG.hours === 'string' ? CFG.hours : '';
-    ch.textContent = (o.known && !o.open) ? '\u25cf ' + (o.label || 'Closed')
-      : (o.label ? '\u25cf ' + o.label + (hoursText ? ' \u00b7 ' + hoursText : '') : (hoursText ? '\u25cf ' + hoursText : '\u25cf Open'));
-    ch.style.color = (o.known && !o.open) ? '#a2141f' : '#0a6b33';
+    var shut = !!(o.known && !o.open);
+    // the label already says the useful sentence ("Closed — opens Mon at 09:00"); the week is the
+    // long form for shops with no live clock, so it is only used when there is no label at all
+    ch.textContent = o.label || hoursText || (shut ? 'Closed' : 'Open');
+    ch.className = 'pill ' + (shut ? 'shut' : 'open');
+    ch.title = hoursText || '';
     ch.hidden = false;
   }
-  if (CFG.location) { $('cloc').textContent = CFG.location; $('cloc').hidden = false; }
+  if (CFG.location) { $('cloc').textContent = CFG.location; $('cloc').hidden = false; $('clocSep').hidden = false; }
   $('curnow').textContent = 'Prices in ' + CUR + (ZIG ? ' + ZiG' : '');
   $('powered').innerHTML = 'Runs on <a href="/onboard">Tapstall</a> — free store for your WhatsApp business, no monthly bill.';
   if (D.hero === 'cover') {
