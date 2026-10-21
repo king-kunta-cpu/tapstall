@@ -4,11 +4,15 @@ Generate the portfolio site from one catalogue definition.
 
 The catalogue lives in this file as data; the script emits two artefacts:
 
-    site/index.html     a single self-contained page — no external CSS, fonts, scripts or
-                        images, so it renders identically offline, in a sandboxed preview,
-                        and on GitHub Pages
-    site/catalogue.json  the same catalogue, machine-readable, for anyone who wants the
-                        list without scraping the page
+    pages/public/portfolio/index.html      a single self-contained page — no external CSS,
+                                           fonts, scripts or images, so it renders the same
+                                           offline, in a sandboxed preview, and on Pages
+    pages/public/portfolio/catalogue.json  the same catalogue, machine-readable, for anyone
+                                           who wants the list without scraping the page
+
+The destination sits inside the directory the Pages workflow publishes, so the portfolio is
+served at /portfolio/ *beside* the shipped landing page rather than replacing it — that page
+is the live shop front and is not this script's business.
 
 Adding a work means adding one dict below and re-running the script. Nothing else is
 edited by hand, so the page and the JSON cannot drift.
@@ -624,9 +628,12 @@ def build():
     return doc, total_pages
 
 
+OUT_DIR = Path("pages/public/portfolio")
+
+
 def main():
-    site = Path("site")
-    site.mkdir(exist_ok=True)
+    site = OUT_DIR
+    site.mkdir(parents=True, exist_ok=True)
     doc, total_pages = build()
     (site / "index.html").write_text(doc, encoding="utf-8")
 
@@ -641,8 +648,8 @@ def main():
     (site / "catalogue.json").write_text(json.dumps(cat, indent=2, ensure_ascii=False) + "\n",
                                          encoding="utf-8")
 
-    print(f"site/index.html      {len(doc):,} bytes")
-    print(f"site/catalogue.json  {len(WORKS)} works, {total_pages:,} pages catalogued")
+    print(f"{site}/index.html      {len(doc):,} bytes")
+    print(f"{site}/catalogue.json  {len(WORKS)} works, {total_pages:,} pages catalogued")
     for w in WORKS:
         missing = [k for k in ("title", "subtitle", "blurb", "formats") if not w.get(k)]
         if missing:

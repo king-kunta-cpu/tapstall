@@ -98,7 +98,7 @@ def main():
             problems.append(f"missing source file: {src}")
     if problems:
         raise SystemExit("\n".join(problems))
-    for f in ["site/index.html", "site/catalogue.json",
+    for f in ["pages/public/portfolio/index.html", "pages/public/portfolio/catalogue.json",
               "book/intelligence-data-and-judgement.epub",
               "papers/tapstall-2026-order-without-custody.pdf"]:
         if not (ROOT / f).exists():
@@ -168,7 +168,7 @@ def main():
                 print(f"  {r.status}  {name}  {int(size):,} bytes")
         except urllib.error.HTTPError as e:
             raise SystemExit(f"  asset not downloadable: {name} ({e.code})")
-    site_url = f"https://{OWNER}.github.io/{REPO}/"
+    site_url = f"https://{OWNER}.github.io/{REPO}/portfolio/"
     try:
         with urllib.request.urlopen(urllib.request.Request(site_url, method="GET"), timeout=90) as r:
             body = r.read().decode(errors="replace")
@@ -177,7 +177,7 @@ def main():
     except Exception as e:  # noqa: BLE001 — first deploy can lag a few minutes
         print(f"  site not serving yet ({type(e).__name__}): {site_url} — Pages builds take a minute or two")
 
-    for path in ["book/intelligence-data-and-judgement.pdf", "site/index.html"]:
+    for path in ["book/intelligence-data-and-judgement.pdf", "pages/public/portfolio/index.html"]:
         url = f"https://raw.githubusercontent.com/{OWNER}/{REPO}/main/{path}"
         with urllib.request.urlopen(urllib.request.Request(url, method="HEAD"), timeout=90) as r:
             print(f"  {r.status}  {path}")
