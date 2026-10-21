@@ -8,6 +8,15 @@ name: outreach
 # (2+ signals, under the touch cap, follow-up due) and files every outcome back through
 # POST /api/leads/act, including STOP -> the do-not-contact ledger.
 on:
+  # Autonomous, on the same ladder as hunting but an hour later. Unattended runs
+  # cannot type into the description box, so the defaults below are the real
+  # policy: send-and-poll, ten sends per mailbox. Ten is the warm-up rung, not a
+  # target — the ramp is the point, and a mailbox that starts at a hundred gets
+  # its domain burned. The Worker remains the judge: this only sends to leads it
+  # calls eligible (two signals, under the touch cap, follow-up due), and every
+  # STOP still lands in the do-not-contact ledger.
+  schedule:
+    - cron: '40 6 * * 1-5'
   workflow_dispatch:
     inputs:
       mode:
@@ -40,8 +49,9 @@ jobs:
           OWNER_NOTIFY_EMAIL: ${{ secrets.OWNER_NOTIFY_EMAIL }}
           OUTREACH_FROM_NAME: ${{ secrets.OUTREACH_FROM_NAME }}
         run: |
+          # scheduled runs carry no inputs: send_and_poll at the warm-up cap
           MODE="${{ github.event.inputs.mode || 'send_and_poll' }}"
-          CAP="${{ github.event.inputs.per_mailbox_cap || '20' }}"
+          CAP="${{ github.event.inputs.per_mailbox_cap || '10' }}"
           case "$MODE" in
             send_and_poll) python3 scripts/mail_outreach.py --send --per-mailbox-cap "$CAP" ;;
             send_only)     python3 scripts/mail_outreach.py --send --send-only --per-mailbox-cap "$CAP" ;;

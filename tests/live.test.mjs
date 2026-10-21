@@ -5048,3 +5048,28 @@ test('the Google Sheet gets its own key: it can read leads and move a stage, and
   assert.equal(dnc.json.lead.status, 'dnc', 'a do-not-contact from the sheet reaches the ledger the discovery pass reads');
   delete env.SHEET_KEY;
 });
+
+// ---------------------------------------------------------------------------
+// Transport: a link that answers on http:// is a link a browser will one day
+// call "not secure", and a redirect that arrives *after* authentication has
+// already sent a secret in clear. So the scheme is settled before routing, and
+// HSTS stops the browser offering http:// at all on the next visit.
+test('plain http is redirected to https before any route is reached, and HSTS is set', async () => {
+  const w = await load();
+  const ctx = { waitUntil: (p) => p };
+
+  const insecure = new Request('http://tapstall.test/order?code=shop', { method: 'GET' });
+  const res = await w.fetch(insecure, env, ctx);
+  assert.equal(res.status, 301, 'http must not be served, even for a page');
+  assert.equal(res.headers.get('location'), 'https://tapstall.test/order?code=shop',
+    'the path and query survive the upgrade, so a shared shop link still lands on the shop');
+
+  // an API surface carrying a secret must be upgraded too, not just the pages
+  const api = await w.fetch(new Request('http://tapstall.test/api/leads/act?key=secret-value', { method: 'POST' }), env, ctx);
+  assert.equal(api.status, 301);
+  assert.ok(!String(api.headers.get('location')).includes('http://'), 'never a downgrade');
+
+  const secure = await w.fetch(new Request('https://tapstall.test/', { method: 'GET' }), env, ctx);
+  assert.match(String(secure.headers.get('strict-transport-security') || ''), /max-age=\d{6,}/,
+    'HSTS is present, so a browser stops trying http at all');
+});

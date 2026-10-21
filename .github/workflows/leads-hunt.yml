@@ -5,6 +5,14 @@ name: leads-hunt
 # prospects into the Worker, which scores them by evidence (two signals before outreach),
 # allocates each to exactly one seller, and drops anything on the do-not-contact ledger.
 on:
+  # Autonomous by default: this job files prospects, and a prospecting queue that
+  # only moves when a person remembers to press a button is not a pipeline.
+  # Weekday mornings, staggered ahead of the outreach slot so the batch it files
+  # is the batch outreach then judges. The Worker still dispatches when it can;
+  # a duplicate fire is harmless because the Worker is the judge of eligibility
+  # and dedupes by URL, so a second run in the same hour finds nothing new.
+  schedule:
+    - cron: '20 5 * * 1-5'
   workflow_dispatch:
     inputs:
       post:
@@ -39,10 +47,12 @@ jobs:
           TAPSTALL_ORIGIN: https://tapstall.zlnew.workers.dev
           ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
         run: |
+          # The cron event has no inputs, so the defaults below are what actually
+          # runs unattended: file the batch, 40 at a time, South Africa and Zimbabwe.
           POST_FLAG="--dry-run"
           [ "${{ github.event.inputs.post || 'true' }}" = "true" ] && POST_FLAG="--post"
           python3 scripts/lead_hunt.py $POST_FLAG \
-            --limit "${{ github.event.inputs.limit || '60' }}" \
+            --limit "${{ github.event.inputs.limit || '40' }}" \
             --countries "${{ github.event.inputs.countries || 'ZA,ZW' }}"
       - name: summary
         if: always()

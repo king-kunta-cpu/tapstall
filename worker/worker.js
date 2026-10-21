@@ -200,6 +200,14 @@ const LOCK_TTL = 600;
 export default {
   async fetch(req, env, ctx) {
     const url = new URL(req.url);
+    // Plain HTTP is served by the edge too, and a shop link that answers on
+    // http:// is a shop link a browser will one day label "not secure". Redirect
+    // before any routing so no surface — page, API, or webhook — can be reached
+    // unencrypted. HSTS (below) then stops the browser trying http:// at all.
+    if (url.protocol === 'http:') {
+      url.protocol = 'https:';
+      return new Response(null, { status: 301, headers: { Location: url.toString() } });
+    }
     const open = isOpenPath(url.pathname);
     if (req.method === 'OPTIONS') return open ? openCors(new Response(null, { status: 204 })) : new Response(null, { status: 403 });
     try {
@@ -2750,6 +2758,9 @@ function timingSafeEq(a, b) {
   return r === 0;
 }
 const SEC_HEADERS = {
+  // One year, subdomains included: after the first https visit the browser stops
+  // offering http://, which removes the downgrade window entirely.
+  'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
   'Referrer-Policy': 'no-referrer',
   'X-Content-Type-Options': 'nosniff',
   'X-Frame-Options': 'DENY',
