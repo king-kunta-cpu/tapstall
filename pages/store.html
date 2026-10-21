@@ -247,6 +247,8 @@ body.tpl-grocery.layout-compact .media{aspect-ratio:16/10}
 .cdetail .clong{margin:0 0 .8rem;padding-bottom:.7rem;border-bottom:1px solid #f1e5ce;font-size:.82rem;line-height:1.7;color:#6a5b4d;font-style:italic}
 .cdetail .cold{font-size:.8rem;color:#6a5b4d;margin:0 0 .8rem}
 .cdetail .cold b{color:var(--accent-dark)}
+.cdetail .cfacts{margin:0 0 .8rem;font-size:.72rem;font-weight:700;letter-spacing:.02em;color:#8a6209;text-transform:uppercase}
+.cdetail .cfacts[hidden]{display:none}
 .ccallouts{display:grid;gap:.5rem;margin-bottom:.85rem}
 .ccall{border-radius:12px;padding:.6rem .75rem;border:1px dashed;font-size:.8rem;line-height:1.55;color:#5c5044;background:#fbf7ef;border-color:#e5d3b8}
 .ccall b{display:block;font-size:.6rem;text-transform:uppercase;letter-spacing:.09em;margin-bottom:.15rem;color:#8a6209}
@@ -409,6 +411,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
         <p class="cdesc" id="cdShort"></p>
         <p class="clong" id="cdLong"></p>
         <p class="cold" id="cdOpts"></p>
+        <p class="cfacts" id="cdFacts"></p>
         <div class="ccallouts" id="cdCalls"></div>
         <div class="ccta">
           <button class="cadd" id="cadd"></button>
@@ -755,9 +758,27 @@ var TERM = /*__TAPSTALL_TERM__*/null;
 
     var calls = [];
     if (soldOut) calls.push('<div class="ccall"><b>Sold out today</b>Ask us when the next batch lands — we will not take an order we cannot fill.</div>');
-    else if (p.popular) calls.push('<div class="ccall"><b>' + esc(D.popular_label) + '</b>This one leaves the kitchen most often. If you are ordering for a group, it is the safe pick.</div>');
-    if (p.cat) calls.push('<div class="ccall pair"><b>More ' + esc(p.cat) + '</b>The rest of the ' + esc(p.cat) + ' shelf is in the row below — swipe it, or tap an item to put it up here.</div>');
+    else if (p.popular) calls.push('<div class="ccall"><b>' + esc(D.popular_label) + '</b>This is the one most people order here. If you are buying for more than one person, it is the safe pick.</div>');
+    var sameCat = collList.filter(function (x) { return x.cat && x.cat === p.cat; }).length;
+    if (p.cat && sameCat > 1) calls.push('<div class="ccall pair"><b>More ' + esc(p.cat) + '</b>The rest of the ' + esc(p.cat) + ' shelf is in the row below — swipe it, or tap an item to put it up here.</div>');
+    // The three steps are the platform's own model, not a promise this shelf invented: order here,
+    // pay the amount the receipt names, and the shop confirms. It fills the panel honestly when a
+    // sheet row carries no description at all.
+    var waOn = !!CFG.whatsapp;
+    calls.push('<div class="ccall"><b>How ordering works</b>'
+      + '1. Add what you want and place the order. '
+      + '2. Your receipt names the exact amount to pay — pay it from your own wallet. '
+      + '3. ' + (waOn ? 'The shop confirms on WhatsApp.' : 'The shop confirms your order and the pickup or delivery.') + '</div>');
     $('cdCalls').innerHTML = calls.join('');
+
+    // the shop's own delivery and place, said plainly, instead of empty space
+    var facts = [];
+    var del = Number(CFG.delivery_fee) || 0, freeOver = Number(CFG.free_over) || 0;
+    if (del || freeOver) facts.push('Delivery ' + (del ? money(del) : 'available') + (freeOver ? ' · free over ' + money(freeOver) : ''));
+    else facts.push('Pickup at the shop');
+    if (CFG.location) facts.push(CFG.location);
+    $('cdFacts').textContent = facts.join(' · ');
+    $('cdFacts').hidden = !facts.length;
 
     var add = $('cadd');
     add.disabled = !!soldOut;
