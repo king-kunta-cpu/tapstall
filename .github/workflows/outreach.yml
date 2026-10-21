@@ -10,11 +10,14 @@ name: outreach
 on:
   # Autonomous, on the same ladder as hunting but an hour later. Unattended runs
   # cannot type into the description box, so the defaults below are the real
-  # policy: send-and-poll, ten sends per mailbox. Ten is the warm-up rung, not a
-  # target — the ramp is the point, and a mailbox that starts at a hundred gets
-  # its domain burned. The Worker remains the judge: this only sends to leads it
-  # calls eligible (two signals, under the touch cap, follow-up due), and every
-  # STOP still lands in the do-not-contact ledger.
+  # policy: send-and-poll, twenty sends per mailbox. Twenty is the owner's
+  # setting as of 21 October 2026 and sits inside the warm-up ladder (10 -> 20 ->
+  # 25 -> 40 -> 50 a day on a weekly step), so the ramp is still the point: a
+  # mailbox that opens at a hundred gets its domain burned, and a burned domain
+  # costs more than the week it saved. Raise it a rung at a time, and only while
+  # bounce and complaint rates stay flat. The Worker remains the judge: this only
+  # sends to leads it calls eligible (two signals, under the touch cap, follow-up
+  # due), and every STOP still lands in the do-not-contact ledger.
   schedule:
     - cron: '40 6 * * 1-5'
   workflow_dispatch:
@@ -51,7 +54,7 @@ jobs:
         run: |
           # scheduled runs carry no inputs: send_and_poll at the warm-up cap
           MODE="${{ github.event.inputs.mode || 'send_and_poll' }}"
-          CAP="${{ github.event.inputs.per_mailbox_cap || '10' }}"
+          CAP="${{ github.event.inputs.per_mailbox_cap || '20' }}"
           case "$MODE" in
             send_and_poll) python3 scripts/mail_outreach.py --send --per-mailbox-cap "$CAP" ;;
             send_only)     python3 scripts/mail_outreach.py --send --send-only --per-mailbox-cap "$CAP" ;;
