@@ -30,6 +30,18 @@ one v1.7.7 filed.
   nonsense.
 - Tests: 401/401.
 
+**Live (v1.7.8).** `4cf00e5`, deploy run success, `/__ping` → `{"ok":true,"version":"1.7.8"}`.
+A cron body was run against production to verify the pipeline rather than the build: 8 jobs,
+1 candidate admitted, 0 new leads because the one candidate was already in the queue from the
+previous pass — the idempotency rule holding in production. `disc:state.runs[-1]` shows
+`rejected: {unverified: 3, no_local_signal: 1}` and `last_errors` naming the Overpass failure
+(`521`, timeout, empty), which is what the exception report is for: the owner can read why a
+morning was quiet without opening a log.
+
+What the rail's discovery leg now is, in one sentence: **the directory fills the queue, the gate
+decides what is allowed in it, the map and search are kept as second and third opinions, and a
+human still writes the first message.**
+
 ## v1.7.6 (2026-10-21): a third source that is neither global nor behind a queue
 
 v1.7.5's diagnostics answered the question and the answer was bad: from the Worker,
