@@ -1,5 +1,26 @@
 # Tapstall — status
 
+## v1.7.4 (2026-10-21): two ways an empty answer lies, both now refused
+
+Under v1.7.3 the mirrors worked and the pass still filed nothing, which is a quieter bug than the
+one before it:
+
+- **A regional mirror can answer `200` with a dataset that does not cover the country.** The Harare
+  bbox came back as an empty element list and the pass read "Harare has no businesses". An empty
+  answer from a mirror is now treated as *this mirror cannot see here* and the next one is asked;
+  the error text says `no_data_on_any_mirror` when they all do it, which is a different sentence
+  from `all_mirrors_failed` and should be.
+- **A mapped business with a website and no phone number is reachable.** Requiring an email or a
+  number refused Techzim, Pook and most of Harare's real firms — OpenStreetMap often carries a
+  website and nothing else. A mapped record with its own site is now admitted with
+  `contact_kind: 'site'`; its website is the `source_url`, and the seller finds the address the same
+  way anybody would. A mapped record with *nothing* is still a dot and is still refused.
+- **Locality is the query, not a sentence**, for map candidates: the bbox *is* the local signal, so
+  a mapped firm no longer has to also say "Zimbabwe" on its page. Search candidates still do.
+- Read back on a stubbed Harare payload: Techzim and Pook admitted (one site-only, one with a
+  number), ZETDC refused as `institution`, an unnamed node refused as `no_contact`.
+- Tests: 400/400.
+
 ## v1.7.3 (2026-10-21): four mirrors and a cached answer — Overpass says when it is full
 
 The first pass under v1.7.2 did the right thing and produced nothing: five jobs ran, nine candidates

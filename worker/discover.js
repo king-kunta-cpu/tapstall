@@ -191,6 +191,7 @@ async function runOverpass(fetcher, job, limit, opts = {}) {
     } catch (e) { /* a cache that cannot be read is not a reason to fail a pass */ }
   }
   const tried = [];
+  let emptyFrom = 0;
   for (const mirror of OVERPASS_MIRRORS) {
     try {
       const r = await fetcher(mirror + '?data=' + encodeURIComponent(q), {
@@ -199,11 +200,14 @@ async function runOverpass(fetcher, job, limit, opts = {}) {
       });
       if (!r.ok) { tried.push(mirror + ' ' + r.status); continue; }
       const items = parseOverpass(JSON.parse(await r.text()), job.segment).slice(0, limit);
-      if (opts.cachePut && items.length) { try { await opts.cachePut(cacheKey, { at: Date.now(), city: picked[0], items }); } catch (e) { /* next day */ } }
+      // A regional mirror can answer 200 with a dataset that does not cover this country; an empty
+      // answer for the middle of Harare is that, not a fact about Harare. Ask the next one.
+      if (!items.length) { emptyFrom++; tried.push(mirror + ' empty'); continue; }
+      if (opts.cachePut) { try { await opts.cachePut(cacheKey, { at: Date.now(), city: picked[0], items }); } catch (e) { /* next day */ } }
       return { items, city: picked[0], count: items.length, mirror };
     } catch (e) { tried.push(mirror.replace(/^https:\/\//, '').split('/')[0] + ' ' + String(e && e.message || e).slice(0, 40)); }
   }
-  return { items: [], error: 'all_mirrors_failed: ' + tried.join('; ').slice(0, 160) };
+  return { items: [], error: (emptyFrom ? 'no_data_on_any_mirror: ' : 'all_mirrors_failed: ') + tried.join('; ').slice(0, 160) };
 }
 
 /* --------------------------------------------------------------- the rotation
@@ -362,7 +366,9 @@ export function admitCandidate(item = {}, evidence = {}, opts = {}) {
   if (!mapOnly && !usableHost(url)) return { ok: false, why: 'platform' };
   const body = [item.title, item.note, evidence.title, evidence.text].join(' ');
   if (!opts.pageChecked && !fromMap) return { ok: false, why: 'unverified' };   // no page read, no hook to stand behind
-  if (!mapOnly && !marketMention(body + ' ' + host, opts.country)) return { ok: false, why: 'no_local_signal' };
+  // A map candidate came out of a bbox around the city: its locality is the query, not a sentence
+  // on a page. Only a search candidate has to prove where it is.
+  if (!fromMap && !marketMention(body + ' ' + host, opts.country)) return { ok: false, why: 'no_local_signal' };
   const name = fromMap ? String(item.title || '').trim() : businessFromTitle(item.title || evidence.title || '', host);
   if (name.length < 2 || name.length > 70) return { ok: false, why: 'no_name' };
   if (GENERIC_NAME.test(name)) return { ok: false, why: 'generic_name' };
@@ -370,8 +376,11 @@ export function admitCandidate(item = {}, evidence = {}, opts = {}) {
   const contact = opts.contact || {};
   const email = String(contact.email || (evidence.emails && evidence.emails[0]) || '').toLowerCase();
   const phone = phonePlausible(contact.phone) ? String(contact.phone) : (phonePlausible(evidence.phone) ? evidence.phone : '');
-  if (!email && !phone) return { ok: false, why: 'no_contact' };
-  return { ok: true, why: 'admitted', name, email, phone };
+  // A mapped business with its own website and no number is reachable — the site is how a seller
+  // finds the address, and the lead carries the URL. A mapped business with *nothing* is a dot.
+  const siteOnly = fromMap && !mapOnly && /^https?:\/\//.test(url);
+  if (!email && !phone && !siteOnly) return { ok: false, why: 'no_contact' };
+  return { ok: true, why: 'admitted', name, email, phone, contact_kind: email ? 'email' : (phone ? 'phone' : 'site') };
 }
 
 /** A business name from a search result: the part before the first separator, cleaned of the
