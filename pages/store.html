@@ -297,8 +297,7 @@ body.tpl-grocery.layout-compact .media{aspect-ratio:16/10}
   .cframe{aspect-ratio:3/4}.cstage .cside{display:none}
   /* the banner is folded away on a collection page, so the name comes back into the brand strip
      where it belongs — a shop with no name on a phone is a shop you cannot mention to a friend */
-  body.layout-collection header h1{display:block;font-size:1.05rem}
-  body.layout-collection header .tag{display:block}
+  body.layout-collection header h1{font-size:1rem}
   .coll-hint{font-size:.6rem;padding:.4rem .55rem}
   .cdetail h4{font-size:1.3rem}}
 @media (max-width:520px){.coll-grid{border-radius:16px}.cthumbs{grid-template-columns:repeat(6,1fr);gap:.3rem}
@@ -308,7 +307,10 @@ body.layout-collection .grid{display:none!important}
    the brand bar stops pinning itself, the browse heading collapses into the filter row,
    and the hero tightens to a strip so the first thing a buyer sees is the shelf. */
 body.layout-collection header{position:static}
-body.layout-collection header h1,body.layout-collection header .tag{display:none}
+/* the banner is folded away on a collection page, so the name has to stay here: a shop page
+   with no shop name on it is a page a buyer cannot even describe to a friend */
+body.layout-collection header h1{font-size:1.1rem;margin:0}
+body.layout-collection header .tag{display:none}
 body.layout-collection header .logo,body.layout-collection header .avatarFallback{width:42px;height:42px;border-radius:13px}
 body.layout-collection .service-strip{display:none}
 body.layout-collection .welcome{margin:.6rem 0 0}
