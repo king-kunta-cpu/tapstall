@@ -141,6 +141,8 @@ section{padding:66px 0 10px}
 .band .facts,.band .note{color:#9aa1a7}
 .band .note{border-color:#3a4046}
 .band .chip{background:transparent;color:#e7e2d6;border-color:#4a4f54}
+.plate .chip{background:#fff;border-color:#d9d3c4;color:#4a5055}
+.plate .chip:hover{background:var(--ink);color:#f7f3e9;border-color:var(--ink)}
 .band .chip:hover{background:var(--accent);border-color:var(--accent);color:#fff}
 .band .card{border-top-color:var(--accent)}
 .band .card{grid-template-columns:262px minmax(0,1fr);gap:40px}
@@ -164,44 +166,64 @@ section{padding:66px 0 10px}
 
 
 /* built / live work */
-.builds{align-items:start;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0 40px}
-.build{border-top:1px solid var(--rule);padding:24px 0 22px;min-width:0}
-.build-top{display:flex;gap:14px;align-items:flex-start;margin-bottom:11px}
-.build-logo{width:46px;height:46px;border-radius:11px;flex:none;display:block}
-.build-logo-text{display:grid;place-items:center;background:#1a1815;border:1px solid #34302b;
-  color:#e9e3d6;font:400 15px/1 var(--serif);letter-spacing:.04em}
-.build-head{flex:1;min-width:0}
-.build-head h3{margin:0 0 4px}
-.build h3{font:400 23px/1.2 var(--serif);margin:0;letter-spacing:-.01em}
-.build h3 a{text-decoration:none}
-.build h3 a:hover{color:var(--accent)}
-.build-role{font:600 9.5px/1.3 var(--sans);letter-spacing:.13em;text-transform:uppercase;
-  overflow-wrap:anywhere;white-space:normal;
-  color:var(--muted);text-align:right}
-.build-what{font-size:15px;line-height:1.55;color:#3a3f44;margin:0 0 12px;overflow-wrap:break-word}
-.build-evidence{list-style:none;margin:0 0 14px;padding:0}
-.build-evidence li{font-size:13.4px;line-height:1.5;color:#4a5055;padding:4px 0 4px 15px;
-  position:relative;border-bottom:1px solid #f0ece3}
-.build-evidence li::before{content:"—";position:absolute;left:0;color:var(--accent)}
-.build-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
-.live{display:inline-flex;align-items:center;gap:7px;text-decoration:none;
-  font:600 9.5px/1 var(--sans);letter-spacing:.16em;text-transform:uppercase;color:#1d7a4c}
+.plate{background:#f4f0e6;border-top:1px solid #ded8c8;border-bottom:1px solid #ded8c8;
+  padding:68px 0 34px;margin-top:66px}
+.plate .sec-head h2{color:var(--ink)}
+.plate .sec-intro{color:#41464b;margin-bottom:40px}
+.builds{display:grid;gap:0;border-top:2px solid var(--ink)}
+.build{display:grid;grid-template-columns:52px minmax(0,1.12fr) minmax(0,.88fr);
+  gap:0 44px;padding:38px 0 36px;border-bottom:1px solid #d9d3c4;align-items:start}
+.build-num{font:400 12px/1 var(--sans);letter-spacing:.2em;color:#a8332c;padding-top:9px}
+.build-main{min-width:0}
+.build-head{display:flex;gap:16px;align-items:center;margin-bottom:16px}
+.build-logo{width:54px;height:54px;border-radius:14px;flex:none;display:block;
+  box-shadow:0 6px 16px -10px rgba(20,18,16,.65)}
+.build-logo-text{display:grid;place-items:center;background:#17150f;color:#efe9db;
+  font:400 16px/1 var(--serif);letter-spacing:.05em}
+.build-id{min-width:0}
+.build-head h3{font:400 26px/1.12 var(--serif);margin:0 0 6px;letter-spacing:-.012em}
+.build-head h3 a{text-decoration:none;color:var(--ink)}
+.build-head h3 a:hover{color:var(--accent)}
+.build-role{display:block;font:600 9.4px/1.4 var(--sans);letter-spacing:.15em;
+  text-transform:uppercase;color:#7d7a72;overflow-wrap:anywhere}
+.build-what{font-size:15.2px;line-height:1.62;color:#3a3f44;margin:0 0 20px;max-width:40em}
+.build-actions{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+.build-cta{display:inline-flex;align-items:center;gap:10px;padding:12px 18px;
+  background:var(--ink);border:1px solid var(--ink);border-radius:2px;text-decoration:none;
+  font:600 10.5px/1 var(--sans);letter-spacing:.14em;text-transform:uppercase;color:#f7f3e9}
+.build-cta span{transition:transform .15s ease}
+.build-cta:hover{background:var(--accent);border-color:var(--accent)}
+.build-cta:hover span{transform:translateX(3px)}
+.build-cta-quiet{background:transparent;color:var(--ink)}
+.build-cta-quiet:hover{background:var(--ink);color:#f7f3e9;border-color:var(--ink)}
+.build-shut{display:inline-flex;align-items:center;padding:12px 16px;border:1px dashed #c3bcaa;
+  border-radius:2px;font:600 10px/1 var(--sans);letter-spacing:.13em;text-transform:uppercase;
+  color:#7d7a72}
+.build-side{border-left:1px solid #d9d3c4;padding-left:34px;min-width:0}
+.build-side-label{font:600 9.2px/1 var(--sans);letter-spacing:.19em;text-transform:uppercase;
+  color:#8a8578;margin-bottom:12px}
+.build-evidence{list-style:none;margin:0;padding:0}
+.build-evidence li{font-size:13.1px;line-height:1.5;color:#4a5055;padding:9px 0 9px 14px;
+  border-bottom:1px solid #e0dacb;position:relative}
+.build-evidence li:last-child{border-bottom:0;padding-bottom:2px}
+.build-evidence li::before{content:"";position:absolute;left:0;top:16px;width:5px;height:5px;
+  border-radius:50%;background:#bfb8a6}
+.build-side .chips{margin-top:16px}
+.live{display:inline-flex;align-items:center;gap:7px;font:600 9.5px/1 var(--sans);
+  letter-spacing:.16em;text-transform:uppercase;color:#3d7d59;text-decoration:none}
 .live .dot{width:7px;height:7px;border-radius:50%;background:#1d7a4c;
   box-shadow:0 0 0 3px rgba(29,122,76,.14)}
-.build-cta{display:inline-flex;align-items:center;gap:9px;margin:2px 0 16px;
-  padding:11px 16px;border:1px solid #e7e2d6;border-radius:3px;text-decoration:none;
-  font:600 10.5px/1 var(--sans);letter-spacing:.14em;text-transform:uppercase;color:#f4f0e7}
-.build-cta span{transition:transform .15s ease}
-.build-cta:hover{background:#f4f0e7;color:#141210}
-.build-cta:hover span{transform:translateX(3px)}
+.gated{display:inline-flex;align-items:center;gap:7px;font:600 9.5px/1 var(--sans);
+  letter-spacing:.16em;text-transform:uppercase;color:#8a6a1f}
+.gated .dot{width:7px;height:7px;border-radius:50%;background:#c08a1e;
+  box-shadow:0 0 0 3px rgba(192,138,30,.16)}
 .closed{display:inline-flex;align-items:center;gap:7px;font:600 9.5px/1 var(--sans);
-  letter-spacing:.16em;text-transform:uppercase;color:#8d949a}
-.closed .dot{width:7px;height:7px;border-radius:50%;background:#5d646a}
-.live:hover{color:var(--accent)}
-.live:hover .dot{background:var(--accent);box-shadow:0 0 0 3px rgba(168,51,44,.14)}
-
-/* skills */
-.skills{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:34px 32px}
+  letter-spacing:.16em;text-transform:uppercase;color:#8d8a84}
+.closed .dot{width:7px;height:7px;border-radius:50%;background:#9a968c}
+.skills{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:34px 30px}
+/* agent systems leads the section, so it takes the accent */
+.skill h4{color:#7d7a72}
+.skill.lead h4{color:var(--accent)}
 .skill h4{font:600 10.5px/1.4 var(--sans);letter-spacing:.17em;text-transform:uppercase;
   color:var(--accent);margin:0 0 10px;padding-bottom:8px;border-bottom:2px solid var(--ink)}
 .skill ul{list-style:none;margin:0;padding:0}
@@ -228,16 +250,25 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
 
 @media (max-width:900px){
   .featured{grid-template-columns:1fr}
+  .build{grid-template-columns:36px minmax(0,1fr);gap:0 18px}
+  .build-side{grid-column:2;border-left:0;border-top:1px solid #d9d3c4;padding:18px 0 0;
+    margin-top:22px}
+  .build-evidence li{padding-left:13px}
   .card,.band .card{grid-template-columns:132px minmax(0,1fr);gap:20px}
   .cover h3{font-size:16px}
   .cover{aspect-ratio:3/4.2}
-  .builds{grid-template-columns:minmax(0,1fr);gap:0}
   .contact{grid-template-columns:1fr;gap:30px}
   .about{grid-template-columns:1fr;gap:34px}
   .aside{border-left:0;border-top:1px solid var(--rule);padding:26px 0 0}
 }
 @media (max-width:620px){
   .stats{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+  .build{grid-template-columns:minmax(0,1fr);padding:32px 0 30px}
+  .build-num{display:none}
+  .build-side{grid-column:1}
+  .build-logo{width:46px;height:46px;border-radius:12px}
+  .build-head h3{font-size:22px}
+  .build-cta{width:100%;justify-content:center}
   .sec-head{flex-wrap:wrap;gap:6px}
   .card,.band .card{grid-template-columns:1fr;gap:18px}
   .cover{aspect-ratio:3/2.9}
@@ -251,8 +282,6 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
   .row-main{grid-column:2}
   .skills{grid-template-columns:1fr;gap:28px}
   .contact-list li{flex-direction:column;align-items:flex-start;gap:2px}
-  .build-head{display:block}
-  .build-role{display:block;margin-top:5px;text-align:left}
   .mast .wrap{flex-direction:column;align-items:flex-start;gap:11px}
   nav.mast-nav{gap:16px;flex-wrap:wrap;row-gap:8px}
 }
@@ -636,7 +665,7 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
       </article></div>
     </section>
 
-  <section class="band" id="work">
+  <section class="plate" id="work">
     <div class="wrap">
       <div class="sec-head">
         <h2>Built and running</h2>
@@ -648,116 +677,137 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
       goes to the working product — nothing here is a mock-up or a screenshot.</p>
       <div class="builds">
       <article class="build">
-        <div class="build-top">
-          <img class="build-logo" src="logos/tapstall.svg" alt="" width="46" height="46" loading="lazy" decoding="async"/>
+        <div class="build-num" aria-hidden="true">01</div>
+        <div class="build-main">
           <div class="build-head">
-            <h3><a href="https://tapstall.zlnew.workers.dev/" target="_blank" rel="noopener">Tapstall</a></h3>
-            <span class="build-role">Founder &amp; engineer · 2026</span>
+            <img class="build-logo" src="logos/tapstall.svg" alt="" width="54" height="54" loading="lazy" decoding="async"/>
+            <div class="build-id">
+              <h3><a href="https://tapstall.zlnew.workers.dev/" target="_blank" rel="noopener">Tapstall</a></h3>
+              <span class="build-role">Founder &amp; engineer · 2026</span>
+            </div>
           </div>
+          <p class="build-what">A merchant commerce rail for Zimbabwe, South Africa, Kenya and Nigeria: a shop in one link, one-tap buyer confirmation, and a settlement statement that reconciles orders against money the merchant received directly. It holds no customer funds, charges a flat fee, and runs on free infrastructure.</p>
+          <div class="build-actions"><a class="build-cta" href="https://tapstall.zlnew.workers.dev/" target="_blank" rel="noopener">view it in action in the wild here<span aria-hidden="true">→</span></a><span class="live"><span class="dot" aria-hidden="true"></span>running</span></div>
         </div>
-        <p class="build-what">A merchant commerce rail for Zimbabwe, South Africa, Kenya and Nigeria: a shop in one link, one-tap buyer confirmation, and a settlement statement that reconciles orders against money the merchant received directly. It holds no customer funds, charges a flat fee, and runs on free infrastructure.</p>
-        <ul class="build-evidence"><li>Single Cloudflare Worker + KV, $0/month, version 1.9.1 live</li><li>420 passing assertions on a ~14.8k-line codebase</li><li>Quota reserve ladder 1000/975/900/800/700 — order submission is the last thing refused</li><li>Public self-test endpoint reports every invariant it claims</li></ul>
-        <a class="build-cta" href="https://tapstall.zlnew.workers.dev/" target="_blank" rel="noopener">view it in action in the wild here<span aria-hidden="true">→</span></a>
-        <div class="build-foot">
-          <a class="live" href="https://tapstall.zlnew.workers.dev/" target="_blank" rel="noopener"><span class="dot" aria-hidden="true"></span>live</a>
+        <aside class="build-side">
+          <div class="build-side-label">What is running</div>
+          <ul class="build-evidence"><li>Single Cloudflare Worker + KV, $0/month, version 1.9.1 live</li><li>420 passing assertions on a ~14.8k-line codebase</li><li>Quota reserve ladder 1000/975/900/800/700 — order submission is the last thing refused</li><li>Public self-test endpoint reports every invariant it claims</li></ul>
           <div class="chips"><a class="chip" href="https://tapstall.zlnew.workers.dev/fees.html" target="_blank" rel="noopener">Fee calculator</a><a class="chip" href="https://tapstall.zlnew.workers.dev/onboard" target="_blank" rel="noopener">Merchant onboarding</a><a class="chip" href="https://tapstall.zlnew.workers.dev/partners" target="_blank" rel="noopener">Partner terms</a><a class="chip" href="https://tapstall.zlnew.workers.dev/guide/payment-reference-matching" target="_blank" rel="noopener">Payment-matching guide</a></div>
-        </div>
+        </aside>
       </article>
       <article class="build">
-        <div class="build-top">
-          <img class="build-logo" src="logos/open-practice.svg" alt="" width="46" height="46" loading="lazy" decoding="async"/>
+        <div class="build-num" aria-hidden="true">02</div>
+        <div class="build-main">
           <div class="build-head">
-            <h3><a href="https://open-practice.zlnew.workers.dev/" target="_blank" rel="noopener">Open Practice</a></h3>
-            <span class="build-role">Designer &amp; engineer · 2026</span>
+            <img class="build-logo" src="logos/open-practice.svg" alt="" width="54" height="54" loading="lazy" decoding="async"/>
+            <div class="build-id">
+              <h3><a href="https://open-practice.zlnew.workers.dev/" target="_blank" rel="noopener">Open Practice</a></h3>
+              <span class="build-role">Designer &amp; engineer · 2026</span>
+            </div>
           </div>
+          <p class="build-what">An independent, non-accredited AI learning platform: 50 illustrated activities, a curriculum, a tool field desk and a facilitator kit. Learner accounts sync across devices; downloaded workspaces stay usable offline.</p>
+          <div class="build-actions"><a class="build-cta" href="https://open-practice.zlnew.workers.dev/" target="_blank" rel="noopener">view it in action in the wild here<span aria-hidden="true">→</span></a><span class="live"><span class="dot" aria-hidden="true"></span>running</span></div>
         </div>
-        <p class="build-what">An independent, non-accredited AI learning platform: 50 illustrated activities, a curriculum, a tool field desk and a facilitator kit. Learner accounts sync across devices; downloaded workspaces stay usable offline.</p>
-        <ul class="build-evidence"><li>Cloudflare Worker + Durable Object + Workers AI, live</li><li>68 repository tests passing on the deployed revision</li><li>First-party learning analytics; export and delete honoured</li><li>No advertising trackers, by construction</li></ul>
-        <a class="build-cta" href="https://open-practice.zlnew.workers.dev/" target="_blank" rel="noopener">view it in action in the wild here<span aria-hidden="true">→</span></a>
-        <div class="build-foot">
-          <a class="live" href="https://open-practice.zlnew.workers.dev/" target="_blank" rel="noopener"><span class="dot" aria-hidden="true"></span>live</a>
+        <aside class="build-side">
+          <div class="build-side-label">What is running</div>
+          <ul class="build-evidence"><li>Cloudflare Worker + Durable Object + Workers AI, live</li><li>68 repository tests passing on the deployed revision</li><li>First-party learning analytics; export and delete honoured</li><li>No advertising trackers, by construction</li></ul>
           <div class="chips"><a class="chip" href="https://open-practice.zlnew.workers.dev/activities.html" target="_blank" rel="noopener">The workshops</a></div>
-        </div>
+        </aside>
       </article>
       <article class="build">
-        <div class="build-top">
-          <img class="build-logo" src="logos/deskos.svg" alt="" width="46" height="46" loading="lazy" decoding="async"/>
+        <div class="build-num" aria-hidden="true">03</div>
+        <div class="build-main">
           <div class="build-head">
-            <h3>DeskOS</h3>
-            <span class="build-role">Architect · operator command centre</span>
+            <img class="build-logo" src="logos/deskos.svg" alt="" width="54" height="54" loading="lazy" decoding="async"/>
+            <div class="build-id">
+              <h3>DeskOS</h3>
+              <span class="build-role">Architect · operator command centre</span>
+            </div>
           </div>
+          <p class="build-what">An operator command centre in ten modules: overview and ECU, units and wCells, lead hunting, outreach, approvals, and a ledger that makes every step auditable. It is the system examined in The Governable Enterprise, and the console itself is closed — the paper carries the method, the screens stay with the operator.</p>
+          <div class="build-actions"><span class="build-shut">Closed console — access by arrangement</span><span class="closed"><span class="dot" aria-hidden="true"></span>closed</span></div>
         </div>
-        <p class="build-what">An operator command centre in ten modules: overview and ECU, units and wCells, lead hunting, outreach, approvals, and a ledger that makes every step auditable. It is the system examined in The Governable Enterprise, and the console itself is closed — the paper carries the method, the screens stay with the operator.</p>
-        <ul class="build-evidence"><li>Ten operating modules in one shell, ~300KB served</li><li>Every step writes to an auditable ledger</li><li>Described and bounded in The Governable Enterprise</li></ul>
-        
-        <div class="build-foot">
-          <span class="closed"><span class="dot" aria-hidden="true"></span>closed</span>
-          <div class="chips"><span class="chip chip-none">Closed console — access by arrangement</span></div>
-        </div>
-      </article>
-      <article class="build">
-        <div class="build-top">
-          <img class="build-logo" src="logos/stpi.svg" alt="" width="46" height="46" loading="lazy" decoding="async"/>
-          <div class="build-head">
-            <h3><a href="https://stpi.whop.site/" target="_blank" rel="noopener">STPi</a></h3>
-            <span class="build-role">Architect &amp; engineer · applied agent system</span>
-          </div>
-        </div>
-        <p class="build-what">A hiring agent that hunts country-specific sources twice a day, Monday to Saturday, across South Africa, Zimbabwe, Zambia and fourteen other southern African countries. Every advert is scored against the candidate&#x27;s real profile; a tailored cover letter and a country-formatted CV are drafted as PDFs; one card is posted to the dashboard. Approve it and it sends from the candidate&#x27;s own mailbox, signed as the candidate, with the reply reaching both — interview invites flagged. Reject it and the PDFs are deleted on the spot. Nothing sends without a human, nothing is invented, drafts die at 72 hours, and the whole thing hosts for $0 on GitHub Actions.</p>
-        <ul class="build-evidence"><li>17 southern African countries, hunted twice daily Monday–Saturday</li><li>One card, one decision: approve sends as the candidate, reject deletes the PDFs</li><li>Nothing sends unattended; unsent drafts expire at 72 hours</li><li>Ceilings enforced — 45s per fetch, 30s per provider, 35min per run, failing loudly with a live log</li><li>Free tier is the same build as the paid tiers: one candidate, five sends per UTC month, no card</li></ul>
-        <a class="build-cta" href="https://stpi.whop.site/" target="_blank" rel="noopener">view it in action in the wild here<span aria-hidden="true">→</span></a>
-        <div class="build-foot">
-          <a class="live" href="https://stpi.whop.site/" target="_blank" rel="noopener"><span class="dot" aria-hidden="true"></span>live</a>
+        <aside class="build-side">
+          <div class="build-side-label">What is running</div>
+          <ul class="build-evidence"><li>Ten operating modules in one shell, ~300KB served</li><li>Every step writes to an auditable ledger</li><li>Described and bounded in The Governable Enterprise</li></ul>
           
-        </div>
+        </aside>
       </article>
       <article class="build">
-        <div class="build-top">
-          <img class="build-logo" src="logos/contentops.svg" alt="" width="46" height="46" loading="lazy" decoding="async"/>
+        <div class="build-num" aria-hidden="true">04</div>
+        <div class="build-main">
           <div class="build-head">
-            <h3><a href="https://contentops-edge.simalidudu.workers.dev/demo" target="_blank" rel="noopener">ContentOps</a></h3>
-            <span class="build-role">Engineer · 2026</span>
+            <img class="build-logo" src="logos/stpi.svg" alt="" width="54" height="54" loading="lazy" decoding="async"/>
+            <div class="build-id">
+              <h3><a href="https://stpi.whop.site/" target="_blank" rel="noopener">STPi</a></h3>
+              <span class="build-role">Architect &amp; engineer · applied agent system</span>
+            </div>
           </div>
+          <p class="build-what">A hiring agent that hunts country-specific sources twice a day, Monday to Saturday, across South Africa, Zimbabwe, Zambia and fourteen other southern African countries. Every advert is scored against the candidate&#x27;s real profile; a tailored cover letter and a country-formatted CV are drafted as PDFs; one card is posted to the dashboard. Approve it and it sends from the candidate&#x27;s own mailbox, signed as the candidate, with the reply reaching both — interview invites flagged. Reject it and the PDFs are deleted on the spot. Nothing sends without a human line, and nothing is invented.</p>
+          <div class="build-actions"><a class="build-cta" href="https://stpi.whop.site/" target="_blank" rel="noopener">view it in action in the wild here<span aria-hidden="true">→</span></a><span class="live"><span class="dot" aria-hidden="true"></span>running</span></div>
         </div>
-        <p class="build-what">A zero-capital writing service: a week of posts for twenty platforms, drafted from a client&#x27;s own facts, then checked by a deterministic editor before anything may publish. When the check fails, the slot stays empty.</p>
-        <ul class="build-evidence"><li>Worker + D1 in production; 185 Python and 101 Worker cases</li><li>Fact-bound generation: no invented numbers, no invented customers</li><li>Clients hold their own model keys — capability isolation</li><li>Formalised with its incidents in the Grounded Cadence paper</li></ul>
-        <a class="build-cta" href="https://contentops-edge.simalidudu.workers.dev/demo" target="_blank" rel="noopener">view it in action in the wild here<span aria-hidden="true">→</span></a>
-        <div class="build-foot">
-          <a class="live" href="https://contentops-edge.simalidudu.workers.dev/demo" target="_blank" rel="noopener"><span class="dot" aria-hidden="true"></span>live</a>
+        <aside class="build-side">
+          <div class="build-side-label">What is running</div>
+          <ul class="build-evidence"><li>17 southern African countries, hunted twice daily Monday–Saturday</li><li>One card, one decision: approve sends as the candidate, reject deletes the PDFs</li><li>Nothing sends unattended; unsent drafts expire at 72 hours</li><li>Ceilings enforced — 45s per fetch, 30s per provider, 35min per run, failing loudly with a live log</li><li>Free tier is the same build as the paid tiers: one candidate, five sends per UTC month, no card</li></ul>
           
-        </div>
+        </aside>
       </article>
       <article class="build">
-        <div class="build-top">
-          <span class="build-logo build-logo-text" aria-hidden="true">BG</span>
+        <div class="build-num" aria-hidden="true">05</div>
+        <div class="build-main">
           <div class="build-head">
-            <h3><a href="https://bsky-audit.simalidudu.workers.dev/" target="_blank" rel="noopener">Bluesky Growth Audit</a></h3>
-            <span class="build-role">Engineer · 2026</span>
+            <img class="build-logo" src="logos/contentops.svg" alt="" width="54" height="54" loading="lazy" decoding="async"/>
+            <div class="build-id">
+              <h3><a href="https://contentops-edge.simalidudu.workers.dev/demo" target="_blank" rel="noopener">ContentOps</a></h3>
+              <span class="build-role">Engineer · 2026</span>
+            </div>
           </div>
+          <p class="build-what">A zero-capital writing service: a week of posts for twenty platforms, drafted from a client&#x27;s own facts, then checked by a deterministic editor before anything may publish. When the check fails, the slot stays empty.</p>
+          <div class="build-actions"><a class="build-cta" href="https://contentops-edge.simalidudu.workers.dev/demo" target="_blank" rel="noopener">view it in action in the wild here<span aria-hidden="true">→</span></a><span class="live"><span class="dot" aria-hidden="true"></span>running</span></div>
         </div>
-        <p class="build-what">A free, no-signup audit of a Bluesky account: posting cadence, engagement shape, content mix and timing, with specific fixes rather than a score.</p>
-        <ul class="build-evidence"><li>Live and free to use</li><li>No account, no tracker, no email capture</li><li>Reads public data only</li></ul>
-        <a class="build-cta" href="https://bsky-audit.simalidudu.workers.dev/" target="_blank" rel="noopener">view it in action in the wild here<span aria-hidden="true">→</span></a>
-        <div class="build-foot">
-          <a class="live" href="https://bsky-audit.simalidudu.workers.dev/" target="_blank" rel="noopener"><span class="dot" aria-hidden="true"></span>live</a>
+        <aside class="build-side">
+          <div class="build-side-label">What is running</div>
+          <ul class="build-evidence"><li>Worker + D1 in production; 185 Python and 101 Worker cases</li><li>Fact-bound generation: no invented numbers, no invented customers</li><li>Clients hold their own model keys — capability isolation</li><li>Formalised with its incidents in the Grounded Cadence paper</li></ul>
           
-        </div>
+        </aside>
       </article>
       <article class="build">
-        <div class="build-top">
-          <span class="build-logo build-logo-text" aria-hidden="true">HL</span>
+        <div class="build-num" aria-hidden="true">06</div>
+        <div class="build-main">
           <div class="build-head">
-            <h3><a href="https://hunta-leads.simalidudu.workers.dev/" target="_blank" rel="noopener">Hunta lead console</a></h3>
-            <span class="build-role">Engineer · internal</span>
+            <span class="build-logo build-logo-text" aria-hidden="true">BG</span>
+            <div class="build-id">
+              <h3><a href="https://bsky-audit.simalidudu.workers.dev/" target="_blank" rel="noopener">Bluesky Growth Audit</a></h3>
+              <span class="build-role">Engineer · 2026</span>
+            </div>
           </div>
+          <p class="build-what">A free, no-signup audit of a Bluesky account: posting cadence, engagement shape, content mix and timing, with specific fixes rather than a score.</p>
+          <div class="build-actions"><a class="build-cta" href="https://bsky-audit.simalidudu.workers.dev/" target="_blank" rel="noopener">view it in action in the wild here<span aria-hidden="true">→</span></a><span class="live"><span class="dot" aria-hidden="true"></span>running</span></div>
         </div>
-        <p class="build-what">The lead pipeline behind the hunta field report: discovery, admission gating and a do-not-contact ledger, driven by scheduled agents.</p>
-        <ul class="build-evidence"><li>Deployed and gated (HTTP 401 without credentials — working as designed)</li><li>Admission gate refuses before a record exists, not at send time</li></ul>
-        
-        <div class="build-foot">
-          <a class="live" href="https://hunta-leads.simalidudu.workers.dev/" target="_blank" rel="noopener"><span class="dot" aria-hidden="true"></span>live</a>
+        <aside class="build-side">
+          <div class="build-side-label">What is running</div>
+          <ul class="build-evidence"><li>Live and free to use</li><li>No account, no tracker, no email capture</li><li>Reads public data only</li></ul>
           
+        </aside>
+      </article>
+      <article class="build">
+        <div class="build-num" aria-hidden="true">07</div>
+        <div class="build-main">
+          <div class="build-head">
+            <span class="build-logo build-logo-text" aria-hidden="true">HL</span>
+            <div class="build-id">
+              <h3>Hunta lead console</h3>
+              <span class="build-role">Engineer · internal</span>
+            </div>
+          </div>
+          <p class="build-what">The lead pipeline behind the hunta field report: discovery, admission gating and a do-not-contact ledger, driven by scheduled agents.</p>
+          <div class="build-actions"><span class="build-shut">Gated — 401 without credentials</span><span class="gated"><span class="dot" aria-hidden="true"></span>running · gated</span></div>
         </div>
+        <aside class="build-side">
+          <div class="build-side-label">What is running</div>
+          <ul class="build-evidence"><li>Deployed and gated (HTTP 401 without credentials — working as designed)</li><li>Admission gate refuses before a record exists, not at send time</li></ul>
+          
+        </aside>
       </article></div>
     </div>
   </section>
@@ -768,7 +818,7 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
         <h2>What I do</h2>
         <div class="kicker">Skills and experience</div>
       </div>
-      <div class="skills"><div class="skill"><h4>Systems &amp; backend</h4><ul><li>Cloudflare Workers, KV, D1, Durable Objects</li><li>Node.js, Python</li><li>Serverless cost ceilings and quota design</li><li>Event-sourced ledgers</li><li>Idempotency and recovery design</li></ul></div><div class="skill"><h4>AI in production</h4><ul><li>LLM provider ladders and failover</li><li>Retrieval and fact-binding</li><li>Deterministic post-checks on generated text</li><li>Prompt and evaluation design</li><li>Agent scheduling with human taps</li></ul></div><div class="skill"><h4>Product &amp; front end</h4><ul><li>Accessible single-file web apps</li><li>Per-business-type storefront design</li><li>Make-in-one-link flows for low-end Android</li><li>Offline-first workspaces</li></ul></div><div class="skill"><h4>Delivery &amp; operations</h4><ul><li>GitHub Actions CI/CD</li><li>Test suites that pin refusals, not just outputs</li><li>Production forensics and incident write-ups</li><li>Zero-budget infrastructure</li></ul></div><div class="skill"><h4>Writing &amp; research</h4><ul><li>Long-form non-fiction and textbooks</li><li>Typesetting pipelines (Markdown → PDF/EPUB)</li><li>Design-science case studies</li><li>Reproducible document builds</li></ul></div></div>
+      <div class="skills"><div class="skill"><h4>Systems &amp; backend</h4><ul><li>Cloudflare Workers, KV, D1, Durable Objects</li><li>Node.js, Python</li><li>Serverless cost ceilings and quota design</li><li>Event-sourced ledgers</li><li>Idempotency and recovery design</li></ul></div><div class="skill lead"><h4>Agent systems</h4><ul><li>Agent scheduling: unattended hunts, human decision points</li><li>Approval gates with real side effects — approve sends, reject deletes</li><li>Capability ladders and idle witnesses: agents that act only inside their grant</li><li>Admission gating and do-not-contact ledgers, enforced before a record exists</li><li>Bounded runs with fail-loud logs — per-fetch, per-provider, per-run ceilings</li><li>Durable agent state, idempotent re-entry and 72-hour draft expiry</li><li>Deterministic checks on what an agent emits before it may emit it</li><li>Autonomy that escalates to a person for anything irreversible</li></ul></div><div class="skill"><h4>AI in production</h4><ul><li>LLM provider ladders and failover</li><li>Retrieval and fact-binding</li><li>Prompt and evaluation design</li><li>Capability isolation: clients hold their own model keys</li><li>Cost ceilings and quota ladders on every model call</li></ul></div><div class="skill"><h4>Product &amp; front end</h4><ul><li>Accessible single-file web apps</li><li>Per-business-type storefront design</li><li>Make-in-one-link flows for low-end Android</li><li>Offline-first workspaces</li></ul></div><div class="skill"><h4>Delivery &amp; operations</h4><ul><li>GitHub Actions CI/CD</li><li>Test suites that pin refusals, not just outputs</li><li>Production forensics and incident write-ups</li><li>Zero-budget infrastructure</li></ul></div><div class="skill"><h4>Writing &amp; research</h4><ul><li>Long-form non-fiction and textbooks</li><li>Typesetting pipelines (Markdown → PDF/EPUB)</li><li>Design-science case studies</li><li>Reproducible document builds</li></ul></div></div>
     </section>
 
   </div>

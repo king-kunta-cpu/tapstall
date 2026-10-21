@@ -21,6 +21,8 @@ Usage:  python3 scripts/make_portfolio.py
 """
 import html
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 REPO = "https://github.com/king-kunta-cpu/tapstall"
@@ -404,8 +406,7 @@ BUILT = [
                  "PDFs; one card is posted to the dashboard. Approve it and it sends from the "
                  "candidate's own mailbox, signed as the candidate, with the reply reaching "
                  "both — interview invites flagged. Reject it and the PDFs are deleted on the "
-                 "spot. Nothing sends without a human, nothing is invented, drafts die at 72 "
-                 "hours, and the whole thing hosts for $0 on GitHub Actions."),
+                 "spot. Nothing sends without a human line, and nothing is invented."),
         "evidence": ["17 southern African countries, hunted twice daily Monday–Saturday",
                      "One card, one decision: approve sends as the candidate, reject deletes the PDFs",
                      "Nothing sends unattended; unsent drafts expire at 72 hours",
@@ -441,7 +442,9 @@ BUILT = [
     {
         "title": "Hunta lead console",
         "role": "Engineer · internal",
-        "url": "https://hunta-leads.simalidudu.workers.dev/",
+        "url": None,
+        "access": "Gated — 401 without credentials",
+        "state": "gated",
         "demo": [],
         "what": ("The lead pipeline behind the hunta field report: discovery, admission gating and "
                  "a do-not-contact ledger, driven by scheduled agents."),
@@ -454,9 +457,18 @@ SKILLS = [
     ("Systems & backend", ["Cloudflare Workers, KV, D1, Durable Objects", "Node.js, Python",
                            "Serverless cost ceilings and quota design", "Event-sourced ledgers",
                            "Idempotency and recovery design"]),
+    ("Agent systems", ["Agent scheduling: unattended hunts, human decision points",
+                       "Approval gates with real side effects — approve sends, reject deletes",
+                       "Capability ladders and idle witnesses: agents that act only inside their grant",
+                       "Admission gating and do-not-contact ledgers, enforced before a record exists",
+                       "Bounded runs with fail-loud logs — per-fetch, per-provider, per-run ceilings",
+                       "Durable agent state, idempotent re-entry and 72-hour draft expiry",
+                       "Deterministic checks on what an agent emits before it may emit it",
+                       "Autonomy that escalates to a person for anything irreversible"]),
     ("AI in production", ["LLM provider ladders and failover", "Retrieval and fact-binding",
-                          "Deterministic post-checks on generated text", "Prompt and evaluation design",
-                          "Agent scheduling with human taps"]),
+                          "Prompt and evaluation design",
+                          "Capability isolation: clients hold their own model keys",
+                          "Cost ceilings and quota ladders on every model call"]),
     ("Product & front end", ["Accessible single-file web apps", "Per-business-type storefront design",
                              "Make-in-one-link flows for low-end Android", "Offline-first workspaces"]),
     ("Delivery & operations", ["GitHub Actions CI/CD", "Test suites that pin refusals, not just outputs",
@@ -490,56 +502,60 @@ def esc(s):
 
 # --------------------------------------------------------------------------- rendering
 
-def built_card(b):
-    """One live product. Where the thing is closed, the card says so and offers no
-    link: a public URL on a private console is an invitation nobody meant to send."""
+def built_card(b, n):
+    """One system, set as a register entry: number, mark, what it is, what is running.
+
+    Where a system is closed, the entry says so in the same place a live one offers
+    its button — a public URL on a private console is an invitation nobody meant to
+    send, so closed entries carry no link at all."""
     demo = "".join(f'<a class="chip" href="{esc(u)}" target="_blank" rel="noopener">{esc(l)}</a>'
                    for l, u in b["demo"] if u != b.get("url"))
     ev = "".join(f"<li>{esc(e)}</li>" for e in b["evidence"])
     if b.get("logo"):
         mark = (f'<img class="build-logo" src="{esc(b["logo"])}" alt="" '
-                f'width="46" height="46" loading="lazy" decoding="async"/>')
+                f'width="54" height="54" loading="lazy" decoding="async"/>')
     else:                       # no published mark: a lettered tile, never a fake logo
         initials = "".join(w[0] for w in b["title"].replace("—", " ").split()[:2]).upper()
         mark = f'<span class="build-logo build-logo-text" aria-hidden="true">{esc(initials)}</span>'
     title = (f'<a href="{esc(b["url"])}" target="_blank" rel="noopener">{esc(b["title"])}</a>'
              if b.get("url") else esc(b["title"]))
-    if b.get("url"):
-        foot = (f'<a class="live" href="{esc(b["url"])}" target="_blank" rel="noopener">'
-                f'<span class="dot" aria-hidden="true"></span>live</a>')
-    else:
-        foot = '<span class="closed"><span class="dot" aria-hidden="true"></span>closed</span>'
-    if demo:
-        chips = demo
+    if b.get("cta"):
+        action = (f'<a class="build-cta" href="{esc(b["url"])}" target="_blank" rel="noopener">'
+                  f'view it in action in the wild here<span aria-hidden="true">→</span></a>')
     elif b.get("url"):
-        chips = ""                    # the button above already opens the product
+        action = (f'<a class="build-cta build-cta-quiet" href="{esc(b["url"])}" '
+                  f'target="_blank" rel="noopener">open it<span aria-hidden="true">→</span></a>')
     else:
-        chips = f'<span class="chip chip-none">{esc(b.get("access", "internal · gated"))}</span>'
-    cta = (f'<a class="build-cta" href="{esc(b["url"])}" target="_blank" rel="noopener">'
-           f'view it in action in the wild here<span aria-hidden="true">→</span></a>'
-           if b.get("cta") else "")
+        action = f'<span class="build-shut">{esc(b.get("access", "internal · gated"))}</span>'
+    kind = b.get("state") or ("live" if b.get("url") else "closed")
+    label = {"live": "running", "gated": "running · gated", "closed": "closed"}[kind]
+    state = f'<span class="{kind}"><span class="dot" aria-hidden="true"></span>{label}</span>'
+    chips = f'<div class="chips">{demo}</div>' if demo else ""
     return f"""
       <article class="build">
-        <div class="build-top">
-          {mark}
+        <div class="build-num" aria-hidden="true">{n:02d}</div>
+        <div class="build-main">
           <div class="build-head">
-            <h3>{title}</h3>
-            <span class="build-role">{esc(b['role'])}</span>
+            {mark}
+            <div class="build-id">
+              <h3>{title}</h3>
+              <span class="build-role">{esc(b['role'])}</span>
+            </div>
           </div>
+          <p class="build-what">{esc(b['what'])}</p>
+          <div class="build-actions">{action}{state}</div>
         </div>
-        <p class="build-what">{esc(b['what'])}</p>
-        <ul class="build-evidence">{ev}</ul>
-        {cta}
-        <div class="build-foot">
-          {foot}
-          {f'<div class="chips">{chips}</div>' if chips else ''}
-        </div>
+        <aside class="build-side">
+          <div class="build-side-label">What is running</div>
+          <ul class="build-evidence">{ev}</ul>
+          {chips}
+        </aside>
       </article>"""
 
 
 def skills_block():
     return "".join(
-        f'<div class="skill"><h4>{esc(name)}</h4><ul>' +
+        f'<div class="skill{" lead" if name == "Agent systems" else ""}"><h4>{esc(name)}</h4><ul>' +
         "".join(f"<li>{esc(x)}</li>" for x in items) + "</ul></div>"
         for name, items in SKILLS)
 
@@ -786,6 +802,8 @@ section{padding:66px 0 10px}
 .band .facts,.band .note{color:#9aa1a7}
 .band .note{border-color:#3a4046}
 .band .chip{background:transparent;color:#e7e2d6;border-color:#4a4f54}
+.plate .chip{background:#fff;border-color:#d9d3c4;color:#4a5055}
+.plate .chip:hover{background:var(--ink);color:#f7f3e9;border-color:var(--ink)}
 .band .chip:hover{background:var(--accent);border-color:var(--accent);color:#fff}
 .band .card{border-top-color:var(--accent)}
 .band .card{grid-template-columns:262px minmax(0,1fr);gap:40px}
@@ -809,44 +827,64 @@ section{padding:66px 0 10px}
 
 
 /* built / live work */
-.builds{align-items:start;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0 40px}
-.build{border-top:1px solid var(--rule);padding:24px 0 22px;min-width:0}
-.build-top{display:flex;gap:14px;align-items:flex-start;margin-bottom:11px}
-.build-logo{width:46px;height:46px;border-radius:11px;flex:none;display:block}
-.build-logo-text{display:grid;place-items:center;background:#1a1815;border:1px solid #34302b;
-  color:#e9e3d6;font:400 15px/1 var(--serif);letter-spacing:.04em}
-.build-head{flex:1;min-width:0}
-.build-head h3{margin:0 0 4px}
-.build h3{font:400 23px/1.2 var(--serif);margin:0;letter-spacing:-.01em}
-.build h3 a{text-decoration:none}
-.build h3 a:hover{color:var(--accent)}
-.build-role{font:600 9.5px/1.3 var(--sans);letter-spacing:.13em;text-transform:uppercase;
-  overflow-wrap:anywhere;white-space:normal;
-  color:var(--muted);text-align:right}
-.build-what{font-size:15px;line-height:1.55;color:#3a3f44;margin:0 0 12px;overflow-wrap:break-word}
-.build-evidence{list-style:none;margin:0 0 14px;padding:0}
-.build-evidence li{font-size:13.4px;line-height:1.5;color:#4a5055;padding:4px 0 4px 15px;
-  position:relative;border-bottom:1px solid #f0ece3}
-.build-evidence li::before{content:"—";position:absolute;left:0;color:var(--accent)}
-.build-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
-.live{display:inline-flex;align-items:center;gap:7px;text-decoration:none;
-  font:600 9.5px/1 var(--sans);letter-spacing:.16em;text-transform:uppercase;color:#1d7a4c}
+.plate{background:#f4f0e6;border-top:1px solid #ded8c8;border-bottom:1px solid #ded8c8;
+  padding:68px 0 34px;margin-top:66px}
+.plate .sec-head h2{color:var(--ink)}
+.plate .sec-intro{color:#41464b;margin-bottom:40px}
+.builds{display:grid;gap:0;border-top:2px solid var(--ink)}
+.build{display:grid;grid-template-columns:52px minmax(0,1.12fr) minmax(0,.88fr);
+  gap:0 44px;padding:38px 0 36px;border-bottom:1px solid #d9d3c4;align-items:start}
+.build-num{font:400 12px/1 var(--sans);letter-spacing:.2em;color:#a8332c;padding-top:9px}
+.build-main{min-width:0}
+.build-head{display:flex;gap:16px;align-items:center;margin-bottom:16px}
+.build-logo{width:54px;height:54px;border-radius:14px;flex:none;display:block;
+  box-shadow:0 6px 16px -10px rgba(20,18,16,.65)}
+.build-logo-text{display:grid;place-items:center;background:#17150f;color:#efe9db;
+  font:400 16px/1 var(--serif);letter-spacing:.05em}
+.build-id{min-width:0}
+.build-head h3{font:400 26px/1.12 var(--serif);margin:0 0 6px;letter-spacing:-.012em}
+.build-head h3 a{text-decoration:none;color:var(--ink)}
+.build-head h3 a:hover{color:var(--accent)}
+.build-role{display:block;font:600 9.4px/1.4 var(--sans);letter-spacing:.15em;
+  text-transform:uppercase;color:#7d7a72;overflow-wrap:anywhere}
+.build-what{font-size:15.2px;line-height:1.62;color:#3a3f44;margin:0 0 20px;max-width:40em}
+.build-actions{display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+.build-cta{display:inline-flex;align-items:center;gap:10px;padding:12px 18px;
+  background:var(--ink);border:1px solid var(--ink);border-radius:2px;text-decoration:none;
+  font:600 10.5px/1 var(--sans);letter-spacing:.14em;text-transform:uppercase;color:#f7f3e9}
+.build-cta span{transition:transform .15s ease}
+.build-cta:hover{background:var(--accent);border-color:var(--accent)}
+.build-cta:hover span{transform:translateX(3px)}
+.build-cta-quiet{background:transparent;color:var(--ink)}
+.build-cta-quiet:hover{background:var(--ink);color:#f7f3e9;border-color:var(--ink)}
+.build-shut{display:inline-flex;align-items:center;padding:12px 16px;border:1px dashed #c3bcaa;
+  border-radius:2px;font:600 10px/1 var(--sans);letter-spacing:.13em;text-transform:uppercase;
+  color:#7d7a72}
+.build-side{border-left:1px solid #d9d3c4;padding-left:34px;min-width:0}
+.build-side-label{font:600 9.2px/1 var(--sans);letter-spacing:.19em;text-transform:uppercase;
+  color:#8a8578;margin-bottom:12px}
+.build-evidence{list-style:none;margin:0;padding:0}
+.build-evidence li{font-size:13.1px;line-height:1.5;color:#4a5055;padding:9px 0 9px 14px;
+  border-bottom:1px solid #e0dacb;position:relative}
+.build-evidence li:last-child{border-bottom:0;padding-bottom:2px}
+.build-evidence li::before{content:"";position:absolute;left:0;top:16px;width:5px;height:5px;
+  border-radius:50%;background:#bfb8a6}
+.build-side .chips{margin-top:16px}
+.live{display:inline-flex;align-items:center;gap:7px;font:600 9.5px/1 var(--sans);
+  letter-spacing:.16em;text-transform:uppercase;color:#3d7d59;text-decoration:none}
 .live .dot{width:7px;height:7px;border-radius:50%;background:#1d7a4c;
   box-shadow:0 0 0 3px rgba(29,122,76,.14)}
-.build-cta{display:inline-flex;align-items:center;gap:9px;margin:2px 0 16px;
-  padding:11px 16px;border:1px solid #e7e2d6;border-radius:3px;text-decoration:none;
-  font:600 10.5px/1 var(--sans);letter-spacing:.14em;text-transform:uppercase;color:#f4f0e7}
-.build-cta span{transition:transform .15s ease}
-.build-cta:hover{background:#f4f0e7;color:#141210}
-.build-cta:hover span{transform:translateX(3px)}
+.gated{display:inline-flex;align-items:center;gap:7px;font:600 9.5px/1 var(--sans);
+  letter-spacing:.16em;text-transform:uppercase;color:#8a6a1f}
+.gated .dot{width:7px;height:7px;border-radius:50%;background:#c08a1e;
+  box-shadow:0 0 0 3px rgba(192,138,30,.16)}
 .closed{display:inline-flex;align-items:center;gap:7px;font:600 9.5px/1 var(--sans);
-  letter-spacing:.16em;text-transform:uppercase;color:#8d949a}
-.closed .dot{width:7px;height:7px;border-radius:50%;background:#5d646a}
-.live:hover{color:var(--accent)}
-.live:hover .dot{background:var(--accent);box-shadow:0 0 0 3px rgba(168,51,44,.14)}
-
-/* skills */
-.skills{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:34px 32px}
+  letter-spacing:.16em;text-transform:uppercase;color:#8d8a84}
+.closed .dot{width:7px;height:7px;border-radius:50%;background:#9a968c}
+.skills{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:34px 30px}
+/* agent systems leads the section, so it takes the accent */
+.skill h4{color:#7d7a72}
+.skill.lead h4{color:var(--accent)}
 .skill h4{font:600 10.5px/1.4 var(--sans);letter-spacing:.17em;text-transform:uppercase;
   color:var(--accent);margin:0 0 10px;padding-bottom:8px;border-bottom:2px solid var(--ink)}
 .skill ul{list-style:none;margin:0;padding:0}
@@ -873,16 +911,25 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
 
 @media (max-width:900px){
   .featured{grid-template-columns:1fr}
+  .build{grid-template-columns:36px minmax(0,1fr);gap:0 18px}
+  .build-side{grid-column:2;border-left:0;border-top:1px solid #d9d3c4;padding:18px 0 0;
+    margin-top:22px}
+  .build-evidence li{padding-left:13px}
   .card,.band .card{grid-template-columns:132px minmax(0,1fr);gap:20px}
   .cover h3{font-size:16px}
   .cover{aspect-ratio:3/4.2}
-  .builds{grid-template-columns:minmax(0,1fr);gap:0}
   .contact{grid-template-columns:1fr;gap:30px}
   .about{grid-template-columns:1fr;gap:34px}
   .aside{border-left:0;border-top:1px solid var(--rule);padding:26px 0 0}
 }
 @media (max-width:620px){
   .stats{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+  .build{grid-template-columns:minmax(0,1fr);padding:32px 0 30px}
+  .build-num{display:none}
+  .build-side{grid-column:1}
+  .build-logo{width:46px;height:46px;border-radius:12px}
+  .build-head h3{font-size:22px}
+  .build-cta{width:100%;justify-content:center}
   .sec-head{flex-wrap:wrap;gap:6px}
   .card,.band .card{grid-template-columns:1fr;gap:18px}
   .cover{aspect-ratio:3/2.9}
@@ -896,8 +943,6 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
   .row-main{grid-column:2}
   .skills{grid-template-columns:1fr;gap:28px}
   .contact-list li{flex-direction:column;align-items:flex-start;gap:2px}
-  .build-head{display:block}
-  .build-role{display:block;margin-top:5px;text-align:left}
   .mast .wrap{flex-direction:column;align-items:flex-start;gap:11px}
   nav.mast-nav{gap:16px;flex-wrap:wrap;row-gap:8px}
 }
@@ -943,7 +988,7 @@ def build():
     total_words = sum(w["words"] or 0 for w in WORKS)
 
     cards = "".join(featured_card(w) for w in flagship)
-    builds = "".join(built_card(b) for b in BUILT)
+    builds = "".join(built_card(b, i + 1) for i, b in enumerate(BUILT))
     skills = skills_block()
     contacts = contact_block()
     research_block = "".join(featured_card(w) for w in research)
@@ -1031,7 +1076,7 @@ def build():
       <div class="rows">{rows}</div>
     </section>
 
-  <section class="band" id="work">
+  <section class="plate" id="work">
     <div class="wrap">
       <div class="sec-head">
         <h2>Built and running</h2>
@@ -1256,6 +1301,12 @@ def main():
     }
     (site / "catalogue.json").write_text(json.dumps(cat, indent=2, ensure_ascii=False) + "\n",
                                          encoding="utf-8")
+
+    check = subprocess.run([sys.executable, str(Path(__file__).with_name("check_portfolio.py"))],
+                           capture_output=True, text=True)
+    print(check.stdout.strip())
+    if check.returncode != 0:
+        raise SystemExit("refusing to finish: the portfolio would publish private material")
 
     print(f"{site}/index.html      {len(doc):,} bytes")
     print(f"{site}/catalogue.json  {len(WORKS)} works, {total_pages:,} pages catalogued")
