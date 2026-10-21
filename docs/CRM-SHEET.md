@@ -42,7 +42,9 @@ file in the same project:
 4. In the editor's function dropdown pick **`tapstallInstallAll`** → **Run**. Authorise when asked.
    That installs the ⚡ Tapstall menu, the 2-hour sync and the stage push. Nothing else is touched.
 5. Reload the sheet. You now have **two menus**: `🚀 STPi + DeskOS Command OS` (theirs) and
-   **⚡ Tapstall** (this file).
+   **⚡ Tapstall** (this file). Two, not one, because their `Code.gs` is re-pasted from their worker
+   whenever they ship a change — anything added to their file is lost then, anything in its own file
+   is not. If you want a single menu anyway, `docs/CRM-ONE-MENU.md` has the six lines and the cost.
 
 **Tab 7 (the DeskOS fleet register) is not created by this file.** It is theirs — running their
 menu item **1. Initialize / Upgrade All 7 WorkCell Tabs** creates `1_`…`7_`, including

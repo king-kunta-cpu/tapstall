@@ -86,7 +86,9 @@ function tpsProps_() {
     // set TPS_INCLUDE_UNSOURCED=true only to import the pre-gate backlog knowingly
     includeUnsourced: String(p.getProperty('TPS_INCLUDE_UNSOURCED') || '').toLowerCase() === 'true',
     // Tab 4 has one owner. It is not this file unless somebody says so.
-    ownQueue: String(p.getProperty('TPS_OWN_QUEUE') || '').toLowerCase() === 'true'
+    ownQueue: String(p.getProperty('TPS_OWN_QUEUE') || '').toLowerCase() === 'true',
+    // set true only if the Tapstall items were folded into the STPi/DeskOS menu (docs/CRM-ONE-MENU.md)
+    menuOwned: String(p.getProperty('TPS_MENU_OWNED') || '').toLowerCase() === 'true'
   };
 }
 
@@ -682,7 +684,7 @@ function tapstallInstallAll() {
   var cfg = tpsProps_();
   if (!cfg.key) return tpsAlert_('Set TAPSTALL_SHEET_KEY in Project Settings → Script Properties first.\n\n'
     + 'The key is in ~/SHEET-KEY.txt on the build machine.');
-  tpsInstallMenuTrigger_();
+  if (!cfg.menuOwned) tpsInstallMenuTrigger_();
   tapstallInstallTriggers();
   tpsOnOpen({});
   return tpsAlert_('Tapstall is installed.\n\n'
