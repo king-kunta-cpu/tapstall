@@ -34,6 +34,14 @@ admin gate as the dashboard.
   the core import regex cannot swallow it), which is what made the deployed Worker actually able
   to answer a statement. Two helper names were renamed in `rail.js` (`railRound2`, `railClip`) so
   the inlined bundle has no duplicate declarations.
+**Live (v1.7.0).** `89f909a`, deploy run `39596255894` — worker + pages, `success`.
+`/__ping` → `{"ok":true,"version":"1.7.0"}`. Unauthenticated behaviour is the intended one:
+`/api/settle`, `/api/settle?fmt=csv` and `/api/rail` all answer `401 need_login` (a statement
+must never leak a shop's money), and the unsigned webhook answers `503 no_secret_configured`
+rather than trusting a claim. `/s/mamatoe` still 200. The collect leg goes live the moment
+`NOWPAYMENTS_API_KEY` and `NOWPAYMENTS_IPN_SECRET` are set with `wrangler secret put` — no code
+change needed.
+
 - **Docs**: `docs/AGENCY-PLAYBOOK.md` (the distribution answer: sell to agencies, 30-day calendar,
   openers, metrics and a kill rule) and `docs/PARTNER-AGREEMENT.md` (the white-label agreement,
   written so a lawyer can finish it and so no clause promises what the software cannot do).
