@@ -31,7 +31,13 @@ storefront.
 
 Built and checked in a browser before shipping — desktop and 390px mobile, no console
 errors, no horizontal overflow, the cart, the sheet, the category chips and the
-sold-out path all exercised. 364 tests.
+sold-out path all exercised. Then two things the live shop taught us within the hour: an
+item with no description left the panel empty and a kitchen sentence appeared on a shop
+that sells cold drinks (now: a "how ordering works" callout, a delivery/place line, and
+"more <category>" only when the shelf really holds another one), and folding the banner
+away took the shop's name with it on a phone (the brand strip keeps the name at every
+size). Deploy runs `39584788689`, `39584988742`, `39585165882`, `39585319883` (all
+worker + pages, all green); live `/__ping` = `1.5.4`. 364 tests.
 
 ## v1.5.3 (2026-10-20): a post the platform accepted is never posted twice
 
