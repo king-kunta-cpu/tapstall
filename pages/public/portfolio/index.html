@@ -68,6 +68,7 @@ section{padding:66px 0 10px}
 
 /* featured cards */
 .featured{display:grid;grid-template-columns:1fr;gap:40px}
+.cover-link{display:block;text-decoration:none;line-height:0}
 .card{display:grid;grid-template-columns:172px minmax(0,1fr);gap:30px;align-items:start;
   border-top:3px solid var(--ink);padding-top:22px}
 .cover{background:var(--panel);color:var(--panel-ink);aspect-ratio:3/4.3;padding:20px 19px;
@@ -163,15 +164,20 @@ section{padding:66px 0 10px}
 
 
 /* built / live work */
-.builds{align-items:start;display:grid;grid-template-columns:1fr 1fr;gap:0 40px}
-.build{border-top:1px solid var(--rule);padding:24px 0 22px}
-.build-head{display:flex;align-items:baseline;justify-content:space-between;gap:14px;margin-bottom:8px}
+.builds{align-items:start;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0 40px}
+.build{border-top:1px solid var(--rule);padding:24px 0 22px;min-width:0}
+.build-top{display:flex;gap:14px;align-items:flex-start;margin-bottom:11px}
+.build-logo{width:46px;height:46px;border-radius:11px;flex:none;display:block}
+.build-logo-text{display:grid;place-items:center;background:#1a1815;border:1px solid #34302b;
+  color:#e9e3d6;font:400 15px/1 var(--serif);letter-spacing:.04em}
+.build-head{flex:1;min-width:0}
+.build-head h3{margin:0 0 4px}
 .build h3{font:400 23px/1.2 var(--serif);margin:0;letter-spacing:-.01em}
 .build h3 a{text-decoration:none}
 .build h3 a:hover{color:var(--accent)}
 .build-role{font:600 9.5px/1.3 var(--sans);letter-spacing:.13em;text-transform:uppercase;
   color:var(--muted);text-align:right;white-space:nowrap}
-.build-what{font-size:15px;line-height:1.55;color:#3a3f44;margin:0 0 12px}
+.build-what{font-size:15px;line-height:1.55;color:#3a3f44;margin:0 0 12px;overflow-wrap:break-word}
 .build-evidence{list-style:none;margin:0 0 14px;padding:0}
 .build-evidence li{font-size:13.4px;line-height:1.5;color:#4a5055;padding:4px 0 4px 15px;
   position:relative;border-bottom:1px solid #f0ece3}
@@ -181,6 +187,9 @@ section{padding:66px 0 10px}
   font:600 9.5px/1 var(--sans);letter-spacing:.16em;text-transform:uppercase;color:#1d7a4c}
 .live .dot{width:7px;height:7px;border-radius:50%;background:#1d7a4c;
   box-shadow:0 0 0 3px rgba(29,122,76,.14)}
+.closed{display:inline-flex;align-items:center;gap:7px;font:600 9.5px/1 var(--sans);
+  letter-spacing:.16em;text-transform:uppercase;color:#8d949a}
+.closed .dot{width:7px;height:7px;border-radius:50%;background:#5d646a}
 .live:hover{color:var(--accent)}
 .live:hover .dot{background:var(--accent);box-shadow:0 0 0 3px rgba(168,51,44,.14)}
 
@@ -215,7 +224,7 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
   .card,.band .card{grid-template-columns:132px minmax(0,1fr);gap:20px}
   .cover h3{font-size:16px}
   .cover{aspect-ratio:3/4.2}
-  .builds{grid-template-columns:1fr;gap:0}
+  .builds{grid-template-columns:minmax(0,1fr);gap:0}
   .contact{grid-template-columns:1fr;gap:30px}
   .about{grid-template-columns:1fr;gap:34px}
   .aside{border-left:0;border-top:1px solid var(--rule);padding:26px 0 0}
@@ -289,7 +298,7 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
       </div>
       <div class="featured">
       <article class="card" data-kind="book" id="card-ledger">
-        
+        <a class="cover-link" href="https://github.com/king-kunta-cpu/tapstall/raw/main/book/the-ledger-and-the-shopkeeper.pdf" data-read="read/ledger.html">
       <div class="cover">
         <div class="cov-top">
           <span class="cov-kicker">Book</span>
@@ -303,22 +312,22 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
           <span>Courage Garikai</span>
           <span>77 pp</span>
         </div>
-      </div>
+      </div></a>
         <div class="card-body">
           <div class="card-meta">Book · 2026</div>
           <div class="status">First edition</div>
-          <h2><a href="#card-ledger">The Ledger and the Shopkeeper</a></h2>
+          <h2><a href="https://github.com/king-kunta-cpu/tapstall/raw/main/book/the-ledger-and-the-shopkeeper.pdf" data-read="read/ledger.html">The Ledger and the Shopkeeper</a></h2>
           <p class="sub">Building commerce for the markets the platforms forgot</p>
           <p class="blurb">A trade book on building a merchant rail for shops the platforms skipped — written from the release log rather than the pitch deck. Part one is the gap: the forty-tab panic, and why the obvious answer is wrong. Part two is the machine: a shop in one link, a statement that can be recomputed, quotas as a design material, the first hundred prospects, and the number that could not be dialled. Part three is the rules: never hold the money, never lie in the copy, never post to your customers. Part four is the craft — what broke, in five failure classes, and the uncomfortable arithmetic that follows.</p>
           <p class="note">Print edition typeset from a single Markdown source; 77 pages, running heads, resolved contents.</p>
           <div class="card-foot">
             <span class="facts">77 pages · 14,595 words · CC BY 4.0</span>
-            <div class="chips"><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/book/the-ledger-and-the-shopkeeper.pdf" target="_blank" rel="noopener">PDF</a><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/book/the-ledger-and-the-shopkeeper.epub" target="_blank" rel="noopener">EPUB</a><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/book/the-ledger-and-the-shopkeeper.html" target="_blank" rel="noopener">HTML</a><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/book/the-ledger-and-the-shopkeeper.md" target="_blank" rel="noopener">MD</a></div>
+            <div class="chips"><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/book/the-ledger-and-the-shopkeeper.pdf" data-read="read/ledger.html">PDF</a><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/book/the-ledger-and-the-shopkeeper.epub" data-read="read/ledger.html">EPUB</a><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/book/the-ledger-and-the-shopkeeper.html" data-read="read/ledger.html">HTML</a><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/book/the-ledger-and-the-shopkeeper.md" data-read="read/ledger.html">MD</a></div>
           </div>
         </div>
       </article>
       <article class="card" data-kind="book" id="card-intelligence">
-        
+        <a class="cover-link" href="https://github.com/king-kunta-cpu/tapstall/raw/main/book/intelligence-data-and-judgement.pdf" data-read="read/intelligence.html">
       <div class="cover">
         <div class="cov-top">
           <span class="cov-kicker">Book</span>
@@ -332,17 +341,17 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
           <span>Courage Garikai</span>
           <span>159 pp</span>
         </div>
-      </div>
+      </div></a>
         <div class="card-body">
           <div class="card-meta">Book · 2026</div>
           <div class="status">First edition</div>
-          <h2><a href="#card-intelligence">Intelligence, Data and Judgement</a></h2>
+          <h2><a href="https://github.com/king-kunta-cpu/tapstall/raw/main/book/intelligence-data-and-judgement.pdf" data-read="read/intelligence.html">Intelligence, Data and Judgement</a></h2>
           <p class="sub">An applied introduction to artificial intelligence, with a production case</p>
           <p class="blurb">A textbook written to be taught from. Twenty-two chapters in five parts — foundations, the material, the machine, the case, and judgement — each with learning outcomes, a worked example, graded exercises and further reading. The disciplinary spine is three widely used curricula: COMCEC&#x27;s introduction to AI and its fundamental concepts, Microsoft&#x27;s Fundamentals of AI Module 1, and NITI Aayog&#x27;s Let&#x27;s Learn AI Base Module, each attributed and mapped chapter by chapter in the appendix. Tapstall runs through the middle of the book as the worked case, including its failures.</p>
           <p class="note">Eleven tables, two pseudocode listings, a sixty-term glossary, eight labs and an annotated bibliography.</p>
           <div class="card-foot">
             <span class="facts">159 pages · 31,930 words · CC BY 4.0</span>
-            <div class="chips"><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/book/intelligence-data-and-judgement.pdf" target="_blank" rel="noopener">PDF</a><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/book/intelligence-data-and-judgement.epub" target="_blank" rel="noopener">EPUB</a><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/book/intelligence-data-and-judgement.html" target="_blank" rel="noopener">HTML</a><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/book/intelligence-data-and-judgement.md" target="_blank" rel="noopener">MD</a></div>
+            <div class="chips"><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/book/intelligence-data-and-judgement.pdf" data-read="read/intelligence.html">PDF</a><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/book/intelligence-data-and-judgement.epub" data-read="read/intelligence.html">EPUB</a><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/book/intelligence-data-and-judgement.html" data-read="read/intelligence.html">HTML</a><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/book/intelligence-data-and-judgement.md" data-read="read/intelligence.html">MD</a></div>
           </div>
         </div>
       </article>
@@ -365,7 +374,7 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
         <div class="card-body">
           <div class="card-meta">Book · 2026</div>
           <div class="status">Complete first edition</div>
-          <h2><a href="#card-governable">The Governable Enterprise</a></h2>
+          <h2>The Governable Enterprise</h2>
           <p class="sub">A practical guide to evidence, authority and AI operations — lessons from DeskOS</p>
           <p class="blurb">A practitioner guide to designing AI operations that can explain their evidence, limit their authority, account for resources and recover from uncertainty. DeskOS is examined as a candid, bounded case rather than a product-success claim, and the ten operating tools are given as methods a reader can adopt rather than results a reader should assume. Prepared in PDF, editable Word, EPUB, HTML and Markdown; full text is not distributed publicly.</p>
           <p class="note">24 developed chapters, 221 pages, 10 operating tools. Constructed examples are identified as such in the work.</p>
@@ -394,7 +403,7 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
         <div class="card-body">
           <div class="card-meta">Book · 2026</div>
           <div class="status">Private author-review edition</div>
-          <h2><a href="#card-emotional">Emotional Engineering for AI-Oriented Infrastructure Operators</a></h2>
+          <h2>Emotional Engineering for AI-Oriented Infrastructure Operators</h2>
           <p class="sub">Trust, agency and ethical adoption in systems that act</p>
           <p class="blurb">An examination of how evidence, meaningful choice and recovery can support appropriate reliance on automated systems. It distinguishes ethical adoption from emotional pressure, and treats operating methods as proposals rather than validated sales formulas — a distinction that matters most to the operator who has to decide what to say to a customer on a bad day.</p>
           <p class="note">Author-review edition: not a public release.</p>
@@ -405,47 +414,47 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
         </div>
       </article>
       <article class="card" data-kind="book" id="card-musk-mirror">
-        <div class="cover has-art"><img src="covers/musk-mirror.jpg" alt="Cover of The Musk Mirror" loading="lazy" decoding="async"/></div>
+        <a class="cover-link" href="https://github.com/king-kunta-cpu/tapstall/releases/download/publications-2026-10/the-musk-mirror.pdf" data-read="read/musk-mirror.html"><div class="cover has-art"><img src="covers/musk-mirror.jpg" alt="Cover of The Musk Mirror" loading="lazy" decoding="async"/></div></a>
         <div class="card-body">
           <div class="card-meta">Book · 2026</div>
           <div class="status">First edition</div>
-          <h2><a href="#card-musk-mirror">The Musk Mirror</a></h2>
+          <h2><a href="https://github.com/king-kunta-cpu/tapstall/releases/download/publications-2026-10/the-musk-mirror.pdf" data-read="read/musk-mirror.html">The Musk Mirror</a></h2>
           <p class="sub">How one billionaire exposed the cracks in China&#x27;s innovation dream</p>
           <p class="blurb">A gallery of expert predictions, set against what was actually built. The book reads as a mirror rather than a weapon: on the rocket sceptics, the communications &#x27;experts&#x27;, the business-model critics and the CEO chorus, and on what their confidence cost. Its argument is about expertise without humility, and about the difference between a claim that sounds authoritative and a number that can be checked.</p>
           <p class="note">Dedicated to engineers building impossible things in constrained environments.</p>
           <div class="card-foot">
             <span class="facts">286 pages · All rights reserved</span>
-            <div class="chips"><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/releases/download/publications-2026-10/the-musk-mirror.pdf" target="_blank" rel="noopener">PDF</a></div>
+            <div class="chips"><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/releases/download/publications-2026-10/the-musk-mirror.pdf" data-read="read/musk-mirror.html">PDF</a></div>
           </div>
         </div>
       </article>
       <article class="card" data-kind="book" id="card-traffic">
-        <div class="cover has-art"><img src="covers/traffic.jpg" alt="Cover of Traffic Is the New Oil" loading="lazy" decoding="async"/></div>
+        <a class="cover-link" href="https://github.com/king-kunta-cpu/tapstall/releases/download/publications-2026-10/traffic-is-the-new-oil.pdf" data-read="read/traffic.html"><div class="cover has-art"><img src="covers/traffic.jpg" alt="Cover of Traffic Is the New Oil" loading="lazy" decoding="async"/></div></a>
         <div class="card-body">
           <div class="card-meta">Book · 2026</div>
           <div class="status">First edition</div>
-          <h2><a href="#card-traffic">Traffic Is the New Oil</a></h2>
+          <h2><a href="https://github.com/king-kunta-cpu/tapstall/releases/download/publications-2026-10/traffic-is-the-new-oil.pdf" data-read="read/traffic.html">Traffic Is the New Oil</a></h2>
           <p class="sub">The African digital wealth formula</p>
           <p class="blurb">Six chapters on the only formula that has ever run the internet — traffic, ads, money — argued for a continent that supplies the eyeballs and keeps too little of the revenue. From the awakening, through the traffic layer and the ad market, to what actually enters an account while the power is out, and a zero-capital route from nothing to a first four-figure month.</p>
           <p class="note">Written for the operator with a phone, a connection and no capital.</p>
           <div class="card-foot">
             <span class="facts">256 pages · All rights reserved</span>
-            <div class="chips"><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/releases/download/publications-2026-10/traffic-is-the-new-oil.pdf" target="_blank" rel="noopener">PDF</a></div>
+            <div class="chips"><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/releases/download/publications-2026-10/traffic-is-the-new-oil.pdf" data-read="read/traffic.html">PDF</a></div>
           </div>
         </div>
       </article>
       <article class="card" data-kind="book" id="card-pinterest">
-        <div class="cover has-art"><img src="covers/pinterest.jpg" alt="Cover of Pinterest Goldmine" loading="lazy" decoding="async"/></div>
+        <a class="cover-link" href="https://github.com/king-kunta-cpu/tapstall/releases/download/publications-2026-10/pinterest-goldmine.pdf" data-read="read/pinterest.html"><div class="cover has-art"><img src="covers/pinterest.jpg" alt="Cover of Pinterest Goldmine" loading="lazy" decoding="async"/></div></a>
         <div class="card-body">
           <div class="card-meta">Book · 2026</div>
           <div class="status">First edition</div>
-          <h2><a href="#card-pinterest">Pinterest Goldmine</a></h2>
+          <h2><a href="https://github.com/king-kunta-cpu/tapstall/releases/download/publications-2026-10/pinterest-goldmine.pdf" data-read="read/pinterest.html">Pinterest Goldmine</a></h2>
           <p class="sub">The traffic source nobody told you about</p>
           <p class="blurb">A complete operating manual for one under-used traffic channel: the psychology of the scroll-stop, a pin factory run from Canva on a phone, the search optimisation playbook, a scheduling system that survives real-life disruption, and the money layer that turns attention into a payout.</p>
           <p class="note">Includes the Sunday System: a week of output in forty-five minutes.</p>
           <div class="card-foot">
             <span class="facts">242 pages · All rights reserved</span>
-            <div class="chips"><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/releases/download/publications-2026-10/pinterest-goldmine.pdf" target="_blank" rel="noopener">PDF</a></div>
+            <div class="chips"><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/releases/download/publications-2026-10/pinterest-goldmine.pdf" data-read="read/pinterest.html">PDF</a></div>
           </div>
         </div>
       </article></div>
@@ -463,7 +472,7 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
       not been proven yet.</p>
       <div class="featured">
       <article class="card" data-kind="research" id="card-custody">
-        
+        <a class="cover-link" href="https://github.com/king-kunta-cpu/tapstall/raw/main/papers/tapstall-2026-order-without-custody.pdf" data-read="read/custody.html">
       <div class="cover">
         <div class="cov-top">
           <span class="cov-kicker">Research</span>
@@ -477,22 +486,22 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
           <span>Courage Garikai</span>
           <span>30 pp</span>
         </div>
-      </div>
+      </div></a>
         <div class="card-body">
           <div class="card-meta">Research · 2026</div>
           <div class="status">Working paper; not peer reviewed</div>
-          <h2><a href="#card-custody">Order Without Custody</a></h2>
+          <h2><a href="https://github.com/king-kunta-cpu/tapstall/raw/main/papers/tapstall-2026-order-without-custody.pdf" data-read="read/custody.html">Order Without Custody</a></h2>
           <p class="sub">Governance-first design for merchant commerce rails in low-infrastructure economies</p>
           <p class="blurb">Small merchants already sell at scale — through chat threads, pages and a phone number painted on a wall — but they sell without a record. This paper argues that the binding constraint at that tier is not payment capability but reconciliation, and that reconcilability is an architectural property rather than a feature. Five mechanisms are formalised against artefacts a reader can inspect: the No-Custody Rail, Admission-Gated Discovery, Reserve-Ladder Scheduling, Surface-Disjoint Multi-Tenancy and the Constrained Persuasion Doctrine. The empirical section is forensic: five classes of governance failure, each stated as a signature, a detector and a design response.</p>
           <p class="note">Candid about its limits: no paying customers in the measurement window, no control condition, no inference beyond the case.</p>
           <div class="card-foot">
             <span class="facts">30 pages · 11,628 words · CC BY 4.0</span>
-            <div class="chips"><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/papers/tapstall-2026-order-without-custody.pdf" target="_blank" rel="noopener">PDF</a><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/papers/tapstall-2026-order-without-custody.epub" target="_blank" rel="noopener">EPUB</a><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/papers/tapstall-2026-order-without-custody.html" target="_blank" rel="noopener">HTML</a><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/papers/tapstall-2026-order-without-custody.md" target="_blank" rel="noopener">MD</a></div>
+            <div class="chips"><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/papers/tapstall-2026-order-without-custody.pdf" data-read="read/custody.html">PDF</a><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/papers/tapstall-2026-order-without-custody.epub" data-read="read/custody.html">EPUB</a><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/papers/tapstall-2026-order-without-custody.html" data-read="read/custody.html">HTML</a><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/papers/tapstall-2026-order-without-custody.md" data-read="read/custody.html">MD</a></div>
           </div>
         </div>
       </article>
       <article class="card" data-kind="research" id="card-sovereign">
-        
+        <a class="cover-link" href="https://github.com/king-kunta-cpu/tapstall/raw/main/papers/sovereign-micro-enterprise.pdf" data-read="read/sovereign.html">
       <div class="cover">
         <div class="cov-top">
           <span class="cov-kicker">Research</span>
@@ -506,22 +515,22 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
           <span>Courage Garikai</span>
           <span>33 pp</span>
         </div>
-      </div>
+      </div></a>
         <div class="card-body">
           <div class="card-meta">Research · 2026</div>
           <div class="status">Working manuscript</div>
-          <h2><a href="#card-sovereign">The Sovereign Micro-Enterprise</a></h2>
+          <h2><a href="https://github.com/king-kunta-cpu/tapstall/raw/main/papers/sovereign-micro-enterprise.pdf" data-read="read/sovereign.html">The Sovereign Micro-Enterprise</a></h2>
           <p class="sub">A governance-first architecture for zero-capital agentic businesses</p>
           <p class="blurb">Frontier models pushed the price of machine cognition toward zero, and the obvious inference — that any connected individual now owns a software company — proves fragile in practice. Producing is easy; operating is hard. This report documents the design, deployment and near-real-time failure forensics of a one-person, zero-capital sales and content business run entirely by autonomous agents under a governance architecture: guarded capability, a ledgered agent pattern with an idle witness, a zero-capital ladder, and effectuation-in-the-loop. Seven figures carry the anatomy, the cadence and the incident traces.</p>
           <p class="note">Silent-failure taxonomy with detection-time bounds, offered as reusable diagnostic vocabulary.</p>
           <div class="card-foot">
             <span class="facts">33 pages · All rights reserved</span>
-            <div class="chips"><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/papers/sovereign-micro-enterprise.pdf" target="_blank" rel="noopener">PDF</a><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/papers/sovereign-micro-enterprise.html" target="_blank" rel="noopener">HTML</a><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/papers/sovereign-micro-enterprise.md" target="_blank" rel="noopener">MD</a></div>
+            <div class="chips"><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/papers/sovereign-micro-enterprise.pdf" data-read="read/sovereign.html">PDF</a><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/papers/sovereign-micro-enterprise.html" data-read="read/sovereign.html">HTML</a><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/papers/sovereign-micro-enterprise.md" data-read="read/sovereign.html">MD</a></div>
           </div>
         </div>
       </article>
       <article class="card" data-kind="research" id="card-cadence">
-        
+        <a class="cover-link" href="https://github.com/king-kunta-cpu/tapstall/raw/main/papers/grounded-cadence.pdf" data-read="read/cadence.html">
       <div class="cover">
         <div class="cov-top">
           <span class="cov-kicker">Research</span>
@@ -535,17 +544,17 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
           <span>Courage Garikai</span>
           <span>17 pp</span>
         </div>
-      </div>
+      </div></a>
         <div class="card-body">
           <div class="card-meta">Research · 2026</div>
           <div class="status">Working paper</div>
-          <h2><a href="#card-cadence">Grounded Cadence</a></h2>
+          <h2><a href="https://github.com/king-kunta-cpu/tapstall/raw/main/papers/grounded-cadence.pdf" data-read="read/cadence.html">Grounded Cadence</a></h2>
           <p class="sub">Fact-bound content operations as a governance architecture</p>
           <p class="blurb">Anyone can now emit a week of social copy. Almost no one can emit it on a schedule, from a company&#x27;s own facts, without inventing customers or numbers, without spending the operator&#x27;s quota on a stranger, and without a silent failure looking like a green run. This paper reports a live zero-capital writing service and formalises four mechanisms with production incidents attached: fact-bound generation, value–promo cadence, capability isolation, and fail-loud operations.</p>
           <p class="note">Honest where it matters: the Worker is in production, the test surface is documented, paying customers are zero.</p>
           <div class="card-foot">
             <span class="facts">17 pages · All rights reserved</span>
-            <div class="chips"><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/papers/grounded-cadence.pdf" target="_blank" rel="noopener">PDF</a><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/papers/grounded-cadence.html" target="_blank" rel="noopener">HTML</a><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/papers/grounded-cadence.md" target="_blank" rel="noopener">MD</a></div>
+            <div class="chips"><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/papers/grounded-cadence.pdf" data-read="read/cadence.html">PDF</a><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/papers/grounded-cadence.html" data-read="read/cadence.html">HTML</a><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/papers/grounded-cadence.md" data-read="read/cadence.html">MD</a></div>
           </div>
         </div>
       </article>
@@ -568,7 +577,7 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
         <div class="card-body">
           <div class="card-meta">Research · 2026</div>
           <div class="status">Working paper; not peer reviewed</div>
-          <h2><a href="#card-autonomy">From Spreadsheet Interface to Governable Autonomy</a></h2>
+          <h2>From Spreadsheet Interface to Governable Autonomy</h2>
           <p class="sub">DeskOS as a critical design-science case of evidence, agency and resource-constrained AI infrastructure</p>
           <p class="blurb">A bounded implementation study separating generated artefacts from verified intelligence — the distinction that decides whether an operator is being informed or flattered. It proposes an Evidence–Authority–Resource Contract and a prospective evaluation protocol, and reports no customer-outcome experiment, because none was run.</p>
           <p class="note">Working paper, not peer reviewed. The contract and protocol are proposals, tested prospectively or not at all.</p>
@@ -594,13 +603,13 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
         <div class="row-year">2026</div>
         <img class="row-thumb" src="covers/rocket-man.jpg" alt="" loading="lazy" decoding="async"/>
         <div class="row-main">
-          <h3><span class="row-title">The Rocket Man Reckoning</span>
+          <h3><a href="https://github.com/king-kunta-cpu/tapstall/releases/download/publications-2026-10/the-rocket-man-reckoning.pdf" data-read="read/rocket-man.html"><span class="row-title">The Rocket Man Reckoning</span></a>
             <span class="row-sub">How China mocked Elon Musk — and why they are now panicking</span></h3>
           <div class="status status-row">First edition</div>
           <p class="blurb">The arrogance of a rising superpower, the collapse of its myths, and what one company&#x27;s success reveals about the future of innovation. A short book about a decade of ridicule from established voices — academic, industrial and editorial — and what happened when the engineering arrived anyway.</p>
           <div class="card-foot">
             <span class="facts">29 pages · All rights reserved</span>
-            <div class="chips"><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/releases/download/publications-2026-10/the-rocket-man-reckoning.pdf" target="_blank" rel="noopener">PDF</a></div>
+            <div class="chips"><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/releases/download/publications-2026-10/the-rocket-man-reckoning.pdf" data-read="read/rocket-man.html">PDF</a></div>
           </div>
         </div>
       </article>
@@ -608,13 +617,13 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
         <div class="row-year">2026</div>
         <img class="row-thumb" src="covers/unchained.jpg" alt="" loading="lazy" decoding="async"/>
         <div class="row-main">
-          <h3><span class="row-title">Unchained Blueprint</span>
+          <h3><a href="https://github.com/king-kunta-cpu/tapstall/releases/download/publications-2026-10/unchained-blueprint-v1.pdf" data-read="read/unchained.html"><span class="row-title">Unchained Blueprint</span></a>
             <span class="row-sub">What to build when every payment door is closed</span></h3>
           <div class="status status-row">Version 1 — working document</div>
           <p class="blurb">Every single door was closed: the processor that does not support your country, the payouts that are unavailable in your region, the account that has been limited. This blueprint starts from the observation that these are decisions rather than accidents, and works out what a builder in that position can still put in place.</p>
           <div class="card-foot">
             <span class="facts">13 pages · All rights reserved</span>
-            <div class="chips"><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/releases/download/publications-2026-10/unchained-blueprint-v1.pdf" target="_blank" rel="noopener">PDF</a></div>
+            <div class="chips"><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/releases/download/publications-2026-10/unchained-blueprint-v1.pdf" data-read="read/unchained.html">PDF</a></div>
           </div>
         </div>
       </article></div>
@@ -624,100 +633,130 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
     <div class="wrap">
       <div class="sec-head">
         <h2>Built and running</h2>
-        <div class="kicker">Every link opens today</div>
+        <div class="kicker">Eight systems · six answer a browser</div>
       </div>
       <p class="sec-intro">A portfolio of writing is an argument; a portfolio of running
-      systems is evidence. Each entry below is deployed and reachable — open it, use it, and
-      hold it against what the books claim. Nothing here is a mock-up or a screenshot.</p>
+      systems is evidence. Six of these answer a browser today — one of those only with
+      credentials. Two are closed consoles and say so rather than pretending. Nothing here is
+      a mock-up or a screenshot.</p>
       <div class="builds">
       <article class="build">
-        <div class="build-head">
-          <h3><a href="https://tapstall.zlnew.workers.dev/" target="_blank" rel="noopener">Tapstall</a></h3>
-          <span class="build-role">Founder &amp; engineer · 2026</span>
+        <div class="build-top">
+          <img class="build-logo" src="logos/tapstall.svg" alt="" width="46" height="46" loading="lazy" decoding="async"/>
+          <div class="build-head">
+            <h3><a href="https://tapstall.zlnew.workers.dev/" target="_blank" rel="noopener">Tapstall</a></h3>
+            <span class="build-role">Founder &amp; engineer · 2026</span>
+          </div>
         </div>
         <p class="build-what">A merchant commerce rail for Zimbabwe, South Africa, Kenya and Nigeria: a shop in one link, one-tap buyer confirmation, and a settlement statement that reconciles orders against money the merchant received directly. It holds no customer funds, charges a flat fee, and runs on free infrastructure.</p>
         <ul class="build-evidence"><li>Single Cloudflare Worker + KV, $0/month, version 1.9.1 live</li><li>420 passing assertions on a ~14.8k-line codebase</li><li>Quota reserve ladder 1000/975/900/800/700 — order submission is the last thing refused</li><li>Public self-test endpoint reports every invariant it claims</li></ul>
         <div class="build-foot">
-          <a class="live" href="https://tapstall.zlnew.workers.dev/" target="_blank" rel="noopener">
-            <span class="dot" aria-hidden="true"></span>live</a>
+          <a class="live" href="https://tapstall.zlnew.workers.dev/" target="_blank" rel="noopener"><span class="dot" aria-hidden="true"></span>live</a>
           <div class="chips"><a class="chip" href="https://tapstall.zlnew.workers.dev/fees.html" target="_blank" rel="noopener">Fee calculator</a><a class="chip" href="https://tapstall.zlnew.workers.dev/onboard" target="_blank" rel="noopener">Merchant onboarding</a><a class="chip" href="https://tapstall.zlnew.workers.dev/partners" target="_blank" rel="noopener">Partner terms</a><a class="chip" href="https://tapstall.zlnew.workers.dev/guide/payment-reference-matching" target="_blank" rel="noopener">Payment-matching guide</a></div>
         </div>
       </article>
       <article class="build">
-        <div class="build-head">
-          <h3><a href="https://open-practice.zlnew.workers.dev/" target="_blank" rel="noopener">Open Practice</a></h3>
-          <span class="build-role">Designer &amp; engineer · 2026</span>
+        <div class="build-top">
+          <img class="build-logo" src="logos/open-practice.svg" alt="" width="46" height="46" loading="lazy" decoding="async"/>
+          <div class="build-head">
+            <h3><a href="https://open-practice.zlnew.workers.dev/" target="_blank" rel="noopener">Open Practice</a></h3>
+            <span class="build-role">Designer &amp; engineer · 2026</span>
+          </div>
         </div>
         <p class="build-what">An independent, non-accredited AI learning platform: 50 illustrated activities, a curriculum, a tool field desk and a facilitator kit. Learner accounts sync across devices; downloaded workspaces stay usable offline.</p>
         <ul class="build-evidence"><li>Cloudflare Worker + Durable Object + Workers AI, live</li><li>68 repository tests passing on the deployed revision</li><li>First-party learning analytics; export and delete honoured</li><li>No advertising trackers, by construction</li></ul>
         <div class="build-foot">
-          <a class="live" href="https://open-practice.zlnew.workers.dev/" target="_blank" rel="noopener">
-            <span class="dot" aria-hidden="true"></span>live</a>
+          <a class="live" href="https://open-practice.zlnew.workers.dev/" target="_blank" rel="noopener"><span class="dot" aria-hidden="true"></span>live</a>
           <div class="chips"><a class="chip" href="https://open-practice.zlnew.workers.dev/activities.html" target="_blank" rel="noopener">The workshops</a><a class="chip" href="https://open-practice.zlnew.workers.dev/" target="_blank" rel="noopener">Starter challenge</a></div>
         </div>
       </article>
       <article class="build">
-        <div class="build-head">
-          <h3><a href="https://stpi-deskos.stpi-cloud.workers.dev/" target="_blank" rel="noopener">DeskOS</a></h3>
-          <span class="build-role">Architect · operator command centre</span>
+        <div class="build-top">
+          <img class="build-logo" src="logos/deskos.svg" alt="" width="46" height="46" loading="lazy" decoding="async"/>
+          <div class="build-head">
+            <h3>DeskOS</h3>
+            <span class="build-role">Architect · operator command centre</span>
+          </div>
         </div>
-        <p class="build-what">The operating console behind STPI: ten modules covering overview, units, global lead hunting, outreach, and the ledger that makes each step auditable. It is the case studied in The Governable Enterprise.</p>
-        <ul class="build-evidence"><li>Live console, ~300KB of served application</li><li>Ten operating modules in one shell</li><li>Everything the case study describes is visible here</li></ul>
+        <p class="build-what">An operator command centre in ten modules: overview and ECU, units and wCells, lead hunting, outreach, approvals, and a ledger that makes every step auditable. It is the system examined in The Governable Enterprise, and the console itself is closed — the paper carries the method, the screens stay with the operator.</p>
+        <ul class="build-evidence"><li>Ten operating modules in one shell, ~300KB served</li><li>Every step writes to an auditable ledger</li><li>Described and bounded in The Governable Enterprise</li></ul>
         <div class="build-foot">
-          <a class="live" href="https://stpi-deskos.stpi-cloud.workers.dev/" target="_blank" rel="noopener">
-            <span class="dot" aria-hidden="true"></span>live</a>
-          <div class="chips"><a class="chip" href="https://stpi-deskos.stpi-cloud.workers.dev/" target="_blank" rel="noopener">Operator console</a></div>
+          <span class="closed"><span class="dot" aria-hidden="true"></span>closed</span>
+          <div class="chips"><span class="chip chip-none">Closed console — access by arrangement</span></div>
         </div>
       </article>
       <article class="build">
-        <div class="build-head">
-          <h3><a href="https://contentops-edge.simalidudu.workers.dev/" target="_blank" rel="noopener">ContentOps</a></h3>
-          <span class="build-role">Engineer · 2026</span>
+        <div class="build-top">
+          <img class="build-logo" src="logos/stpi.svg" alt="" width="46" height="46" loading="lazy" decoding="async"/>
+          <div class="build-head">
+            <h3>STPi</h3>
+            <span class="build-role">Author &amp; architect · internal</span>
+          </div>
+        </div>
+        <p class="build-what">The marketing bible behind STPi: product definition, market and ICP, decided pricing, offer language, house rules for published work, the loop step by step and the guard-rails. It exists so that what goes out is argued once and then followed, not re-invented per campaign.</p>
+        <ul class="build-evidence"><li>One document, kept current, that the operator works from</li><li>House rules and guard-rails stated as instructions, not aspirations</li><li>Not public: it is an internal manual, so no link is offered here</li></ul>
+        <div class="build-foot">
+          <span class="closed"><span class="dot" aria-hidden="true"></span>closed</span>
+          <div class="chips"><span class="chip chip-none">Closed — internal operating manual</span></div>
+        </div>
+      </article>
+      <article class="build">
+        <div class="build-top">
+          <img class="build-logo" src="logos/contentops.svg" alt="" width="46" height="46" loading="lazy" decoding="async"/>
+          <div class="build-head">
+            <h3><a href="https://contentops-edge.simalidudu.workers.dev/" target="_blank" rel="noopener">ContentOps</a></h3>
+            <span class="build-role">Engineer · 2026</span>
+          </div>
         </div>
         <p class="build-what">A zero-capital writing service: a week of posts for twenty platforms, drafted from a client&#x27;s own facts, then checked by a deterministic editor before anything may publish. When the check fails, the slot stays empty.</p>
         <ul class="build-evidence"><li>Worker + D1 in production; 185 Python and 101 Worker cases</li><li>Fact-bound generation: no invented numbers, no invented customers</li><li>Clients hold their own model keys — capability isolation</li><li>Formalised with its incidents in the Grounded Cadence paper</li></ul>
         <div class="build-foot">
-          <a class="live" href="https://contentops-edge.simalidudu.workers.dev/" target="_blank" rel="noopener">
-            <span class="dot" aria-hidden="true"></span>live</a>
+          <a class="live" href="https://contentops-edge.simalidudu.workers.dev/" target="_blank" rel="noopener"><span class="dot" aria-hidden="true"></span>live</a>
           <div class="chips"><a class="chip" href="https://contentops-edge.simalidudu.workers.dev/demo" target="_blank" rel="noopener">Live demo</a></div>
         </div>
       </article>
       <article class="build">
-        <div class="build-head">
-          <h3><a href="https://bsky-audit.simalidudu.workers.dev/" target="_blank" rel="noopener">Bluesky Growth Audit</a></h3>
-          <span class="build-role">Engineer · 2026</span>
+        <div class="build-top">
+          <span class="build-logo build-logo-text" aria-hidden="true">BG</span>
+          <div class="build-head">
+            <h3><a href="https://bsky-audit.simalidudu.workers.dev/" target="_blank" rel="noopener">Bluesky Growth Audit</a></h3>
+            <span class="build-role">Engineer · 2026</span>
+          </div>
         </div>
         <p class="build-what">A free, no-signup audit of a Bluesky account: posting cadence, engagement shape, content mix and timing, with specific fixes rather than a score.</p>
         <ul class="build-evidence"><li>Live and free to use</li><li>No account, no tracker, no email capture</li><li>Reads public data only</li></ul>
         <div class="build-foot">
-          <a class="live" href="https://bsky-audit.simalidudu.workers.dev/" target="_blank" rel="noopener">
-            <span class="dot" aria-hidden="true"></span>live</a>
+          <a class="live" href="https://bsky-audit.simalidudu.workers.dev/" target="_blank" rel="noopener"><span class="dot" aria-hidden="true"></span>live</a>
           <div class="chips"><a class="chip" href="https://bsky-audit.simalidudu.workers.dev/" target="_blank" rel="noopener">Run an audit</a></div>
         </div>
       </article>
       <article class="build">
-        <div class="build-head">
-          <h3><a href="https://courage-publications.zlnew.workers.dev/" target="_blank" rel="noopener">Courage Garikai — Publications</a></h3>
-          <span class="build-role">Author &amp; engineer · 2026</span>
+        <div class="build-top">
+          <img class="build-logo" src="logos/courage.svg" alt="" width="46" height="46" loading="lazy" decoding="async"/>
+          <div class="build-head">
+            <h3><a href="https://courage-publications.zlnew.workers.dev/" target="_blank" rel="noopener">Courage Garikai — Publications</a></h3>
+            <span class="build-role">Author &amp; engineer · 2026</span>
+          </div>
         </div>
         <p class="build-what">The publications catalogue: four works with their exact edition status, a research thread, and an explicit statement of what is and is not claimed.</p>
         <ul class="build-evidence"><li>Live catalogue, served from a Worker</li><li>States edition status per work rather than implying a full-text library</li><li>Discloses funding and relationship</li></ul>
         <div class="build-foot">
-          <a class="live" href="https://courage-publications.zlnew.workers.dev/" target="_blank" rel="noopener">
-            <span class="dot" aria-hidden="true"></span>live</a>
+          <a class="live" href="https://courage-publications.zlnew.workers.dev/" target="_blank" rel="noopener"><span class="dot" aria-hidden="true"></span>live</a>
           <div class="chips"><a class="chip" href="https://courage-publications.zlnew.workers.dev/" target="_blank" rel="noopener">Catalogue</a></div>
         </div>
       </article>
       <article class="build">
-        <div class="build-head">
-          <h3><a href="https://hunta-leads.simalidudu.workers.dev/" target="_blank" rel="noopener">Hunta lead console</a></h3>
-          <span class="build-role">Engineer · internal</span>
+        <div class="build-top">
+          <span class="build-logo build-logo-text" aria-hidden="true">HL</span>
+          <div class="build-head">
+            <h3><a href="https://hunta-leads.simalidudu.workers.dev/" target="_blank" rel="noopener">Hunta lead console</a></h3>
+            <span class="build-role">Engineer · internal</span>
+          </div>
         </div>
         <p class="build-what">The lead pipeline behind the hunta field report: discovery, admission gating and a do-not-contact ledger, driven by scheduled agents.</p>
         <ul class="build-evidence"><li>Deployed and gated (HTTP 401 without credentials — working as designed)</li><li>Admission gate refuses before a record exists, not at send time</li></ul>
         <div class="build-foot">
-          <a class="live" href="https://hunta-leads.simalidudu.workers.dev/" target="_blank" rel="noopener">
-            <span class="dot" aria-hidden="true"></span>live</a>
+          <a class="live" href="https://hunta-leads.simalidudu.workers.dev/" target="_blank" rel="noopener"><span class="dot" aria-hidden="true"></span>live</a>
           <div class="chips"><span class="chip chip-none">internal · gated</span></div>
         </div>
       </article></div>
@@ -819,6 +858,16 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
 </footer>
 
 <script>
+/* Every download in the catalogue also opens the work in a window of its own.
+   The href still points at the file, so the download happens exactly as before;
+   the new window is the reading view, so nobody is left hunting for a file. */
+document.querySelectorAll('[data-read]').forEach(function(a){
+  a.addEventListener('click', function(){
+    var w = window.open(a.getAttribute('data-read'), '_blank');
+    if (w) { w.opener = null; }
+  });
+});
+
 document.querySelectorAll('.filters button').forEach(function(btn){
   btn.addEventListener('click', function(){
     var kind = btn.dataset.filter;

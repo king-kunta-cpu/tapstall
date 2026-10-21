@@ -341,6 +341,7 @@ WORKS = [
 BUILT = [
     {
         "title": "Tapstall",
+        "logo": "logos/tapstall.svg",
         "role": "Founder & engineer · 2026",
         "url": "https://tapstall.zlnew.workers.dev/",
         "demo": [("Fee calculator", "https://tapstall.zlnew.workers.dev/fees.html"),
@@ -358,6 +359,7 @@ BUILT = [
     },
     {
         "title": "Open Practice",
+        "logo": "logos/open-practice.svg",
         "role": "Designer & engineer · 2026",
         "url": "https://open-practice.zlnew.workers.dev/",
         "demo": [("The workshops", "https://open-practice.zlnew.workers.dev/activities.html"),
@@ -372,18 +374,38 @@ BUILT = [
     },
     {
         "title": "DeskOS",
+        "logo": "logos/deskos.svg",
         "role": "Architect · operator command centre",
-        "url": "https://stpi-deskos.stpi-cloud.workers.dev/",
-        "demo": [("Operator console", "https://stpi-deskos.stpi-cloud.workers.dev/")],
-        "what": ("The operating console behind STPI: ten modules covering overview, units, global "
-                 "lead hunting, outreach, and the ledger that makes each step auditable. It is "
-                 "the case studied in The Governable Enterprise."),
-        "evidence": ["Live console, ~300KB of served application",
-                     "Ten operating modules in one shell",
-                     "Everything the case study describes is visible here"],
+        "url": None,
+        "access": "Closed console — access by arrangement",
+        "demo": [],
+        "what": ("An operator command centre in ten modules: overview and ECU, units and wCells, "
+                 "lead hunting, outreach, approvals, and a ledger that makes every step "
+                 "auditable. It is the system examined in The Governable Enterprise, and the "
+                 "console itself is closed — the paper carries the method, the screens stay "
+                 "with the operator."),
+        "evidence": ["Ten operating modules in one shell, ~300KB served",
+                     "Every step writes to an auditable ledger",
+                     "Described and bounded in The Governable Enterprise"],
+    },
+    {
+        "title": "STPi",
+        "logo": "logos/stpi.svg",
+        "role": "Author & architect · internal",
+        "url": None,
+        "access": "Closed — internal operating manual",
+        "demo": [],
+        "what": ("The marketing bible behind STPi: product definition, market and ICP, decided "
+                 "pricing, offer language, house rules for published work, the loop step by "
+                 "step and the guard-rails. It exists so that what goes out is argued once and "
+                 "then followed, not re-invented per campaign."),
+        "evidence": ["One document, kept current, that the operator works from",
+                     "House rules and guard-rails stated as instructions, not aspirations",
+                     "Not public: it is an internal manual, so no link is offered here"],
     },
     {
         "title": "ContentOps",
+        "logo": "logos/contentops.svg",
         "role": "Engineer · 2026",
         "url": "https://contentops-edge.simalidudu.workers.dev/",
         "demo": [("Live demo", "https://contentops-edge.simalidudu.workers.dev/demo")],
@@ -407,6 +429,7 @@ BUILT = [
     },
     {
         "title": "Courage Garikai — Publications",
+        "logo": "logos/courage.svg",
         "role": "Author & engineer · 2026",
         "url": "https://courage-publications.zlnew.workers.dev/",
         "demo": [("Catalogue", "https://courage-publications.zlnew.workers.dev/")],
@@ -469,21 +492,39 @@ def esc(s):
 # --------------------------------------------------------------------------- rendering
 
 def built_card(b):
+    """One live product. Where the thing is closed, the card says so and offers no
+    link: a public URL on a private console is an invitation nobody meant to send."""
     demo = "".join(f'<a class="chip" href="{esc(u)}" target="_blank" rel="noopener">{esc(l)}</a>'
                    for l, u in b["demo"])
     ev = "".join(f"<li>{esc(e)}</li>" for e in b["evidence"])
+    if b.get("logo"):
+        mark = (f'<img class="build-logo" src="{esc(b["logo"])}" alt="" '
+                f'width="46" height="46" loading="lazy" decoding="async"/>')
+    else:                       # no published mark: a lettered tile, never a fake logo
+        initials = "".join(w[0] for w in b["title"].replace("—", " ").split()[:2]).upper()
+        mark = f'<span class="build-logo build-logo-text" aria-hidden="true">{esc(initials)}</span>'
+    title = (f'<a href="{esc(b["url"])}" target="_blank" rel="noopener">{esc(b["title"])}</a>'
+             if b.get("url") else esc(b["title"]))
+    if b.get("url"):
+        foot = (f'<a class="live" href="{esc(b["url"])}" target="_blank" rel="noopener">'
+                f'<span class="dot" aria-hidden="true"></span>live</a>')
+    else:
+        foot = '<span class="closed"><span class="dot" aria-hidden="true"></span>closed</span>'
+    chips = demo or f'<span class="chip chip-none">{esc(b.get("access", "internal · gated"))}</span>'
     return f"""
       <article class="build">
-        <div class="build-head">
-          <h3><a href="{esc(b['url'])}" target="_blank" rel="noopener">{esc(b['title'])}</a></h3>
-          <span class="build-role">{esc(b['role'])}</span>
+        <div class="build-top">
+          {mark}
+          <div class="build-head">
+            <h3>{title}</h3>
+            <span class="build-role">{esc(b['role'])}</span>
+          </div>
         </div>
         <p class="build-what">{esc(b['what'])}</p>
         <ul class="build-evidence">{ev}</ul>
         <div class="build-foot">
-          <a class="live" href="{esc(b['url'])}" target="_blank" rel="noopener">
-            <span class="dot" aria-hidden="true"></span>live</a>
-          <div class="chips">{demo or '<span class="chip chip-none">internal · gated</span>'}</div>
+          {foot}
+          <div class="chips">{chips}</div>
         </div>
       </article>"""
 
@@ -537,7 +578,10 @@ def chips(w):
                 'no public edition</span></div>')
     out = []
     for label, url in w["formats"].items():
-        out.append(f'<a class="chip" href="{esc(url)}" target="_blank" rel="noopener">{esc(label)}</a>')
+        # The href still downloads, exactly as before. data-read is what the click
+        # additionally opens, so nobody is left staring at an empty downloads folder.
+        read = f' data-read="{esc(w["read"])}"' if w.get("read") else ""
+        out.append(f'<a class="chip" href="{esc(url)}"{read}>{esc(label)}</a>')
     return '<div class="chips">' + "".join(out) + "</div>"
 
 
@@ -549,14 +593,25 @@ def facts(w):
     return " · ".join(esc(b) for b in bits)
 
 
+def primary_link(w, inner, cls=""):
+    """Title and cover behave like a format button: the file downloads, and the
+    reader opens in a window of its own so the catalogue is still where they left it."""
+    if not w["formats"]:
+        return inner
+    url = next(iter(w["formats"].values()))
+    read = f' data-read="{esc(w["read"])}"' if w.get("read") else ""
+    c = f' class="{cls}"' if cls else ""
+    return f'<a{c} href="{esc(url)}"{read}>{inner}</a>'
+
+
 def featured_card(w):
     return f"""
       <article class="card" data-kind="{w['kind']}" id="card-{esc(w['id'])}">
-        {cover(w)}
+        {primary_link(w, cover(w), "cover-link")}
         <div class="card-body">
           <div class="card-meta">{esc(KIND_LABEL[w['kind']])} · {esc(w['year'])}</div>
           <div class="status">{esc(w['status'])}</div>
-          <h2><a href="#card-{esc(w['id'])}">{esc(w['title'])}</a></h2>
+          <h2>{primary_link(w, esc(w['title']))}</h2>
           <p class="sub">{esc(w['subtitle'])}</p>
           <p class="blurb">{esc(w['blurb'])}</p>
           <p class="note">{esc(w['note'])}</p>
@@ -576,7 +631,7 @@ def shelf_row(w):
         <div class="row-year">{esc(w['year'])}</div>
         {thumb}
         <div class="row-main">
-          <h3><span class="row-title">{esc(w['title'])}</span>
+          <h3>{primary_link(w, f'<span class="row-title">{esc(w['title'])}</span>')}
             <span class="row-sub">{esc(w['subtitle'])}</span></h3>
           <div class="status status-row">{esc(w['status'])}</div>
           <p class="blurb">{esc(w['blurb'])}</p>
@@ -650,6 +705,7 @@ section{padding:66px 0 10px}
 
 /* featured cards */
 .featured{display:grid;grid-template-columns:1fr;gap:40px}
+.cover-link{display:block;text-decoration:none;line-height:0}
 .card{display:grid;grid-template-columns:172px minmax(0,1fr);gap:30px;align-items:start;
   border-top:3px solid var(--ink);padding-top:22px}
 .cover{background:var(--panel);color:var(--panel-ink);aspect-ratio:3/4.3;padding:20px 19px;
@@ -745,15 +801,20 @@ section{padding:66px 0 10px}
 
 
 /* built / live work */
-.builds{align-items:start;display:grid;grid-template-columns:1fr 1fr;gap:0 40px}
-.build{border-top:1px solid var(--rule);padding:24px 0 22px}
-.build-head{display:flex;align-items:baseline;justify-content:space-between;gap:14px;margin-bottom:8px}
+.builds{align-items:start;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:0 40px}
+.build{border-top:1px solid var(--rule);padding:24px 0 22px;min-width:0}
+.build-top{display:flex;gap:14px;align-items:flex-start;margin-bottom:11px}
+.build-logo{width:46px;height:46px;border-radius:11px;flex:none;display:block}
+.build-logo-text{display:grid;place-items:center;background:#1a1815;border:1px solid #34302b;
+  color:#e9e3d6;font:400 15px/1 var(--serif);letter-spacing:.04em}
+.build-head{flex:1;min-width:0}
+.build-head h3{margin:0 0 4px}
 .build h3{font:400 23px/1.2 var(--serif);margin:0;letter-spacing:-.01em}
 .build h3 a{text-decoration:none}
 .build h3 a:hover{color:var(--accent)}
 .build-role{font:600 9.5px/1.3 var(--sans);letter-spacing:.13em;text-transform:uppercase;
   color:var(--muted);text-align:right;white-space:nowrap}
-.build-what{font-size:15px;line-height:1.55;color:#3a3f44;margin:0 0 12px}
+.build-what{font-size:15px;line-height:1.55;color:#3a3f44;margin:0 0 12px;overflow-wrap:break-word}
 .build-evidence{list-style:none;margin:0 0 14px;padding:0}
 .build-evidence li{font-size:13.4px;line-height:1.5;color:#4a5055;padding:4px 0 4px 15px;
   position:relative;border-bottom:1px solid #f0ece3}
@@ -763,6 +824,9 @@ section{padding:66px 0 10px}
   font:600 9.5px/1 var(--sans);letter-spacing:.16em;text-transform:uppercase;color:#1d7a4c}
 .live .dot{width:7px;height:7px;border-radius:50%;background:#1d7a4c;
   box-shadow:0 0 0 3px rgba(29,122,76,.14)}
+.closed{display:inline-flex;align-items:center;gap:7px;font:600 9.5px/1 var(--sans);
+  letter-spacing:.16em;text-transform:uppercase;color:#8d949a}
+.closed .dot{width:7px;height:7px;border-radius:50%;background:#5d646a}
 .live:hover{color:var(--accent)}
 .live:hover .dot{background:var(--accent);box-shadow:0 0 0 3px rgba(168,51,44,.14)}
 
@@ -797,7 +861,7 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
   .card,.band .card{grid-template-columns:132px minmax(0,1fr);gap:20px}
   .cover h3{font-size:16px}
   .cover{aspect-ratio:3/4.2}
-  .builds{grid-template-columns:1fr;gap:0}
+  .builds{grid-template-columns:minmax(0,1fr);gap:0}
   .contact{grid-template-columns:1fr;gap:30px}
   .about{grid-template-columns:1fr;gap:34px}
   .aside{border-left:0;border-top:1px solid var(--rule);padding:26px 0 0}
@@ -826,6 +890,16 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
 """
 
 JS = """
+/* Every download in the catalogue also opens the work in a window of its own.
+   The href still points at the file, so the download happens exactly as before;
+   the new window is the reading view, so nobody is left hunting for a file. */
+document.querySelectorAll('[data-read]').forEach(function(a){
+  a.addEventListener('click', function(){
+    var w = window.open(a.getAttribute('data-read'), '_blank');
+    if (w) { w.opener = null; }
+  });
+});
+
 document.querySelectorAll('.filters button').forEach(function(btn){
   btn.addEventListener('click', function(){
     var kind = btn.dataset.filter;
@@ -841,6 +915,8 @@ document.querySelectorAll('.filters button').forEach(function(btn){
 
 
 def build():
+    for w in WORKS:                      # reading views are written before the page
+        w["read"] = read_view(w) if w["formats"] else None
     featured = [w for w in WORKS if w["featured"]]
     research = [w for w in featured if w["kind"] == "research"]
     books = [w for w in WORKS if w["kind"] == "book"]
@@ -944,11 +1020,12 @@ def build():
     <div class="wrap">
       <div class="sec-head">
         <h2>Built and running</h2>
-        <div class="kicker">Every link opens today</div>
+        <div class="kicker">Eight systems · six answer a browser</div>
       </div>
       <p class="sec-intro">A portfolio of writing is an argument; a portfolio of running
-      systems is evidence. Each entry below is deployed and reachable — open it, use it, and
-      hold it against what the books claim. Nothing here is a mock-up or a screenshot.</p>
+      systems is evidence. Six of these answer a browser today — one of those only with
+      credentials. Two are closed consoles and say so rather than pretending. Nothing here is
+      a mock-up or a screenshot.</p>
       <div class="builds">{builds}</div>
     </div>
   </section>
@@ -1055,6 +1132,91 @@ def build():
 
 
 OUT_DIR = Path("pages/public/portfolio")
+READ_DIR = OUT_DIR / "read"
+
+
+def read_view(w):
+    """A window a reader can land in, instead of an empty tab and a downloads folder.
+
+    Where the work has an HTML edition, that edition is copied here and served as
+    text/html, so the browser renders the book itself. Where the only edition is a
+    PDF, an edition page is generated: the cover, the facts, every format, and one
+    sentence saying the file is on its way. Nothing here invents a format."""
+    READ_DIR.mkdir(parents=True, exist_ok=True)
+    html_url = w["formats"].get("HTML")
+    local = None
+    if html_url and "/raw/main/" in html_url:
+        cand = Path(html_url.split("/raw/main/", 1)[1])
+        if cand.exists():
+            local = cand
+    target = READ_DIR / f"{w['id']}.html"
+    if local:
+        # The edition is copied verbatim, with one addition: a wide table may not push
+        # the whole page sideways on a phone, so the table scrolls inside its own box.
+        book = local.read_text(encoding="utf-8")
+        patch = ("\n<style>@media (max-width:760px){"
+                 "table{display:block;max-width:100%;overflow-x:auto;"
+                 "-webkit-overflow-scrolling:touch}"
+                 "p,li,td,th,dd{overflow-wrap:anywhere}"
+                 ".m{white-space:normal;overflow-wrap:anywhere}"
+                 "pre,code{overflow-wrap:anywhere;white-space:pre-wrap}}"
+                 "</style>\n")
+        book = book.replace("</head>", patch + "</head>", 1) if "</head>" in book else patch + book
+        target.write_text(book, encoding="utf-8")
+        return f"read/{w['id']}.html"
+    cover = (f'<img class="ed-cover" src="../{esc(w["cover"])}" '
+             f'alt="Cover of {esc(w["title"])}"/>' if w.get("cover")
+             else '<div class="ed-cover ed-cover-none">No cover artwork supplied</div>')
+    buttons = "".join(
+        f'<a class="ed-btn" href="{esc(u)}">{esc(k)}</a>' for k, u in w["formats"].items())
+    target.write_text(f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{esc(w['title'])} — {esc(AUTHOR)}</title>
+<style>
+  body{{margin:0;background:#f7f4ec;color:#191714;
+    font:16px/1.6 Georgia,'Times New Roman',serif}}
+  .wrap{{max-width:760px;margin:0 auto;padding:56px 24px 80px}}
+  .kind{{font:600 10.5px/1 ui-sans-serif,system-ui,sans-serif;letter-spacing:.2em;
+    text-transform:uppercase;color:#a8332c;margin-bottom:18px}}
+  h1{{font-size:clamp(30px,4.6vw,44px);line-height:1.12;letter-spacing:-.018em;margin:0 0 10px}}
+  .sub{{font-style:italic;color:#5b5650;margin:0 0 26px}}
+  .cols{{display:grid;grid-template-columns:200px minmax(0,1fr);gap:32px;align-items:start}}
+  .ed-cover{{width:100%;height:auto;display:block;border:1px solid #ded8ca;background:#fff;
+    box-shadow:0 12px 28px -18px rgba(20,18,16,.5)}}
+  .ed-cover-none{{aspect-ratio:3/4.2;display:grid;place-items:center;text-align:center;
+    padding:16px;background:#17150f;color:#a49b8b;font-size:12px}}
+  .blurb{{color:#3a3631;margin:0 0 22px}}
+  .facts{{font:600 10px/1 ui-sans-serif,system-ui,sans-serif;letter-spacing:.14em;
+    text-transform:uppercase;color:#7c756a;border-top:1px solid #ded8ca;
+    border-bottom:1px solid #ded8ca;padding:12px 0;margin:0 0 24px}}
+  .ed-btn{{display:inline-block;margin:0 8px 8px 0;padding:9px 15px;border:1px solid #191714;
+    border-radius:3px;color:#191714;text-decoration:none;
+    font:600 10.5px/1 ui-sans-serif,system-ui,sans-serif;letter-spacing:.14em;text-transform:uppercase}}
+  .ed-btn:hover{{background:#191714;color:#f7f4ec}}
+  .note{{font-size:14px;color:#6f6961;margin-top:18px}}
+  .back{{margin-top:34px;font-size:13.5px}}
+  .back a{{color:#a8332c}}
+  @media (max-width:620px){{.cols{{grid-template-columns:1fr}}.ed-cover{{max-width:220px}}}}
+</style></head>
+<body><div class="wrap">
+  <div class="kind">{esc(KIND_LABEL[w['kind']])} · {esc(w['status'])}</div>
+  <div class="cols">
+    {cover}
+    <div>
+      <h1>{esc(w['title'])}</h1>
+      <p class="sub">{esc(w['subtitle'])}</p>
+      <p class="blurb">{esc(w['blurb'])}</p>
+      <p class="facts">{facts(w)}</p>
+      {buttons}
+      <p class="note">This edition is published as a PDF. Pick a format above and the file
+      downloads; this page stays open so you can choose again.</p>
+    </div>
+  </div>
+  <p class="back"><a href="../">Back to the catalogue</a></p>
+</div></body></html>
+""", encoding="utf-8")
+    return f"read/{w['id']}.html"
 
 
 def main():
@@ -1068,7 +1230,7 @@ def main():
         "publisher": PRESS,
         "updated": "2026-10-21",
         "works": [
-            {k: v for k, v in w.items() if k != "featured"} for w in WORKS
+            {k: v for k, v in w.items() if k not in ("featured", "read")} for w in WORKS
         ],
     }
     (site / "catalogue.json").write_text(json.dumps(cat, indent=2, ensure_ascii=False) + "\n",
