@@ -1181,3 +1181,25 @@ test('1.5.4 the collection shelf is the default storefront, and it is wired to t
   assert.equal(CORE.STOREFRONT_LAYOUTS[0], 'collection', 'collection is the layout a shop that never chose gets');
   assert.equal(CORE.STOREFRONT_DEFAULT_LAYOUT, 'collection');
 });
+
+test('1.5.5 every trade gets its own storefront, and the space under the details is used', () => {
+  const store = page('store'), admin = src('admin');
+  // the template's rhythm reaches the page as a body class, and it survives the config whitelist
+  assert.match(store, /variant: D\.variant \|\| CFG\.store_variant/, 'the rhythm must survive the resolved-design whitelist');
+  assert.match(store, /' coll-' \+ variant/, 'the shelf wears the template rhythm as a body class');
+  for (const v of ['lookbook', 'shelf', 'spec', 'gallery', 'service', 'showcase']) {
+    assert.ok(store.includes('body.coll-' + v), 'no rhythm drawn for ' + v);
+  }
+  // a booking shop asks for a booking, in the button and in the panel
+  assert.match(store, /D\.template === 'services' \? 'Book'/, 'a booking shop asks for a booking');
+  assert.match(store, /Book next/, 'a booking shop suggests the next appointment');
+  // the empty panel is filled with real items, each one a door into the tested sheet
+  assert.match(store, /function paintPairs/, 'the panel fills itself');
+  assert.match(store, /Goes well with/, 'and says what it is for');
+  assert.match(store, /data-add="' \+ esc\(x\.id\)/, 'a pair adds through the same door');
+  // no commentary in a buyer-facing page
+  assert.ok(!/Why the photo is this big/i.test(store), 'the sandbox explainer never ships to a buyer');
+  // the dashboard names the look the chosen trade draws, instead of pretending every shop is the same
+  assert.match(admin, /function lookName/, 'the dashboard knows the trade looks by name');
+  assert.match(admin, /template draws/, 'and says which one this shop gets');
+});

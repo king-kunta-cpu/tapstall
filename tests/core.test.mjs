@@ -243,7 +243,18 @@ test('storefront templates cover the common shop shapes and resolve safely', () 
   });
   assert.equal(food.accent, '#aabbcc', 'a short hex colour is expanded, never passed through as CSS text');
   assert.equal(food.layout, 'collection', 'an unknown layout falls back to the default shelf, not to a broken class');
-  assert.equal(food.suggested_layout, 'grid', 'the template still offers its own suggestion to the dashboard');
+  assert.equal(food.suggested_layout, 'collection', 'the template owns its own layout now');
+  // every business shape gets its own stage, and no two share one
+  const variants = Object.entries(C.STOREFRONT_TEMPLATES).map(([k, t]) => [k, C.storefrontDesign({ handle: 'x', business_type: k }).variant]);
+  for (const [k, v] of variants) assert.ok(C.STOREFRONT_VARIANTS.includes(v), k + ' resolves to a rhythm the page can draw');
+  assert.equal(new Set(variants.map(([, v]) => v)).size, variants.length, 'no two business types share a layout');
+  assert.equal(C.storefrontDesign({ handle: 'x', business_type: 'food' }).variant, 'plate');
+  assert.equal(C.storefrontDesign({ handle: 'x', business_type: 'fashion' }).variant, 'lookbook');
+  assert.equal(C.storefrontDesign({ handle: 'x', business_type: 'grocery' }).variant, 'shelf');
+  assert.equal(C.storefrontDesign({ handle: 'x', business_type: 'electronics' }).variant, 'spec');
+  assert.equal(C.storefrontDesign({ handle: 'x', business_type: 'home' }).variant, 'gallery');
+  assert.equal(C.storefrontDesign({ handle: 'x', business_type: 'services' }).variant, 'service');
+  assert.equal(C.storefrontDesign({ handle: 'x', business_type: 'spaceship' }).variant, 'showcase', 'an unknown type gets the plain showcase');
   assert.equal(C.storefrontDesign({ handle: 'g', business_type: 'food', store_layout: 'grid' }).layout, 'grid',
     'a merchant who picked a layout keeps it — the new default never overrides a choice');
   assert.equal(food.cta, 'Order'); assert.equal(food.popular_label, 'Most ordered');

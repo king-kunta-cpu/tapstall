@@ -1,5 +1,32 @@
 # Tapstall — status
 
+## v1.5.5 (2026-10-21): one storefront per trade
+
+The owner's objection was that every shop got the same card in a different colour. A food
+shop and a phone shop should not read the same. So the shelf keeps its engine and the
+**template** now decides the rhythm.
+
+- **`variant` per template**, resolved by `storefrontDesign` and validated by the new
+  `STOREFRONT_VARIANTS` export: food `plate`, fashion `lookbook`, groceries `shelf`,
+  electronics `spec`, home/handmade `gallery`, services `service`, anything unknown
+  `showcase`. Seven business shapes, seven rhythms, no two alike (pinned by test).
+- **Painted as one body class** (`body.coll-<variant>`) so the stage ratio, thumbnail
+  shape, overlay caption, title face and row-card shape all switch together: 3:4 warm
+  card for food, 4:5 editorial frame with white serif caption for fashion, 16:11
+  basket-width frame for groceries, 1:1 cool grey-blue with monospaced prices for
+  electronics, 1:1 rounded with wide corners for handmade, 4:3 violet booking card for
+  services. The dashboard names the look under the layout picker (`lookName`), and a
+  merchant can still choose Cards, Rows or Compact.
+- **Words follow the trade**: services read “Book” / “Choose and book”, and the under-panel
+  suggestion is “Book next” rather than “Goes well with”.
+- **The empty half of the panel is filled** with two real items from the shop
+  (`paintPairs`) — same category first, then popular — each tile putting the item on the
+  stage, each `+` entering the order through the same `openItem()` door. Sold-out picks
+  carry no `+`.
+- **No commentary in a buyer's page**: the sandbox explainer (“Why the photo is this big”)
+  is gone from every render; that panel now sells, it does not describe the design.
+- **Mobile**: no horizontal overflow on any of the six rhythms at 390 px.
+
 ## v1.5.4 (2026-10-20): the collection shelf is the storefront
 
 The owner rejected the v1.4 shelf as ugly and pointed at a reference layout he owns: one

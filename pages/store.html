@@ -263,6 +263,95 @@ body.tpl-grocery.layout-compact .media{aspect-ratio:16/10}
 .cask:hover{background:#f4faf6;border-color:#bcd9c7}
 .cproof{display:flex;gap:.7rem;flex-wrap:wrap;margin-top:.55rem;font-size:.6rem;font-weight:800;color:#8b7860;text-transform:uppercase;letter-spacing:.05em}
 .cproof span{display:inline-flex;align-items:center;gap:.2rem}.cproof i{font-style:normal;color:var(--accent)}
+
+/* ---- v1.5.5 six rhythms, one engine ---------------------------------------------------------
+ * Every business shape gets its own stage rather than the same card in a different colour:
+ * food a plate, fashion a lookbook, groceries a shelf, electronics a spec sheet, handmade a
+ * gallery, services a booking card, general a plain showcase. The engine (selection, swipe,
+ * row, add door) is shared, so a fix in one place fixes all of them. */
+body.coll-lookbook .cframe{aspect-ratio:4/5;border-radius:2px}
+body.coll-lookbook .cframe .cov{background:linear-gradient(to top,rgba(38,22,30,.62),rgba(38,22,30,.1) 42%,transparent);padding:.7rem}
+body.coll-lookbook .cframe .cov .t{display:none}
+body.coll-lookbook .cframe .cov h3{font-family:Georgia,'Times New Roman',serif;font-weight:700;font-size:1rem;margin:0;color:#fff}
+body.coll-lookbook .cframe .cov .p{font-size:.78rem;font-weight:500;color:#fff;opacity:.9;letter-spacing:.06em}
+body.coll-lookbook .cstage{background:#f4f1ee;border-color:#e6ded8;padding:.4rem}
+body.coll-lookbook .cdetail h4{font-family:Georgia,'Times New Roman',serif;font-weight:700;letter-spacing:-.01em;font-size:clamp(1.4rem,3vw,2rem)}
+body.coll-lookbook .cdetail .ccat{background:none;padding:0;letter-spacing:.22em;color:#8b7860}
+body.coll-lookbook .cdetail .cprice{font-weight:600;letter-spacing:.04em}
+body.coll-lookbook .cthumb{aspect-ratio:2/3;border-radius:2px}
+body.coll-lookbook .rcard{flex-basis:clamp(8.5rem,19vw,10.5rem);border-radius:2px}
+body.coll-lookbook .rcard img{aspect-ratio:2/3}
+body.coll-lookbook .rcall{border-radius:2px}
+
+body.coll-shelf .cframe{aspect-ratio:16/11}
+body.coll-shelf .cstage{padding:.4rem;background:#f4f6f4;border-color:#e2e8e2}
+body.coll-shelf .cthumb{aspect-ratio:1/1}
+body.coll-shelf .cdetail h4{font-size:clamp(1.2rem,2.4vw,1.55rem)}
+body.coll-shelf .cdetail .cprice{font-size:1.05rem}
+body.coll-shelf .rcard{flex-basis:clamp(8rem,19vw,10rem)}
+body.coll-shelf .rcard img{aspect-ratio:4/3}
+body.coll-shelf .cadd{padding:.7rem .9rem;font-size:.82rem}
+body.coll-shelf .cdetail .clong{display:none}
+
+body.coll-spec .cframe{aspect-ratio:1/1;background:#f5f7fa}
+body.coll-spec .cstage{background:linear-gradient(180deg,#f7f9fc,#eef2f7);border-color:#e2e9f2}
+body.coll-spec .cframe .cov{background:linear-gradient(to top,rgba(9,14,22,.9),rgba(9,14,22,.35) 55%,transparent)}
+body.coll-spec .cdetail h4{font-size:clamp(1.2rem,2.4vw,1.6rem);letter-spacing:-.02em}
+body.coll-spec .cdetail .cprice{font-family:ui-monospace,Menlo,monospace;letter-spacing:-.02em}
+body.coll-spec .cmeta strong{font-family:ui-monospace,Menlo,monospace}
+body.coll-spec .cthumb{aspect-ratio:1/1}
+body.coll-spec .rcard img{aspect-ratio:1/1}
+body.coll-spec .ccall{background:#f2f6fc;border-color:#cfdcee;color:#3b4f68}
+body.coll-spec .ccall b{color:#1d4ed8}
+body.coll-spec .cadd{background:linear-gradient(135deg,#2563eb,#1e3a8a)}
+
+body.coll-gallery .cframe{aspect-ratio:1/1;border-radius:18px}
+body.coll-gallery .cstage{background:#f7f3ec;border-color:#e9dfd0}
+body.coll-gallery .cframe .cov{background:linear-gradient(to top,rgba(28,18,8,.86),rgba(28,18,8,.2) 45%,transparent)}
+body.coll-gallery .cdetail h4{font-family:Georgia,'Times New Roman',serif;font-weight:700}
+body.coll-gallery .cthumb{aspect-ratio:1/1;border-radius:12px}
+body.coll-gallery .rcard{border-radius:18px}
+body.coll-gallery .rcard img{aspect-ratio:1/1}
+body.coll-gallery .cadd{background:linear-gradient(135deg,#b45309,#7c3a06)}
+
+body.coll-service .cframe{aspect-ratio:4/3}
+body.coll-service .cstage{padding:.45rem;background:#f3f0fb;border-color:#e2dbf3}
+body.coll-service .cframe .cov{background:linear-gradient(to top,rgba(28,18,48,.9),rgba(28,18,48,.3) 55%,transparent)}
+body.coll-service .cthumb{aspect-ratio:4/3}
+body.coll-service .cadd{background:linear-gradient(135deg,#6d28d9,#4c1d95)}
+body.coll-service .rail{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(15rem,1fr);gap:.6rem}
+body.coll-service .rcard{flex:none;display:flex;align-items:stretch;border-radius:14px}
+body.coll-service .rcard .rm{width:6.5rem;flex:0 0 6.5rem}
+body.coll-service .rcard img,body.coll-service .rcard .rno{aspect-ratio:auto;height:100%}
+body.coll-service .rcard .rb{display:flex;flex-direction:column;justify-content:center}
+
+body.coll-showcase .cframe{aspect-ratio:3/4}
+body.coll-showcase .cframe .cov{background:linear-gradient(to top,rgba(10,18,24,.9),rgba(10,18,24,.35) 55%,transparent)}
+body.coll-showcase .cdetail h4{letter-spacing:-.02em}
+
+
+/* the gap under the details is filled with something a buyer can use, not with air: the two
+   things this shop would put in the same bag, each one a live door into the same tested sheet */
+.cpairs{margin-top:1.1rem;border-top:1px dashed #e8d6bd;padding-top:.8rem}
+.cpairs .cphead{font-size:.66rem;font-weight:800;letter-spacing:.16em;text-transform:uppercase;color:#8b7860;margin-bottom:.5rem;display:flex;align-items:center;gap:.4rem}
+.cprow{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.55rem}
+.ctile{display:flex;align-items:center;gap:.55rem;text-align:left;background:#fffaf2;border:1px solid #efe0c8;border-radius:12px;padding:.4rem;cursor:pointer;font:inherit;color:inherit;min-width:0}
+.ctile:hover{border-color:var(--accent);background:#fff}
+.ctile .cm{width:3rem;height:3rem;flex:0 0 3rem;border-radius:9px;overflow:hidden;background:#f1e5d3;display:flex;align-items:center;justify-content:center;font-weight:800;color:#a8420f}
+.ctile .cm img{width:100%;height:100%;object-fit:cover}
+.ctile .cb{min-width:0;flex:1}
+.ctile .cn{display:block;font-size:.8rem;font-weight:700;color:var(--accent-dark);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ctile .cp{display:block;font-size:.76rem;color:#8b7860;font-variant-numeric:tabular-nums}
+.ctile.sold{opacity:.6;cursor:default}
+.ctile .cplus{flex:0 0 auto;width:1.6rem;height:1.6rem;border-radius:999px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:.95rem;line-height:1}
+body.coll-lookbook .ctile,body.coll-lookbook .ctile .cm{border-radius:2px}
+body.coll-lookbook .ctile .cn{font-family:Georgia,'Times New Roman',serif}
+body.coll-gallery .ctile,body.coll-gallery .ctile .cm{border-radius:14px}
+body.coll-service .ctile{background:#f7f4fd;border-color:#e4dcf5}
+body.coll-spec .ctile{background:#f5f8fd;border-color:#dde7f4}
+body.coll-spec .ctile .cp{font-family:ui-monospace,Menlo,monospace}
+body.coll-shelf .ctile{background:#f6faf6;border-color:#dfeade}
+
 /* the row under the card */
 .more{margin:1rem 0 1.4rem}
 .more-head{display:flex;align-items:flex-end;justify-content:space-between;gap:.75rem;margin-bottom:.6rem}
@@ -426,6 +515,10 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
           <a class="cask" id="cask" href="#" hidden><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.5 8.5 0 0 1-12.3 7.6L3 21l1.9-5.7A8.5 8.5 0 1 1 21 11.5z"/></svg> Ask</a>
         </div>
         <div class="cproof"><span><i>✓</i> No card needed</span><span><i>✓</i> Exact amount to pay</span><span><i>✓</i> Pay from your own wallet</span></div>
+        <div class="cpairs" id="cdPairs" hidden>
+          <div class="cphead" id="cdPairsHead">Goes well with</div>
+          <div class="cprow" id="cdPairsRow"></div>
+        </div>
       </div>
     </div>
   </section>
@@ -482,6 +575,7 @@ var TERM = /*__TAPSTALL_TERM__*/null;
     template: D.template || CFG.business_type || 'general', label: D.label || 'Shop',
     accent: D.accent || '#0a6b33', accent_dark: D.accent_dark || '#0b0f14', accent_soft: D.accent_soft || '#e8f7ef', on_accent: D.on_accent || '#fff',
     layout: D.layout || CFG.store_layout || 'grid', hero: D.hero || CFG.hero_style || 'classic',
+    variant: D.variant || CFG.store_variant || 'showcase',
     sort: D.sort || CFG.sort_mode || 'popular', cta: D.cta || CFG.cta_label || 'Add',
     popular_label: D.popular_label || 'Popular', empty_title: D.empty_title || 'No products loaded yet',
     cover_image: D.cover_image || CFG.cover_image || '', welcome_message: D.welcome_message || CFG.welcome_message || '',
@@ -713,6 +807,11 @@ var TERM = /*__TAPSTALL_TERM__*/null;
     $('collMore').hidden = !on;
     document.body.classList.toggle('layout-collection', !!on);
     if (!on) return;
+    // v1.5.5: the template decides the rhythm, not the merchant. One class on the body switches
+    // the stage, the thumbnails, the detail panel and the row together.
+    var variant = String(D.variant || 'showcase');
+    document.body.className = (document.body.className.replace(/\bcoll-[a-z]+\b/g, '').trim() + ' coll-' + variant).replace(/\s+/g, ' ');
+    $('collTitle').textContent = String($('browseTitle') && $('browseTitle').textContent || 'Browse the collection');
     // a collection page opens on the shelf, not on a second banner: the shop's own banner is put
     // away (the identity bar above already carries the name, hours and links) and the welcome
     // message it was showing moves into the note above the shelf, so nothing is lost by hiding it
@@ -790,7 +889,9 @@ var TERM = /*__TAPSTALL_TERM__*/null;
 
     var add = $('cadd');
     add.disabled = !!soldOut;
-    add.textContent = soldOut ? 'Sold out' : ((p.opts && p.opts.length) || (p.addons && p.addons.length) ? 'Choose options · ' + money(p.price) : 'Add to order · ' + money(p.price));
+    var verb = D.template === 'services' ? 'Book' : 'Add to order';
+    var verbChoose = D.template === 'services' ? 'Choose and book · ' : 'Choose options · ';
+    add.textContent = soldOut ? 'Sold out' : ((p.opts && p.opts.length) || (p.addons && p.addons.length) ? verbChoose + money(p.price) : verb + ' · ' + money(p.price));
     add.onclick = function () { if (!soldOut) openItem(p); };
 
     var wa = $('cask');
@@ -813,6 +914,42 @@ var TERM = /*__TAPSTALL_TERM__*/null;
     }
     var r = $('collRail').children;
     for (var m = 0; m < r.length; m++) r[m].classList.toggle('on', r[m].getAttribute('data-id') === p.id);
+    paintPairs(p);
+  }
+  /* v1.5.5: the rest of the panel does not stay empty. Two real items from this shop, picked the
+     way a counter hand would pick them — the same category first, then whatever else is popular —
+     and each one is a door into the same sheet every other add goes through. */
+  function paintPairs(p) {
+    var mine = String(D.variant || '');
+    var want = collList.filter(function (x) { return x.id !== p.id; });
+    var sameCat = want.filter(function (x) { return x.cat && x.cat === p.cat; });
+    var others = want.filter(function (x) { return !(x.cat && x.cat === p.cat); });
+    others.sort(function (a, b) { return (b.popular ? 1 : 0) - (a.popular ? 1 : 0); });
+    var pick = sameCat.concat(others).slice(0, 2);
+    var head = mine === 'service' ? 'Book next' : (sameCat.length ? 'Also in ' + (p.cat || 'this shop') : 'Goes well with');
+    $('cdPairsHead').textContent = head;
+    if (!pick.length) { $('cdPairs').hidden = true; return; }
+    $('cdPairsRow').innerHTML = pick.map(function (x) {
+      var sold = x.available === false;
+      var media = x.img ? '<img loading="lazy" decoding="async" src="' + esc(x.img) + '" alt="">'
+        : esc(String(x.name || '?').trim().charAt(0).toUpperCase());
+      return '<div class="ctile' + (sold ? ' sold' : '') + '" data-pick="' + esc(x.id) + '" role="button" tabindex="0">'
+        + '<span class="cm">' + media + '</span>'
+        + '<span class="cb"><span class="cn">' + esc(x.name) + '</span><span class="cp">'
+        + (sold ? 'Sold out' : money(x.price)) + '</span></span>'
+        + (sold ? '' : '<span class="cplus" data-add="' + esc(x.id) + '" aria-label="Add ' + esc(x.name) + '">+</span>') + '</div>';
+    }).join('');
+    Array.prototype.forEach.call($('cdPairsRow').children, function (tile) {
+      tile.onclick = function (e) {
+        var addId = e.target && e.target.getAttribute && e.target.getAttribute('data-add');
+        var id = addId || tile.getAttribute('data-pick');
+        var x = collItemOf(id);
+        if (!x) return;
+        if (addId) { if (x.available !== false) openItem(x); return; }
+        collCur = id; paintColl();
+      };
+    });
+    $('cdPairs').hidden = false;
   }
   function waLink(text) {
     var num = String(CFG.whatsapp || '').replace(/[^0-9]/g, '');

@@ -1241,43 +1241,43 @@ export function notifyText(st, order = {}) {
  */
 export const STOREFRONT_TEMPLATES = {
   general: {
-    label: 'General retail / market stall', accent: '#0a6b33', layout: 'grid', hero: 'classic',
+    label: 'General retail / market stall', accent: '#0a6b33', layout: 'collection', variant: 'showcase', hero: 'classic',
     cta: 'Add', popular_label: 'Popular', empty_title: 'The shelf is being packed',
     categories: ['New in', 'Essentials', 'Specials', 'Gifts'],
     blurb: 'A clean all-rounder for mixed stock and everyday selling.',
   },
   food: {
-    label: 'Food, bakery & takeaway', accent: '#b33a1f', layout: 'grid', hero: 'cover',
+    label: 'Food, bakery & takeaway', accent: '#b33a1f', layout: 'collection', variant: 'plate', hero: 'cover',
     cta: 'Add', popular_label: 'Most ordered', empty_title: 'The menu is being warmed up',
     categories: ['Mains', 'Sides', 'Drinks', 'Desserts', 'Combos'],
     blurb: 'Warm cover-first layout for menus people order from hungry.',
   },
   fashion: {
-    label: 'Fashion & beauty', accent: '#9d2c5a', layout: 'grid', hero: 'cover',
+    label: 'Fashion & beauty', accent: '#9d2c5a', layout: 'collection', variant: 'lookbook', hero: 'cover',
     cta: 'Add', popular_label: 'Trending', empty_title: 'New pieces are on the way',
     categories: ['New in', 'Clothing', 'Shoes', 'Beauty', 'Accessories'],
     blurb: 'Picture-led cards for clothing, beauty and accessories.',
   },
   grocery: {
-    label: 'Groceries & essentials', accent: '#15803d', layout: 'compact', hero: 'classic',
+    label: 'Groceries & essentials', accent: '#15803d', layout: 'collection', variant: 'shelf', hero: 'classic',
     cta: 'Add', popular_label: 'Everyday favourite', empty_title: 'The shelves are being stocked',
     categories: ['Fresh', 'Pantry', 'Drinks', 'Household', 'Baby'],
     blurb: 'Tighter cards and search up front for longer everyday lists.',
   },
   electronics: {
-    label: 'Phones & electronics', accent: '#2563eb', layout: 'list', hero: 'minimal',
+    label: 'Phones & electronics', accent: '#2563eb', layout: 'collection', variant: 'spec', hero: 'minimal',
     cta: 'Add', popular_label: 'Hot deal', empty_title: 'Stock is being checked',
     categories: ['Phones', 'Audio', 'Power', 'Accessories', 'Repairs'],
     blurb: 'Spec-friendly list rows for gadgets, accessories and repairs.',
   },
   home: {
-    label: 'Home, handmade & gifts', accent: '#b45309', layout: 'grid', hero: 'cover',
+    label: 'Home, handmade & gifts', accent: '#b45309', layout: 'collection', variant: 'gallery', hero: 'cover',
     cta: 'Add', popular_label: 'Handpicked', empty_title: 'The next batch is being made',
     categories: ['Home', 'Decor', 'Handmade', 'Gifts', 'Furniture'],
     blurb: 'Warm, browsable cards for homeware, craft and gift shops.',
   },
   services: {
-    label: 'Services & bookings', accent: '#6d28d9', layout: 'list', hero: 'classic',
+    label: 'Services & bookings', accent: '#6d28d9', layout: 'collection', variant: 'service', hero: 'classic',
     cta: 'Book', popular_label: 'Popular service', empty_title: 'Bookings open soon',
     categories: ['Popular', 'Packages', 'Add-ons', 'Gift vouchers'],
     blurb: 'List layout and a Book button for salons, repairs and services.',
@@ -1288,6 +1288,11 @@ export const STOREFRONT_TEMPLATES = {
  * (a merchant who chose one keeps it), but a shop that never chose now opens as a collection. */
 export const STOREFRONT_LAYOUTS = ['collection', 'grid', 'list', 'compact'];
 export const STOREFRONT_DEFAULT_LAYOUT = 'collection';
+/** The shelf has six visual rhythms, one per business shape. Same engine, different stage:
+ *  a plate for food, a lookbook for fashion, a shelf for groceries, a spec sheet for electronics,
+ *  a gallery for handmade things, a card for services. A merchant never picks this — the template
+ *  does — but the layout choice (collection / grid / list / compact) stays theirs. */
+export const STOREFRONT_VARIANTS = ['showcase', 'plate', 'lookbook', 'shelf', 'spec', 'gallery', 'service'];
 export const STOREFRONT_HEROES = ['classic', 'cover', 'minimal'];
 export const STOREFRONT_SORTS = ['popular', 'menu', 'price_low', 'price_high', 'name'];
 
@@ -1335,6 +1340,7 @@ export function storefrontDesign(st) {
     accent_soft: mixHex(accent, '#ffffff', 0.88),
     on_accent: onHex(accent),
     layout: designEnum(s.store_layout, STOREFRONT_LAYOUTS, STOREFRONT_DEFAULT_LAYOUT),
+    variant: STOREFRONT_VARIANTS.indexOf(String(t.variant || '')) >= 0 ? String(t.variant) : 'plate',
     suggested_layout: t.layout,   // the template's own idea, offered in the dashboard, never imposed
     hero: designEnum(s.hero_style, STOREFRONT_HEROES, t.hero),
     sort: designEnum(s.sort_mode, STOREFRONT_SORTS, 'popular'),

@@ -730,6 +730,16 @@ function designOpts(list, cur) {
     return '<option value="' + esc(v) + '"' + (String(cur) === String(v) ? ' selected' : '') + '>' + esc(t) + '</option>';
   }).join('');
 }
+var LOOK = {
+  plate: 'a plate — one dish on a warm stage, warm words beside it',
+  lookbook: 'a lookbook — tall editorial frames and serif titles',
+  shelf: 'a shelf — square goods in a tight row with a quick add on each',
+  spec: 'a spec sheet — square stills, monospaced prices, facts first',
+  gallery: 'a gallery — big rounded photographs, calm spacing',
+  service: 'a booking card — the service on the left, the name and time on the right',
+  showcase: 'a showcase — one item at a time, plainly'
+};
+function lookName(v) { return LOOK[v] || LOOK.showcase; }
 function designPanel() {
   if ((S.editable || []).indexOf('business_type') < 0) return '';
   var d = S.design || {}, templates = S.templates || {};
@@ -751,7 +761,8 @@ function designPanel() {
     + picHtml(S.store.cover_image || '', 'cover image link, or drop a file', 'data-which="cover"', 'data-k="cover_image" data-default=""') + '</div>'
     + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(10rem,1fr));gap:.5rem">'
     + '<div class="f"><label>' + esc(LABEL.accent_color) + '</label><span style="display:flex;gap:.4rem;align-items:center"><input data-k="accent_color" data-default="" value="' + esc(S.store.accent_color || '') + '" placeholder="' + esc(d.accent || '#0a6b33') + '" style="flex:1"><input type="color" id="accentPick" value="' + esc(d.accent || '#0a6b33') + '" style="width:3rem;padding:.15rem"></span><p class="hint">Blank keeps the template colour.</p></div>'
-    + '<div class="f"><label>' + esc(LABEL.store_layout) + '</label><select data-k="store_layout" data-default="' + esc(layout) + '">' + designOpts([['collection', 'Collection — one item on a stage, swipe for more'], ['grid', 'Cards, two across'], ['list', 'Rows, one by one'], ['compact', 'Compact cards']], layout) + '</select></div>'
+    + '<div class="f"><label>' + esc(LABEL.store_layout) + '</label><select data-k="store_layout" data-default="' + esc(layout) + '">' + designOpts([['collection', 'Collection — one item on a stage, swipe for more'], ['grid', 'Cards, two across'], ['list', 'Rows, one by one'], ['compact', 'Compact cards']], layout) + '</select>'
+      + '<p class="hint" id="lookHint">Your ' + esc(type) + ' template draws ' + esc(lookName(d.variant || tpl.variant)) + '. Choosing Cards, Rows or Compact replaces that look with a plain list.</p></div>'
     + '<div class="f"><label>' + esc(LABEL.hero_style) + '</label><select data-k="hero_style" data-default="' + esc(hero) + '">' + designOpts([['classic', 'Dark header'], ['cover', 'Cover picture header'], ['minimal', 'Light minimal header']], hero) + '</select></div>'
     + '<div class="f"><label>' + esc(LABEL.sort_mode) + '</label><select data-k="sort_mode" data-default="' + esc(sort) + '">' + designOpts([['popular', 'Popular first'], ['menu', 'My menu order'], ['price_low', 'Price: low to high'], ['price_high', 'Price: high to low'], ['name', 'Name A–Z']], sort) + '</select></div>'
     + '<div class="f"><label>' + esc(LABEL.cta_label) + '</label><input data-k="cta_label" data-default="" value="' + esc(S.store.cta_label || '') + '" placeholder="' + esc(d.cta || 'Add') + '" maxlength="18"></div>'
