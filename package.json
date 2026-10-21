@@ -9,9 +9,9 @@
     "build": "bash scripts/build_bundle.sh .build",
     "check": "bash scripts/deploy.sh --check",
     "deploy": "bash scripts/deploy.sh",
-    "test": "node --test tests/",
+    "test": "node --test tests/ leads/apps-script/test/",
     "quota": "bash scripts/quota.sh"
   },
   "type": "module",
-  "version": "1.9.0"
+  "version": "1.9.1"
 }

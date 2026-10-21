@@ -58,7 +58,7 @@ import {
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '1.9.0';
+const VERSION = '1.9.1';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
@@ -5215,9 +5215,22 @@ async function sellerAuth(env, codeIn, keyIn) {
 }
 /** Owner-as-seller for the sheets feed and lead doors: code `owner` with the platform secret.
  *  Returns a sentinel doc so callers can tell "sees everything" from "sees their own book". */
+/* Two credentials open the lead surface, and only the lead surface:
+ *   owner + ADMIN_SECRET   — the platform's own key, for the ops console and press;
+ *   sheet + SHEET_KEY      — a key minted for one Google Sheet, so the person running the CRM
+ *                            never has to be handed the platform secret. It resolves to the same
+ *                            actor (an owner may act across seller allocations), and nothing else
+ *                            in the Worker accepts it: it cannot deploy, cannot read a merchant's
+ *                            store, cannot touch money. If the sheet leaks, rotate one secret.
+ */
 async function leadActor(env, codeIn, keyIn) {
-  if (String(codeIn || '') === 'owner' && env.ADMIN_SECRET && keyIn && timingSafeEq(String(keyIn), String(env.ADMIN_SECRET))) {
-    return { code: 'owner', owner: true, active: true };
+  const code = String(codeIn || '');
+  if (code === 'owner' && env.ADMIN_SECRET && keyIn && timingSafeEq(String(keyIn), String(env.ADMIN_SECRET))) {
+    return { code: 'owner', owner: true, active: true, via: 'admin' };
+  }
+  if (code === 'sheet' && env.SHEET_KEY && String(env.SHEET_KEY).length >= 24
+      && keyIn && timingSafeEq(String(keyIn), String(env.SHEET_KEY))) {
+    return { code: 'owner', owner: true, active: true, via: 'sheet' };
   }
   return sellerAuth(env, codeIn, keyIn);
 }
@@ -5622,7 +5635,8 @@ async function sheetsFeed(url, env) {
   if (!doc) return json({ ok: false, error: 'seller code + key required' }, 401);
   const leads = await listLeads(env, { ...(doc.owner ? {} : { seller: doc.code }), limit: 1000 });
   if ((url.searchParams.get('fmt') || 'tsv') === 'json') {
-    return json({ ok: true, seller: doc.code, leads }, 200, { 'Cache-Control': 'no-store' });
+    return json({ ok: true, seller: doc.code, via: doc.via || 'seller', count: leads.length, at: new Date().toISOString(), leads },
+      200, { 'Cache-Control': 'no-store' });
   }
   const cols = ['id', 'business', 'name', 'email', 'phone', 'country', 'segment', 'score', 'signals', 'seller_code', 'status', 'source', 'source_url', 'next_follow_at', 'shop', 'note', 'updated_at'];
   const cell = (v) => String(Array.isArray(v) ? v.join(',') : (v ?? '')).replace(/[\t\r\n]/g, ' ');

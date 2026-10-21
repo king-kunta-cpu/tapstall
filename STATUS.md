@@ -1,5 +1,26 @@
 # Tapstall — status
 
+## v1.9.1 (2026-10-21): Tapstall joins the Master Sheet CRM
+
+The shared Master Sheet (`1j_ktMLCRmLlk6TOb0-YddYGTmfHChyI29wu84j7SJ8o`) already runs STPi and
+DeskOS into one 17-column contact ledger. Tapstall is now the third engine, without touching theirs.
+
+- **`leads/apps-script/TapstallMasterSheet.gs`** — one paste, no libraries. Syncs the lead queue into
+  `3_CRM_Who_We_Talked_To` as `tapstall-<id>` rows, and pushes the **Stage** a human types back to the
+  Worker (`/api/leads/act`), so the sheet is the working surface and Tapstall stays the judge.
+  Idempotent both directions: unseen IDs only, one request per stage change, ledger in
+  `9_Tapstall_Sync`, funnel in `8_Tapstall_Pipeline`.
+- **A key for the sheet, not the platform**: `SHEET_KEY` resolves to an owner actor *on the lead
+  surface only* (`code=sheet`). It cannot open `/api/discover`, cannot reach a merchant's store and
+  cannot touch money; rotating it costs nothing else. Tested.
+- **Engine-aware queue**: `4_Tomorrow_Queue` rebuilds across all three engines with the right next
+  action per engine, skips terminal stages, and never treats a blank date as due today.
+- **The negatives are pinned**: no mail surface in the file, no invented contact, no edit to a row
+  that is not `tapstall-*`, no `ADMIN_SECRET` anywhere in the sheet script.
+- **416/416** (the GAS file is tested too: a VM with faked Spreadsheet/UrlFetch/Properties/Lock
+  globals, asserting the row it produces and that a second run adds nothing).
+- Docs: `docs/CRM-SHEET.md`.
+
 ## v1.9.0 (2026-10-21): discovery stops being one source in one country
 
 The complaint that forced this release was arithmetic, not taste: *one to three leads a day is bad*.

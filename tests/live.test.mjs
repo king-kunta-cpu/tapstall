@@ -5015,3 +5015,36 @@ test('1.7.1 the three tiers are on a live page, priced flat, with no custody in 
   assert.match(page.text, /settlement statement/i, 'the artefact being sold is the statement');
   assert.match(page.text, /\/api\/partners\/apply/, 'and the form does not promise to phone home somewhere else');
 });
+
+test('the Google Sheet gets its own key: it can read leads and move a stage, and nothing else', async () => {
+  env.SHEET_KEY = 'sheetkey_' + 'z'.repeat(24);          // 33 chars, the length the Worker insists on
+  const feed = (q) => call('/api/leads/sheets-feed?' + q);
+  assert.equal((await feed('code=sheet&key=wrong')).status, 401, 'a wrong key is not a key');
+  assert.equal((await feed('code=sheet')).status, 401, 'nor is a missing one');
+
+  const ok = await feed('code=sheet&key=' + env.SHEET_KEY + '&fmt=json');
+  assert.equal(ok.status, 200, ok.text);
+  assert.equal(ok.json.via, 'sheet', 'the feed says which credential opened it');
+  assert.ok(Array.isArray(ok.json.leads), 'and returns the queue as data');
+  assert.equal(ok.json.count, ok.json.leads.length);
+  assert.ok(!JSON.stringify(ok.json).includes(env.SHEET_KEY), 'the key is never echoed back');
+
+  // it is a lead key, not an admin key: the discovery console stays shut
+  assert.equal((await call('/api/discover', { headers: { 'x-tapstall-admin': env.SHEET_KEY } })).status, 401,
+    'a leaked sheet key cannot open the platform console');
+  assert.equal((await call('/api/discover/run', { method: 'POST', headers: { 'x-tapstall-admin': env.SHEET_KEY } })).status, 401);
+
+  // and it can do the one write a CRM needs: move a lead's stage, as the owner, without touching money
+  const lead = discLeads()[0];
+  assert.ok(lead, 'there is a lead to move');
+  const moved = await call('/api/leads/act', {
+    method: 'POST', body: { code: 'sheet', key: env.SHEET_KEY, id: lead.id, action: 'contacted', note: 'called from the sheet' },
+  });
+  assert.equal(moved.status, 200, moved.text);
+  assert.equal(moved.json.lead.status, 'contacted');
+  assert.ok(moved.json.lead.next_follow_at, 'and the follow-up clock starts, because that is what contacted means');
+  const dnc = await call('/api/leads/act', { method: 'POST', body: { code: 'sheet', key: env.SHEET_KEY, id: lead.id, action: 'dnc' } });
+  assert.equal(dnc.status, 200);
+  assert.equal(dnc.json.lead.status, 'dnc', 'a do-not-contact from the sheet reaches the ledger the discovery pass reads');
+  delete env.SHEET_KEY;
+});
