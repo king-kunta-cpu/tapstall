@@ -1,5 +1,22 @@
 # Tapstall — status
 
+## v1.7.5 (2026-10-21): Overpass queues, it does not refuse
+
+v1.7.4's diagnostics did their job on the first run: `last_errors` read back
+
+    no_data_on_any_mirror: overpass-api.de The operation was aborted due to timeout;
+    overpass.private.coffee The operation was aborted due to timeout; overpass.osm.ch …
+
+Measured from outside the Worker, the *same* query answered `200` with 85 elements in 34s, 40s and
+45s, and answered in 34s even when the bbox was halved — the wait is the queue, not the query. A
+twelve-second clock read a busy server as a dead one.
+
+- **`OVERPASS_TIMEOUTS = [45000, 15000, 15000, 15000]`** — the primary gets long enough to be
+  queued; the alternates stay short, because they are either fast or not there.
+- The result is cached for twenty hours per segment, so the platform pays that wait once a day at
+  most, and a later pass in the same day reads KV instead.
+- Tests: 400/400.
+
 ## v1.7.4 (2026-10-21): two ways an empty answer lies, both now refused
 
 Under v1.7.3 the mirrors worked and the pass still filed nothing, which is a quieter bug than the

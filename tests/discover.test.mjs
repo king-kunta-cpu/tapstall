@@ -17,7 +17,7 @@ import {
   stripTags, usableHost, hostOf, businessFromTitle, hookFor, readPageEvidence, candidateLead,
   discoverySummary, runDiscovery, placeOf, COUNTRY_NAMES, admitCandidate, phonePlausible,
   marketMention, MARKET_CITIES, overpassQuery, parseOverpass, OSM_TAGS, OSM_CITIES, OVERPASS_URL,
-  OVERPASS_MIRRORS,
+  OVERPASS_MIRRORS, OVERPASS_TIMEOUTS,
 } from '../worker/discover.js';
 import { LEAD_SEGMENTS, PARTNER_TIERS, PARTNER_TIER_KEYS, cleanLead, cleanLeadEvidence } from '../worker/core.js';
 
@@ -360,6 +360,9 @@ test('the map is asked about the segments it can describe, and a month of passes
 
 test('one Overpass mirror at capacity is not a lost day: fall through, then fall back to the cache', async () => {
   assert.ok(OVERPASS_MIRRORS.length >= 3, 'there is more than one server to ask: ' + OVERPASS_MIRRORS.join(', '));
+  assert.equal(OVERPASS_TIMEOUTS.length, OVERPASS_MIRRORS.length, 'every mirror has its own clock');
+  assert.ok(OVERPASS_TIMEOUTS[0] >= 45000, 'the primary queues rather than refuses when busy — measured 34–45s, not 12');
+  assert.ok(OVERPASS_TIMEOUTS.slice(1).every((t) => t < OVERPASS_TIMEOUTS[0]), 'and the alternates are either fast or gone');
   const osm = { elements: [{ type: 'node', id: 7, tags: { name: 'Harare Web Studio', office: 'it', phone: '+263 77 111 2223' } }] };
   const store = {};
   const asked = [];

@@ -117,7 +117,12 @@ export const OVERPASS_MIRRORS = [
   'https://overpass.osm.ch/api/interpreter',
   'https://overpass.osm.jp/api/interpreter',
 ];
-export const OSM_TIMEOUT_MS = 12000;
+// The main Overpass server queues rather than refuses when it is busy: measured from outside, the
+// same query answered in 34s, 40s and 45s while returning correct data. A twelve-second clock read
+// that as "Overpass is down". The primary gets long enough to be queued; the alternates stay short,
+// because they are either fast or not there.
+export const OVERPASS_TIMEOUTS = [45000, 15000, 15000, 15000];
+export const OSM_TIMEOUT_MS = OVERPASS_TIMEOUTS[0];
 
 export const OSM_CITIES = {
   ZW: [['Harare', -17.83, 31.05], ['Bulawayo', -20.15, 28.58]],
@@ -192,11 +197,13 @@ async function runOverpass(fetcher, job, limit, opts = {}) {
   }
   const tried = [];
   let emptyFrom = 0;
-  for (const mirror of OVERPASS_MIRRORS) {
+  for (let mi = 0; mi < OVERPASS_MIRRORS.length; mi++) {
+    const mirror = OVERPASS_MIRRORS[mi];
+    const clock = OVERPASS_TIMEOUTS[mi] || OVERPASS_TIMEOUTS[OVERPASS_TIMEOUTS.length - 1];
     try {
       const r = await fetcher(mirror + '?data=' + encodeURIComponent(q), {
         headers: { 'user-agent': 'Tapstall discovery (harmless, once a day)', accept: 'application/json' },
-        signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(OSM_TIMEOUT_MS) : undefined,
+        signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) ? AbortSignal.timeout(clock) : undefined,
       });
       if (!r.ok) { tried.push(mirror + ' ' + r.status); continue; }
       const items = parseOverpass(JSON.parse(await r.text()), job.segment).slice(0, limit);
