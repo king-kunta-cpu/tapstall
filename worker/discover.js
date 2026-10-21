@@ -228,10 +228,14 @@ async function runOverpass(fetcher, job, limit, opts = {}) {
  * hosts that can never be a lead, and appears on a lead only as the page the lead was found on.
  */
 export const DIRECTORY_INDEX = 'https://www.classifieds.co.zw/directory';
+// The directory's own taxonomy, read live (40 categories, none of them "web design"): a Zimbabwean
+// web shop lists under Computer Services & Software or Internet & Telecommunications, a till and
+// scale seller under Computer Hardware or Scales & Weighing, and a bookkeeper under Finance. The
+// mapping is to the words the directory actually uses, not the words the playbook uses.
 export const DIRECTORY_KEYWORDS = {
-  agencies: [/web/i, /design/i, /marketing/i, /advertis/i, /digital/i],
-  accountants: [/account/i, /bookkeep/i, /tax/i, /audit/i],
-  pos_resellers: [/computer/i, /hardware/i, /point of sale/i, /electronics/i, /software/i],
+  agencies: [/computer services/i, /software/i, /internet/i, /telecommunicat/i],
+  accountants: [/finance/i, /account/i, /bookkeep/i, /tax/i, /audit/i],
+  pos_resellers: [/computer hardware/i, /scales/i, /weighing/i, /electronics/i, /point of sale/i],
 };
 
 export function parseDirectoryIndex(html, base = DIRECTORY_INDEX) {

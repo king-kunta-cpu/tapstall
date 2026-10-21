@@ -438,8 +438,13 @@ test('the directory source reads a listing page into named businesses with a num
   assert.equal(index.length, 2);
   assert.equal(index[0].slug, 'computer-services-software');
   assert.equal(index[1].label, 'Estate Agents', 'entities decoded, or every match is a near-miss');
-  assert.ok(DIRECTORY_KEYWORDS.agencies.some((p) => p.test('Web Design & Hosting')));
-  assert.ok(DIRECTORY_KEYWORDS.accountants.some((p) => p.test('Accountants & Bookkeepers')));
+  // the directory's real category names, from the live index
+  assert.ok(DIRECTORY_KEYWORDS.agencies.some((p) => p.test('Computer Services & Software')));
+  assert.ok(DIRECTORY_KEYWORDS.agencies.some((p) => p.test('Internet & Telecommunications')));
+  assert.ok(DIRECTORY_KEYWORDS.accountants.some((p) => p.test('Finance Services')));
+  assert.ok(DIRECTORY_KEYWORDS.pos_resellers.some((p) => p.test('Scales & Weighing Machines')),
+    'a Zimbabwean till seller is filed under scales, which the playbook would never have guessed');
+  assert.ok(!DIRECTORY_KEYWORDS.agencies.some((p) => p.test('Motor Vehicle Dealers')), 'and a car dealer is not an agency');
   assert.match(DIRECTORY_INDEX, /classifieds\.co\.zw/);
   // and the directory host can never be filed as a business itself
   assert.equal(usableHost('https://www.classifieds.co.zw/macbyte-systems13'), false);
