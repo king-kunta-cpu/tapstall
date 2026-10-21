@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Courage Garikai — books, research and field reports</title>
-<meta name="description" content="Courage Garikai writes and builds commerce systems for markets the platforms skip. Books, research papers and field reports, in PDF, EPUB, HTML and Markdown.">
+<title>Courage Garikai — AI infrastructure, autonomous systems, books and research</title>
+<meta name="description" content="Courage Garikai writes and builds merchant rails and autonomous AI operations for low-infrastructure markets. Books, research papers and field reports, in PDF, EPUB, HTML and Markdown.">
 <meta name="author" content="Courage Garikai">
 <style>
 :root{
@@ -34,11 +34,14 @@ nav.mast-nav a:hover{color:var(--accent)}
 
 /* hero */
 .hero{padding:76px 0 54px;border-bottom:1px solid var(--rule)}
-.hero .eyebrow{font:600 11.5px/1 var(--sans);letter-spacing:.22em;text-transform:uppercase;
+.hero .eyebrow{display:grid;gap:5px;
+  font:600 10.8px/1.5 var(--sans);letter-spacing:.185em;text-transform:uppercase;
   color:var(--accent);margin-bottom:26px}
+.hero .eyebrow span{display:block}
+.hero .eyebrow span+span{color:#737a80}   /* one accent, two supporting lines */
 .hero h1{font-size:clamp(38px,5.6vw,64px);line-height:1.05;letter-spacing:-.022em;
   font-weight:400;margin:0 0 26px;max-width:16em}
-.hero h1 em{font-style:italic;color:var(--accent)}
+.hero h1 em{font-style:italic;color:var(--accent);white-space:nowrap}
 .hero .lede{font-size:19.5px;line-height:1.55;color:#33383d;max-width:34em;margin:0 0 30px}
 .hero .lede b{font-weight:600;color:var(--ink)}
 .stats{display:flex;flex-wrap:wrap;gap:38px;margin-top:34px;padding-top:26px;
@@ -224,6 +227,8 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
   .cover{aspect-ratio:3/2.9}
   .wrap{padding:0 20px}
   .hero{padding:48px 0 40px}
+  .hero .eyebrow{font-size:9px;letter-spacing:.085em;gap:6px;margin-bottom:20px}
+  .hero h1 em{white-space:normal}
   .row{grid-template-columns:76px 1fr;gap:16px}
   .row-year{border-right:0;padding-top:0;grid-column:1/-1;margin-bottom:2px}
   .row-thumb{width:76px}
@@ -233,7 +238,7 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
   .build-head{display:block}
   .build-role{display:block;margin-top:5px;text-align:left}
   .mast .wrap{flex-direction:column;align-items:flex-start;gap:11px}
-  nav.mast-nav{gap:16px}
+  nav.mast-nav{gap:16px;flex-wrap:wrap;row-gap:8px}
 }
 @media print{ header.mast{position:static} .filters{display:none} body{background:#fff} }
 </style>
@@ -256,12 +261,13 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
 <main>
   <div class="wrap">
     <section class="hero">
-      <div class="eyebrow">Writer · Engineer · Operator</div>
-      <h1>I build commerce for the markets the platforms skip, and write down <em>what happens next</em>.</h1>
-      <p class="lede">Thirteen published works on trade, technology and constraint — seven books, four
-      working papers and two short volumes, all from the same practice.
-      Everything here is produced from a source file and shipped in four formats, because a
-      reader should not need a particular app to read a book.</p>
+      <div class="eyebrow"><span>AI Infrastructure and Autonomous Systems Writer</span><span>Autonomous Cognitive Infrastructure Engineer</span><span>Autonomous Cognitive Infrastructure Operator</span></div>
+      <h1>The market never refused these merchants. <em>The software did.</em></h1>
+      <p class="lede">I rebuild the software: merchant rails, reconciliation ledgers and autonomous
+      AI operations that still hold a record when the connection drops. Thirteen published works
+      on trade, technology and constraint — seven books, four working papers and two short
+      volumes — come out of the same practice, each produced from a source file and shipped in
+      four formats.</p>
       <div class="stats">
         <div class="stat"><div class="n">13</div><div class="k">Published works</div></div>
         <div class="stat"><div class="n">1,363</div><div class="k">Pages in print</div></div>
