@@ -50,6 +50,21 @@ data the pipeline ranks by, and gives the cron one bounded pass a day to fill th
   a stubbed feed, the duplicate and DNC rules, the application meter, and the tiers on the page).
   The live `0.9.1` page-count assertion moved 11 → 12 with `partners.html`.
 
+**Live (v1.7.1).** `5d864ec`, deploy run `39599554165` — worker + pages, `success`.
+`/__ping` → `{"ok":true,"version":"1.7.1"}`; `/__selftest` → `pages_inlined: 12`,
+`pages_bytes: 441322`, `pages_store_from: bundle`. Checked against production, not the build:
+`/partners` → `200` and the same 15,793 bytes as the source file; `GET /api/discover` → `401
+{"error":"admin secret required"}`; `POST /api/discover/run` → `401`; `POST /api/partners/apply`
+with no trading name → `422 business_required`, with one → `200 {"filed":true}`. The links are
+live on both surfaces: `/fees` and `/` carry `href="/partners"`, and the static mirror resolves
+`/partners/` (the handoff page) instead of 404.
+
+The cron is `5,25,45 * * * *` plus the four nightly slots, so the first discovery pass lands
+within twenty minutes of the deploy and then once per UTC day (`disc:state.day` guards the rest).
+One artefact of the live check is in the production lead queue: the application the endpoint test
+filed, business `Live Check Ltd`, `livecheck@example.com`, segment `agencies`, status `queued`. It
+should be marked do-not-contact or deleted from the sellers console — it is a test, not a prospect.
+
 ## v1.7.0 (2026-10-21): the settlement layer — the rail we can actually sell
 
 The owner asked which of the missing rail pieces are needed **now**, and told us to build them.
