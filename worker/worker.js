@@ -16,6 +16,7 @@
 
 import {
   runDiscovery, discoveryPlan, discoverySummary, TARGET_SEGMENTS, SEGMENT_KEYS,
+  DIRECTORY_SITES, searchProvider,
 } from './discover.js';
 import {
   railCatalogue, railFor, allocateCents, paymentEvent, appendPaymentEvent, hasPaymentEvent,
@@ -57,7 +58,7 @@ import {
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '1.8.0';
+const VERSION = '1.9.0';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
@@ -5497,9 +5498,13 @@ async function discoveryPass(env, opts = {}) {
   if (opts.force === false && !quotaGate('writes', 'automation').ok) {
     return { ok: true, skipped: 'quota', added: 0, candidates: 0 };
   }
-  const countries = (opts.countries && opts.countries.length) ? opts.countries : ['ZW', 'ZA'];
+  // Every market the rail is sold in — a registry of directories is only worth what it is asked,
+  // and ZW+ZA alone left Kenya and Nigeria wired but never queried.
+  const countries = (opts.countries && opts.countries.length) ? opts.countries : ['ZW', 'ZA', 'KE', 'NG'];
   const run = await runDiscovery({
     nowMs: Date.now(), countries,
+    // a paid/keyed provider if the Worker holds one; otherwise the search leg stays Bing RSS
+    search: searchProvider(env),
     perRun: Math.max(1, Math.min(12, Number(opts.perRun) || DISC_PER_RUN_DEFAULT)),
     limit: Math.max(1, Math.min(24, Number(opts.limit) || DISC_LIMIT_DEFAULT)),
     perQuery: 3, done: st.done || [],
@@ -5557,6 +5562,17 @@ async function discoverStatus(req, env) {
       note: 'A candidate is filed only if its page was read, names the market, gives a business name and a way to answer. Refusals are counted, never padded over.' },
     last: (st.runs || []).slice(-5).reverse(),
     budget: { per_day_writes: DISC_WRITES_MAX, per_run_queries: DISC_PER_RUN_DEFAULT, per_run_candidates: DISC_LIMIT_DEFAULT },
+    // What is wired, per country, so "why is the list thin" has an answer that is not a guess.
+    sources: {
+      directories: Object.entries(DIRECTORY_SITES).map(([cc, d]) => ({ country: cc, site: d.host, kind: d.kind })),
+      directoryless: ['ZA'],
+      search: searchProvider(env) ? { provider: searchProvider(env).provider, label: searchProvider(env).label, state: 'on' } : {
+        state: 'off',
+        reason: 'no key — set BRAVE_KEY (2,000 free queries a month) or SERPAPI_KEY (100) as a Worker secret and the search leg turns on in the next pass',
+      },
+      never: ['linkedin.com', 'facebook.com profiles', 'any page behind a login'],
+      why: 'A directory the business chose to be listed in is consent. A profile somebody did not publish for this is not, and both networks block datacentre traffic anyway.',
+    },
     note: 'Discovery reads public pages and files candidates into the lead queue. It never sends, never claims a lead and never overrides the do-not-contact ledger. A human opens the queue; the cron only fills it.',
   }, 200, { 'Cache-Control': 'no-store' });
 }

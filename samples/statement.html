@@ -1,0 +1,58 @@
+<!doctype html>
+<!--
+  A captured render of GET /s/settlestore/settle?day=2026-10-21 from the live test — the actual
+  markup the Worker produced, kept as a sample so the page can be looked at without a merchant
+  login. Nothing here is external: the page has no script, no font and no image, which is why it
+  prints, saves as a PDF, and opens on a bad connection.
+-->
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
+<title>Statement · Statement Kitchen · 2026-10-21</title>
+<style>
+:root{--ink:#12211b;--mut:#5d7169;--line:#e2e8e4;--hot:#0b5b34;--warn:#a8560d}
+*{box-sizing:border-box}body{margin:0;background:#f4f6f5;color:var(--ink);font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:46rem;margin:0 auto;padding:1.6rem 1.1rem 3rem}
+h1{font-size:1.28rem;margin:0 0 .15rem}h2{font-size:.82rem;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin:1.6rem 0 .5rem}
+.head{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap}
+.sub{color:var(--mut);font-size:.9rem;margin:0}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(7.5rem,1fr));gap:.55rem;margin-top:1.1rem}
+.stat{background:#fff;border:1px solid var(--line);border-radius:.6rem;padding:.7rem .8rem}
+.stat b{display:block;font-size:1.12rem;font-variant-numeric:tabular-nums}
+.stat span{color:var(--mut);font-size:.76rem}
+.stat.hot{border-color:var(--hot)}.stat.hot b{color:var(--hot)}.stat.warn b{color:var(--warn)}
+table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:.6rem;overflow:hidden}
+th,td{text-align:left;padding:.5rem .6rem;border-bottom:1px solid var(--line);font-size:.88rem;vertical-align:top}
+th{background:#fafbfa;font-weight:600;color:var(--mut);font-size:.76rem;text-transform:uppercase;letter-spacing:.04em}
+tr:last-child td{border-bottom:0}.n{text-align:right;font-variant-numeric:tabular-nums}.warn{color:var(--warn)}
+.todo{background:#fff;border:1px solid var(--hot);border-radius:.6rem;padding:.75rem .85rem;margin-top:1rem}
+.todo b{display:block;font-size:.76rem;text-transform:uppercase;letter-spacing:.05em;color:var(--hot);margin-bottom:.2rem}
+.foot{margin-top:1.6rem;color:var(--mut);font-size:.82rem}
+.act{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:1rem}
+.act a{display:inline-block;padding:.5rem .8rem;border-radius:.45rem;border:1px solid var(--line);background:#fff;color:var(--ink);text-decoration:none;font-size:.85rem}
+.act a.pri{background:var(--hot);border-color:var(--hot);color:#fff}
+@media print{body{background:#fff}main{padding:0}.act{display:none}.stat,table{border-color:#ccc}
+.stat,.stat.hot{border-width:1px}tr{break-inside:avoid}}
+</style></head><body><main>
+<div class="head"><div><h1>Statement Kitchen</h1>
+<p class="sub">Settlement statement · Wednesday, 21 October 2026 · USD</p></div>
+<div class="sub">settlestore<br>prepared by Tapstall</div></div>
+<div class="stats">
+<div class="stat"><b>$6.15</b><span>expected from orders</span></div>
+<div class="stat hot"><b>$6.15</b><span>matched in the ledger</span></div>
+<div class="stat"><b>$0.00</b><span>to chase</span></div>
+<div class="stat"><b>$0.00</b><span>refunded</span></div>
+<div class="stat"><b>$0.00</b><span>rail fees recorded</span></div>
+<div class="stat"><b>$6.15</b><span>net</span></div>
+</div>
+<div class="todo"><b>One thing to do today</b>Every expected amount is matched. Nothing to chase.</div>
+<h2>By rail</h2>
+<table><thead><tr><th>rail</th><th class="n">orders</th><th class="n">expected</th><th class="n">matched</th><th class="n">to chase</th><th class="n">fees</th></tr></thead>
+<tbody><tr><td>ecocash_usd</td><td class="n">1</td><td class="n">$6.15</td><td class="n">$6.15</td><td class="n">—</td><td class="n">—</td></tr></tbody></table>
+<h2>The two facts this page is built on</h2>
+<p class="sub"><b>Expected</b> is what the order book says buyers owed. <b>Matched</b> is what the shop recorded as actually received against an order. They are kept apart on purpose: a rail that shows a payment is not the same thing as money in the shop’s account, and this page never calls one the other.</p>
+<div class="act"><a class="pri" href="#" download>Download this day as CSV</a>
+<a href="#">← 2026-10-20</a>
+<a href="#">2026-10-22 →</a>
+<a href="javascript:print()">Print or save as PDF</a></div>
+<p class="foot">Every rail on this statement paid the shop directly. Tapstall does not hold the money, does not pay it out and does not convert it — it reads what the shop recorded and does the arithmetic. Rows stay available for five years. A rail that is missing from this page has no payments recorded against it, which is a fact worth checking rather than a gap in the arithmetic.</p>
+</main></body></html>

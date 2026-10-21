@@ -1,5 +1,66 @@
 # Tapstall — status
 
+## v1.9.0 (2026-10-21): discovery stops being one source in one country
+
+The complaint that forced this release was arithmetic, not taste: *one to three leads a day is bad*.
+The cause was structural. Discovery had a single directory, hard-wired to Zimbabwe, with one
+category taxonomy, and a search leg (Bing RSS) that ignores the market it is asked about. Three
+sources, one of them a formality, one country deep.
+
+**A registry of directories, one per target country** (`DIRECTORY_SITES` in `worker/discover.js`):
+
+| Country | Site | Kind | Why this one |
+| --- | --- | --- | --- |
+| ZW | `classifieds.co.zw` | taxonomy (40 categories) | the source that produced the first real lead |
+| KE | `businesslist.co.ke` | phrase search | answers `?q=web+design` with company pages that carry `tel:` |
+| NG | `businesslist.com.ng` | phrase search | same platform, its own market, same parser |
+| ZA | — | — | *admitted, not hidden*: yep/cylex/brabys are Cloudflare or JS shells from a Worker, hotfrog and all.biz refuse datacentre traffic |
+
+- **Two kinds of directory, because the sites are two kinds.** A site with a taxonomy is asked about
+  the category that matches the trade (`DIRECTORY_KEYWORDS`, mapped to the directory's own words). A
+  site that answers a phrase is asked three or four phrases per segment (`DIRECTORY_PHRASES` —
+  "web design", "bookkeeping", "point of sale"), then **each company page is read** for the number
+  the business published. Nothing is read off a list.
+- **Numbers are made dialable, not guessed.** `dialablePhone()` turns the way a shop writes its
+  number (`0726239033` in Kenya) into a number a seller anywhere can ring (`254726239033`), and
+  refuses anything that is not a plausible number for that market — a five-digit string stays a
+  five-digit string.
+- **The pass keeps asking when a source answers nothing.** The daily budget counts candidates, but a
+  directory with no matching category, a map with no records for that trade, or a page that moved is
+  not a lead — stopping on the first of those is exactly how a day produced one. Attempts are now
+  capped at three times the daily query budget, so a bad morning is a longer pass, not an unbounded
+  crawl. `quiet` (answered with nothing) is reported separately from `errors` (refused), so the
+  error count finally means what it says.
+- **A business reached twice is filed once.** The map knows a shop under two trade tags and a
+  directory and a search both name it; duplicates used to burn the day's budget and inflate the
+  morning. Deduped inside the pass on name + host.
+- **Sources are interleaved, not stacked.** A strict sort meant one failing source could spend the
+  whole budget (the regression the suite caught on the first run of this change: a directory 404
+  emptied the day while the map and search were never asked).
+- **Paid search: offered, not assumed.** `BRAVE_KEY` (2,000 free queries a month) or `SERPAPI_KEY`
+  (100, a trial) as a Worker secret turns the search leg into a provider that honours the query.
+  With no key the leg is off and `/api/discover` says so, with the price of switching it on.
+- **The scheduled pass asks every market**: its default country list was `['ZW','ZA']`, so Kenya and
+  Nigeria would have been wired and never queried. Now `['ZW','ZA','KE','NG']`, with a test that
+  reads the default out of `worker.js` and fails if a market with a directory is missing from it.
+- **`docs/DISCOVERY-SOURCES.md`** is the honest table: what is wired free, what each paid key costs, why South Africa has no directory, and why LinkedIn and Facebook will not be scraped.
+- **`GET /api/discover` now reports `sources`**: which directory serves each country, which country
+  has none and why, the search provider's state, and the list of surfaces never touched.
+- **Never behind a login.** No LinkedIn, no Facebook profiles, no Instagram: they require a session,
+  they forbid automated collection, and they block datacentre traffic. A directory a business chose
+  to be listed in is consent; a profile somebody did not publish for this is not. There is a test
+  that fails if a request to any of those hosts ever appears in the source.
+- **Measured, not estimated** — a real pass from a real address on 2026-10-21, `countries: [KE, NG]`,
+  `perRun: 6`: the Kenyan directory answered **6 company pages**, the Nigerian one **6**, the map
+  added 3 in Nairobi and 12 across Nigeria, and the pass filed 8 candidates with numbers like
+  `254726239033`, `2347301771710`, `2348022226930`. Two things the live pass taught, both fixed
+  before commit: a page writing `+234 (0)730 177 1710` produced a number nobody could ring, and a
+  children's home was filed as a prospect (the institution gate now covers charities, NGOs, orphanages
+  and foundations).
+- **Tests**: 408/408. New: the registry (including ZA being absent), Kenyan/Nigerian company pages
+  read for a dialable number, the phrase list using the directory's words, a dead market not
+  stopping the pass, the login-host invariant, and "no key, no search jobs / one key, provider jobs".
+
 ## v1.8.0 (2026-10-21): the statement a shop can hand over, and the policy in its own file
 
 The partner page has been selling one artefact since v1.7.1: *the settlement statement*. An agency
@@ -261,8 +322,11 @@ with no trading name → `422 business_required`, with one → `200 {"filed":tru
 live on both surfaces: `/fees` and `/` carry `href="/partners"`, and the static mirror resolves
 `/partners/` (the handoff page) instead of 404.
 
-The cron is `5,25,45 * * * *` plus the four nightly slots, so the first discovery pass lands
-within twenty minutes of the deploy and then once per UTC day (`disc:state.day` guards the rest).
+The cron is `5,25,45 * * * *` plus the four nightly slots.**Correction (v1.9.0):** that was wrong,
+and the live cron log says so — the 20-minute slot is the press slot and returns before `runCron`,
+so discovery does *not* run within twenty minutes of a deploy. It runs on the four 6-hourly sweeps
+(`15 0,6,12,18 * * *`), keyed to once per UTC day (`disc:state.day` guards the rest). The next pass
+after a deploy is therefore at most six hours away, not twenty minutes.
 One artefact of the live check is in the production lead queue: the application the endpoint test
 filed, business `Live Check Ltd`, `livecheck@example.com`, segment `agencies`, status `queued`. It
 should be marked do-not-contact or deleted from the sellers console — it is a test, not a prospect.

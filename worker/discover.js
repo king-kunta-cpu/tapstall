@@ -95,6 +95,69 @@ export function segmentFor(key) {
   return TARGET_SEGMENTS.find((s) => s.key === String(key)) || null;
 }
 
+/* ------------------------------------------------------- keyed search (optional)
+ * Bing's RSS ignores the market and the operators, so the search leg is only worth anything with a
+ * provider that honours a query. Both providers below have a free tier and no card:
+ *   Brave Search API  — 2,000 queries a month, one a second (the better free tier by far);
+ *   SerpAPI           — 100 searches a month (a trial, not a habit).
+ * Neither is switched on by code: they are switched on by a key in the Worker's secrets, and until
+ * then the leg reports `no_search_key` rather than pretending to have run.
+ *
+ * What is deliberately *not* here: scraping LinkedIn or Facebook. Both forbid it in their terms,
+ * both block on sight, and a company whose pitch is "your records are yours" cannot be the company
+ * that got its address banned harvesting people's profiles. A directory the business chose to be
+ * listed in is consent; a profile somebody did not publish for this is not.
+ */
+export const SEARCH_PROVIDERS = {
+  brave: {
+    env: 'BRAVE_KEY', label: 'Brave Search API',
+    url: (q, cc) => 'https://api.search.brave.com/res/v1/web/search?q=' + encodeURIComponent(q + ' ' + cc)
+      + '&country=' + cc + '&count=20&safesearch=moderate',
+    headers: (key) => ({ 'x-subscription-token': key, accept: 'application/json' }),
+    parse: parseBrave,
+  },
+  serpapi: {
+    env: 'SERPAPI_KEY', label: 'SerpAPI',
+    url: (q, cc, key) => 'https://serpapi.com/search.json?engine=google&q=' + encodeURIComponent(q)
+      + '&gl=' + String(cc).toLowerCase() + '&hl=en&num=20&api_key=' + encodeURIComponent(key),
+    headers: () => ({ accept: 'application/json' }),
+    parse: parseSerpApi,
+  },
+};
+
+export function parseBrave(json) {
+  const d = (json && json.web && json.web.results) || [];
+  return d.map((r) => ({ title: stripTags(r.title || ''), url: r.url || '', note: stripTags(r.description || '') }))
+    .filter((i) => i.title && i.url);
+}
+export function parseSerpApi(json) {
+  const d = (json && json.organic_results) || [];
+  return d.map((r) => ({ title: stripTags(r.title || ''), url: r.link || '', note: stripTags(r.snippet || '') }))
+    .filter((i) => i.title && i.url);
+}
+
+/** Which provider, if any, this Worker holds a key for. Reported by /api/discover so the owner can
+ *  see the leg is off, rather than wondering why the list is thin. */
+export function searchProvider(env = {}) {
+  for (const key of Object.keys(SEARCH_PROVIDERS)) {
+    const p = SEARCH_PROVIDERS[key];
+    if (env[p.env] && String(env[p.env]).length > 8) return { provider: key, key: String(env[p.env]), label: p.label };
+  }
+  return null;
+}
+
+async function runSearchProvider(fetcher, job, limit, provider) {
+  if (!provider || !provider.key) return { items: [], skipped: true, error: 'no_search_key' };
+  const p = SEARCH_PROVIDERS[provider.provider];
+  if (!p) return { items: [], error: 'unknown_provider' };
+  try {
+    const r = await fetcher(p.url(job.query, job.country, provider.key), { headers: p.headers(provider.key) });
+    if (!r.ok) return { items: [], error: provider.provider + '_' + r.status };
+    const items = p.parse(JSON.parse(await r.text())).filter((i) => usableHost(i.url)).slice(0, limit);
+    return { items, provider: provider.provider, count: items.length };
+  } catch (e) { return { items: [], error: provider.provider + '_' + String(e && e.message || e).slice(0, 60) }; }
+}
+
 /* ------------------------------------------------------------ the map source
  * Why a second source exists: the first live pass asked Bing for "website design agency Harare ZW"
  * and Bing answered with Wix, Wikipedia and a dictionary definition of the word "digital". Its RSS
@@ -214,7 +277,11 @@ async function runOverpass(fetcher, job, limit, opts = {}) {
       return { items, city: picked[0], count: items.length, mirror };
     } catch (e) { tried.push(mirror.replace(/^https:\/\//, '').split('/')[0] + ' ' + String(e && e.message || e).slice(0, 40)); }
   }
-  return { items: [], error: (emptyFrom ? 'no_data_on_any_mirror: ' : 'all_mirrors_failed: ') + tried.join('; ').slice(0, 160) };
+  // Distinguish the two endings, because they cost different things: "every mirror answered and
+  // nobody in that city has that tag" is a quiet day, while "every mirror refused" is an outage.
+  // Only the second is an error worth refunding a slot for.
+  if (emptyFrom >= OVERPASS_MIRRORS.length) return { items: [], empty: true, city: picked[0], note: 'no map records for this trade in ' + picked[0] };
+  return { items: [], error: 'all_mirrors_failed: ' + tried.join('; ').slice(0, 160), fatal: true };
 }
 
 /* -------------------------------------------------------- the directory source
@@ -238,6 +305,100 @@ export const DIRECTORY_KEYWORDS = {
   pos_resellers: [/computer hardware/i, /scales/i, /weighing/i, /electronics/i, /point of sale/i],
 };
 
+/* ------------------------------------------------- one directory per country
+ * A single source is a single point of failure twice over: one country, one category taxonomy, one
+ * server. What the user asked for — "at least one free directory per country we target" — is also
+ * the right engineering answer, because a directory is local by construction in a way no search
+ * engine is.
+ *
+ * Two kinds, because the sites are two kinds:
+ *   `categories` — the site publishes a taxonomy (Zimbabwe's classifieds.co.zw, 40 categories);
+ *   `search`     — the site answers a phrase and returns company pages (businesslist, KE and NG).
+ * Every candidate ends up on a company page that a person can open, and the phone is read off that
+ * page rather than off a list, so what a seller dials is what the business published.
+ */
+export const DIRECTORY_SITES = {
+  ZW: { key: 'classifieds-zw', kind: 'categories', host: 'classifieds.co.zw', index: DIRECTORY_INDEX, dial: '263',
+    note: 'listed in a Zimbabwe business directory' },
+  KE: { key: 'businesslist-ke', kind: 'search', host: 'businesslist.co.ke', dial: '254',
+    search: (q) => 'https://www.businesslist.co.ke/?q=' + encodeURIComponent(q),
+    note: 'listed in a Kenyan business directory' },
+  NG: { key: 'businesslist-ng', kind: 'search', host: 'businesslist.com.ng', dial: '234',
+    search: (q) => 'https://www.businesslist.com.ng/?q=' + encodeURIComponent(q),
+    note: 'listed in a Nigerian business directory' },
+};
+
+/** What to ask a directory that answers a phrase. The directory's own words win over the
+ *  playbook's: a Kenyan web shop lists itself as "web design", not as "agency". */
+export const DIRECTORY_PHRASES = {
+  agencies: ['web design', 'website design', 'digital agency', 'software company'],
+  accountants: ['accountants', 'bookkeeping', 'tax consultants', 'auditors'],
+  pos_resellers: ['point of sale', 'computer shop', 'electronics shop', 'weighing scales'],
+  associations: ['business association', 'chamber of commerce'],
+};
+
+/** A local number written the way the shop writes it, made dialable from anywhere:
+ *  `0726239033` in Kenya is `254726239033`. Anything that is not the right length for the market
+ *  after that is not a number, it is a string that looked like one. */
+export function dialablePhone(raw, dial) {
+  let d = String(raw || '').replace(/[^\d+]/g, '');
+  if (!d) return '';
+  d = d.replace(/^\+/, '');
+  if (d.startsWith('00')) d = d.slice(2);
+  if (dial && d.startsWith(dial)) {
+    // "+234 (0)730 177 1710" is how a Nigerian page writes it: the trunk zero in brackets is not
+    // part of the number, and leaving it in produces a number nobody can ring
+    const rest = d.slice(dial.length);
+    if (rest.startsWith('0') && rest.length > 6) d = dial + rest.replace(/^0+/, '');
+  } else if (dial) {
+    if (d.startsWith('0')) d = dial + d.slice(1);
+    else if (d.length === 9) d = dial + d;
+  }
+  return phonePlausible(d) ? d : '';
+}
+
+/** The company links a businesslist search answers with. Names come from the link text when the
+ *  page gives it, and from the slug when it does not — never invented. */
+export function parseDirectorySearch(html, pageUrl = '') {
+  const s = String(html || '');
+  const out = [];
+  const seen = new Set();
+  for (const m of s.matchAll(/<a[^>]+href="(\/company\/(\d+)\/[a-z0-9-]+)"[^>]*>([\s\S]{0,120}?)<\/a>/gi)) {
+    const href = m[1];
+    if (seen.has(href)) continue;
+    seen.add(href);
+    const label = stripTags(decodeEntities(m[3])).replace(/\s+/g, ' ').trim();
+    const slug = href.split('/').pop() || '';
+    const name = (label && label.length >= 2 && label.length <= 80 && !/^(view|more|details)/i.test(label))
+      ? label
+      : slug.replace(/-\d+$/, '').replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    out.push({ name, url: pageUrl ? new URL(href, pageUrl).href : href, id: m[2] });
+  }
+  return out;
+}
+
+/** A company page: the name the directory holds, the number it published, and any site it names. */
+export function parseCompanyPage(html, url, site = {}) {
+  const s = String(html || '');
+  const nameM = s.match(/id="company_name"[^>]*>([\s\S]{0,200}?)<\//i)
+    || s.match(/<h1[^>]*>([\s\S]{0,200}?)<\/h1>/i)
+    || s.match(/<title[^>]*>([\s\S]{0,200}?)<\/title>/i);
+  const name = stripTags(decodeEntities(nameM ? nameM[1] : '')).replace(/\s+/g, ' ').trim();
+  const tel = (s.match(/href="tel:([+\d\s()\.-]{7,22})"/i) || [])[1] || '';
+  const wa = (s.match(/wa\.me\/(\+?\d{9,15})/i) || [])[1] || '';
+  const phone = dialablePhone(tel, site.dial || '') || dialablePhone(wa, site.dial || '');
+  const sites = [...s.matchAll(/href="(https?:\/\/[^"]+)"/gi)].map((m) => m[1])
+    .filter((u) => usableHost(u) && hostOf(u) !== hostOf(url) && !/google\.|facebook\.|linkedin\.|twitter\.|x\.com|whatsapp\./i.test(u));
+  return {
+    title: name.slice(0, 80),
+    url: String(url),
+    note: (site.note || 'listed in a business directory') + (sites[0] ? ' with a link to ' + hostOf(sites[0]) : ', with a phone and no website of its own'),
+    contact: { email: (s.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i) || [''])[0].toLowerCase(), phone },
+    site: sites[0] || '',
+    fromDirectory: true,
+  };
+}
+
 export function parseDirectoryIndex(html, base = DIRECTORY_INDEX) {
   const s = String(html || '');
   const out = [];
@@ -252,7 +413,7 @@ export function parseDirectoryIndex(html, base = DIRECTORY_INDEX) {
 }
 
 /** One listing block per business: the name, the page that proves it, the number it published. */
-export function parseDirectory(html, pageUrl = '') {
+export function parseDirectory(html, pageUrl = '', meta = {}) {
   const s = String(html || '');
   const blocks = s.split(/<div[^>]*class="[^"]*\blisting\b[^"]*"/i).slice(1);
   const out = [];
@@ -265,49 +426,85 @@ export function parseDirectory(html, pageUrl = '') {
     const wa = b.match(/phone=(\+?\d{9,15})/i);
     const tel = b.match(/href="tel:([+\d\s()-]{7,20})"/i);
     let phone = wa ? wa[1] : (tel ? tel[1].replace(/[^\d+]/g, '') : '');
+    // a shop that writes its number the local way ("0771 234 567") publishes a number a person can
+    // dial; the market's country code is what makes it dialable from anywhere
+    if (!phonePlausible(phone) && meta.dial) phone = dialablePhone(phone, meta.dial);
     if (!phonePlausible(phone)) phone = '';
     // the first outbound link that is a real business site — not the listing's own WhatsApp button,
     // which every listing has and which would make every note read "a link to api.whatsapp.com"
     const sites = [...b.matchAll(/href="(https?:\/\/(?!www\.classifieds\.co\.zw|api\.whatsapp\.com)[^"]+)"/gi)]
       .map((m) => m[1]).filter((u) => usableHost(u));
-    const site = sites[0] || '';
+    const bizSite = sites[0] || '';
     out.push({
       title: name,
       url: /^https?:\/\//.test(href) ? href : (pageUrl ? new URL(href, pageUrl).href : href),
-      note: 'listed in a Zimbabwe business directory' + (site ? ' with a link to ' + hostOf(site) : ', with a phone and no website of its own'),
+      note: (meta.note || 'listed in a business directory')
+        + (bizSite ? ' with a link to ' + hostOf(bizSite) : ', with a phone and no website of its own'),
       contact: { email: '', phone },
-      site,
+      site: bizSite,
       fromDirectory: true,
     });
   }
   return out;
 }
 
+/** The phrase-search half of the directory registry: ask the site a phrase, then read each company
+ *  page for the number the business published. Bounded by `limit`, because every candidate is one
+ *  page fetch and a pass must not become a crawl. */
+async function runDirectorySearch(fetcher, job, limit, opts = {}) {
+  const cc = String(job.country || '').toUpperCase();
+  const site = DIRECTORY_SITES[cc];
+  if (!site || site.kind !== 'search') return { items: [], skipped: true, error: 'no_search_directory_' + cc };
+  const phrases = DIRECTORY_PHRASES[job.segment] || [];
+  if (!phrases.length) return { items: [], skipped: true, error: 'no_phrase_for_' + job.segment };
+  const phrase = phrases[Math.abs(Number(job.day) || 0) % phrases.length];
+  let links = [];
+  try {
+    const r = await fetcher(site.search(phrase), { headers: { 'user-agent': 'Tapstall discovery (harmless, once a day)', accept: 'text/html' } });
+    if (!r.ok) return { items: [], error: site.key + '_search_' + r.status, fatal: true };
+    links = parseDirectorySearch(await r.text(), site.search(phrase)).slice(0, Math.max(1, Math.min(6, limit)));
+  } catch (e) { return { items: [], error: site.key + '_search_' + String(e && e.message || e).slice(0, 60), fatal: true }; }
+  const items = [];
+  for (const l of links) {
+    try {
+      const r = await fetcher(l.url, { headers: { 'user-agent': 'Tapstall discovery (harmless, once a day)', accept: 'text/html' } });
+      if (!r.ok) continue;
+      const item = parseCompanyPage(await r.text(), l.url, site);
+      if (!item.title) item.title = l.name;
+      items.push({ ...item, category: phrase });
+    } catch (e) { /* one bad company page does not fail the job */ }
+  }
+  return { items, phrase, count: items.length };
+}
+
 async function runDirectory(fetcher, job, limit, opts = {}) {
   const cc = String(job.country || '').toUpperCase();
-  if (cc !== 'ZW') return { items: [], error: 'no_directory_for_' + cc, skipped: true };
+  const site = DIRECTORY_SITES[cc];
+  if (!site || site.kind !== 'categories') return { items: [], error: 'no_directory_for_' + cc, skipped: true };
   const pats = DIRECTORY_KEYWORDS[job.segment];
   if (!pats) return { items: [], error: 'no_directory_category_for_' + job.segment, skipped: true };
+  const cacheKey = 'dir|index|' + site.key;
   let index = null;
-  if (opts.cacheGet) { try { index = await opts.cacheGet('dir|index'); } catch (e) { /* refetch */ } }
+  if (opts.cacheGet) { try { index = await opts.cacheGet(cacheKey); } catch (e) { /* refetch */ } }
   if (!index || !Array.isArray(index.cats) || !index.cats.length) {
     try {
-      const r = await fetcher(DIRECTORY_INDEX, { headers: { 'user-agent': 'Tapstall discovery (harmless, once a day)', accept: 'text/html' } });
-      if (!r.ok) return { items: [], error: 'directory_index_' + r.status };
-      index = { at: Date.now(), cats: parseDirectoryIndex(await r.text()) };
-      if (opts.cachePut && index.cats.length) { try { await opts.cachePut('dir|index', index); } catch (e) { /* next day */ } }
-    } catch (e) { return { items: [], error: 'directory_index_' + String(e && e.message || e).slice(0, 60) }; }
+      const r = await fetcher(site.index, { headers: { 'user-agent': 'Tapstall discovery (harmless, once a day)', accept: 'text/html' } });
+      if (!r.ok) return { items: [], error: site.key + '_index_' + r.status, fatal: true };
+      index = { at: Date.now(), cats: parseDirectoryIndex(await r.text(), site.index) };
+      if (opts.cachePut && index.cats.length) { try { await opts.cachePut(cacheKey, index); } catch (e) { /* next day */ } }
+    } catch (e) { return { items: [], error: site.key + '_index_' + String(e && e.message || e).slice(0, 60), fatal: true }; }
   }
   const cats = (index.cats || []).filter((c) => pats.some((p) => p.test(c.label) || p.test(c.slug)));
-  if (!cats.length) return { items: [], error: 'no_category_matched' };
+  // the index answered and has no such category: a skip with a reason, not a failure
+  if (!cats.length) return { items: [], error: 'no_category_matched', skipped: true };
   const pick = cats[Math.abs(Number(job.day) || 0) % cats.length];
   try {
     const r = await fetcher(pick.url, { headers: { 'user-agent': 'Tapstall discovery (harmless, once a day)', accept: 'text/html' } });
-    if (!r.ok) return { items: [], error: 'directory_page_' + r.status };
-    const items = parseDirectory(await r.text(), pick.url).slice(0, limit)
+    if (!r.ok) return { items: [], error: site.key + '_page_' + r.status, fatal: true };
+    const items = parseDirectory(await r.text(), pick.url, site).slice(0, limit)
       .map((i) => ({ ...i, category: pick.label, url: i.site || i.url }));
     return { items, category: pick.label, count: items.length };
-  } catch (e) { return { items: [], error: 'directory_page_' + String(e && e.message || e).slice(0, 60) }; }
+  } catch (e) { return { items: [], error: site.key + '_page_' + String(e && e.message || e).slice(0, 60), fatal: true }; }
 }
 
 /* --------------------------------------------------------------- the rotation
@@ -326,22 +523,57 @@ export function discoveryPlan(opts = {}) {
       // The map is tried first for the segments it can actually describe (an agency, an
       // accountant, a till shop are all tagged offices and shops); the two softest segments stay on
       // search, where a phrase is the only handle there is.
-      if (cc === 'ZW' && DIRECTORY_KEYWORDS[seg.key]) {
-        jobs.push({ segment: seg.key, country: cc, source: 'directory', query: 'zimbabwe business directory', key: 'dir|' + seg.key + '|' + cc });
+      const dsite = DIRECTORY_SITES[cc];
+      if (dsite && dsite.kind === 'categories' && DIRECTORY_KEYWORDS[seg.key]) {
+        jobs.push({ segment: seg.key, country: cc, source: 'directory', query: 'business directory categories', key: 'dir|' + seg.key + '|' + cc });
+      }
+      if (dsite && dsite.kind === 'search' && DIRECTORY_PHRASES[seg.key]) {
+        jobs.push({ segment: seg.key, country: cc, source: 'dirsearch', query: 'business directory search', key: 'dsr|' + seg.key + '|' + cc });
       }
       const mapFirst = !!OSM_TAGS[seg.key] && (OSM_CITIES[cc] || []).length;
       if (mapFirst) jobs.push({ segment: seg.key, country: cc, source: 'osm', query: 'openstreetmap ' + seg.key, key: 'osm|' + seg.key + '|' + cc });
-      for (const q of ((seg.queries || {})[cc] || [])) jobs.push({ segment: seg.key, country: cc, source: 'bing', query: q, key: seg.key + '|' + cc + '|' + q });
+      const searchSource = opts.search ? 'search' : 'bing';
+      for (const q of ((seg.queries || {})[cc] || [])) jobs.push({ segment: seg.key, country: cc, source: searchSource, query: q, key: seg.key + '|' + cc + '|' + q });
     }
   }
   if (!jobs.length) return { jobs: [], day: dayIndex };
+  // Order by how well the source is known to work, not by how the segments are ordered: a
+  // directory answers in one request, a keyed search API answers in one request, Overpass queues
+  // for forty seconds when it answers at all, and Bing answers with the wrong continent.
+  const PRIORITY = { directory: 0, dirsearch: 0, search: 1, osm: 2, bing: 3 };
+  const rank = (src) => (PRIORITY[src] === undefined ? 9 : PRIORITY[src]);   // 0 is a rank, not a missing value
+  jobs.sort((a, b) => rank(a.source) - rank(b.source));
+
+  // Interleaved, not stacked. A strict sort meant the whole day's budget could be spent on one
+  // source — and on the day that directory answers 404, the day produced nothing while the sources
+  // behind it were never asked. Round-robin over (source, country) keeps every working source in
+  // every pass, and keeps the pass honest when one of them is down.
+  const groups = new Map();
+  for (const j of jobs) {
+    const g = j.source + '|' + j.country;
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g).push(j);
+  }
+  const names = [...groups.keys()].sort((a, b) => rank(a.split('|')[0]) - rank(b.split('|')[0]) || a.localeCompare(b));
+  const woven = [];
+  for (let round = 0; woven.length < jobs.length; round++) {
+    for (const n of names) {
+      const q = groups.get(n);
+      if (q[round]) woven.push(q[round]);
+    }
+  }
+
   // fresh queries first, then wrap around from today's offset so coverage is continuous
-  const fresh = jobs.filter((j) => !done.has(j.key));
-  const pool = fresh.length ? fresh : jobs;
-  const start = fresh.length ? 0 : (dayIndex * perRun) % pool.length;
+  const freshWoven = woven.filter((j) => !done.has(j.key));
+  const pool = freshWoven.length ? freshWoven : woven;
+  const start = freshWoven.length ? 0 : (dayIndex * perRun) % pool.length;
   const picked = [];
   for (let i = 0; i < Math.min(perRun, pool.length); i++) picked.push(pool[(start + i) % pool.length]);
-  return { jobs: picked, day: dayIndex, total: jobs.length, fresh: fresh.length };
+  // The reserve is what the pass may reach into when a job errors instead of answering. A 404 is
+  // not a day's work; it is a reason to ask the next source in the same pass.
+  const pickedKeys = new Set(picked.map((j) => j.key));
+  const reserve = pool.filter((j) => !pickedKeys.has(j.key)).slice(0, perRun * 2);
+  return { jobs: picked, reserve, day: dayIndex, total: jobs.length, fresh: freshWoven.length };
 }
 
 /* ------------------------------------------------------------------ parsing
@@ -392,6 +624,9 @@ export const SKIP_HOSTS = ['google.', 'bing.com', 'duckduckgo.com', 'facebook.co
   'sortlist.', 'goodfirms.co', 'upwork.com', 'fiverr.com', 'freelancer.com', 'thumbtack.com',
   'alibaba.com', 'aliexpress.com', 'jumia.', 'takealot.com', 'ebay.', 'etsy.com', 'olx.',
   'indeed.com', 'glassdoor.', 'crunchbase.com', 'classifieds.co.zw', 'yellowpages.co.zw', 'zimyellowpages.com', 'olx.co.zw',
+  // asset hosts: a stylesheet's origin is not a shop's website
+  'googleapis.com', 'gstatic.com', 'bootstrapcdn.com', 'cloudflare.com', 'jquery.com', 'jsdelivr.net',
+  'fontawesome.com', 'googletagmanager.com', 'google-analytics.com', 'schema.org', 'w3.org',
 ];
 
 export function hostOf(url) {
@@ -457,7 +692,7 @@ const GENERIC_NAME = /\b(create your|build your|log ?in|sign ?in|sign ?up|free w
 
 /** The map tags `office=company` honestly, and a national utility is a company. An institution is
  *  not a prospect — it cannot buy a storefront, and a seller who rings it has wasted the call. */
-const NOT_A_PROSPECT = /\b(council|ministry|government|authority|commission|municipal\w*|university|polytechnic|college|hospital|clinic|school|bank|police|prison|embassy|high court|courts?|parastatal|zesa|zetdc|city of|residents association)\b/i;
+const NOT_A_PROSPECT = /\b(council|ministry|government|authority|commission|municipal\w*|university|polytechnic|college|hospital|clinic|school|bank|police|prison|embassy|high court|courts?|parastatal|zesa|zetdc|city of|residents association|orphan\w*|children'?s?\b|charity|ngo|foundation|church|missions?|diocese|parish|trust fund)\b/i;
 
 export function admitCandidate(item = {}, evidence = {}, opts = {}) {
   const fromMap = !!opts.fromMap;
@@ -600,20 +835,46 @@ export async function runDiscovery(opts = {}) {
   const perQuery = Math.max(1, Math.min(10, Number(opts.perQuery) || 4));
   const out = { ok: true, day: plan.day, ran: [], candidates: [], errors: [], fetched: 0, rejected: {} };
 
-  for (const job of plan.jobs) {
+  // Attempts are not the budget: a job that errors refunds itself and the pass asks the next
+  // source. The reserve is capped, so a morning when every source is down ends in a report rather
+  // than in a crawl.
+  // The daily budget counts *candidates*, but a pass must keep asking when a source answers nothing:
+  // a directory with no matching category, a map with no records for that trade, a page that has
+  // moved — none of those is a lead, and stopping on the first of them is how a day produced one.
+  // So the reservation is attempts, capped at three times the daily query budget, and the cap is
+  // what stops a bad morning turning into a crawl.
+  const queue = [...plan.jobs, ...(plan.reserve || []), ...(plan.tail || [])];
+  const maxAttempts = Math.min(queue.length, Math.max(plan.jobs.length, plan.jobs.length * 3));
+  let asked = 0;
+  for (const job of queue) {
     if (out.candidates.length >= limit) break;
+    if (asked >= maxAttempts) break;
+    asked++;
     const jobWithDay = { ...job, day: plan.day };
     let items = [];
-    if (job.source === 'directory') {
+    if (job.source === 'dirsearch') {
+      const ds = await runDirectorySearch(fetcher, jobWithDay, Math.min(limit, perQuery * 2), {});
+      if (ds.error && ds.fatal) out.errors.push({ job: job.key, error: ds.error });
+      else if (ds.error) out.quiet = (out.quiet || 0) + 1;
+      items = ds.items || [];
+      out.ran.push({ ...job, results: items.length, phrase: ds.phrase || '' });
+    } else if (job.source === 'directory') {
       const dir = await runDirectory(fetcher, jobWithDay, Math.min(limit, perQuery * 3), { cacheGet: opts.cacheGet, cachePut: opts.cachePut });
-      if (dir.error && !dir.skipped) out.errors.push({ job: job.key, error: dir.error });
+      if (dir.error && !dir.skipped && dir.fatal) out.errors.push({ job: job.key, error: dir.error });
+      else if (dir.error) out.skipped = (out.skipped || 0) + 1;
       items = dir.items || [];
       out.ran.push({ ...job, results: items.length, category: dir.category || '' });
     } else if (job.source === 'osm') {
       const map = await runOverpass(fetcher, jobWithDay, Math.min(limit, perQuery * 4), { cacheGet: opts.cacheGet, cachePut: opts.cachePut });
-      if (map.error) out.errors.push({ job: job.key, error: map.error });
+      if (map.error && map.fatal) out.errors.push({ job: job.key, error: map.error });
+      else if (map.error || map.empty) out.quiet = (out.quiet || 0) + 1;
       items = map.items || [];
       out.ran.push({ ...job, results: items.length, city: map.city || '', cached: !!map.cached, mirror: map.mirror || '' });
+    } else if (job.source === 'search') {
+      const sr = await runSearchProvider(fetcher, jobWithDay, Math.min(limit, perQuery * 4), opts.search);
+      if (sr.error && !sr.skipped) out.errors.push({ job: job.key, error: sr.error });
+      items = (sr.items || []).map((i) => ({ ...i, note: (i.note || '') + ' (via ' + (sr.provider || 'search') + ')' }));
+      out.ran.push({ ...job, results: items.length, provider: sr.provider || '' });
     } else {
       const q = encodeURIComponent(job.query + ' ' + job.country);
       const url = 'https://www.bing.com/search?format=rss&count=20&q=' + q;
@@ -627,8 +888,15 @@ export async function runDiscovery(opts = {}) {
         continue;
       }
     }
+    // The same business can be reached twice in one pass — the map knows a shop from two trade
+    // tags, a directory and a search both name it — and counting it twice wastes the day's budget
+    // and makes the morning look fuller than it is.
+    const seen = out._seen || (out._seen = new Set());
     for (const item of items.slice(0, perQuery)) {
       if (out.candidates.length >= limit) break;
+      const ikey = String(item.title || '').toLowerCase().replace(/[^a-z0-9]+/g, '') + '|' + hostOf(item.url || '');
+      if (!item.title || seen.has(ikey)) { if (item.title) out.duplicates = (out.duplicates || 0) + 1; continue; }
+      seen.add(ikey);
       let evidence = {};
       let pageChecked = false;
       // a map record with no website of its own: do not fetch the OpenStreetMap object page as if
@@ -661,6 +929,8 @@ export async function runDiscovery(opts = {}) {
       }));
     }
   }
+  out.asked = asked;
+  delete out._seen;
   return out;
 }
 

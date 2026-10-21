@@ -12,13 +12,18 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 import {
   TARGET_SEGMENTS, SEGMENT_KEYS, segmentFor, discoveryPlan, parseBingRss, decodeEntities,
   stripTags, usableHost, hostOf, businessFromTitle, hookFor, readPageEvidence, candidateLead,
   discoverySummary, runDiscovery, placeOf, COUNTRY_NAMES, admitCandidate, phonePlausible,
   marketMention, MARKET_CITIES, overpassQuery, parseOverpass, OSM_TAGS, OSM_CITIES, OVERPASS_URL,
   OVERPASS_MIRRORS, OVERPASS_TIMEOUTS, parseDirectory, parseDirectoryIndex, DIRECTORY_KEYWORDS,
-  DIRECTORY_INDEX,
+  DIRECTORY_INDEX, DIRECTORY_SITES, DIRECTORY_PHRASES, dialablePhone, parseDirectorySearch,
+  parseCompanyPage, searchProvider, parseBrave, parseSerpApi,
 } from '../worker/discover.js';
 import { LEAD_SEGMENTS, PARTNER_TIERS, PARTNER_TIER_KEYS, cleanLead, cleanLeadEvidence } from '../worker/core.js';
 
@@ -249,16 +254,21 @@ test('the summary counts what a person can act on today, and says so plainly', (
 
 test('a run reads a search feed and the pages behind it, and stops at the limit', async () => {
   const asked = [];
+  // Every query answers with its own businesses, the way a real search does. A fixed feed would
+  // make the second query return the first query's results, which the pass (correctly) refuses as
+  // duplicates — and then this test would be measuring dedupe, not the limit.
+  let feed = 0;
   const fetcher = async (url) => {
     asked.push(url);
     if (String(url).includes('classifieds.co.zw')) return EMPTY_DIR();
     if (String(url).includes('overpass')) return { ok: true, text: async () => '{"elements":[]}' };
     if (String(url).includes('bing.com/search')) {
+      feed++;
       return { ok: true, text: async () => [
         '<rss><channel>',
-        '<item><title>Harare Web Studio | Design</title><link>https://harareweb.example/about</link></item>',
-        '<item><title>Second Agency | Web</title><link>https://second.example/</link></item>',
-        '<item><title>Third | Web</title><link>https://third.example/</link></item>',
+        '<item><title>Harare Web Studio ' + feed + ' | Design</title><link>https://harareweb' + feed + '.example/about</link></item>',
+        '<item><title>Second Agency ' + feed + ' | Web</title><link>https://second' + feed + '.example/</link></item>',
+        '<item><title>Third ' + feed + ' | Web</title><link>https://third' + feed + '.example/</link></item>',
         '</channel></rss>',
       ].join('') };
     }
@@ -266,16 +276,20 @@ test('a run reads a search feed and the pages behind it, and stops at the limit'
     return { ok: true, text: async () => '<html><title>Harare Studio</title><body>Harare, Zimbabwe. '
       + 'Website design for restaurants.<a href="mailto:hi@' + hostOf(url) + '">mail</a></body></html>' };
   };
-  // five jobs: the directory (empty here), the map (empty), and three search queries
+  // five jobs reserved: the directory (empty here), the map (empty), and the search queries. A pass
+  // may ask up to three times its budget when sources answer nothing, so "how many did it ask" is a
+  // range with a ceiling, not a fixed number — what is fixed is the candidate ceiling.
   const run = await runDiscovery({ fetch: fetcher, perRun: 5, limit: 4, perQuery: 2, countries: ['ZW'], nowMs: 20300 * 864e5 });
   assert.equal(run.ok, true);
-  assert.equal(run.ran.length, 4, 'four jobs ran before the limit filled it: ' + run.ran.map((r) => r.source).join(','));
-  assert.equal(run.candidates.length, 4, 'two from each query, and no more than the limit: ' + run.candidates.length);
+  assert.ok(run.asked >= 3 && run.asked <= 15, 'it asked sources, inside the attempt cap: ' + run.asked);
+  assert.equal(run.candidates.length, 4, 'two from each query, and never more than the limit: ' + run.candidates.length);
+  assert.equal(new Set(run.candidates.map((c) => c.business)).size, 4, 'and no business counted twice');
+  assert.ok(run.ran.some((r) => r.source === 'bing'), 'the search leg was asked');
 
   // the limit is a ceiling, not a suggestion: one query offering six results still yields the cap
   const capped = await runDiscovery({ fetch: fetcher, perRun: 5, limit: 1, perQuery: 3, countries: ['ZW'], nowMs: 20300 * 864e5 });
   assert.equal(capped.candidates.length, 1, 'one is the ceiling it was given');
-  assert.equal(capped.ran.length, 3, 'and it stopped asking once it had enough: ' + capped.ran.map((r) => r.source).join(','));
+  assert.ok(capped.asked <= 15, 'and it stopped asking once it had enough: ' + capped.asked);
   assert.ok(run.candidates.every((c) => c.segment && c.source_url && c.evidence.page_checked), 'each candidate was read on its page');
   assert.ok(asked.every((u) => /^https:\/\//.test(u)), 'only https');
   assert.ok(!asked.some((u) => u.includes('facebook')), 'nothing did a social platform');
@@ -285,7 +299,7 @@ test('a run reads a search feed and the pages behind it, and stops at the limit'
     fetch: async () => { throw new Error('dns gone'); }, perRun: 2, limit: 2, countries: ['ZW'], nowMs: 20300 * 864e5 });
   assert.equal(broken.ok, true, 'a run survives a dead source');
   assert.equal(broken.candidates.length, 0, 'with no candidates invented to fill the gap');
-  assert.equal(broken.errors.length, 2, 'and every failure named: ' + JSON.stringify(broken.errors));
+  assert.ok(broken.errors.length >= 2, 'and every failure named: ' + JSON.stringify(broken.errors));
   assert.match(broken.errors[0].error, /dns gone/);
 });
 
@@ -465,4 +479,156 @@ test('the three tiers are flat prices in data', () => {
     assert.ok(t.label && t.line && t.includes.length >= 3, k + ' is a tier a person could read out');
     assert.ok(!/%/.test(t.line), k + ' is priced flat: no percentage in the line');
   }
+});
+
+/* ------------------------------------------------- v1.9.0: one directory per country
+ * The complaint that started this was arithmetic: one source, one country, one category taxonomy,
+ * and 1–3 leads a day. These tests hold the answer to it — a registry of directories, a phrase
+ * search for the countries whose directory has no taxonomy, and one country honestly marked as
+ * having no reachable free directory at all.
+ */
+test('every target country with a reachable free directory is in the registry, and the missing one is admitted', () => {
+  assert.ok(DIRECTORY_SITES.ZW, 'Zimbabwe: the classifieds index that produced the first real lead');
+  assert.ok(DIRECTORY_SITES.KE, 'Kenya: a directory that answers a phrase');
+  assert.ok(DIRECTORY_SITES.NG, 'Nigeria: the same platform, its own market');
+  assert.equal(DIRECTORY_SITES.KE.kind, 'search');
+  assert.equal(DIRECTORY_SITES.NG.dial, '234');
+  // South Africa is not missing by oversight: yep/cylex/brabys are Cloudflare or JS shells from a
+  // Worker's address, and hotfrog/all.biz refuse the datacentre. Saying so is the honest state.
+  assert.equal(DIRECTORY_SITES.ZA, undefined, 'no ZA directory is claimed');
+
+  for (const [cc, site] of Object.entries(DIRECTORY_SITES)) {
+    assert.ok(site.host && /^[a-z0-9.-]+$/.test(site.host), cc + ' names a host');
+    assert.ok(site.note && !/[A-Z]{2}\b/.test(site.note), cc + ' describes itself in words, not a country code');
+    if (site.kind === 'search') {
+      const u = site.search('web design');
+      assert.match(u, /^https:\/\/[a-z0-9.-]+\/\?q=/, cc + ' asks a phrase in the URL, not a session');
+      assert.ok(!/login|auth|token|cookie/i.test(u), cc + ' needs nobody to sign in');
+    } else {
+      assert.match(site.index, /^https:\/\//, cc + ' points at a public index');
+    }
+  }
+});
+
+test('a Kenyan or Nigerian company page is read for the number the business published, dialable from anywhere', () => {
+  const page = (tel) => '<html><body><div id="company_name">Hope Brand</div>'
+    + '<a href="tel:' + tel + '">call</a><a href="mailto:Info@Hope.example">mail</a>'
+    + '<a href="https://ajax.googleapis.com/x.js">cdn</a><a href="https://hopebrand.example">site</a></body></html>';
+
+  const ke = parseCompanyPage(page('0726239033'), 'https://www.businesslist.co.ke/company/1/hope-brand', DIRECTORY_SITES.KE);
+  assert.equal(ke.title, 'Hope Brand');
+  assert.equal(ke.contact.phone, '254726239033', 'a local 07 number becomes a number dialable from Harare');
+  assert.equal(ke.contact.email, 'info@hope.example', 'the published address, lowercased');
+  assert.equal(ke.site, 'https://hopebrand.example', 'the site it names — not the CDN its stylesheet came from');
+  assert.match(ke.note, /Kenyan business directory/);
+
+  const ng = parseCompanyPage(page('08031234567'), 'https://www.businesslist.com.ng/company/2/x', DIRECTORY_SITES.NG);
+  assert.equal(ng.contact.phone, '2348031234567');
+
+  // a number that is not a number for that market is refused rather than filed as one
+  const bad = parseCompanyPage(page('12345'), 'https://www.businesslist.co.ke/company/3/x', DIRECTORY_SITES.KE);
+  assert.equal(bad.contact.phone, '', 'a five-digit string is not a phone number');
+  assert.equal(dialablePhone('+254 (726) 239-033', '254'), '254726239033');
+  // the way a Nigerian page writes it, with the trunk zero in brackets — the shape the first real
+  // pass produced, and the shape that made a dialable number look like an 11-digit local one
+  assert.equal(dialablePhone('+234 (0)7301771710', '234'), '2347301771710');
+  assert.equal(dialablePhone('+27 (0)11 234 5678', '27'), '27112345678');
+  assert.equal(dialablePhone('', '254'), '');
+});
+
+test('the phrase a directory is asked comes from the directory\u2019s words, and the pass keeps asking when one source answers nothing', async () => {
+  assert.ok(DIRECTORY_PHRASES.agencies.includes('web design'), 'asked in the words a Kenyan shop lists itself under');
+  assert.ok(!DIRECTORY_PHRASES.agencies.includes('digital transformation consultant'),
+    'and not in the words a conference deck uses');
+
+  const asked = [];
+  const fetcher = async (url) => {
+    const u = String(url);
+    asked.push(u);
+    if (u.includes('businesslist.co.ke') && u.includes('?q=')) {
+      return { ok: true, text: async () => '<html><a href="/company/146903/hope-brand">Hope Brand</a>'
+        + '<a href="/company/149751/up-fix-electronics">UP Fix Electronics</a></html>' };
+    }
+    if (u.includes('/company/146903')) return { ok: true, text: async () => '<div id="company_name">Hope Brand</div><a href="tel:0726239033">c</a>' };
+    if (u.includes('/company/149751')) return { ok: true, text: async () => '<div id="company_name">UP Fix Electronics</div><a href="tel:0726999888">c</a>' };
+    if (u.includes('businesslist.com.ng') && u.includes('?q=')) return { ok: false, status: 503, text: async () => '' };
+    return { ok: true, text: async () => '<html><body>Harare, Zimbabwe. Website design. <a href="mailto:hi@x.example">m</a></body></html>' };
+  };
+
+  const run = await runDiscovery({ fetch: fetcher, perRun: 4, limit: 6, countries: ['KE'], nowMs: 20750 * 864e5 });
+  assert.equal(run.ok, true);
+  const fromKe = run.candidates.filter((c) => /businesslist\.co\.ke/.test(c.source_url || ''));
+  assert.ok(fromKe.length >= 1, 'a Kenyan directory candidate was filed: ' + JSON.stringify(run.ran.map((r) => r.source + '=' + r.results)));
+  const hope = fromKe.find((c) => c.business === 'Hope Brand');
+  assert.ok(hope, 'with the name the directory holds');
+  assert.equal(hope.phone, '254726239033', 'and the number on its page, dialable');
+  assert.equal(hope.segment, 'agencies', 'filed in the segment the playbook ranks first');
+  assert.ok(/^https:\/\/www\.businesslist\.co\.ke\/company\//.test(hope.source_url), 'the hook is checkable where it came from');
+  assert.ok(!/contacted|messaged|sent/i.test(hope.status || ''), 'discovery still never claims a lead');
+
+  // a dead market does not stop the pass: the next source is asked in the same run
+  const partial = await runDiscovery({ fetch: fetcher, perRun: 4, limit: 2, countries: ['NG', 'ZW'], nowMs: 20750 * 864e5 });
+  assert.equal(partial.ok, true);
+  assert.ok(partial.errors.some((e) => /503/.test(e.error)), 'the failure is named: ' + JSON.stringify(partial.errors));
+  assert.ok(partial.asked > 1, 'and the pass kept asking: ' + partial.asked);
+});
+
+test('nothing discovery does is behind a login, and the paid search APIs stay off until a key exists', () => {
+  const src = readFileSync(join(root, 'worker/discover.js'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/.*$/gm, '$1');
+  for (const host of ['linkedin.com', 'facebook.com', 'instagram.com', 'tiktok.com']) {
+    assert.ok(!new RegExp('https?://([a-z0-9-]+\\.)?' + host.replace('.', '\\.'), 'i').test(src),
+      'no request is made to ' + host + ' — profiles there are neither public to a Worker nor legal to harvest');
+  }
+  for (const key of ['BRAVE_KEY', 'SERPAPI_KEY']) {
+    assert.ok(src.includes(key), key + ' is read from the Worker environment, never committed');
+  }
+
+  // off means off: with no key the search leg reports why, rather than pretending a pass ran
+  assert.equal(searchProvider({}), null);
+  assert.equal(searchProvider({ BRAVE_KEY: 'short' }), null, 'a stub value is not a key');
+  assert.equal(searchProvider({ BRAVE_KEY: 'b'.repeat(24) }).provider, 'brave');
+  assert.equal(searchProvider({ SERPAPI_KEY: 's'.repeat(24) }).provider, 'serpapi');
+
+  const p = discoveryPlan({ nowMs: 20750 * 864e5, perRun: 6, countries: ['ZW', 'KE'], done: [] });
+  assert.ok(p.jobs.every((j) => j.source !== 'search'), 'no key, no search jobs');
+  const withKey = discoveryPlan({ nowMs: 20750 * 864e5, perRun: 6, countries: ['ZW', 'KE'], done: [], search: { provider: 'brave', key: 'k'.repeat(24) } });
+  assert.ok(withKey.jobs.some((j) => j.source === 'search'), 'one key and the leg is the search provider, not Bing');
+
+  // the parse of both providers, on the shapes they actually return
+  assert.deepEqual(parseBrave({ web: { results: [{ title: 'A', url: 'https://a.example', description: 'd' }] } }),
+    [{ title: 'A', url: 'https://a.example', note: 'd' }]);
+  assert.deepEqual(parseSerpApi({ organic_results: [{ title: 'B', link: 'https://b.example', snippet: 's' }] }),
+    [{ title: 'B', url: 'https://b.example', note: 's' }]);
+  assert.deepEqual(parseBrave({}), [], 'an empty answer is empty, not an exception');
+});
+
+test('the daily pass asks every market the rail is sold in, not the two it started with', () => {
+  // The registry is worthless if the cron never names the country. This pins the default the
+  // scheduled pass uses (worker.js) against the registry here, so a fifth market cannot be added to
+  // one and forgotten in the other.
+  const src = readFileSync(join(root, 'worker/worker.js'), 'utf8');
+  const m = src.match(/opts\.countries : \[([^\]]+)\]/);
+  assert.ok(m, 'the default country list is findable');
+  const defaults = m[1].split(',').map((x) => x.trim().replace(/['"]/g, '')).filter(Boolean);
+  assert.deepEqual(defaults, ['ZW', 'ZA', 'KE', 'NG'], 'ZW, ZA, KE, NG');
+  for (const cc of Object.keys(DIRECTORY_SITES)) {
+    assert.ok(defaults.includes(cc), cc + ' has a directory and is asked about it');
+  }
+  assert.match(src, /search: searchProvider\(env\)/, 'and the keyed provider, when one exists, is what the pass uses');
+});
+
+test('a directory listing that is an institution or a charity is refused, and its number is still made dialable', () => {
+  const page = (name, tel) => '<div id="company_name">' + name + '</div><a href="tel:' + tel + '">c</a>';
+  // the two live shapes that got through on the first real Kenyan/Nigerian pass
+  for (const name of ["House of Mercy Children's  Lagos, Nigeria (HOM)", 'Lagos Orphanage Trust', 'Grace Foundation NGO']) {
+    const c = parseCompanyPage(page(name, '+2348022499177'), 'https://www.businesslist.com.ng/company/9/x', DIRECTORY_SITES.NG);
+    const admit = admitCandidate(c, {}, { fromDirectory: true, pageChecked: true, contact: c.contact });
+    assert.equal(admit.ok, false, name + ' is not a prospect');
+    assert.equal(admit.why, 'institution');
+  }
+  // and a real shop is untouched, with the local number made dialable from anywhere
+  const shop = parseCompanyPage(page('Olumedia E-Commerce Company', '07080574539'), 'https://www.businesslist.com.ng/company/1/x', DIRECTORY_SITES.NG);
+  assert.equal(shop.contact.phone, '2347080574539', 'a Nigerian 0708 number filed as-is is a number a Kenyan seller cannot ring');
+  assert.equal(admitCandidate(shop, {}, { fromDirectory: true, pageChecked: true, contact: shop.contact }).ok, true);
 });
