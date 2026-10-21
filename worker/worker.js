@@ -57,7 +57,7 @@ import {
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '1.7.7';
+const VERSION = '1.7.8';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
@@ -5367,7 +5367,7 @@ async function leadsAct(req, env) {
  * reason an order cannot land.
  */
 const DISC_STATE = 'disc:state';
-const DISC_PER_RUN_DEFAULT = 5;     // queries per pass
+const DISC_PER_RUN_DEFAULT = 8;     // jobs per pass: enough for the directory to be asked about every ZW segment
 const DISC_LIMIT_DEFAULT = 12;      // candidates per pass
 const DISC_WRITES_MAX = 20;         // new leads per day, so the lead pipeline stays a queue
 
@@ -5392,7 +5392,7 @@ async function discoveryPass(env, opts = {}) {
   const countries = (opts.countries && opts.countries.length) ? opts.countries : ['ZW', 'ZA'];
   const run = await runDiscovery({
     nowMs: Date.now(), countries,
-    perRun: Math.max(1, Math.min(8, Number(opts.perRun) || DISC_PER_RUN_DEFAULT)),
+    perRun: Math.max(1, Math.min(12, Number(opts.perRun) || DISC_PER_RUN_DEFAULT)),
     limit: Math.max(1, Math.min(24, Number(opts.limit) || DISC_LIMIT_DEFAULT)),
     perQuery: 3, done: st.done || [],
     // The map is answered once a day per segment and kept for twenty hours: a capacity spike at

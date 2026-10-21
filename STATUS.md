@@ -1,5 +1,35 @@
 # Tapstall — status
 
+## v1.7.8 (2026-10-21): the first real name the platform found by itself, and the queue it walked into
+
+The pass under v1.7.7 filed exactly one lead, and it was a real one:
+
+    Cainway Holdings (Pvt) Ltd · agencies · queued · 263783283422
+    http://www.webdev.co.zw/about-us/
+    "talks about orders on webdev.co.zw but gives a buyer no way to order — a link would finish
+     the sentence"
+
+A Harare web agency, with the number the directory published, and a hook built from the page it
+actually serves. That is the whole machine working end to end: directory → listing → the business's
+own page → evidence → a lead with a sentence a seller can open with. **It did not need a person, a
+key, or a payment.**
+
+The same pass exposed a second problem that is not code: the production queue held **47 leads
+filed before any of this existed** — Chewy, WhatsApp Web, Merriam-Webster's definition of the word
+"order", Uber Eats, France Diplomatie, RFI, a Zimbabwe tourism guide. Every one has no `source`
+recorded, which is exactly what the gate now refuses to produce. They are left in place rather than
+deleted (a queue is the owner's data, and a purge is theirs to ask for); the count and the list are
+in this file's release note so the decision is informed. The one genuine entry in the queue is the
+one v1.7.7 filed.
+
+- **Eight jobs a pass** (`DISC_PER_RUN_DEFAULT` 5 → 8) so the directory is asked about the Zimbabwe
+  segments in the same run rather than across three days. Still bounded by 12 candidates and 20 new
+  leads a day, still one pass a day, still never sends.
+- Honest expectation, measured: 1–3 admitted leads a day while Bing remains worthless and Overpass
+  remains unreachable from a Worker. The gate is what makes that a floor rather than a flood of
+  nonsense.
+- Tests: 401/401.
+
 ## v1.7.6 (2026-10-21): a third source that is neither global nor behind a queue
 
 v1.7.5's diagnostics answered the question and the answer was bad: from the Worker,
