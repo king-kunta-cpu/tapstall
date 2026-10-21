@@ -25,7 +25,17 @@ shop and a phone shop should not read the same. So the shelf keeps its engine an
   carry no `+`.
 - **No commentary in a buyer's page**: the sandbox explainer (“Why the photo is this big”)
   is gone from every render; that panel now sells, it does not describe the design.
-- **Mobile**: no horizontal overflow on any of the six rhythms at 390 px.
+- **Mobile**: no horizontal overflow on any of the six rhythms at 390 px; the row's own
+  horizontal scroller is the only thing that extends past the fold.
+
+**Live (v1.5.5).** Pushed as `1e5b1d1`, deploy run `39587747725` — worker + pages, `success`.
+`/__ping` → `{"ok":true,"version":"1.5.5"}`. `/s/kotaking` and `/s/mamatoe` are both general
+shops, so both wear `body.coll-showcase`; the shelf stepped, the rail stepped, the options
+sheet opened, the bar counted `1 item`, sold-out items offered no add and sold-out pair
+tiles offered no `+`, `document.scrollWidth == clientWidth == 390` on a phone, no page
+errors. The five trade looks are proved by the local renders in
+`sandbox/storefront-six-layouts.html` until a food, fashion, grocery, electronics, home or
+services shop exists on the live build.
 
 ## v1.5.4 (2026-10-20): the collection shelf is the storefront
 
