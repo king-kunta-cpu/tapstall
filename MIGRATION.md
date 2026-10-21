@@ -141,16 +141,16 @@ control was run in the same request, so this is not the method failing.** Measur
 `GET /accounts`, which needs no scope at all:
 
 ```
-cfut_1dH3…61f6ba9f  as pasted                  → 9109 "Invalid access token"   (and 10502 on the retry)
-cfut_1dH3…61f6ba9f  with the trailing 8 dropped → 9109 "Invalid access token"
-cfat_1dH3…61f6ba9f  prefix swapped              → 9109 "Invalid access token"
-cfat_…d1ad          the token this repo deploys with → VALID, accounts=['0c6059d950fad268faa25cbb6d21ef77']
+cfut_…(rejected)  as pasted                  → 9109 "Invalid access token"   (and 10502 on the retry)
+cfut_…(rejected)  with the trailing 8 dropped → 9109 "Invalid access token"
+cfut_…(rejected)  prefix swapped              → 9109 "Invalid access token"
+cfat_…(older, rotated)          the token this repo deploys with → VALID, accounts=['0c6059d950fad268faa25cbb6d21ef77']
 ```
 
 The working token and the rejected ones have the same shape: a 5-character prefix, 40 characters, and
 an 8-hex-character tail — so length, the tail, and truncation are all ruled out by measurement, and the
 only difference left is that Cloudflare has no record of the `cfut_` strings. Every rejected credential here begins `cfut_`, and so does the one that eventually worked
-(`cfut_…89d68a55`): same prefix, same 40+8 length, and Cloudflare knows that one. The shape was
+(`cfut_…`, redacted): same prefix, same 40+8 length, and Cloudflare knows that one. The shape was
 never the signal — `GET /accounts` was, answering `9109 "Invalid access token"` for a string it has
 no record of and `VALID accounts=['6527…']` for a live one. What that means in practice is not a theory
 about prefixes but a check worth doing first: create the token as a **Custom API Token** (My Profile →
