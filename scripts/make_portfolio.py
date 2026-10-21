@@ -556,7 +556,7 @@ def featured_card(w):
         <div class="card-body">
           <div class="card-meta">{esc(KIND_LABEL[w['kind']])} · {esc(w['year'])}</div>
           <div class="status">{esc(w['status'])}</div>
-          <h2><a href="#{esc(w['id'])}">{esc(w['title'])}</a></h2>
+          <h2><a href="#card-{esc(w['id'])}">{esc(w['title'])}</a></h2>
           <p class="sub">{esc(w['subtitle'])}</p>
           <p class="blurb">{esc(w['blurb'])}</p>
           <p class="note">{esc(w['note'])}</p>
