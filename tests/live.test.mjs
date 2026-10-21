@@ -4772,11 +4772,22 @@ const realFetchStub = () => async (u, init) => (String(u).includes('stub/menu.cs
   ? new Response(MENU, { headers: { 'content-type': 'text/csv' } })
   : realFetch(u, init));
 
+// The plan reads the map first for the segments OpenStreetMap can describe, so a pass sees two
+// sources: Overpass (structured, local by bbox) and Bing RSS (a phrase). Both are stubbed here, and
+// the same business coming from both must still be one lead.
+const DISC_OVERPASS = { elements: [
+  { type: 'node', id: 9001, tags: { name: 'Harare Web Studio', office: 'company', phone: '+263 77 111 2223',
+    website: 'https://harareweb.example/about', email: 'hello@harareweb.example' } },
+  { type: 'node', id: 9002, tags: { name: 'A Dot With No Contact', office: 'company' } },
+  { type: 'node', id: 9003, tags: { name: 'Wix', office: 'company', phone: '+263 77 999 0000' } },
+] };
+
 function stubDiscovery(rss = DISC_RSS, page = DISC_PAGE) {
   const seen = [];
   globalThis.fetch = async (u, init) => {
     const url = String(u);
     seen.push(url);
+    if (url.includes('overpass-api.de')) return new Response(JSON.stringify(DISC_OVERPASS), { headers: { 'content-type': 'application/json' } });
     if (url.includes('bing.com/search')) return new Response(rss, { headers: { 'content-type': 'application/rss+xml' } });
     if (url.includes('harareweb.example')) return new Response(page, { headers: { 'content-type': 'text/html' } });
     return new Response('gone', { status: 404 });
@@ -4813,7 +4824,8 @@ test('1.7.1 a cron pass fills the queue by itself: ranked segments, page evidenc
   assert.equal(r.status, 200, r.text);
   assert.ok(r.json.ran >= 1, 'queries actually ran: ' + r.json.ran);
   assert.ok(r.json.added >= 1, 'and at least one lead was filed: ' + JSON.stringify(r.json));
-  assert.ok(seen.some((u) => u.includes('bing.com/search')), 'through the search surface, no key needed');
+  assert.ok(seen.some((u) => u.includes('overpass-api.de') || u.includes('bing.com/search')),
+    'through a keyless public source, and it fetched something: ' + seen.slice(0, 3).join(' '));
 
   const leads = discLeads();
   assert.equal(leads.length, before + r.json.added, 'the count the response reports is the count in the queue');
@@ -4823,6 +4835,7 @@ test('1.7.1 a cron pass fills the queue by itself: ranked segments, page evidenc
   assert.equal(web.email, 'hello@harareweb.example', 'with the address that is on the page');
   assert.equal(web.phone, '263771112223', 'and the number that is on the page');
   assert.equal(web.source_url, 'https://harareweb.example/about', 'and the page the hook came from, checkable');
+  assert.ok(r.json.rejected, 'the pass reports what it refused rather than padding the queue: ' + JSON.stringify(r.json.rejected));
   assert.equal(web.evidence.page_checked, true);
   assert.match(web.hook || web.note, /quote|order|WhatsApp|price/i, 'the hook is a sentence a seller can open with');
   assert.ok(['research_hold', 'queued'].includes(web.status), 'filed as work for a seller, never as a conversation: ' + web.status);

@@ -95,6 +95,92 @@ export function segmentFor(key) {
   return TARGET_SEGMENTS.find((s) => s.key === String(key)) || null;
 }
 
+/* ------------------------------------------------------------ the map source
+ * Why a second source exists: the first live pass asked Bing for "website design agency Harare ZW"
+ * and Bing answered with Wix, Wikipedia and a dictionary definition of the word "digital". Its RSS
+ * endpoint loosens the query until it matches something global. A list built on that is a list of
+ * the internet, not of Harare.
+ *
+ * OpenStreetMap is the opposite kind of source: keyless, structured, and *local by construction* —
+ * a bbox around the city, tags for what the business is, and often a phone, an email and a website
+ * that a mapper stood in front of and typed in. Every candidate is checkable at a URL anybody can
+ * open, which is the same standard the hook is held to.
+ */
+export const OVERPASS_URL = 'https://overpass-api.de/api/interpreter';
+
+export const OSM_CITIES = {
+  ZW: [['Harare', -17.83, 31.05], ['Bulawayo', -20.15, 28.58]],
+  ZA: [['Johannesburg', -26.20, 28.04], ['Cape Town', -33.93, 18.42], ['Durban', -29.86, 31.02]],
+  KE: [['Nairobi', -1.29, 36.82]],
+  NG: [['Lagos', 6.52, 3.37]],
+};
+
+/** What kind of business each segment is, in OpenStreetMap's own vocabulary. */
+export const OSM_TAGS = {
+  agencies: ['office=company', 'office=advertising_agency', 'office=it', 'craft=web_developer'],
+  accountants: ['office=tax_advisor', 'office=accountant', 'office=bookkeeper'],
+  pos_resellers: ['shop=computer', 'shop=electronics'],
+  associations: ['office=association', 'office=ngo'],
+};
+
+export function overpassQuery(city, lat, lon, segment, radius = 0.14) {
+  const tags = OSM_TAGS[segment] || [];
+  if (!tags.length) return '';
+  const bbox = [lat - radius, lon - radius, lat + radius, lon + radius].map((n) => n.toFixed(4)).join(',');
+  const parts = tags.map((t) => {
+    const [k, v] = t.split('=');
+    return '  nwr["' + k + '"="' + v + '"](' + bbox + ');';
+  });
+  // names and a way to reach them: an unnamed node is a dot, and a named one with no contact is
+  // a bookmark. Both are refused here rather than in a seller's morning.
+  return '[out:json][timeout:25];\n(\n' + parts.join('\n') + '\n);\nout tags 120;';
+}
+
+/** Overpass JSON to the same item shape Bing produces, plus the contact the map already holds. */
+export function parseOverpass(doc, segment) {
+  const els = (doc && doc.elements) || [];
+  const out = [];
+  for (const el of els) {
+    const t = (el && el.tags) || {};
+    const name = String(t.name || t['name:en'] || '').trim();
+    if (!name || name.length > 80) continue;
+    const email = String(t.email || t['contact:email'] || '').toLowerCase();
+    let phone = String(t.phone || t['contact:phone'] || t['contact:mobile'] || '')
+      .split(/[;,/]/)[0].replace(/[^\d+]/g, '');
+    if (phone && !phonePlausible(phone)) phone = '';
+    const site = String(t.website || t['contact:website'] || t.url || '').trim();
+    const osmUrl = 'https://www.openstreetmap.org/' + (el.type || 'node') + '/' + el.id;
+    const kind = t.office || t.shop || t.craft || '';
+    out.push({
+      title: name,
+      url: /^https?:\/\//.test(site) ? site : osmUrl,
+      note: 'listed on OpenStreetMap as ' + (kind || 'a business') + ' in ' + (t['addr:city'] || 'the city'),
+      contact: { email: /@/.test(email) ? email : '', phone },
+      osm: { type: el.type, id: el.id, url: osmUrl, kind, segment },
+      fromMap: true,
+    });
+  }
+  return out;
+}
+
+async function runOverpass(fetcher, job, limit) {
+  const cities = OSM_CITIES[String(job.country || '').toUpperCase()] || [];
+  if (!cities.length) return { items: [], error: 'no_city_for_' + job.country };
+  const picked = cities[Math.abs(Number(job.day) || 0) % cities.length];
+  const q = overpassQuery(picked[0], picked[1], picked[2], job.segment);
+  if (!q) return { items: [], error: 'no_osm_tags' };
+  try {
+    const r = await fetcher(OVERPASS_URL + '?data=' + encodeURIComponent(q), {
+      headers: { 'user-agent': 'Tapstall discovery (harmless, once a day)', accept: 'application/json' },
+    });
+    if (!r.ok) return { items: [], error: 'status_' + r.status };
+    const items = parseOverpass(JSON.parse(await r.text()), job.segment).slice(0, limit);
+    return { items, city: picked[0], count: items.length };
+  } catch (e) {
+    return { items: [], error: String(e && e.message || e).slice(0, 80) };
+  }
+}
+
 /* --------------------------------------------------------------- the rotation
  * A month of runs must cover every query once without repeating one twice in a day. The plan is
  * deterministic from the day number, so a retried cron produces the same slice and the state
@@ -108,7 +194,12 @@ export function discoveryPlan(opts = {}) {
   const jobs = [];
   for (const seg of TARGET_SEGMENTS) {
     for (const cc of countries) {
-      for (const q of ((seg.queries || {})[cc] || [])) jobs.push({ segment: seg.key, country: cc, query: q, key: seg.key + '|' + cc + '|' + q });
+      // The map is tried first for the segments it can actually describe (an agency, an
+      // accountant, a till shop are all tagged offices and shops); the two softest segments stay on
+      // search, where a phrase is the only handle there is.
+      const mapFirst = !!OSM_TAGS[seg.key] && (OSM_CITIES[cc] || []).length;
+      if (mapFirst) jobs.push({ segment: seg.key, country: cc, source: 'osm', query: 'openstreetmap ' + seg.key, key: 'osm|' + seg.key + '|' + cc });
+      for (const q of ((seg.queries || {})[cc] || [])) jobs.push({ segment: seg.key, country: cc, source: 'bing', query: q, key: seg.key + '|' + cc + '|' + q });
     }
   }
   if (!jobs.length) return { jobs: [], day: dayIndex };
@@ -153,16 +244,109 @@ export function stripTags(s) { return decodeEntities(String(s || '').replace(/<[
 
 /** A host we will not treat as a prospect: search engines, social walls, directories that hide
  *  the business behind a login. Keeping this list short and honest beats a clever matcher. */
+/* The first live pass, read back, was a lesson: Bing's RSS answers a Zimbabwe agency query with
+ * website.com and web.whatsapp.com, and a scraper that files those is a scraper that wastes a
+ * seller's morning. So the blocklist is not "the obvious social platforms" — it is every host whose
+ * page is a product, a directory or a marketplace rather than a business that could buy something. */
 export const SKIP_HOSTS = ['google.', 'bing.com', 'duckduckgo.com', 'facebook.com', 'instagram.com',
-  'linkedin.com', 'youtube.com', 'tripadvisor', 'wikipedia.', 'pinterest.', 'tiktok.com', 'x.com', 'twitter.com'];
+  'linkedin.com', 'youtube.com', 'tripadvisor', 'wikipedia.', 'pinterest.', 'tiktok.com', 'x.com', 'twitter.com',
+  // platforms and builders: a title from these is a product name, not a prospect
+  'whatsapp.com', 'whatsapp.net', 'website.com', 'wix.com', 'squarespace.com', 'wordpress.com',
+  'shopify.com', 'godaddy.com', 'hostinger.', 'namecheap.com', 'bluehost.com', 'weebly.com',
+  'webflow.io', 'medium.com', 'quora.com', 'reddit.com', 'blogspot.com', 'wordpress.org',
+  'github.com', 'apple.com', 'microsoft.com', 'amazon.', 'play.google.com', 'apps.apple.com',
+  // directories and marketplaces: someone else's list is not a lead
+  'yelp.', 'yellowpages', 'yell.com', 'brabys.com', 'cylex', 'hotfrog', 'kompass.com', 'clutch.co',
+  'sortlist.', 'goodfirms.co', 'upwork.com', 'fiverr.com', 'freelancer.com', 'thumbtack.com',
+  'alibaba.com', 'aliexpress.com', 'jumia.', 'takealot.com', 'ebay.', 'etsy.com', 'olx.',
+  'indeed.com', 'glassdoor.', 'crunchbase.com', 'za.pinterest.com', 'lo.co.zw', 'classifed',
+];
 
 export function hostOf(url) {
   try { return new URL(String(url)).hostname.replace(/^www\./, '').toLowerCase(); } catch (e) { return ''; }
 }
+/** A host is usable when it is a real domain that is not a platform, a directory or a search
+ *  engine. Suffix-matched, so `m.whatsapp.com` and `za.yelp.com` are caught too. */
 export function usableHost(url) {
   const h = hostOf(url);
   if (!h || h.indexOf('.') < 0) return false;
-  return !SKIP_HOSTS.some((x) => h === x || h.indexOf(x) >= 0 && (x.endsWith('.') || h === x.replace(/\.$/, '')));
+  if (/\.(pdf|jpg|jpeg|png|gif|zip|docx?|xlsx?)$/.test(h)) return false;
+  return !SKIP_HOSTS.some((x) => {
+    // 'google.' is a family (google.co.zw, google.com.ng); 'yelp.' must catch za.yelp.com too.
+    // Entries ending in a dot are matched anywhere in the host, the rest by exact host or suffix.
+    if (x.endsWith('.')) return h.indexOf(x) >= 0;
+    return h === x || h.endsWith('.' + x);
+  });
+}
+
+/* ---------------------------------------------------------- the admission gate
+ * Four things have to be true before a candidate is allowed to become work for a seller, and each
+ * one is a sentence a person could check by opening the page:
+ *   1. it is a business site, not a platform or somebody's directory;
+ *   2. it is *in the market we searched* — the page names the country or one of its cities;
+ *   3. the name is a business name, not a product slogan ("Create Your Free Website");
+ *   4. there is a way to answer — an email, a plausible number, or a WhatsApp route.
+ * A pass that fails these produces nothing. Volume is not the metric; a morning not wasted is.
+ */
+export const MARKET_CITIES = {
+  ZW: ['zimbabwe', 'harare', 'bulawayo', 'mutare', 'gweru', 'kwekwe', 'masvingo', 'chitungwiza', 'victoria falls'],
+  ZA: ['south africa', 'johannesburg', 'cape town', 'durban', 'pretoria', 'sandton', 'soweto', 'gauteng', 'port elizabeth', 'stellenbosch'],
+  KE: ['kenya', 'nairobi', 'mombasa', 'kisumu', 'nakuru'],
+  NG: ['nigeria', 'lagos', 'abuja', 'port harcourt', 'ibadan'],
+};
+
+/** Telephone lengths that are real in the markets we search: country code + national digits. */
+export const PHONE_RULES = { '263': [9], '27': [9], '254': [9], '234': [10, 11] };
+
+/** A number is a number when it is the right length for a market we actually reached and it was
+ *  found with a separator or a plus — the live pass filed `279927998279`, an Indonesian id, off a
+ *  page that happened to contain it. */
+export function phonePlausible(num) {
+  const d = String(num || '').replace(/\D/g, '');
+  for (const cc of Object.keys(PHONE_RULES)) {
+    if (!d.startsWith(cc)) continue;
+    const rest = d.slice(cc.length);
+    return PHONE_RULES[cc].includes(rest.length);
+  }
+  return false;
+}
+
+/** Does this page say where it is? A page that never names the country or a city of it is not
+ *  evidence of a Zimbabwean agency, however it got into the results. */
+export function marketMention(text, country) {
+  const cc = String(country || '').toUpperCase();
+  const words = MARKET_CITIES[cc] || (COUNTRY_NAMES[cc] ? [COUNTRY_NAMES[cc].toLowerCase()] : []);
+  if (!words.length) return true;                 // a market we have no vocabulary for is not a filter we can apply
+  const t = String(text || '').toLowerCase();
+  return words.some((w) => t.indexOf(w) >= 0);
+}
+
+const GENERIC_NAME = /\b(create your|build your|log ?in|sign ?in|sign ?up|free website|website builder|home ?page|welcome|official site|book now|get a quote|contact us|search results)\b/i;
+
+/** The map tags `office=company` honestly, and a national utility is a company. An institution is
+ *  not a prospect — it cannot buy a storefront, and a seller who rings it has wasted the call. */
+const NOT_A_PROSPECT = /\b(council|ministry|government|authority|commission|municipal\w*|university|polytechnic|college|hospital|clinic|school|bank|police|prison|embassy|high court|courts?|parastatal|zesa|zetdc|city of|residents association)\b/i;
+
+export function admitCandidate(item = {}, evidence = {}, opts = {}) {
+  const fromMap = !!opts.fromMap;
+  const url = String(item.url || '');
+  const host = hostOf(url);
+  // A map candidate whose only URL is its own OpenStreetMap object has no site to judge — the map
+  // record is the evidence, and it was read inside the city's own bbox.
+  const mapOnly = fromMap && /openstreetmap\.org$/.test(host);
+  if (!mapOnly && !usableHost(url)) return { ok: false, why: 'platform' };
+  const body = [item.title, item.note, evidence.title, evidence.text].join(' ');
+  if (!opts.pageChecked && !fromMap) return { ok: false, why: 'unverified' };   // no page read, no hook to stand behind
+  if (!mapOnly && !marketMention(body + ' ' + host, opts.country)) return { ok: false, why: 'no_local_signal' };
+  const name = fromMap ? String(item.title || '').trim() : businessFromTitle(item.title || evidence.title || '', host);
+  if (name.length < 2 || name.length > 70) return { ok: false, why: 'no_name' };
+  if (GENERIC_NAME.test(name)) return { ok: false, why: 'generic_name' };
+  if (NOT_A_PROSPECT.test(name)) return { ok: false, why: 'institution' };
+  const contact = opts.contact || {};
+  const email = String(contact.email || (evidence.emails && evidence.emails[0]) || '').toLowerCase();
+  const phone = phonePlausible(contact.phone) ? String(contact.phone) : (phonePlausible(evidence.phone) ? evidence.phone : '');
+  if (!email && !phone) return { ok: false, why: 'no_contact' };
+  return { ok: true, why: 'admitted', name, email, phone };
 }
 
 /** A business name from a search result: the part before the first separator, cleaned of the
@@ -211,7 +395,12 @@ export function readPageEvidence(html, url) {
   const emails = [...new Set((s.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g) || [])
     .map((x) => x.toLowerCase()).filter((x) => !/\.(png|jpe?g|gif|webp|svg)$/.test(x) && x.length < 80))].slice(0, 3);
   const wa = (s.match(/wa\.me\/(\+?\d{9,15})/i) || [])[1] || '';
-  const phones = [...new Set((s.match(/\+?(?:263|27)[\s().-]*\d[\d\s().-]{7,12}\d/g) || []).map((x) => x.replace(/\D/g, '')))].slice(0, 3);
+  // A number is read with its separators intact — "(024) 771 2345", "+263 77 111 2223" — and then
+  // judged against the market's real lengths. The old loose pattern read digits out of the middle
+  // of an id and called it a phone.
+  const rawPhones = (s.match(/(?:^|[^\d])\+?(?:\(?\d{2,4}\)?[\s.-]?){2,4}\d{2,4}(?![\d])/g) || [])
+    .map((x) => x.replace(/[^\d+]/g, '')).filter((x) => phonePlausible(x));
+  const phones = [...new Set(rawPhones)].slice(0, 3);
   return {
     host,
     emails,
@@ -222,6 +411,9 @@ export function readPageEvidence(html, url) {
     has_price_page: /(price|usd|zar|\$\s?\d+|r\s?\d{2,}|kwacha)/i.test(lower),
     has_website: !!host,
     title: (s.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || '',
+    // a sample of the visible text, for the two questions only text can answer: does this page say
+    // where it is, and does it talk about orders. Never stored — `evidence` on a lead is booleans.
+    text: stripTags(s.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<style[\s\S]*?<\/style>/gi, ' ')).slice(0, 4000),
   };
 }
 
@@ -267,28 +459,39 @@ export async function runDiscovery(opts = {}) {
   const plan = discoveryPlan(opts);
   const limit = Math.max(1, Math.min(40, Number(opts.limit) || 12));
   const perQuery = Math.max(1, Math.min(10, Number(opts.perQuery) || 4));
-  const out = { ok: true, day: plan.day, ran: [], candidates: [], errors: [], fetched: 0 };
+  const out = { ok: true, day: plan.day, ran: [], candidates: [], errors: [], fetched: 0, rejected: {} };
 
   for (const job of plan.jobs) {
     if (out.candidates.length >= limit) break;
-    const seg = segmentFor(job.segment);
-    const q = encodeURIComponent(job.query + ' ' + job.country);
-    const url = 'https://www.bing.com/search?format=rss&count=20&q=' + q;
+    const jobWithDay = { ...job, day: plan.day };
     let items = [];
-    try {
-      const r = await fetcher(url, { headers: { 'user-agent': 'Tapstall discovery (harmless, once a day)', accept: 'application/rss+xml,text/xml' } });
-      if (!r.ok) throw new Error('status_' + r.status);
-      items = parseBingRss(await r.text()).filter((i) => usableHost(i.url));
-      out.ran.push({ ...job, results: items.length });
-    } catch (e) {
-      out.errors.push({ job: job.key, error: String(e && e.message || e).slice(0, 80) });
-      continue;
+    if (job.source === 'osm') {
+      const map = await runOverpass(fetcher, jobWithDay, Math.min(limit, perQuery * 4));
+      if (map.error) out.errors.push({ job: job.key, error: map.error });
+      items = map.items || [];
+      out.ran.push({ ...job, results: items.length, city: map.city || '' });
+    } else {
+      const q = encodeURIComponent(job.query + ' ' + job.country);
+      const url = 'https://www.bing.com/search?format=rss&count=20&q=' + q;
+      try {
+        const r = await fetcher(url, { headers: { 'user-agent': 'Tapstall discovery (harmless, once a day)', accept: 'application/rss+xml,text/xml' } });
+        if (!r.ok) throw new Error('status_' + r.status);
+        items = parseBingRss(await r.text()).filter((i) => usableHost(i.url));
+        out.ran.push({ ...job, results: items.length });
+      } catch (e) {
+        out.errors.push({ job: job.key, error: String(e && e.message || e).slice(0, 80) });
+        continue;
+      }
     }
     for (const item of items.slice(0, perQuery)) {
       if (out.candidates.length >= limit) break;
       let evidence = {};
       let pageChecked = false;
+      // a map record with no website of its own: do not fetch the OpenStreetMap object page as if
+      // it were the business's site — the hook that matters is that there is no site at all
+      const hasOwnSite = !(item.osm && item.url === item.osm.url);
       try {
+        if (!hasOwnSite) throw new Error('no_site');
         const pr = await fetcher(item.url, { headers: { 'user-agent': 'Tapstall discovery (harmless, once a day)' } });
         if (pr.ok) {
           const body = (await pr.text()).slice(0, 120000);
@@ -296,10 +499,21 @@ export async function runDiscovery(opts = {}) {
           pageChecked = true;
           out.fetched++;
         }
-      } catch (e) { out.errors.push({ page: hostOf(item.url), error: 'page_failed' }); }
-      out.candidates.push(candidateLead(item, {
-        segment: job.segment, country: job.country, evidence, pageChecked,
-        source: 'bing-rss', hook: hookFor(job.segment, evidence, { country: job.country }),
+      } catch (e) {
+        // an unreachable *website* is a finding, not a failure: it is why the hook exists
+        if (hasOwnSite) out.errors.push({ page: hostOf(item.url), error: 'page_failed' });
+      }
+      const admit = admitCandidate(item, evidence, {
+        country: job.country, pageChecked, fromMap: !!item.fromMap, contact: item.contact,
+      });
+      if (!admit.ok) { out.rejected[admit.why] = (out.rejected[admit.why] || 0) + 1; continue; }
+      // A map record with no website is still a business a person can ring: the hook says exactly
+      // that, which is the sharpest true thing about it.
+      const evid = { ...evidence, no_site: !!item.fromMap && !hasOwnSite };
+      out.candidates.push(candidateLead({ ...item, email: admit.email, phone: admit.phone }, {
+        segment: job.segment, country: job.country, evidence: evid, pageChecked,
+        source: item.fromMap ? 'openstreetmap' : 'bing-rss',
+        hook: hookFor(job.segment, evid, { country: job.country, city: item.city }),
       }));
     }
   }

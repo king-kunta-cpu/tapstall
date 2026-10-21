@@ -57,7 +57,7 @@ import {
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '1.7.1';
+const VERSION = '1.7.2';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
@@ -5415,6 +5415,8 @@ async function discoveryPass(env, opts = {}) {
       at: new Date().toISOString(), day: run.day,
       queries: run.ran.length, candidates: summary.candidates, added: ingest.counts.added || 0,
       by_segment: summary.by_segment, errors: run.errors.length,
+      // what the gate refused, so "a quiet morning" and "a broken gate" look different in the log
+      rejected: run.rejected || {},
     }].slice(-30),
   };
   if (env.ORDERS && (ingest.counts.added || run.ran.length)) {
@@ -5422,6 +5424,7 @@ async function discoveryPass(env, opts = {}) {
   }
   return { ok: true, ran: run.ran.length, candidates: summary.candidates, added: ingest.counts.added || 0,
     updated: ingest.counts.updated || 0, by_segment: summary.by_segment, errors: run.errors.slice(0, 3),
+    rejected: run.rejected || {},
     summary: summary.note, state: { day: next.day, added_today: next.added_today, added: next.added } };
 }
 
@@ -5432,6 +5435,8 @@ async function discoverStatus(req, env) {
     ok: true,
     targets: TARGET_SEGMENTS.map((t) => ({ rank: t.rank, key: t.key, label: t.label, why: t.why, queries: Object.values(t.queries || {}).reduce((a, x) => a + x.length, 0) })),
     state: { day: st.day || 'never', runs: (st.runs || []).length, added: st.added || 0, added_today: st.added_today || 0, candidates: st.candidates || 0, errors: st.errors || 0, queries_seen: (st.done || []).length },
+    gate: { rules: ['platform', 'unverified', 'no_local_signal', 'no_name', 'generic_name', 'institution', 'no_contact'],
+      note: 'A candidate is filed only if its page was read, names the market, gives a business name and a way to answer. Refusals are counted, never padded over.' },
     last: (st.runs || []).slice(-5).reverse(),
     budget: { per_day_writes: DISC_WRITES_MAX, per_run_queries: DISC_PER_RUN_DEFAULT, per_run_candidates: DISC_LIMIT_DEFAULT },
     note: 'Discovery reads public pages and files candidates into the lead queue. It never sends, never claims a lead and never overrides the do-not-contact ledger. A human opens the queue; the cron only fills it.',

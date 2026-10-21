@@ -1,5 +1,49 @@
 # Tapstall — status
 
+## v1.7.2 (2026-10-21): the gate — what the first live pass taught, in production
+
+v1.7.1 shipped at 12:26 UTC. At 12:47 the cron body ran for the first time and filed eight leads.
+Every one of them was junk:
+
+  W3Schools · Cambridge Dictionary "DIGITAL" · Merriam-Webster "DIGITAL" · W3C · Wix ·
+  Website.com ×2 · WhatsApp Web
+
+and one of them carried `279927998279`, an Indonesian id read out of a page as a phone number. The
+pass *worked* — Bing answered, pages were fetched, leads were written — and the result was worthless,
+which is the failure mode a queue hides best. This release is the gate that was missing, plus the
+second source that makes the first one's weakness irrelevant.
+
+- **Bing's RSS loosens the query until it matches something global.** Asked for "website design
+  agency Harare ZW" it answers Wix, Wikipedia and a dictionary. That is not a bug to fix in a
+  parser; it is a property of the feed.
+- **`worker/discover.js` gained `admitCandidate()`** — six refusals, every one checkable by opening
+  the page: `platform` (a builder, directory, marketplace or social platform is not a prospect —
+  the blocklist now covers website.com, wix, web.whatsapp.com, yelp, upwork, clutch and ~50 more),
+  `unverified` (no page could be read, so there is no hook to stand behind), `no_local_signal` (the
+  page never names the country or one of its cities), `no_name`, `generic_name` ("Create Your Free
+  Website" is a slogan), `institution` (a council, utility or ministry is a company on the map and
+  still not a customer) and `no_contact` (a lead nobody can answer is a bookmark).
+- **Telephone numbers are validated against the market**, not just matched: `PHONE_RULES` says
+  Zimbabwe is 263 + 9 digits, South Africa 27 + 9, Kenya 254 + 9, Nigeria 234 + 10/11. The loose
+  pattern that read `279927998279` out of a page is gone.
+- **A second source, structured instead of searched.** OpenStreetMap's Overpass API is asked about
+  a **bbox around the city** for the four segments the map can describe (`office=company`,
+  `office=it`, `craft=web_developer`, `office=tax_advisor`, `shop=computer`, `office=association`),
+  and a candidate arrives with the name the mapper typed, a phone, an email, a website and a URL
+  anybody can open. A shop with a number and no website is filed with the sharpest true hook there
+  is (`no website of its own, so every order starts with a typed message`). Verified against the
+  live Overpass endpoint: the Harare bbox returns 85 elements, 17 of them named with a contact or a
+  site — real Harare firms, not the internet.
+- **The plan reads the map first** for those segments and search for the two softest ones; the
+  rotation is deterministic per day, so a month of passes covers every query in the pool — asserted
+  by simulating sixty days of runs in a test rather than by trusting the slice.
+- **A quiet morning and a broken gate now look different**: the pass returns and stores
+  `rejected: {no_contact: 2, platform: 5, …}` per run, so "nothing was filed" can be read off the
+  log instead of guessed at.
+- **Cleanup**: the nine leads filed by the v1.7.1 pass (eight discovery, one API smoke-test
+  application) were deleted from the production queue by key. They were the test, not prospects.
+- **Tests**: 399/399 (`discover` 15, plus the live tests, which now stub both sources).
+
 ## v1.7.1 (2026-10-21): the list that arrives by itself — discovery on the cron, and the tiers
 
 The owner's question was sharper than "add a feature": *the 90-name list should be autonomous by

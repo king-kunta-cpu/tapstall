@@ -15,7 +15,8 @@ import assert from 'node:assert/strict';
 import {
   TARGET_SEGMENTS, SEGMENT_KEYS, segmentFor, discoveryPlan, parseBingRss, decodeEntities,
   stripTags, usableHost, hostOf, businessFromTitle, hookFor, readPageEvidence, candidateLead,
-  discoverySummary, runDiscovery, placeOf, COUNTRY_NAMES,
+  discoverySummary, runDiscovery, placeOf, COUNTRY_NAMES, admitCandidate, phonePlausible,
+  marketMention, MARKET_CITIES, overpassQuery, parseOverpass, OSM_TAGS, OSM_CITIES, OVERPASS_URL,
 } from '../worker/discover.js';
 import { LEAD_SEGMENTS, PARTNER_TIERS, PARTNER_TIER_KEYS, cleanLead, cleanLeadEvidence } from '../worker/core.js';
 
@@ -144,6 +145,86 @@ test('a candidate carries the page it came from, and the pipeline keeps that pro
     { has_whatsapp: true, has_order_button: false, has_price_page: false, page_checked: true }, 'only a real true counts');
 });
 
+test('the gate refuses a platform, a stranger, a slogan and a dead end — the first live pass taught it', () => {
+  const page = (title, extra = '') => '<html><head><title>' + title + '</title></head><body>'
+    + '<h1>Websites for restaurants in Harare</h1><a href="mailto:hello@harareweb.example">mail</a>' + extra + '</body></html>';
+  const read = (html, url) => readPageEvidence(html, url);
+
+  // what the deployed pass actually filed before this gate existed
+  for (const url of ['https://www.website.com/', 'https://web.whatsapp.com/', 'https://www.wix.com/',
+    'https://za.yelp.com/search?x=1', 'https://www.upwork.com/', 'https://m.facebook.com/x']) {
+    assert.equal(usableHost(url), false, url + ' is a product or somebody else’s list, not a prospect');
+  }
+  assert.equal(usableHost('https://harareweb.example/about'), true);
+  assert.equal(usableHost('https://kwekwe-tills.example/'), true, 'a real business host still passes');
+
+  const ok = admitCandidate({ title: 'Harare Web Studio | Design', url: 'https://harareweb.example/about' },
+    read(page('Harare Web Studio | Design'), 'https://harareweb.example/about'), { country: 'ZW', pageChecked: true });
+  assert.equal(ok.ok, true, 'a Harare agency with an address on its page is admitted');
+  assert.equal(ok.name, 'Harare Web Studio');
+
+  const platform = admitCandidate({ title: 'WhatsApp Web', url: 'https://web.whatsapp.com/' },
+    read(page('WhatsApp Web'), 'https://web.whatsapp.com/'), { country: 'ZW', pageChecked: true });
+  assert.deepEqual(platform, { ok: false, why: 'platform' });
+
+  const elsewhere = admitCandidate({ title: 'Jakarta Studio', url: 'https://jakarta.example/' },
+    read('<html><title>Jakarta Studio</title><body>Jakarta digital agency<a href="mailto:a@jakarta.example">m</a></body></html>', 'https://jakarta.example/'),
+    { country: 'ZW', pageChecked: true });
+  assert.equal(elsewhere.why, 'no_local_signal', 'a page that never names the market is not a Zimbabwean agency');
+
+  const slogan = admitCandidate({ title: 'Create Your Free Website | Zimbabwe', url: 'https://site.example/' },
+    read(page('Create Your Free Website'), 'https://site.example/'), { country: 'ZW', pageChecked: true });
+  assert.equal(slogan.why, 'generic_name', 'a product slogan is not a business name');
+
+  const blind = admitCandidate({ title: 'Harare Web Studio', url: 'https://harareweb.example/' }, {},
+    { country: 'ZW', pageChecked: false });
+  assert.equal(blind.why, 'unverified', 'no page read, no hook to stand behind');
+
+  const unreachable = admitCandidate({ title: 'Harare Web Studio', url: 'https://harareweb.example/' },
+    read('<html><title>Harare Web Studio</title><body>Harare. We build sites.</body></html>', 'https://harareweb.example/'),
+    { country: 'ZW', pageChecked: true });
+  assert.equal(unreachable.why, 'no_contact', 'a lead nobody can answer is not work, it is a bookmark');
+
+  const utility = admitCandidate({ title: 'ZETDC Harare Regional Office', url: 'https://zetdc.example/' },
+    { emails: [], phone: '263242706451', text: 'Zimbabwe' }, { country: 'ZW', pageChecked: true });
+  assert.equal(utility.why, 'institution', 'a national utility is a company on the map and is not a customer');
+
+  // a WhatsApp route alone is not enough evidence of a way to *answer* a business — but the number — but the number
+  // behind it is, and it has to be a real length for the market
+  assert.equal(phonePlausible('263771112223'), true, 'Zimbabwe mobile: 263 + 9');
+  assert.equal(phonePlausible('27711234567'), true, 'South African mobile: 27 + 9');
+  assert.equal(phonePlausible('279927998279'), false, '27 + 10 digits is an Indonesian id, not a Cape Town number');
+  assert.equal(phonePlausible('26377111222'), false, '263 + 8 is not a Zimbabwean number');
+  assert.equal(phonePlausible(''), false);
+  assert.equal(marketMention('we serve Harare and Bulawayo', 'ZW'), true);
+  assert.equal(marketMention('we serve Zimbabwe', 'ZW'), true);
+  assert.equal(marketMention('we serve Nairobi', 'KE'), true);
+  assert.equal(marketMention('we serve Nairobi', 'ZW'), false);
+  assert.ok(MARKET_CITIES.ZA.includes('johannesburg'));
+});
+
+test('a run files only what the gate admitted, and says what it refused', async () => {
+  const fetcher = async (url) => {
+    if (String(url).includes('overpass')) return { ok: true, text: async () => '{"elements":[]}' };
+    if (String(url).includes('bing.com/search')) {
+      return { ok: true, text: async () => '<rss><channel>'
+        + '<item><title>Harare Web Studio | Design</title><link>https://harareweb.example/about</link></item>'
+        + '<item><title>Jakarta Studio | Web</title><link>https://jakarta-studio.example/</link></item>'
+        + '</channel></rss>' };
+    }
+    if (String(url).includes('harareweb')) {
+      return { ok: true, text: async () => '<html><title>Harare Web Studio</title><body>Harare agencies.'
+        + '<a href="mailto:hello@harareweb.example">mail</a></body></html>' };
+    }
+    return { ok: true, text: async () => '<html><title>Jakarta Studio</title><body>Jakarta agencies.'
+      + '<a href="mailto:hi@jakarta-studio.example">mail</a></body></html>' };
+  };
+  const run = await runDiscovery({ fetch: fetcher, perRun: 2, limit: 4, perQuery: 3, countries: ['ZW'], nowMs: 20747 * 864e5 });
+  assert.equal(run.candidates.length, 1, 'one real business out of the feed');
+  assert.equal(run.candidates[0].business, 'Harare Web Studio');
+  assert.equal(run.rejected.no_local_signal, 1, 'and the stranger is counted, not quietly dropped: ' + JSON.stringify(run.rejected));
+});
+
 test('the summary counts what a person can act on today, and says so plainly', () => {
   const cands = [
     { segment: 'agencies', email: 'a@x.example', hook: 'h' },
@@ -163,6 +244,7 @@ test('a run reads a search feed and the pages behind it, and stops at the limit'
   const asked = [];
   const fetcher = async (url) => {
     asked.push(url);
+    if (String(url).includes('overpass')) return { ok: true, text: async () => '{"elements":[]}' };
     if (String(url).includes('bing.com/search')) {
       return { ok: true, text: async () => [
         '<rss><channel>',
@@ -172,17 +254,20 @@ test('a run reads a search feed and the pages behind it, and stops at the limit'
         '</channel></rss>',
       ].join('') };
     }
-    return { ok: true, text: async () => '<a href="mailto:hi@' + hostOf(url) + '">mail</a>' };
+    // a page the gate can stand behind: it names the market and offers a way to answer
+    return { ok: true, text: async () => '<html><title>Harare Studio</title><body>Harare, Zimbabwe. '
+      + 'Website design for restaurants.<a href="mailto:hi@' + hostOf(url) + '">mail</a></body></html>' };
   };
-  const run = await runDiscovery({ fetch: fetcher, perRun: 2, limit: 4, perQuery: 2, countries: ['ZW'], nowMs: 20300 * 864e5 });
+  // three jobs: the map (empty in this stub) and two search queries
+  const run = await runDiscovery({ fetch: fetcher, perRun: 3, limit: 4, perQuery: 2, countries: ['ZW'], nowMs: 20300 * 864e5 });
   assert.equal(run.ok, true);
-  assert.equal(run.ran.length, 2, 'two queries');
-  assert.equal(run.candidates.length, 4, 'two from each, and no more than the limit: ' + run.candidates.length);
+  assert.equal(run.ran.length, 3, 'three jobs ran: ' + run.ran.map((r) => r.source).join(','));
+  assert.equal(run.candidates.length, 4, 'two from each query, and no more than the limit: ' + run.candidates.length);
 
   // the limit is a ceiling, not a suggestion: one query offering six results still yields the cap
-  const capped = await runDiscovery({ fetch: fetcher, perRun: 1, limit: 1, perQuery: 3, countries: ['ZW'], nowMs: 20300 * 864e5 });
-  assert.equal(capped.candidates.length, 1);
-  assert.equal(capped.ran.length, 1, 'and it stopped asking once it had enough');
+  const capped = await runDiscovery({ fetch: fetcher, perRun: 3, limit: 1, perQuery: 3, countries: ['ZW'], nowMs: 20300 * 864e5 });
+  assert.equal(capped.candidates.length, 1, 'one is the ceiling it was given');
+  assert.equal(capped.ran.length, 2, 'and it stopped asking once it had enough');
   assert.ok(run.candidates.every((c) => c.segment && c.source_url && c.evidence.page_checked), 'each candidate was read on its page');
   assert.ok(asked.every((u) => /^https:\/\//.test(u)), 'only https');
   assert.ok(!asked.some((u) => u.includes('facebook')), 'nothing did a social platform');
@@ -194,6 +279,82 @@ test('a run reads a search feed and the pages behind it, and stops at the limit'
   assert.equal(broken.candidates.length, 0, 'with no candidates invented to fill the gap');
   assert.equal(broken.errors.length, 2, 'and every failure named: ' + JSON.stringify(broken.errors));
   assert.match(broken.errors[0].error, /dns gone/);
+});
+
+test('the map source asks a city bbox a question only a local business can answer', () => {
+  const q = overpassQuery('Harare', -17.83, 31.05, 'agencies');
+  assert.match(q, /^\[out:json\]/, 'a query Overpass will accept');
+  assert.match(q, /nwr\["office"="company"\]\(-17\.9/, 'an office tag, inside a box around the city');
+  assert.match(q, /nwr\["craft"="web_developer"\]/, 'and the craftsman spelling of the same trade');
+  assert.equal(overpassQuery('Harare', -17.83, 31.05, 'social_merchants'), '',
+    'a segment the map cannot describe gets no query at all, rather than a bad one');
+  assert.ok(OSM_TAGS.accountants.includes('office=tax_advisor'));
+  assert.ok(OSM_CITIES.ZW.some((c) => c[0] === 'Harare'));
+
+  const doc = { elements: [
+    { type: 'node', id: 1, tags: { name: 'Harare Web Studio', office: 'company', phone: '+263 77 111 2223',
+      website: 'https://harareweb.example/', email: 'hi@harareweb.example' } },
+    { type: 'way', id: 2, tags: { name: 'Bula Books', office: 'tax_advisor', phone: '27 11 234 5678' } },
+    { type: 'node', id: 3, tags: { name: 'A Dot', office: 'company', phone: '279927998279' } },
+    { type: 'node', id: 4, tags: { office: 'company', phone: '+263 77 111 2222' } },
+  ] };
+  const items = parseOverpass(doc, 'agencies');
+  assert.equal(items.length, 3, 'the unnamed node is a dot, not a business');
+  assert.equal(items[0].title, 'Harare Web Studio');
+  assert.equal(items[0].url, 'https://harareweb.example/', 'the business site when the map has one');
+  assert.equal(items[0].contact.email, 'hi@harareweb.example');
+  assert.equal(items[0].contact.phone, '+263771112223', 'the number the mapper typed, digits kept');
+  assert.equal(items[1].url, 'https://www.openstreetmap.org/way/2', 'a business with no site is checkable at its map object');
+  assert.equal(items[2].contact.phone, '', 'an Indonesian id is not a Harare number, and the map is not believed blindly');
+});
+
+test('a map candidate with no website is filed, with the hook that makes it sharp', async () => {
+  const osm = { elements: [
+    { type: 'node', id: 11, tags: { name: 'Kwekwe Tills', shop: 'computer', phone: '+263 77 222 3344' } },
+    { type: 'node', id: 12, tags: { name: 'No Contact Traders', shop: 'computer' } },
+  ] };
+  const asked = [];
+  const fetcher = async (url) => {
+    asked.push(String(url));
+    if (String(url).includes('overpass')) return { ok: true, text: async () => JSON.stringify(osm) };
+    return { ok: false, status: 404, text: async () => '' };
+  };
+  const run = await runDiscovery({ fetch: fetcher, perRun: 1, limit: 5, countries: ['ZW'], nowMs: 20750 * 864e5 });
+  assert.equal(run.candidates.length, 1, 'one of the two can be answered');
+  const c = run.candidates[0];
+  assert.equal(c.business, 'Kwekwe Tills');
+  assert.equal(c.phone, '+263772223344');
+  assert.equal(c.source, 'discovery:openstreetmap', 'the lead says where it came from');
+  assert.equal(c.source_url, 'https://www.openstreetmap.org/node/11', 'and a person can open that URL');
+  assert.match(c.hook, /no website of its own/, 'the true and useful thing about a shop with a phone and no site');
+  assert.equal(run.rejected.no_contact, 1, 'and the one that cannot be answered is counted, not filed');
+  assert.ok(!asked.some((u) => u.includes('openstreetmap.org/node/')), 'the map object page is not fetched as if it were a shop’s site');
+});
+
+test('the map is asked about the segments it can describe, and a month of passes covers them all', () => {
+  // One pass is a slice on purpose, so the claim "every target is being worked" is only testable
+  // over time: simulate the rotation with the same done-list the Worker keeps.
+  let done = [];
+  const seen = new Set();
+  let firstPass = null;
+  for (let d = 0; d < 60; d++) {
+    const p = discoveryPlan({ nowMs: 20750 * 864e5 + d * 864e5, perRun: 12, countries: ['ZW', 'ZA'], done });
+    if (!firstPass) firstPass = p;
+    for (const j of p.jobs) seen.add(j.source + ':' + j.segment + ':' + j.country);
+    done = [...new Set([...done, ...p.jobs.map((j) => j.key)])];
+    assert.equal(new Set(p.jobs.map((j) => j.key)).size, p.jobs.length, 'no job twice in one pass');
+  }
+  for (const seg of ['agencies', 'accountants', 'pos_resellers', 'associations']) {
+    assert.ok(seen.has('osm:' + seg + ':ZW'), 'over two months the map is asked about ' + seg + ' in Zimbabwe');
+    assert.ok(seen.has('osm:' + seg + ':ZA'), 'and in South Africa');
+  }
+  for (const seg of ['agencies', 'accountants', 'pos_resellers', 'associations']) {
+    assert.ok(seen.has('bing:' + seg + ':ZW'), 'search backs the map up for ' + seg);
+  }
+  assert.ok(seen.has('bing:social_merchants:ZW'), 'and the long tail is reachable only through a phrase');
+  assert.ok(![...seen].some((k) => k.startsWith('osm:social_merchants')),
+    'the map is never asked about a segment it cannot describe: no query full of nothing');
+  assert.ok(done.length >= firstPass.total, 'a month of passes eventually touches every query in the pool');
 });
 
 test('the three tiers are flat prices in data', () => {
