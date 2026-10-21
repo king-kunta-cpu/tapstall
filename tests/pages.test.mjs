@@ -25,7 +25,7 @@ const page = (n) => readFileSync(join(root, 'pages', n + '.html'), 'utf8');
 const src = (n) => readFileSync(join(root, 'pages/src', n + '.html'), 'utf8');
 const worker = readFileSync(join(root, 'worker/worker.js'), 'utf8');
 
-const PAGES = ['store', 'onboard', 'admin', 'fees', 'index', 'confirm', 'renew', 'ops'];
+const PAGES = ['store', 'onboard', 'admin', 'fees', 'index', 'partners', 'confirm', 'renew', 'ops'];
 const MONEY = ['confirm', 'renew'];          // pages a merchant taps to move money
 const PRIVATE = ['admin', 'confirm', 'renew', 'ops'];   // must never be indexed
 

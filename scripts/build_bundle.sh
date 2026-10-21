@@ -15,13 +15,18 @@ import re, sys, json as _json, os as _os
 worker = open('worker/worker.js', encoding='utf-8').read()
 core = open('worker/core.js', encoding='utf-8').read()
 rail = open('worker/rail.js', encoding='utf-8').read()
+discover = open('worker/discover.js', encoding='utf-8').read()
 
 def inline(src, name, needs, target):
     """Replace `import { ... } from './<name>.js';` with the module body, exports stripped.
 
     Order matters and is asserted: the selling rail is inlined FIRST because the core import
     regex would otherwise swallow the rail import on its way to './core.js'."""
-    m = re.search(r"import \{[\s\S]*?\} from '\./" + re.escape(name) + r"\.js';", target)
+    # `[^;]*?` rather than `[\s\S]*?`: an import statement ends at its semicolon, and a lazy
+    # match across statements swallows the import *above* it (that is how discover.js's import was
+    # deleted by the rail inline, and how TARGET_SEGMENTS came to be undefined in a deploy that
+    # passed every other test).
+    m = re.search(r"import \{[^;]*?\} from '\./" + re.escape(name) + r"\.js';", target)
     assert m, "worker.js must import from './%s.js' (build inlines it)" % name
     body = re.sub(r"^export (const|function|async function)", r"\1", src, flags=re.M)
     body = re.sub(r"/\*[\s\S]*?\*/", "", body.strip(), count=1).strip()
@@ -38,6 +43,13 @@ worker = inline(rail, 'rail',
     ("function settlement", "function railCatalogue", "function allocateCents", "function paymentEvent",
      "function verifyWebhook", "function vettingPlan", "function collectSettlement", "async function hmacSha256Hex"),
     worker)
+# v1.7.1: discovery rides in the same bundle for the same reason, and this is the module that
+# proved the regex had to be tightened: left out, the routes answer 500 with a ReferenceError and
+# nothing else on the platform notices.
+worker = inline(discover, 'discover',
+    ("const TARGET_SEGMENTS", "function discoveryPlan", "async function runDiscovery",
+     "function candidateLead", "function hookFor", "function readPageEvidence"),
+    worker)
 worker = inline(core, 'core',
     ("function priceOrder", "function parseProducts", "const RAILS", "function publicStore",
      "function adminStore", "const PUBLIC_KEYS", "function issueCap", "function verifyCap", "async function sign"),
@@ -51,7 +63,7 @@ out = worker
 # its hand-publish door (it writes `tpl-ovr:<name>`, which outranks the bundle) precisely because
 # the emergency case is "the deploy is not available at 22:00 and the page is wrong now".
 pages = {}
-for n in ('store', 'onboard', 'admin', 'confirm', 'renew', 'ops', 'index', 'fees',
+for n in ('store', 'onboard', 'admin', 'confirm', 'renew', 'ops', 'index', 'fees', 'partners',
           'guide-whatsapp-shop-payments', 'guide-payment-reference-matching'):
     for cand in ('pages/%s.html', 'pages/public/%s.html', 'pages/public/guide/%s.html'):
         f = cand % n
@@ -66,7 +78,7 @@ assert out.count(decl) == 1, "worker.js must declare `const INLINED_PAGES = {};`
 out = out.replace(decl, "const INLINED_PAGES = " + _json.dumps(pages, ensure_ascii=False, separators=(',', ':')) + ";")
 print("pages inlined: %d files, %d bytes" % (len(pages), sum(len(v) for v in pages.values())))
 open(sys.argv[1], "w", encoding="utf-8").write(out + "\n")
-print("bundle: worker.js + core.js + rail.js inlined (%d lines, %d bytes)" % (len(out.splitlines()), len(out)))
+print("bundle: worker.js + discover.js + core.js + rail.js inlined (%d lines, %d bytes)" % (len(out.splitlines()), len(out)))
 PYEOF
 
 for f in store.html onboard.html admin.html confirm.html renew.html ops.html; do cp "pages/$f" "$OUT/assets/$f"; done

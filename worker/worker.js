@@ -15,6 +15,9 @@
  */
 
 import {
+  runDiscovery, discoveryPlan, discoverySummary, TARGET_SEGMENTS, SEGMENT_KEYS,
+} from './discover.js';
+import {
   railCatalogue, railFor, allocateCents, paymentEvent, appendPaymentEvent, hasPaymentEvent,
   settlement, settlementCsv, vettingPlan, refundTransition, retentionUntil,
   collectInvoiceDraft, collectSettlement, verifyWebhook, payDocKey, PAY_EVENTS, COLLECT_PROVIDERS,
@@ -54,7 +57,7 @@ import {
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '1.7.0';
+const VERSION = '1.7.1';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
@@ -252,6 +255,10 @@ async function route(req, url, env, ctx) {
   // the second file is a list of what we will *not* enumerate (see core.js).
   if (p === '/robots.txt') return text(ROBOTS_TXT(url.origin));
   if (p === '/sitemap.xml') return text(sitemapXml(url.origin), 200, 'application/xml; charset=utf-8');   // text(body, status, type): passing the type second is a 500
+  if (p === '/partners' || p === '/partners.html') {
+    const page = await tpl(env, 'partners');
+    return page.startsWith('<!doctype') ? html(page, 200, { 'Cache-Control': 'public, max-age=3600' }) : redirect('/onboard');
+  }
   if (p === '/fees' || p === '/fees.html') {
     const page = await tpl(env, 'fees');
     return page.startsWith('<!doctype') ? html(page, 200, { 'Cache-Control': 'public, max-age=3600' }) : redirect('/onboard');
@@ -401,6 +408,11 @@ async function route(req, url, env, ctx) {
   if ((m = p.match(/^\/(r|g)\/([a-z0-9][a-z0-9-]{1,23})$/))) return sellerRedirect(url, env, m[2], m[1]);
   if (p === '/api/seller') return sellerView(url, env);
   if (p === '/api/leads/ingest' && req.method === 'POST') return leadsIngest(req, env);
+  /* v1.7.1, the autonomous list: read the state, trigger a pass by hand, and receive a partner
+   * application. Discovery itself is a cron job — a human only looks at what it found. */
+  if (p === '/api/discover' && req.method === 'GET') return discoverStatus(req, env);
+  if (p === '/api/discover/run' && req.method === 'POST') return discoverRun(req, env);
+  if (p === '/api/partners/apply' && req.method === 'POST') return partnerApply(req, url, env);
   if (p === '/api/leads' && req.method === 'GET') return leadsListSeller(url, env);
   if (p === '/api/leads/act' && req.method === 'POST') return leadsAct(req, env);
   if (p === '/api/leads/sheets-feed') return sheetsFeed(url, env);
@@ -2047,6 +2059,12 @@ async function runCron(env) {
     try { if (await governedPut(env.STORES, 'cron:last', JSON.stringify({ at: new Date().toISOString(), unix: Date.now() }), null, 'telemetry')) out.heartbeat = true; } catch (e) {}
   }
   try { out.buyer_flushed = await flushBuyerBuf(env, 25); } catch (e) { out.buyer_flushed = 0; }
+  // v1.7.1: the list builds itself. One bounded pass a day, quota-gated, and never the reason an
+  // order fails — discovery is the lowest-priority writer in the house.
+  try {
+    const d = await discoveryPass(env, {});
+    out.discovery = { added: d.added || 0, candidates: d.candidates || 0, skipped: d.skipped || null };
+  } catch (e) { out.discovery = { error: String(e && e.message || e).slice(0, 80) }; }
   const watch = [];                                  // shops that asked for the chain reader
   const summary = { total: 0, live: 0, suspended: 0, expiring: [] };
   out.read_docs = 0; out.legacy_docs = 0; out.backfilled = 0;
@@ -5260,6 +5278,14 @@ async function leadsIngest(req, env) {
   const b = await readBody(req).catch(() => ({}));
   const raw = Array.isArray(b.leads) ? b.leads.slice(0, 100) : (b.business || b.email || b.phone ? [b] : []);
   if (!raw.length) return json({ ok: false, error: 'send {leads:[…]} (max 100 per call)' }, 422);
+  return json(await ingestLeads(env, raw));
+}
+
+/** The one place a lead is filed, shared by the HTTP ingest, the autonomous discovery pass and the
+ *  partner page. Dedupe, scoring, seller allocation and the do-not-contact ledger live here, so a
+ *  cron cannot invent a second, more permissive way in. */
+async function ingestLeads(env, rawList) {
+  const raw = (rawList || []).slice(0, 100);
   const activeCodes = (await listSellers(env)).filter((s) => s.active !== false).map((s) => s.code);
   const counts = { received: raw.length, added: 0, updated: 0, duplicate: 0, dnc_skipped: 0, invalid: 0, research_hold: 0 };
   const added = [];
@@ -5289,8 +5315,8 @@ async function leadsIngest(req, env) {
     counts.added++; if (lead.status === 'research_hold') counts.research_hold++;
     if (added.length < 100) added.push(lead.id);
   }
-  return json({ ok: true, counts, added_ids: added,
-    note: 'Two signals is the door out of research_hold; allocation is by hash across active sellers; dnc is checked before anything is stored. No outreach is sent here — this fills the queue sellers work.' });
+  return { ok: true, counts, added_ids: added,
+    note: 'Two signals is the door out of research_hold; allocation is by hash across active sellers; dnc is checked before anything is stored. No outreach is sent here — this fills the queue sellers work.' };
 }
 async function leadsListSeller(url, env) {
   const doc = await leadActor(env, url.searchParams.get('code') || '', url.searchParams.get('key') || '');
@@ -5332,6 +5358,126 @@ async function leadsAct(req, env) {
   }
   return json({ ok: true, lead: t.lead });
 }
+
+/* --------------------------------------------------------------- the autonomous list
+ * v1.7.1. The playbook's first week was "build a list of 60 agencies and 30 accountants". That is
+ * now a job that runs itself: the cron picks a slice of the target queries, reads public pages,
+ * files candidates into the same lead pipeline the sellers work, and records what it did. It never
+ * sends, never claims, and never exceeds a daily write budget — a discovery pass must never be the
+ * reason an order cannot land.
+ */
+const DISC_STATE = 'disc:state';
+const DISC_PER_RUN_DEFAULT = 5;     // queries per pass
+const DISC_LIMIT_DEFAULT = 12;      // candidates per pass
+const DISC_WRITES_MAX = 20;         // new leads per day, so the lead pipeline stays a queue
+
+async function discoverState(env) {
+  const raw = env.ORDERS ? await env.ORDERS.get(DISC_STATE, 'json').catch(() => null) : null;
+  return (raw && typeof raw === 'object') ? raw : { runs: [], done: [], added: 0, day: '', candidates: 0, errors: 0 };
+}
+
+/** One pass. Bounded by writes, not by ambition. */
+async function discoveryPass(env, opts = {}) {
+  // A switch, so a test run (or a workshop with no network) never reaches out to a search engine
+  // inside a cron. Never used to hide a failure: when it is on, it runs or it reports the error.
+  if (String(env.DISCOVERY || '') === 'off') return { ok: true, skipped: 'disabled', added: 0, candidates: 0 };
+  const st = await discoverState(env);
+  const today = new Date().toISOString().slice(0, 10);
+  if (!opts.force && st.day === today) {
+    return { ok: true, skipped: 'already_ran_today', added: 0, candidates: 0, summary: null, state: { day: st.day, added: st.added } };
+  }
+  if (opts.force === false && !quotaGate('writes', 'automation').ok) {
+    return { ok: true, skipped: 'quota', added: 0, candidates: 0 };
+  }
+  const countries = (opts.countries && opts.countries.length) ? opts.countries : ['ZW', 'ZA'];
+  const run = await runDiscovery({
+    nowMs: Date.now(), countries,
+    perRun: Math.max(1, Math.min(8, Number(opts.perRun) || DISC_PER_RUN_DEFAULT)),
+    limit: Math.max(1, Math.min(24, Number(opts.limit) || DISC_LIMIT_DEFAULT)),
+    perQuery: 3, done: st.done || [],
+  });
+  const summary = discoverySummary(run.candidates);
+  const budget = Math.max(0, Math.min(DISC_WRITES_MAX, Number(opts.writes) || DISC_WRITES_MAX) - (st.added_today || 0));
+  const batch = run.candidates.filter((c) => c.email || c.phone || c.source_url).slice(0, budget);
+  let ingest = { counts: { added: 0, updated: 0, duplicate: 0, invalid: 0 }, added_ids: [] };
+  if (batch.length) {
+    try { ingest = await ingestLeads(env, batch); } catch (e) { ingest.error = String(e && e.message || e); }
+  }
+  const next = {
+    ...st,
+    day: today,
+    added_today: (st.added_today || 0) + (ingest.counts.added || 0),
+    added: (st.added || 0) + (ingest.counts.added || 0),
+    candidates: (st.candidates || 0) + summary.candidates,
+    errors: (st.errors || 0) + run.errors.length,
+    done: [...new Set([...(st.done || []), ...run.ran.map((r) => r.key)])].slice(-400),
+    runs: [...(st.runs || []), {
+      at: new Date().toISOString(), day: run.day,
+      queries: run.ran.length, candidates: summary.candidates, added: ingest.counts.added || 0,
+      by_segment: summary.by_segment, errors: run.errors.length,
+    }].slice(-30),
+  };
+  if (env.ORDERS && (ingest.counts.added || run.ran.length)) {
+    try { await governedPut(env.ORDERS, DISC_STATE, JSON.stringify(next), null, 'automation'); } catch (e) { void e; }
+  }
+  return { ok: true, ran: run.ran.length, candidates: summary.candidates, added: ingest.counts.added || 0,
+    updated: ingest.counts.updated || 0, by_segment: summary.by_segment, errors: run.errors.slice(0, 3),
+    summary: summary.note, state: { day: next.day, added_today: next.added_today, added: next.added } };
+}
+
+async function discoverStatus(req, env) {
+  const denied = await pressAdmin(req, env); if (denied) return denied;
+  const st = await discoverState(env);
+  return json({
+    ok: true,
+    targets: TARGET_SEGMENTS.map((t) => ({ rank: t.rank, key: t.key, label: t.label, why: t.why, queries: Object.values(t.queries || {}).reduce((a, x) => a + x.length, 0) })),
+    state: { day: st.day || 'never', runs: (st.runs || []).length, added: st.added || 0, added_today: st.added_today || 0, candidates: st.candidates || 0, errors: st.errors || 0, queries_seen: (st.done || []).length },
+    last: (st.runs || []).slice(-5).reverse(),
+    budget: { per_day_writes: DISC_WRITES_MAX, per_run_queries: DISC_PER_RUN_DEFAULT, per_run_candidates: DISC_LIMIT_DEFAULT },
+    note: 'Discovery reads public pages and files candidates into the lead queue. It never sends, never claims a lead and never overrides the do-not-contact ledger. A human opens the queue; the cron only fills it.',
+  }, 200, { 'Cache-Control': 'no-store' });
+}
+
+async function discoverRun(req, env) {
+  const denied = await pressAdmin(req, env); if (denied) return denied;
+  const b = await readBody(req).catch(() => ({}));
+  const out = await discoveryPass(env, { force: true, perRun: b.perRun, limit: b.limit, countries: b.countries });
+  return json(out, out.ok ? 200 : 502);
+}
+
+/** A partner application is a lead, filed by the same pipeline, with the segment the playbook says
+ *  is worth most. Public by necessity, so it is throttled per address and stores nothing a stranger
+ *  can abuse: no seller allocation trouble, no echo of other applicants. */
+async function partnerApply(req, url, env) {
+  const b = await readBody(req).catch(() => ({}));
+  const ip = ipOf(req);
+  const meterKey = 'pa:' + ip;
+  if (env.STORES) {
+    const seen = await env.STORES.get(meterKey).catch(() => null);
+    const n = Number(seen || 0);
+    if (n >= 5) return json({ ok: false, error: 'too_many', note: 'Five applications a day from one address is the limit. Nothing was filed.' }, 429);
+    try { await env.STORES.put(meterKey, String(n + 1), { expirationTtl: 86400 }); } catch (e) { void e; }
+  }
+  const business = String(b.business || b.company || '').trim().slice(0, 80);
+  if (business.length < 2) return json({ ok: false, error: 'business_required', note: 'A trading name is the one thing needed.' }, 422);
+  const email = isEmail(String(b.email || '')) ? String(b.email).toLowerCase() : '';
+  const phone = digits(b.phone || b.whatsapp || '').slice(0, 15);
+  if (!email && !phone) return json({ ok: false, error: 'contact_required', note: 'An email or a number — otherwise there is no way to answer.' }, 422);
+  const tier = String(b.tier || 'partner').toLowerCase();
+  const leadIn = {
+    business, name: String(b.name || '').slice(0, 60), email, phone,
+    country: String(b.country || '').slice(0, 40), segment: 'agencies',
+    source: 'partners page', source_url: String(url.origin + '/partners'),
+    note: 'Applied for the ' + tier + ' tier.' + (b.merchants ? ' Carries ' + String(b.merchants).slice(0, 12) + ' merchants.' : '')
+      + (b.note ? ' ' + String(b.note).slice(0, 160) : ''),
+    signals: ['applied'],   // an application is one honest signal; the pipeline still wants a second
+  };
+  const out = await ingestLeads(env, [leadIn]);
+  return json({ ok: true, filed: out.counts.added > 0 || out.counts.updated > 0, tier,
+    note: 'Filed. A person answers applications within one working day — nothing was subscribed, and nothing is charged until you choose a tier.' },
+    200, { 'Cache-Control': 'no-store' });
+}
+
 async function sheetsFeed(url, env) {
   const doc = await leadActor(env, url.searchParams.get('code') || '', url.searchParams.get('key') || '');
   if (!doc) return json({ ok: false, error: 'seller code + key required' }, 401);

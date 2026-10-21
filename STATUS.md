@@ -1,5 +1,55 @@
 # Tapstall — status
 
+## v1.7.1 (2026-10-21): the list that arrives by itself — discovery on the cron, and the tiers
+
+The owner's question was sharper than "add a feature": *the 90-name list should be autonomous by
+now.* It was not. Segments existed as prose in `docs/AGENCY-PLAYBOOK.md`, the tiers existed only in
+a spreadsheet, and every name on the list had been typed by a person. v1.7.1 makes the target order
+data the pipeline ranks by, and gives the cron one bounded pass a day to fill the queue behind it.
+
+- **`worker/discover.js`** (new, inlined into the bundle) — `TARGET_SEGMENTS`, five segments with
+  `rank`, `weight`, `why`, per-country queries and a hook builder:
+  1. agencies (30) · 2. accountants (26) · 3. POS resellers (22) · 4. associations (18) ·
+  5. social merchants (12). Ranks are the playbook's order and the weights fall with them.
+- **The pipeline ranks by that order, not by a template.** `LEAD_SEGMENTS` gained the four channel
+  segments; without that an agency lead was silently scored as `other` — a real bug found while
+  wiring it, and the reason a test now asserts every target key is an accepted segment.
+- **One pass a day inside `scheduled`** — `discoveryPass()` runs after the buyer buffer flush, keyed
+  on `disc:state.day` so a retried cron is the same slice of work, capped at 5 queries, 12
+  candidates and **20 new leads a day** (`DISC_WRITES_MAX`) so discovery can never crowd an order
+  out of the write budget. `DISCOVERY=off` is the switch a test or a workshop uses; when it is on
+  it runs or it reports the error.
+- **Reading, only.** Bing's RSS feed (no key, no cookie), then each candidate's own page for an
+  email, a `wa.me` link, a phone, and three booleans about the page. The hook is built from what
+  the page showed — `source_url` is stored so a person can check the claim in ten seconds. It never
+  sends, never claims a lead, and never overrides the do-not-contact ledger: `dnc_skipped` is
+  counted, not swallowed.
+- **Routes**: `GET /api/discover` (ranked targets + budget + last five runs), `POST
+  /api/discover/run` (one forced pass), `POST /api/partners/apply` (public, 5 a day per address,
+  422 without a trading name or a way to answer). The partner page `/partners` is served from the
+  bundle.
+- **Tiers as data** (`PARTNER_TIERS`): Pilot $0 / 60 days / 10 merchants; Partner $149 a month / 5
+  seats / $29 an extra seat; Platform $299 / unlimited / sub-agencies. Flat prices, no share of
+  volume — asserted in a test, not just in the copy.
+- **Two bugs the tests caught before the deploy did:**
+  1. the bundler inlined `rail.js` with a regex that spanned statements, deleting the `discover.js`
+     import above it — the routes answered `500 TARGET_SEGMENTS is not defined` in the built
+     bundle only. The import regex is now `[^;]*?` (an import ends at its semicolon) and
+     `discover.js` is inlined like the other two modules.
+  2. hooks read `"web, in ZW that runs client storefronts"` — the label's first word, comma and
+     all, and a country code. Hooks now name the place in words (`Zimbabwe`, or the city when the
+     query had one) and are full sentences; a test refuses a hook containing `ZW`, `undefined`, or
+     a leading `web,`.
+- **Leads carry their evidence**: `cleanLead` keeps four booleans (`has_whatsapp`,
+  `has_order_button`, `has_price_page`, `page_checked`) so "every hook is checkable" survives the
+  run instead of living in a doc.
+- **The page is findable**: `/partners` from the fee calculator and the home-page footer, plus a
+  handoff at `pages/public/partners/` so the static mirror's link resolves instead of 404 (Pages
+  has no rewrite engine, and a form on a static host would collect applications and lose them).
+- **Tests**: 394/394 (`discover` 10, plus five live tests covering the admin door, a real pass with
+  a stubbed feed, the duplicate and DNC rules, the application meter, and the tiers on the page).
+  The live `0.9.1` page-count assertion moved 11 → 12 with `partners.html`.
+
 ## v1.7.0 (2026-10-21): the settlement layer — the rail we can actually sell
 
 The owner asked which of the missing rail pieces are needed **now**, and told us to build them.

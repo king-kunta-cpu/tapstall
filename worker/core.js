@@ -4287,7 +4287,32 @@ export function meshIdentityPlan(identity, storePlan, facts, opt) {
  * over. Two sellers must never work the same lead: the transition refuses, in one pure function,
  * so every door that moves a lead refuses the same way. */
 export const SELLER_DEFAULT_PCT = 30;
-export const LEAD_SEGMENTS = ['social_merchants', 'catalog_pdfs', 'dues_collectors', 'directories', 'other'];
+/* v1.7.1: the channel segments come first, because the playbook sells to the people who already
+ * own the shops. `agencies`, `accountants`, `pos_resellers` and `associations` are the door;
+ * `social_merchants` is what comes in on its own. */
+export const LEAD_SEGMENTS = ['agencies', 'accountants', 'pos_resellers', 'associations',
+  'social_merchants', 'catalog_pdfs', 'dues_collectors', 'directories', 'other'];
+
+/* The partner tiers, as data, so the page, the agreement and the invoice cannot disagree.
+ * Pilot is deliberately time-boxed: an open-ended free tier is how a channel becomes a hobby. */
+export const PARTNER_TIERS = {
+  pilot: {
+    key: 'pilot', label: 'Pilot', price: 0, seats: 10, months: 2,
+    line: 'Sixty days, free — and a decision date booked on day one.',
+    includes: ['Your brand on the shop pages', 'Up to 10 merchants', 'The settlement statement', 'Our number, not a ticket queue'],
+  },
+  partner: {
+    key: 'partner', label: 'Partner', price: 149, seats: 5, seat_price: 29,
+    line: 'The standard agency licence: your brand, five seats, $29 for each one after.',
+    includes: ['Your subdomain and brand', '5 merchant seats included', 'Settlement statements and CSV', 'Priority support'],
+  },
+  platform: {
+    key: 'platform', label: 'Platform', price: 299, seats: 0, seat_price: 0,
+    line: 'For resellers with a hundred merchants and their own price list.',
+    includes: ['Unlimited seats', 'Sub-agency accounts', 'Your own pricing', 'Co-branded onboarding'],
+  },
+};
+export const PARTNER_TIER_KEYS = Object.keys(PARTNER_TIERS);
 export const LEAD_STATUSES = ['research_hold', 'queued', 'claimed', 'contacted', 'replied', 'trial', 'closed', 'dnc'];
 
 /** A seller code is the bit of a link a person can read aloud: lowercase, short, no tricks. */
@@ -4352,6 +4377,13 @@ export function leadScoreOf(lead) {
 /** One lead, cleaned once, with an id that is a fact about the lead (email, else number, else
  *  business name) — so the same prospect hunted twice is the same KV key twice, not two rows two
  *  sellers can both chase. */
+export function cleanLeadEvidence(e) {
+  const o = (e && typeof e === 'object') ? e : {};
+  const b = (v) => v === true || v === 'true' || v === 1;
+  return { has_whatsapp: b(o.has_whatsapp), has_order_button: b(o.has_order_button),
+    has_price_page: b(o.has_price_page), page_checked: b(o.page_checked) };
+}
+
 export function cleanLead(input, opt) {
   const o = input || {}, k = opt || {};
   const business = meshClip(o.business || o.company || o.shop || '', 80);
@@ -4364,6 +4396,9 @@ export function cleanLead(input, opt) {
     source: meshClip(o.source || '', 80),
     source_url: /^https?:\/\//.test(String(o.source_url || o.url || '')) ? String(o.source_url || o.url).slice(0, 300) : '',
     note: meshClip(o.note || '', 300),
+    // What the page said when discovery read it, so a lead's hook stays checkable after the run:
+    // four booleans, never a scraped body. `source_url` is where a person verifies them.
+    evidence: cleanLeadEvidence(o.evidence),
     seller_code: cleanSellerCode(o.seller_code || o.seller || ''),
     status: 'research_hold', claimed_by: '', touches: 0, shop: '',
     created_at: new Date(k.now || Date.now()).toISOString(),

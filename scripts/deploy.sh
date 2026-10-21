@@ -80,7 +80,7 @@ python3 scripts/ui_kit.py check || die "pages/*.html are out of date with pages/
 #                             happening tonight. `--pages-clear <name>` takes it away again.
 #   PAGES_KV=1                also write the legacy `tpl:<name>` copies, so a rollback to a
 #                             pre-0.9.1 Worker still finds the current pages, not a stale month.
-TPL_NAMES="store onboard admin fees index confirm renew ops"
+TPL_NAMES="store onboard admin fees index partners confirm renew ops"
 for f in pages/guide-*.html; do          # the script has already cd'd to the repo root
   [[ -e "$f" ]] && TPL_NAMES="$TPL_NAMES $(basename "$f" .html)"
 done

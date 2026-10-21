@@ -1,0 +1,55 @@
+<!doctype html>
+<!--
+  A handoff, not a copy of the page.
+
+  The static mirror carries the marketing pages only. The partner page needs the Worker: it posts
+  to /api/partners/apply, which files the application into the same lead queue the sellers work.
+  A form on Pages would collect an application and lose it, which is worse than a link that moves
+  you to the place where the form actually works.
+
+  Pages has no rewrite engine (it ignores _redirects), so the mirror's "See the partner tiers"
+  link needs a file at /partners to land on — this one.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tapstall — partner tiers</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         margin: 0; padding: 3rem 1.25rem; background: #0b1512; color: #e8f7ef; }
+  main { max-width: 34rem; margin: 0 auto; }
+  h1 { font-size: 1.35rem; margin: 0 0 .5rem; }
+  a { color: #4cc9a6; }
+  .big { display: inline-block; margin: 1.25rem 0 .75rem; padding: .8rem 1.1rem; border-radius: .6rem;
+         background: #0b5b34; color: #fff; text-decoration: none; font-weight: 600; }
+  p.note { color: #91a8a0; font-size: .9rem; }
+  ul { color: #cfe6dc; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Partner tiers live on the app</h1>
+  <p>Three tiers, flat prices, and one artefact sold: the settlement statement.
+     Your brand on the shop pages, seats for your team, and nothing held by us.</p>
+  <ul>
+    <li><b>Pilot</b> — $0 for 60 days, up to 10 merchants, with a decision date booked on day one.</li>
+    <li><b>Partner</b> — $149 a month, five seats, $29 for each seat after.</li>
+    <li><b>Platform</b> — $299 a month, unlimited seats, sub-agency accounts.</li>
+  </ul>
+  <a class="big" href="https://tapstall.zlnew.workers.dev/partners">Open the tiers and apply →</a>
+  <p class="note">This mirror is static, so the application form is on the app, where it can actually
+     file what you send. Nothing you type here is stored — this page reads nothing and keeps nothing.</p>
+</main>
+<script>
+  // keep the query string (a referral code may ride on the link); a meta refresh cannot
+  (function () {
+    var to = 'https://tapstall.zlnew.workers.dev/partners' + location.search;
+    setTimeout(function () { location.replace(to); }, 1200);
+    var a = document.querySelector('a.big');
+    if (a) a.href = to;
+  })();
+</script>
+</body>
+</html>

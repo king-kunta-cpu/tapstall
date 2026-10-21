@@ -129,6 +129,9 @@ const env = {
   // builds stores from one harness address, so it passes a wide meter; one test
   // below proves the rule itself at 2/3 instead of trusting these numbers
   REG_RL: { windowSec: 3600, max: 100000 }, REG_RL_DAY: { windowSec: 86400, max: 100000 },
+  // discovery is the one part of the cron that reaches the public internet; the test that proves
+  // it turns it back on and stubs the fetcher, so no other test depends on Bing being awake.
+  DISCOVERY: 'off',
 };
 
 let worker;
@@ -182,7 +185,7 @@ let store = {};
 before(async () => {
   // derived from the directory, exactly as deploy.sh does: a page in git that nobody
   // added to a list is a page that ships broken, in the test and in production alike
-  const TPL = ['store', 'onboard', 'admin', 'fees', 'index', 'confirm', 'renew', 'ops']
+  const TPL = ['store', 'onboard', 'admin', 'fees', 'index', 'partners', 'confirm', 'renew', 'ops']
     .concat(readdirSync(join(root, 'pages')).filter((f) => /^guide-.*\.html$/.test(f)).map((f) => f.slice(0, -5)));
   for (const name of TPL) {
     const html = readFileSync(join(root, 'pages', name + '.html'), 'utf8');
@@ -3981,7 +3984,7 @@ test('0.9.1 the bundle carries every page, and no KV write stands between it and
   // pass every other test in this file by falling through to KV, which is exactly how a regression
   // here would hide.
   const st = await call('/__selftest');
-  assert.equal(st.json.pages_inlined, 11, 'every page the console can name is in the bundle: ' + JSON.stringify(st.json.pages_inlined));
+  assert.equal(st.json.pages_inlined, 12, 'every page the console can name is in the bundle (partners joined in v1.7.1): ' + JSON.stringify(st.json.pages_inlined));
   assert.ok(st.json.pages_bytes > 200000, 'and they are real pages, not markers: ' + st.json.pages_bytes + ' bytes');
   assert.equal(st.json.pages_store_from, 'bundle', 'the storefront a merchant is served comes out of the Worker, not a KV read');
   assert.equal(st.json.pages_served, true, 'and it is a page');
@@ -4736,4 +4739,185 @@ test('the settlement statement, the event log and the vetting gate work through 
   // the webhook refuses an unsigned claim, and refuses without a secret rather than trusting it
   const hook = await call('/api/hook/nowpayments?h=railtest', { method: 'POST', body: '{"order_id":"x"}' });
   assert.ok(hook.status === 401 || hook.status === 503, 'an unsigned IPN is rejected: ' + hook.status);
+});
+
+/* ============================================================ 1.7.1 · discovery
+ * The list has to arrive by itself now. Three things have to be true and one has to stay untrue:
+ * the cron fills the queue without a human, it is bounded and idempotent per day, it respects the
+ * do-not-contact ledger — and it never sends anything and never claims a lead it did not read on
+ * a page. The pass reaches the public internet, so the fetcher is stubbed and the switch that the
+ * harness leaves off is turned on for the length of these tests only.
+ */
+const DISC_RSS = [
+  '<?xml version="1.0"?><rss><channel>',
+  '<item><title>Harare Web Studio | Design and hosting</title><link>https://harareweb.example/about</link>',
+  '<description>We build restaurant websites in Zimbabwe</description></item>',
+  // the host filter: a social platform is a conversation, not a business to file
+  '<item><title>Some agency</title><link>https://www.facebook.com/someagency/posts/1</link><description>x</description></item>',
+  '</channel></rss>',
+].join('');
+const DISC_PAGE = [
+  '<html><head><title>Harare Web Studio</title></head><body>',
+  '<h1>Websites for restaurants</h1>',
+  '<a href="mailto:hello@harareweb.example">Email us</a>',
+  '<a href="https://wa.me/263771112223">WhatsApp</a>',
+  '<p>Call +263 77 111 2223</p>',
+  '<a class="btn" href="/quote">Get a quote</a>',
+  '</body></html>',
+].join('');
+
+// the file-wide stub (menu sheet + the real network) is the default state to come back to; a
+// discovery test that left its own stub in place would silently feed later tests fake pages
+const realFetchStub = () => async (u, init) => (String(u).includes('stub/menu.csv')
+  ? new Response(MENU, { headers: { 'content-type': 'text/csv' } })
+  : realFetch(u, init));
+
+function stubDiscovery(rss = DISC_RSS, page = DISC_PAGE) {
+  const seen = [];
+  globalThis.fetch = async (u, init) => {
+    const url = String(u);
+    seen.push(url);
+    if (url.includes('bing.com/search')) return new Response(rss, { headers: { 'content-type': 'application/rss+xml' } });
+    if (url.includes('harareweb.example')) return new Response(page, { headers: { 'content-type': 'text/html' } });
+    return new Response('gone', { status: 404 });
+  };
+  return seen;
+}
+const discLeads = () => [...env.ORDERS._map.keys()].filter((k) => k.startsWith('lead:')).map((k) => JSON.parse(env.ORDERS._map.get(k).value));
+const discState = () => JSON.parse(env.ORDERS._map.get('disc:state')?.value || '{}');
+const adminHeaders = { 'x-tapstall-admin': 'test-secret', 'x-tapstall-confirm': '1' };
+
+test('1.7.1 discovery is a door with a lock: the queue and its budget are admin-only', async () => {
+  const locked = await call('/api/discover');
+  assert.equal(locked.status, 401, 'no secret, no view of the pipeline');
+  const unconfirmed = await call('/api/discover', { headers: { 'x-tapstall-admin': 'test-secret' } });
+  assert.equal(unconfirmed.status, 403, 'and a run needs the confirm header, like every other write');
+
+  const st = await call('/api/discover', { headers: adminHeaders });
+  assert.equal(st.status, 200, st.text);
+  const order = st.json.targets.map((t) => t.key);
+  assert.deepEqual(order, ['agencies', 'accountants', 'pos_resellers', 'associations', 'social_merchants'],
+    'the page a person reads ranks targets in the playbook’s order: ' + order.join(' > '));
+  assert.deepEqual(st.json.targets.map((t) => t.rank), [1, 2, 3, 4, 5], 'rank is a number, not a position in a template');
+  assert.ok(st.json.targets.every((t) => t.queries > 0), 'every target still has live queries behind it');
+  assert.equal(st.json.budget.per_day_writes, 20, 'the day’s ceiling is data, not a mood');
+  assert.match(st.json.note, /never sends/, 'the page states the rule it keeps');
+});
+
+test('1.7.1 a cron pass fills the queue by itself: ranked segments, page evidence, no send', async () => {
+  env.DISCOVERY = 'on';        // the switch the harness leaves off so no other test needs Bing awake
+  const seen = stubDiscovery();
+  const before = discLeads().length;
+  const r = await call('/api/discover/run', { method: 'POST', body: { perRun: 2, limit: 4, countries: ['ZW'] }, headers: adminHeaders });
+  globalThis.fetch = realFetchStub();
+  assert.equal(r.status, 200, r.text);
+  assert.ok(r.json.ran >= 1, 'queries actually ran: ' + r.json.ran);
+  assert.ok(r.json.added >= 1, 'and at least one lead was filed: ' + JSON.stringify(r.json));
+  assert.ok(seen.some((u) => u.includes('bing.com/search')), 'through the search surface, no key needed');
+
+  const leads = discLeads();
+  assert.equal(leads.length, before + r.json.added, 'the count the response reports is the count in the queue');
+  const web = leads.find((l) => l.business === 'Harare Web Studio');
+  assert.ok(web, 'the agency arrived named, not as a URL: ' + JSON.stringify(leads.map((l) => l.business)));
+  assert.equal(web.segment, 'agencies', 'filed in the segment the playbook ranks first');
+  assert.equal(web.email, 'hello@harareweb.example', 'with the address that is on the page');
+  assert.equal(web.phone, '263771112223', 'and the number that is on the page');
+  assert.equal(web.source_url, 'https://harareweb.example/about', 'and the page the hook came from, checkable');
+  assert.equal(web.evidence.page_checked, true);
+  assert.match(web.hook || web.note, /quote|order|WhatsApp|price/i, 'the hook is a sentence a seller can open with');
+  assert.ok(['research_hold', 'queued'].includes(web.status), 'filed as work for a seller, never as a conversation: ' + web.status);
+  assert.ok(!/contacted|messaged|sent/i.test(web.status || ''), 'discovery does not claim a lead');
+  assert.ok(!JSON.stringify(web).includes('facebook.com'), 'a social post is not a business');
+
+  // nothing was sent: no outbox, no message queue, nothing addressed
+  const outKeys = [...env.ORDERS._map.keys()].filter((k) => /^(send|outbox|msg|email):/.test(k));
+  assert.deepEqual(outKeys, [], 'a discovery pass writes leads and nothing else: ' + outKeys.join(','));
+
+  // idempotent per day: the same day does not run twice inside the scheduler
+  const tick = await call('/__selftest?scheduled=1');
+  assert.equal(tick.status, 200);
+  const firstDay = discState().day;
+  const tick2 = await call('/__selftest?scheduled=1');
+  assert.equal(tick2.status, 200);
+  assert.equal(discState().day, firstDay, 'the cron is one pass a day, keyed on the day it wrote');
+});
+
+test('1.7.1 the same candidate is not filed twice, and the do-not-contact ledger wins', async () => {
+  env.DISCOVERY = 'on';
+  const before = discLeads().length;
+  const stateBefore = discState();
+  await env.ORDERS.delete('disc:state');       // a second forced pass over the same queries
+  stubDiscovery();
+  const again = await call('/api/discover/run', { method: 'POST', body: { perRun: 2, limit: 4, countries: ['ZW'] }, headers: adminHeaders });
+  globalThis.fetch = realFetchStub();
+  assert.equal(again.status, 200, again.text);
+  assert.equal(again.json.added, 0, 'the same page seen twice is one lead: ' + JSON.stringify(again.json));
+  assert.equal(discLeads().length, before, 'the queue did not grow by a duplicate');
+
+  // a human marked this address do-not-contact; the cron must not refill it
+  const email = 'stop@harareweb.example';
+  await env.STORES.put('Lead:' + email, '1');
+  await env.ORDERS.delete('disc:state');
+  const dncLeadsBefore = discLeads().length;
+  stubDiscovery(DISC_RSS, DISC_PAGE.replace('hello@harareweb.example', email));
+  const dnc = await call('/api/discover/run', { method: 'POST', body: { perRun: 2, limit: 4, countries: ['ZW'] }, headers: adminHeaders });
+  globalThis.fetch = realFetchStub();
+  assert.equal(dnc.status, 200, dnc.text);
+  assert.equal(dnc.json.added, 0, 'a do-not-contact address is never filed again: ' + JSON.stringify(dnc.json));
+  assert.equal(discLeads().length, dncLeadsBefore, 'and nothing was stored for it');
+  assert.ok(discState().added_today >= 0 && stateBefore.day, 'state still reports the pass honestly');
+});
+
+test('1.7.1 a partner application files itself into the top segment, once, and is metered', async () => {
+  const leadCount = discLeads().length;
+  const empty = await call('/api/partners/apply', { method: 'POST', body: { email: 'a@b.example' }, ip: '196.51.7.10' });
+  assert.equal(empty.status, 422, 'no trading name, no lead');
+  assert.equal(empty.json.error, 'business_required');
+
+  const noContact = await call('/api/partners/apply', { method: 'POST', body: { business: 'Kwekwe Sites' }, ip: '196.51.7.10' });
+  assert.equal(noContact.status, 422);
+  assert.equal(noContact.json.error, 'contact_required', 'a lead nobody can answer is not a lead');
+
+  const ok = await call('/api/partners/apply', {
+    method: 'POST', ip: '196.51.7.10',
+    body: { business: 'Bulawayo Web Co', email: 'owner@bulaweb.example', phone: '+263 77 555 0101', tier: 'partner', merchants: 14 },
+  });
+  assert.equal(ok.status, 200, ok.text);
+  assert.equal(ok.json.filed, true);
+  assert.match(ok.json.note, /nothing is charged/, 'the page promises no charge and the API repeats it');
+  const filed = discLeads().find((l) => l.business === 'Bulawayo Web Co');
+  assert.ok(filed, 'the application is a lead, in the queue the sellers already work');
+  assert.equal(filed.segment, 'agencies', 'filed where the playbook says money is');
+  assert.equal(filed.source, 'partners page');
+  assert.ok(filed.signals.includes('applied'), 'the application is the signal that gets a human’s attention: ' + filed.signals.join(','));
+  assert.equal(filed.status, 'queued', 'and it is work now, not research: an application is a person asking');
+  assert.equal(discLeads().length, leadCount + 1);
+
+  // a stranger cannot flood the queue: five a day from one address
+  let last = null;
+  for (let i = 0; i < 6; i++) {
+    last = await call('/api/partners/apply', { method: 'POST', ip: '196.51.7.11', body: { business: 'Spam ' + i + ' Ltd', email: 's' + i + '@spam.example' } });
+  }
+  assert.equal(last.status, 429, 'the sixth from one address is refused: ' + last.status);
+  assert.equal(last.json.error, 'too_many');
+});
+
+test('1.7.1 the three tiers are on a live page, priced flat, with no custody in the copy', async () => {
+  const page = await call('/partners');
+  assert.equal(page.status, 200);
+  assert.equal(page.headers.get('content-type') || '', page.headers.get('content-type') || '', 'served');
+  for (const tier of ['pilot', 'partner', 'platform']) {
+    assert.ok(page.text.includes('data-tier="' + tier + '"'), 'the page offers the ' + tier + ' tier');
+  }
+  assert.match(page.text, /\$149/, 'partner is $149 a month, a flat number');
+  assert.match(page.text, /\$299/, 'platform is $299 a month');
+  // flat pricing is the rule the whole rail is built on, so the page is read for it rather than
+  // trusted: a percentage of volume anywhere in the copy is a different business model
+  const feeCopy = page.text.replace(/<[^>]+>/g, ' ');
+  assert.ok(!/\d+\s*%\s*of\s+(your\s+|the\s+)?(volume|sales|revenue|gmv)/i.test(feeCopy),
+    'no fee is a share of what a merchant sells');
+  assert.ok(!/\bwe (hold|payout|pay out|convert|float)\b/i.test(feeCopy),
+    'the page never promises to hold, pay out or convert money — that is the no-custody rule');
+  assert.match(page.text, /settlement statement/i, 'the artefact being sold is the statement');
+  assert.match(page.text, /\/api\/partners\/apply/, 'and the form does not promise to phone home somewhere else');
 });
