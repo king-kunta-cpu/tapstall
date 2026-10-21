@@ -243,6 +243,7 @@ details.box .in{padding:.5rem 0 .7rem}
       <select id="booksBasis" aria-label="basis"><option value="cash">money in hand (cash)</option><option value="accrual">when the order came (accrual)</option></select>
       <button class="sm sec" id="booksAll">Whole shop</button>
       <a class="sm" id="booksCsv" style="text-decoration:none" href="#" download>Download the CSV for an accountant</a>
+      <a class="sm" id="settleLn" style="text-decoration:none" href="#" target="_blank" rel="noopener">Today's settlement statement &rarr;</a>
     </div>
     <div id="booksOut"><p class="hint">open the ledger once and the figures are built from the rows it read.</p></div>
     <p class="hint" style="margin-top:.4rem">Nothing here is a return filed on your behalf and nothing is stored: the figures are added up from your order rows each time you open this, which is why it still answers on a day the platform cannot write.</p>
@@ -1546,6 +1547,9 @@ function renderBooks() {
     })).join('');
     sel.value = per || '';
     q('#booksBasis').value = j.opts.basis || 'cash';
+    // the statement as a page, next to the books as a file: the same arithmetic, one for an
+    // accountant and one for a shop that wants to print it and hold it
+    q('#settleLn').href = '/s/' + encodeURIComponent(S.handle) + '/settle';
     q('#booksCsv').href = '/api/books?handle=' + encodeURIComponent(S.handle) + '&basis=' + (j.opts.basis || 'cash')
       + (per ? '&period=' + per : '') + '&fmt=csv';
     q('#booksTag').textContent = (per ? per : 'everything on file') + ' · ' + (j.opts.basis === 'accrual' ? 'when the order came' : 'money in hand') + ' · ' + cur;

@@ -4798,6 +4798,87 @@ const discLeads = () => [...env.ORDERS._map.keys()].filter((k) => k.startsWith('
 const discState = () => JSON.parse(env.ORDERS._map.get('disc:state')?.value || '{}');
 const adminHeaders = { 'x-tapstall-admin': 'test-secret', 'x-tapstall-confirm': '1' };
 
+test('1.8.0 the statement is a page a shop can hand over — its own money, and nobody else\'s', async () => {
+  const reg = await call('/api/register', {
+    method: 'POST', ip: '196.51.9.1',
+    body: { shop_name: 'Statement Kitchen', handle: 'settlestore', owner_email: 'settle@example.com',
+      whatsapp: '263771110000', currency: 'USD', feed_url: 'https://stub/menu.csv',
+      rail: 'ecocash_usd', pay_account: '0770001111', tax_pct: 0, delivery_fee: 0 },
+  });
+  assert.equal(reg.status, 201, reg.text);
+  const { cookie } = await loginWithPin(reg.json.key, reg.json.pin);
+  assert.ok(cookie, 'no session cookie');
+
+  const o = await call('/api/order', { method: 'POST', ip: '196.0.0.71', body: {
+    handle: 'settlestore', service: 'pickup', buyer: { name: 'Settle Buyer', phone: '263780002222' },
+    items: [{ id: '1', name: 'Chicken & rice', price: 5.5, qty: 1 }],
+  } });
+  assert.equal(o.status, 201, o.text);
+  const today = new Date().toISOString().slice(0, 10);
+  // the amount the book expects includes whatever the shop charged on top of the item, so the
+  // payment recorded is the figure the statement itself names — not the menu price plus a guess
+  const before = await call('/api/settle?handle=settlestore&day=' + today, { cookie });
+  const due = before.json.totals.expected;
+  assert.ok(due >= 5.5, 'the order put money in the book: ' + JSON.stringify(before.json.totals));
+  const ev = await call('/api/settle/event', { method: 'POST', cookie, body: {
+    handle: 'settlestore', kind: 'matched', amount: due, order: o.json.order.code, rail: 'ecocash_usd', reference: 'SETTLE1',
+  } });
+  assert.equal(ev.status, 200, ev.text);
+
+  // a statement is not public: no session, no page
+  const anon = await call('/s/settlestore/settle', { ip: '196.51.9.9' });
+  assert.equal(anon.status, 302, 'a statement is not public: it redirects to the door, it does not print');
+  assert.match(anon.headers.get('location') || '', /^\/a\?handle=settlestore$/, 'and says which shop it was for: ' + anon.headers.get('location'));
+
+  const nothing = await call('/s/nosuchshop/settle');
+  assert.equal(nothing.status, 404, 'no shop, no statement');
+  assert.match(nothing.text, /No shop at that address/);
+
+  const dead = await call('/s/settlestore/settle', { cookie: 'tp_sess=' + DEAD_LINK });
+  assert.equal(dead.status, 403, 'a dead session shows nothing and says so');
+  assert.match(dead.text, /no longer works/);
+
+  // the page, with the merchant's own session
+  const page = await call('/s/settlestore/settle?day=' + today, { cookie });
+  assert.equal(page.status, 200, page.text.slice(0, 240));
+  assert.match(page.text, /Settlement statement/, 'the artefact, named');
+  assert.match(page.text, /Statement Kitchen/, 'the shop’s own name on its own money');
+
+  // the numbers on the page are the numbers the API gives — one arithmetic, not two
+  const api = await call('/api/settle?handle=settlestore&day=' + today, { cookie });
+  assert.equal(api.status, 200);
+  const t = api.json.totals;
+  assert.equal(t.expected, due, 'the order is in the book: ' + JSON.stringify(t));
+  assert.equal(t.matched, due, 'and the payment matched it exactly');
+  assert.equal(t.awaiting_match, 0, 'so there is nothing to chase: ' + JSON.stringify(t));
+  const money = (n) => '$' + (Math.round((Number(n) || 0) * 100) / 100).toFixed(2);
+  for (const [label, v] of [['expected from orders', t.expected], ['matched in the ledger', t.matched], ['net', t.net]]) {
+    assert.ok(page.text.includes(money(v)), label + ' ' + money(v) + ' is on the page, as the API computes it');
+  }
+  assert.ok(page.text.includes(money(t.awaiting_match)), 'and the number a shop should act on');
+  assert.match(page.text, /Every expected amount is matched/, 'the one sentence to act on, when there is nothing to chase: ' + (page.text.match(/One thing to do today<\/b>([^<]{0,120})/) || [])[1]);
+
+  // the no-custody rule is said on the page a shop shows an accountant
+  assert.match(page.text, /does not hold the money/, 'the rule, on the page');
+  const prose = page.text.replace(/<[^>]+>/g, ' ');
+  assert.ok(!/\bwe (hold|payout|pay out|convert|float)\b/i.test(prose), 'and never a promise to hold, pay out or convert');
+  assert.match(page.text, /\/api\/settle\?handle=settlestore(?:&amp;|&)day=\d{4}-\d{2}-\d{2}(?:&amp;|&)fmt=csv/, 'the accountant still gets the file, from the same window');
+  assert.ok(page.text.includes('/s/settlestore/settle?day='), 'and the day can be walked backwards and forwards');
+  assert.ok(!/<script/i.test(page.text), 'no script on a page whose whole job is to be printed');
+  assert.match(page.headers.get('cache-control') || '', /no-store/, 'a statement is never cached at an edge');
+
+  // a day with nothing on it says so in words, not as a wall of zeros
+  const quiet = await call('/s/settlestore/settle?day=2020-01-02', { cookie });
+  assert.equal(quiet.status, 200);
+  assert.match(quiet.text, /Nothing on this day/);
+
+  // and the dashboard hands the merchant the link, next to the books CSV
+  const dash = await call('/a');
+  assert.equal(dash.status, 200);
+  assert.match(dash.text, /settleLn/, 'the dashboard carries the door');
+  assert.match(dash.text, /\/settle'/, 'pointed at the page, built from the store name');
+});
+
 test('1.7.1 discovery is a door with a lock: the queue and its budget are admin-only', async () => {
   const locked = await call('/api/discover');
   assert.equal(locked.status, 401, 'no secret, no view of the pipeline');

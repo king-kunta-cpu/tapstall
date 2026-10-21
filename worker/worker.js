@@ -57,7 +57,7 @@ import {
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '1.7.8';
+const VERSION = '1.8.0';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
@@ -296,6 +296,9 @@ async function route(req, url, env, ctx) {
     if (!page.includes('<title>')) return html(NO_GUIDE, 404, NOINDEX);   // written but never published
     return html(page.split('@ORIGIN@').join(url.origin), 200, { 'Cache-Control': 'public, max-age=3600' });
   }
+  // v1.8.0: the statement as a page. `/api/settle` is the same arithmetic for a machine; this is
+  // the copy a shop prints and hands to its accountant, or photographs and sends to a supplier.
+  if ((m = p.match(/^\/s\/([a-z0-9][a-z0-9-]{1,30})\/settle(?:\/|\.html)?$/))) return settlePage(req, url, env, m[1]);
   if ((m = p.match(/^\/s\/([a-z0-9][a-z0-9-]{1,30})\/share\.txt$/))) {
     // The post a merchant would otherwise have to write at 21:00 with one hand. Plain
     // text on purpose: on any phone a text page is select-all then share, and it works
@@ -2795,6 +2798,23 @@ const NO_GUIDE = `<!doctype html><html lang="en"><head><meta charset="utf-8"><me
 <p>The guides we have: <a href="/guide/whatsapp-shop-payments">taking payment for a WhatsApp shop</a>
 and <a href="/guide/payment-reference-matching">matching a payment to an order</a>.</p>
 <p><a href="/onboard">Create a shop</a> — a name, a menu and a PIN.</p></body></html>`;
+/* A statement is the shop's own money, so the two pages that are not the statement say plainly
+ * that they are not, and where the working one is. */
+const NO_STORE_PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>No statement here | Tapstall</title>
+<meta name="robots" content="noindex"></head>
+<body style="font:16px/1.6 system-ui;max-width:34rem;margin:14vh auto;padding:0 1.2rem">
+<h1 style="font-size:1.3rem">No shop at that address</h1>
+<p>A statement belongs to a shop. This address has no shop, so there is nothing to show and nothing was read.</p>
+<p><a href="/onboard">Create a shop</a> — a name, a menu and a PIN.</p></body></html>`;
+const SETTLE_CLOSED_PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign in again | Tapstall</title>
+<meta name="robots" content="noindex"></head>
+<body style="font:16px/1.6 system-ui;max-width:34rem;margin:14vh auto;padding:0 1.2rem">
+<h1 style="font-size:1.3rem">That sign-in no longer works</h1>
+<p>The session used to open this statement has been closed or replaced. Nothing about the shop’s
+money changed, and nothing was shown to whoever held the old link.</p>
+<p><a href="/a">Sign in with your store name and PIN</a> to open the statement again.</p></body></html>`;
 function text(s, status = 200, type = 'text/plain; charset=utf-8') {
   return new Response(s, { status, headers: { 'content-type': type, 'cache-control': 'public, max-age=3600' } });
 }
@@ -3173,6 +3193,94 @@ async function settleView(req, url, env) {
     } });
   }
   return json({ ok: true, handle, ...doc, currency: st.currency || 'USD' }, 200, { 'Cache-Control': 'no-store' });
+}
+
+/** The statement a shop can hold. Same arithmetic as `/api/settle` (it calls `settlement()`), a
+ *  plain HTML page with no script and no external asset, so it prints, saves as PDF, and opens on a
+ *  phone with a dead battery of patience. It says the one thing that matters about custody out loud:
+ *  every rail paid the shop directly; Tapstall never held the money. */
+async function settlePage(req, url, env, handleHint) {
+  const handle = slug(handleHint || url.searchParams.get('handle') || '');
+  const who = await identify(req, env, handle);
+  if (!who || !who.st) return html(NO_STORE_PAGE, 404, { 'Cache-Control': 'no-store' });
+  // No `next=` promise: the dashboard does not read one, and a redirect that carries a parameter
+  // nothing consumes is a link that looks like it will come back here and will not.
+  if (who.anonymous) return redirect('/a?handle=' + encodeURIComponent(handle));
+  if (who.bad) return html(SETTLE_CLOSED_PAGE, 403, { 'Cache-Control': 'no-store' });
+  const st = who.st;
+  const asked = String(url.searchParams.get('day') || '').slice(0, 10);
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(asked) ? asked : new Date().toISOString().slice(0, 10);
+  const rows = await ledgerRows(env, handle);
+  const events = await payEvents(env, handle, { day });
+  const doc = settlement(rows, events, { day });
+  const cur = st.currency || 'USD';
+  const money = (n) => (cur === 'ZAR' ? 'R' : (cur === 'USD' ? '$' : cur + ' ')) + (Math.round((Number(n) || 0) * 100) / 100).toFixed(2);
+  const t = doc.totals;
+  const nice = new Date(day + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+  const prev = new Date(Date.parse(day + 'T00:00:00Z') - 864e5).toISOString().slice(0, 10);
+  const next = new Date(Date.parse(day + 'T00:00:00Z') + 864e5).toISOString().slice(0, 10);
+  const base = '/s/' + handle + '/settle';
+  const csv = '/api/settle?handle=' + encodeURIComponent(handle) + '&day=' + day + '&fmt=csv';
+  const stat = (label, value, cls) => '<div class="stat' + (cls ? ' ' + cls : '') + '"><b>' + esc(value) + '</b><span>' + esc(label) + '</span></div>';
+  const railRows = (doc.per_rail || []).map((r) => '<tr><td>' + esc(r.rail || 'unrecorded') + '</td><td class="n">' + r.orders + '</td>'
+    + '<td class="n">' + esc(money(r.expected)) + '</td><td class="n">' + esc(money(r.matched)) + '</td>'
+    + '<td class="n' + (r.unmatched > 0 ? ' warn' : '') + '">' + esc(r.unmatched > 0 ? money(r.unmatched) : '—') + '</td>'
+    + '<td class="n">' + esc(r.fees > 0 ? money(r.fees) : '—') + '</td></tr>').join('');
+  const nothing = !doc.events && !t.orders;
+  return html('<!doctype html><html lang="en"><head><meta charset="utf-8">'
+    + '<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">'
+    + '<title>Statement · ' + esc(st.shop_name || handle) + ' · ' + esc(day) + '</title>'
+    + '<style>'
+    + ':root{--ink:#12211b;--mut:#5d7169;--line:#e2e8e4;--hot:#0b5b34;--warn:#a8560d}'
+    + '*{box-sizing:border-box}body{margin:0;background:#f4f6f5;color:var(--ink);font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}'
+    + 'main{max-width:46rem;margin:0 auto;padding:1.6rem 1.1rem 3rem}'
+    + 'h1{font-size:1.28rem;margin:0 0 .15rem}h2{font-size:.82rem;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin:1.6rem 0 .5rem}'
+    + '.head{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap}'
+    + '.sub{color:var(--mut);font-size:.9rem;margin:0}'
+    + '.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(7.5rem,1fr));gap:.55rem;margin-top:1.1rem}'
+    + '.stat{background:#fff;border:1px solid var(--line);border-radius:.6rem;padding:.7rem .8rem}'
+    + '.stat b{display:block;font-size:1.12rem;font-variant-numeric:tabular-nums}'
+    + '.stat span{color:var(--mut);font-size:.76rem}'
+    + '.stat.hot{border-color:var(--hot)}.stat.hot b{color:var(--hot)}.stat.warn b{color:var(--warn)}'
+    + 'table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:.6rem;overflow:hidden}'
+    + 'th,td{text-align:left;padding:.5rem .6rem;border-bottom:1px solid var(--line);font-size:.88rem;vertical-align:top}'
+    + 'th{background:#fafbfa;font-weight:600;color:var(--mut);font-size:.76rem;text-transform:uppercase;letter-spacing:.04em}'
+    + 'tr:last-child td{border-bottom:0}.n{text-align:right;font-variant-numeric:tabular-nums}.warn{color:var(--warn)}'
+    + '.todo{background:#fff;border:1px solid var(--hot);border-radius:.6rem;padding:.75rem .85rem;margin-top:1rem}'
+    + '.todo b{display:block;font-size:.76rem;text-transform:uppercase;letter-spacing:.05em;color:var(--hot);margin-bottom:.2rem}'
+    + '.foot{margin-top:1.6rem;color:var(--mut);font-size:.82rem}'
+    + '.act{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:1rem}'
+    + '.act a{display:inline-block;padding:.5rem .8rem;border-radius:.45rem;border:1px solid var(--line);background:#fff;color:var(--ink);text-decoration:none;font-size:.85rem}'
+    + '.act a.pri{background:var(--hot);border-color:var(--hot);color:#fff}'
+    + '@media print{body{background:#fff}main{padding:0}.act{display:none}.stat,table{border-color:#ccc}'
+    + '.stat,.stat.hot{border-width:1px}tr{break-inside:avoid}}'
+    + '</style></head><body><main>'
+    + '<div class="head"><div><h1>' + esc(st.shop_name || handle) + '</h1>'
+    + '<p class="sub">Settlement statement · ' + esc(nice) + ' · ' + esc(cur) + '</p></div>'
+    + '<div class="sub">' + esc(handle) + '<br>prepared by Tapstall</div></div>'
+    + '<div class="stats">'
+    + stat('expected from orders', money(t.expected))
+    + stat('matched in the ledger', money(t.matched), 'hot')
+    + stat('to chase', money(t.awaiting_match), t.awaiting_match > 0 ? 'warn' : '')
+    + stat('refunded', money(t.refunded))
+    + stat('rail fees recorded', money(t.fees))
+    + stat('net', money(t.net))
+    + '</div>'
+    + (nothing
+      ? '<div class="todo"><b>Nothing on this day</b>No order and no payment was recorded on ' + esc(day) + '. Pick another day below — a statement with zeros in it is not a statement that something went wrong.</div>'
+      : '<div class="todo"><b>One thing to do today</b>' + esc(doc.note) + '</div>')
+    + '<h2>By rail</h2>'
+    + '<table><thead><tr><th>rail</th><th class="n">orders</th><th class="n">expected</th><th class="n">matched</th><th class="n">to chase</th><th class="n">fees</th></tr></thead>'
+    + '<tbody>' + (railRows || '<tr><td colspan="6" class="sub">No rail activity recorded.</td></tr>') + '</tbody></table>'
+    + '<h2>The two facts this page is built on</h2>'
+    + '<p class="sub"><b>Expected</b> is what the order book says buyers owed. <b>Matched</b> is what the shop recorded as actually received against an order. They are kept apart on purpose: a rail that shows a payment is not the same thing as money in the shop’s account, and this page never calls one the other.</p>'
+    + '<div class="act"><a class="pri" href="' + esc(csv) + '" download>Download this day as CSV</a>'
+    + '<a href="' + esc(base + '?day=' + prev) + '">← ' + esc(prev) + '</a>'
+    + '<a href="' + esc(base + '?day=' + next) + '">' + esc(next) + ' →</a>'
+    + '<a href="javascript:print()">Print or save as PDF</a></div>'
+    + '<p class="foot">Every rail on this statement paid the shop directly. Tapstall does not hold the money, does not pay it out and does not convert it — it reads what the shop recorded and does the arithmetic. '
+    + 'Rows stay available for five years. A rail that is missing from this page has no payments recorded against it, which is a fact worth checking rather than a gap in the arithmetic.</p>'
+    + '</main></body></html>', 200, { 'Cache-Control': 'no-store' });
 }
 
 async function settleEvent(req, url, env) {
