@@ -34,11 +34,11 @@ nav.mast-nav a:hover{color:var(--accent)}
 
 /* hero */
 .hero{padding:76px 0 54px;border-bottom:1px solid var(--rule)}
-.hero .eyebrow{display:grid;gap:5px;
+.hero .eyebrow{display:block;
   font:600 10.8px/1.5 var(--sans);letter-spacing:.185em;text-transform:uppercase;
   color:var(--accent);margin-bottom:26px}
-.hero .eyebrow span{display:block}
-.hero .eyebrow span+span{color:#737a80}   /* one accent, two supporting lines */
+.hero .eyebrow span{display:block;max-width:26em;line-height:1.6}
+
 .hero h1{font-size:clamp(38px,5.6vw,64px);line-height:1.05;letter-spacing:-.022em;
   font-weight:400;margin:0 0 26px;max-width:16em}
 .hero h1 em{font-style:italic;color:var(--accent);white-space:nowrap}
@@ -176,7 +176,8 @@ section{padding:66px 0 10px}
 .build h3 a{text-decoration:none}
 .build h3 a:hover{color:var(--accent)}
 .build-role{font:600 9.5px/1.3 var(--sans);letter-spacing:.13em;text-transform:uppercase;
-  color:var(--muted);text-align:right;white-space:nowrap}
+  overflow-wrap:anywhere;white-space:normal;
+  color:var(--muted);text-align:right}
 .build-what{font-size:15px;line-height:1.55;color:#3a3f44;margin:0 0 12px;overflow-wrap:break-word}
 .build-evidence{list-style:none;margin:0 0 14px;padding:0}
 .build-evidence li{font-size:13.4px;line-height:1.5;color:#4a5055;padding:4px 0 4px 15px;
@@ -187,6 +188,12 @@ section{padding:66px 0 10px}
   font:600 9.5px/1 var(--sans);letter-spacing:.16em;text-transform:uppercase;color:#1d7a4c}
 .live .dot{width:7px;height:7px;border-radius:50%;background:#1d7a4c;
   box-shadow:0 0 0 3px rgba(29,122,76,.14)}
+.build-cta{display:inline-flex;align-items:center;gap:9px;margin:2px 0 16px;
+  padding:11px 16px;border:1px solid #e7e2d6;border-radius:3px;text-decoration:none;
+  font:600 10.5px/1 var(--sans);letter-spacing:.14em;text-transform:uppercase;color:#f4f0e7}
+.build-cta span{transition:transform .15s ease}
+.build-cta:hover{background:#f4f0e7;color:#141210}
+.build-cta:hover span{transform:translateX(3px)}
 .closed{display:inline-flex;align-items:center;gap:7px;font:600 9.5px/1 var(--sans);
   letter-spacing:.16em;text-transform:uppercase;color:#8d949a}
 .closed .dot{width:7px;height:7px;border-radius:50%;background:#5d646a}
@@ -270,13 +277,13 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
 <main>
   <div class="wrap">
     <section class="hero">
-      <div class="eyebrow"><span>AI Infrastructure and Autonomous Systems Writer</span><span>Autonomous Cognitive Infrastructure Engineer</span><span>Autonomous Cognitive Infrastructure Operator</span></div>
-      <h1>The market never refused these merchants. <em>The software did.</em></h1>
-      <p class="lede">I rebuild the software: merchant rails, reconciliation ledgers and autonomous
-      AI operations that still hold a record when the connection drops. Thirteen published works
-      on trade, technology and constraint — seven books, four working papers and two short
-      volumes — come out of the same practice, each produced from a source file and shipped in
-      four formats.</p>
+      <div class="eyebrow"><span>Autonomous Cognitive Infrastructure Engineer, Operator, Writer</span></div>
+      <h1>Demand was never the problem. <em>Infrastructure was.</em></h1>
+      <p class="lede">Autonomous cognitive infrastructure for markets the last decade priced out:
+      merchant rails, reconciliation ledgers and agent operations that hold a record when the
+      connection drops. Thirteen published works on trade, technology and constraint — seven
+      books, four working papers and two short volumes — come out of the same practice, each
+      produced from a source file and shipped in four formats.</p>
       <div class="stats">
         <div class="stat"><div class="n">13</div><div class="k">Published works</div></div>
         <div class="stat"><div class="n">1,363</div><div class="k">Pages in print</div></div>
@@ -633,12 +640,12 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
     <div class="wrap">
       <div class="sec-head">
         <h2>Built and running</h2>
-        <div class="kicker">Eight systems · six answer a browser</div>
+        <div class="kicker">Seven systems · five answer a browser</div>
       </div>
       <p class="sec-intro">A portfolio of writing is an argument; a portfolio of running
-      systems is evidence. Six of these answer a browser today — one of those only with
-      credentials. Two are closed consoles and say so rather than pretending. Nothing here is
-      a mock-up or a screenshot.</p>
+      systems is evidence. Five of these open to a browser today, one more answers only with
+      credentials, and one is a closed console that says so rather than pretending. Every link
+      goes to the working product — nothing here is a mock-up or a screenshot.</p>
       <div class="builds">
       <article class="build">
         <div class="build-top">
@@ -650,6 +657,7 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
         </div>
         <p class="build-what">A merchant commerce rail for Zimbabwe, South Africa, Kenya and Nigeria: a shop in one link, one-tap buyer confirmation, and a settlement statement that reconciles orders against money the merchant received directly. It holds no customer funds, charges a flat fee, and runs on free infrastructure.</p>
         <ul class="build-evidence"><li>Single Cloudflare Worker + KV, $0/month, version 1.9.1 live</li><li>420 passing assertions on a ~14.8k-line codebase</li><li>Quota reserve ladder 1000/975/900/800/700 — order submission is the last thing refused</li><li>Public self-test endpoint reports every invariant it claims</li></ul>
+        <a class="build-cta" href="https://tapstall.zlnew.workers.dev/" target="_blank" rel="noopener">view it in action in the wild here<span aria-hidden="true">→</span></a>
         <div class="build-foot">
           <a class="live" href="https://tapstall.zlnew.workers.dev/" target="_blank" rel="noopener"><span class="dot" aria-hidden="true"></span>live</a>
           <div class="chips"><a class="chip" href="https://tapstall.zlnew.workers.dev/fees.html" target="_blank" rel="noopener">Fee calculator</a><a class="chip" href="https://tapstall.zlnew.workers.dev/onboard" target="_blank" rel="noopener">Merchant onboarding</a><a class="chip" href="https://tapstall.zlnew.workers.dev/partners" target="_blank" rel="noopener">Partner terms</a><a class="chip" href="https://tapstall.zlnew.workers.dev/guide/payment-reference-matching" target="_blank" rel="noopener">Payment-matching guide</a></div>
@@ -665,9 +673,10 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
         </div>
         <p class="build-what">An independent, non-accredited AI learning platform: 50 illustrated activities, a curriculum, a tool field desk and a facilitator kit. Learner accounts sync across devices; downloaded workspaces stay usable offline.</p>
         <ul class="build-evidence"><li>Cloudflare Worker + Durable Object + Workers AI, live</li><li>68 repository tests passing on the deployed revision</li><li>First-party learning analytics; export and delete honoured</li><li>No advertising trackers, by construction</li></ul>
+        <a class="build-cta" href="https://open-practice.zlnew.workers.dev/" target="_blank" rel="noopener">view it in action in the wild here<span aria-hidden="true">→</span></a>
         <div class="build-foot">
           <a class="live" href="https://open-practice.zlnew.workers.dev/" target="_blank" rel="noopener"><span class="dot" aria-hidden="true"></span>live</a>
-          <div class="chips"><a class="chip" href="https://open-practice.zlnew.workers.dev/activities.html" target="_blank" rel="noopener">The workshops</a><a class="chip" href="https://open-practice.zlnew.workers.dev/" target="_blank" rel="noopener">Starter challenge</a></div>
+          <div class="chips"><a class="chip" href="https://open-practice.zlnew.workers.dev/activities.html" target="_blank" rel="noopener">The workshops</a></div>
         </div>
       </article>
       <article class="build">
@@ -680,6 +689,7 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
         </div>
         <p class="build-what">An operator command centre in ten modules: overview and ECU, units and wCells, lead hunting, outreach, approvals, and a ledger that makes every step auditable. It is the system examined in The Governable Enterprise, and the console itself is closed — the paper carries the method, the screens stay with the operator.</p>
         <ul class="build-evidence"><li>Ten operating modules in one shell, ~300KB served</li><li>Every step writes to an auditable ledger</li><li>Described and bounded in The Governable Enterprise</li></ul>
+        
         <div class="build-foot">
           <span class="closed"><span class="dot" aria-hidden="true"></span>closed</span>
           <div class="chips"><span class="chip chip-none">Closed console — access by arrangement</span></div>
@@ -689,30 +699,32 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
         <div class="build-top">
           <img class="build-logo" src="logos/stpi.svg" alt="" width="46" height="46" loading="lazy" decoding="async"/>
           <div class="build-head">
-            <h3>STPi</h3>
-            <span class="build-role">Author &amp; architect · internal</span>
+            <h3><a href="https://stpi.whop.site/" target="_blank" rel="noopener">STPi</a></h3>
+            <span class="build-role">Architect &amp; engineer · applied agent system</span>
           </div>
         </div>
-        <p class="build-what">The marketing bible behind STPi: product definition, market and ICP, decided pricing, offer language, house rules for published work, the loop step by step and the guard-rails. It exists so that what goes out is argued once and then followed, not re-invented per campaign.</p>
-        <ul class="build-evidence"><li>One document, kept current, that the operator works from</li><li>House rules and guard-rails stated as instructions, not aspirations</li><li>Not public: it is an internal manual, so no link is offered here</li></ul>
+        <p class="build-what">A hiring agent that hunts country-specific sources twice a day, Monday to Saturday, across South Africa, Zimbabwe, Zambia and fourteen other southern African countries. Every advert is scored against the candidate&#x27;s real profile; a tailored cover letter and a country-formatted CV are drafted as PDFs; one card is posted to the dashboard. Approve it and it sends from the candidate&#x27;s own mailbox, signed as the candidate, with the reply reaching both — interview invites flagged. Reject it and the PDFs are deleted on the spot. Nothing sends without a human, nothing is invented, drafts die at 72 hours, and the whole thing hosts for $0 on GitHub Actions.</p>
+        <ul class="build-evidence"><li>17 southern African countries, hunted twice daily Monday–Saturday</li><li>One card, one decision: approve sends as the candidate, reject deletes the PDFs</li><li>Nothing sends unattended; unsent drafts expire at 72 hours</li><li>Ceilings enforced — 45s per fetch, 30s per provider, 35min per run, failing loudly with a live log</li><li>Free tier is the same build as the paid tiers: one candidate, five sends per UTC month, no card</li></ul>
+        <a class="build-cta" href="https://stpi.whop.site/" target="_blank" rel="noopener">view it in action in the wild here<span aria-hidden="true">→</span></a>
         <div class="build-foot">
-          <span class="closed"><span class="dot" aria-hidden="true"></span>closed</span>
-          <div class="chips"><span class="chip chip-none">Closed — internal operating manual</span></div>
+          <a class="live" href="https://stpi.whop.site/" target="_blank" rel="noopener"><span class="dot" aria-hidden="true"></span>live</a>
+          
         </div>
       </article>
       <article class="build">
         <div class="build-top">
           <img class="build-logo" src="logos/contentops.svg" alt="" width="46" height="46" loading="lazy" decoding="async"/>
           <div class="build-head">
-            <h3><a href="https://contentops-edge.simalidudu.workers.dev/" target="_blank" rel="noopener">ContentOps</a></h3>
+            <h3><a href="https://contentops-edge.simalidudu.workers.dev/demo" target="_blank" rel="noopener">ContentOps</a></h3>
             <span class="build-role">Engineer · 2026</span>
           </div>
         </div>
         <p class="build-what">A zero-capital writing service: a week of posts for twenty platforms, drafted from a client&#x27;s own facts, then checked by a deterministic editor before anything may publish. When the check fails, the slot stays empty.</p>
         <ul class="build-evidence"><li>Worker + D1 in production; 185 Python and 101 Worker cases</li><li>Fact-bound generation: no invented numbers, no invented customers</li><li>Clients hold their own model keys — capability isolation</li><li>Formalised with its incidents in the Grounded Cadence paper</li></ul>
+        <a class="build-cta" href="https://contentops-edge.simalidudu.workers.dev/demo" target="_blank" rel="noopener">view it in action in the wild here<span aria-hidden="true">→</span></a>
         <div class="build-foot">
-          <a class="live" href="https://contentops-edge.simalidudu.workers.dev/" target="_blank" rel="noopener"><span class="dot" aria-hidden="true"></span>live</a>
-          <div class="chips"><a class="chip" href="https://contentops-edge.simalidudu.workers.dev/demo" target="_blank" rel="noopener">Live demo</a></div>
+          <a class="live" href="https://contentops-edge.simalidudu.workers.dev/demo" target="_blank" rel="noopener"><span class="dot" aria-hidden="true"></span>live</a>
+          
         </div>
       </article>
       <article class="build">
@@ -725,24 +737,10 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
         </div>
         <p class="build-what">A free, no-signup audit of a Bluesky account: posting cadence, engagement shape, content mix and timing, with specific fixes rather than a score.</p>
         <ul class="build-evidence"><li>Live and free to use</li><li>No account, no tracker, no email capture</li><li>Reads public data only</li></ul>
+        <a class="build-cta" href="https://bsky-audit.simalidudu.workers.dev/" target="_blank" rel="noopener">view it in action in the wild here<span aria-hidden="true">→</span></a>
         <div class="build-foot">
           <a class="live" href="https://bsky-audit.simalidudu.workers.dev/" target="_blank" rel="noopener"><span class="dot" aria-hidden="true"></span>live</a>
-          <div class="chips"><a class="chip" href="https://bsky-audit.simalidudu.workers.dev/" target="_blank" rel="noopener">Run an audit</a></div>
-        </div>
-      </article>
-      <article class="build">
-        <div class="build-top">
-          <img class="build-logo" src="logos/courage.svg" alt="" width="46" height="46" loading="lazy" decoding="async"/>
-          <div class="build-head">
-            <h3><a href="https://courage-publications.zlnew.workers.dev/" target="_blank" rel="noopener">Courage Garikai — Publications</a></h3>
-            <span class="build-role">Author &amp; engineer · 2026</span>
-          </div>
-        </div>
-        <p class="build-what">The publications catalogue: four works with their exact edition status, a research thread, and an explicit statement of what is and is not claimed.</p>
-        <ul class="build-evidence"><li>Live catalogue, served from a Worker</li><li>States edition status per work rather than implying a full-text library</li><li>Discloses funding and relationship</li></ul>
-        <div class="build-foot">
-          <a class="live" href="https://courage-publications.zlnew.workers.dev/" target="_blank" rel="noopener"><span class="dot" aria-hidden="true"></span>live</a>
-          <div class="chips"><a class="chip" href="https://courage-publications.zlnew.workers.dev/" target="_blank" rel="noopener">Catalogue</a></div>
+          
         </div>
       </article>
       <article class="build">
@@ -755,9 +753,10 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
         </div>
         <p class="build-what">The lead pipeline behind the hunta field report: discovery, admission gating and a do-not-contact ledger, driven by scheduled agents.</p>
         <ul class="build-evidence"><li>Deployed and gated (HTTP 401 without credentials — working as designed)</li><li>Admission gate refuses before a record exists, not at send time</li></ul>
+        
         <div class="build-foot">
           <a class="live" href="https://hunta-leads.simalidudu.workers.dev/" target="_blank" rel="noopener"><span class="dot" aria-hidden="true"></span>live</a>
-          <div class="chips"><span class="chip chip-none">internal · gated</span></div>
+          
         </div>
       </article></div>
     </div>
@@ -781,16 +780,16 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
       </div>
       <div class="about">
         <div>
-          <p>I write about commerce in places where the assumptions baked into
-          software — always-on power, card rails, a postcode, a credit history — are
-          simply false. Then I build the thing the writing describes.</p>
-          <p>I am an <b>AI infrastructure and autonomous systems writer</b>, an
-          <b>autonomous cognitive infrastructure engineer</b> and an
-          <b>autonomous cognitive infrastructure operator</b> — three descriptions of one
-          job: design systems that act on their own, write down how they fail, and stay
-          answerable for the run. The writing is governance-first architecture, evidence and
-          constraint. The building is merchant rails, operator consoles, learning platforms
-          and publishing pipelines, each deployed and each documented in public.</p>
+          <p>The writing starts where the assumptions imported into a market simply do not
+          hold — always-on power, card rails, a postcode, a credit history. The building
+          follows: autonomous cognitive infrastructure that assumes none of them, and keeps a
+          record when the connection drops.</p>
+          <p><b>Autonomous Cognitive Infrastructure Engineer, Operator, Writer.</b> Three
+          descriptions of one job: design systems that act on their own, write down how they
+          fail, and stay answerable for the run. The writing is governance-first architecture,
+          evidence and constraint. The building is merchant rails, operator consoles, learning
+          platforms, hiring infrastructure and publishing pipelines — each deployed, each
+          documented in public.</p>
           <p>No single product defines the practice. <b>Tapstall</b> is one of the systems
           that came out of it, and the books are another: the catalogue above is the written
           half, and the systems above that are the running half.</p>
@@ -809,8 +808,7 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
         <aside class="aside">
           <h4>At a glance</h4>
           <ul>
-            <li><b>Roles</b> — AI infrastructure and autonomous systems writer; autonomous
-            cognitive infrastructure engineer; autonomous cognitive infrastructure operator</li>
+            <li><b>Role</b> — Autonomous Cognitive Infrastructure Engineer, Operator, Writer</li>
             <li><b>Books</b> — seven long-form titles</li>
             <li><b>Research</b> — four working papers, DCAI series</li>
             <li><b>Essays &amp; reports</b> — two shorter volumes</li>
@@ -836,10 +834,10 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
       <div class="contact">
         <div>
           <p class="contact-note"><b>Available for</b> systems design, AI operations reviews,
-          autonomous-agent and infrastructure work, and building commerce or learning
+          autonomous cognitive infrastructure work, and building commerce or learning
           infrastructure for constrained markets. I work
           remote-first and I am comfortable with intermittent power and bandwidth, because
-          that is the environment the software has to run in.</p>
+          that is the environment the infrastructure has to run in.</p>
           <p class="contact-note"><b>Best first message:</b> what the system has to do, who
           uses it, and what happens today when it fails. If the answer is "nothing yet", that
           is a fine place to start.</p>

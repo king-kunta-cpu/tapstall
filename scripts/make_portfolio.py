@@ -344,6 +344,7 @@ BUILT = [
         "logo": "logos/tapstall.svg",
         "role": "Founder & engineer · 2026",
         "url": "https://tapstall.zlnew.workers.dev/",
+        "cta": True,
         "demo": [("Fee calculator", "https://tapstall.zlnew.workers.dev/fees.html"),
                  ("Merchant onboarding", "https://tapstall.zlnew.workers.dev/onboard"),
                  ("Partner terms", "https://tapstall.zlnew.workers.dev/partners"),
@@ -362,6 +363,7 @@ BUILT = [
         "logo": "logos/open-practice.svg",
         "role": "Designer & engineer · 2026",
         "url": "https://open-practice.zlnew.workers.dev/",
+        "cta": True,
         "demo": [("The workshops", "https://open-practice.zlnew.workers.dev/activities.html"),
                  ("Starter challenge", "https://open-practice.zlnew.workers.dev/")],
         "what": ("An independent, non-accredited AI learning platform: 50 illustrated activities, "
@@ -391,23 +393,31 @@ BUILT = [
     {
         "title": "STPi",
         "logo": "logos/stpi.svg",
-        "role": "Author & architect · internal",
-        "url": None,
-        "access": "Closed — internal operating manual",
+        "role": "Architect & engineer · applied agent system",
+        "url": "https://stpi.whop.site/",
+        "cta": True,
         "demo": [],
-        "what": ("The marketing bible behind STPi: product definition, market and ICP, decided "
-                 "pricing, offer language, house rules for published work, the loop step by "
-                 "step and the guard-rails. It exists so that what goes out is argued once and "
-                 "then followed, not re-invented per campaign."),
-        "evidence": ["One document, kept current, that the operator works from",
-                     "House rules and guard-rails stated as instructions, not aspirations",
-                     "Not public: it is an internal manual, so no link is offered here"],
+        "what": ("A hiring agent that hunts country-specific sources twice a day, Monday to "
+                 "Saturday, across South Africa, Zimbabwe, Zambia and fourteen other southern "
+                 "African countries. Every advert is scored against the candidate's real "
+                 "profile; a tailored cover letter and a country-formatted CV are drafted as "
+                 "PDFs; one card is posted to the dashboard. Approve it and it sends from the "
+                 "candidate's own mailbox, signed as the candidate, with the reply reaching "
+                 "both — interview invites flagged. Reject it and the PDFs are deleted on the "
+                 "spot. Nothing sends without a human, nothing is invented, drafts die at 72 "
+                 "hours, and the whole thing hosts for $0 on GitHub Actions."),
+        "evidence": ["17 southern African countries, hunted twice daily Monday–Saturday",
+                     "One card, one decision: approve sends as the candidate, reject deletes the PDFs",
+                     "Nothing sends unattended; unsent drafts expire at 72 hours",
+                     "Ceilings enforced — 45s per fetch, 30s per provider, 35min per run, failing loudly with a live log",
+                     "Free tier is the same build as the paid tiers: one candidate, five sends per UTC month, no card"],
     },
     {
         "title": "ContentOps",
         "logo": "logos/contentops.svg",
         "role": "Engineer · 2026",
-        "url": "https://contentops-edge.simalidudu.workers.dev/",
+        "url": "https://contentops-edge.simalidudu.workers.dev/demo",
+        "cta": True,
         "demo": [("Live demo", "https://contentops-edge.simalidudu.workers.dev/demo")],
         "what": ("A zero-capital writing service: a week of posts for twenty platforms, drafted "
                  "from a client's own facts, then checked by a deterministic editor before "
@@ -421,23 +431,12 @@ BUILT = [
         "title": "Bluesky Growth Audit",
         "role": "Engineer · 2026",
         "url": "https://bsky-audit.simalidudu.workers.dev/",
+        "cta": True,
         "demo": [("Run an audit", "https://bsky-audit.simalidudu.workers.dev/")],
         "what": ("A free, no-signup audit of a Bluesky account: posting cadence, engagement shape, "
                  "content mix and timing, with specific fixes rather than a score."),
         "evidence": ["Live and free to use", "No account, no tracker, no email capture",
                      "Reads public data only"],
-    },
-    {
-        "title": "Courage Garikai — Publications",
-        "logo": "logos/courage.svg",
-        "role": "Author & engineer · 2026",
-        "url": "https://courage-publications.zlnew.workers.dev/",
-        "demo": [("Catalogue", "https://courage-publications.zlnew.workers.dev/")],
-        "what": ("The publications catalogue: four works with their exact edition status, a "
-                 "research thread, and an explicit statement of what is and is not claimed."),
-        "evidence": ["Live catalogue, served from a Worker",
-                     "States edition status per work rather than implying a full-text library",
-                     "Discloses funding and relationship"],
     },
     {
         "title": "Hunta lead console",
@@ -495,7 +494,7 @@ def built_card(b):
     """One live product. Where the thing is closed, the card says so and offers no
     link: a public URL on a private console is an invitation nobody meant to send."""
     demo = "".join(f'<a class="chip" href="{esc(u)}" target="_blank" rel="noopener">{esc(l)}</a>'
-                   for l, u in b["demo"])
+                   for l, u in b["demo"] if u != b.get("url"))
     ev = "".join(f"<li>{esc(e)}</li>" for e in b["evidence"])
     if b.get("logo"):
         mark = (f'<img class="build-logo" src="{esc(b["logo"])}" alt="" '
@@ -510,7 +509,15 @@ def built_card(b):
                 f'<span class="dot" aria-hidden="true"></span>live</a>')
     else:
         foot = '<span class="closed"><span class="dot" aria-hidden="true"></span>closed</span>'
-    chips = demo or f'<span class="chip chip-none">{esc(b.get("access", "internal · gated"))}</span>'
+    if demo:
+        chips = demo
+    elif b.get("url"):
+        chips = ""                    # the button above already opens the product
+    else:
+        chips = f'<span class="chip chip-none">{esc(b.get("access", "internal · gated"))}</span>'
+    cta = (f'<a class="build-cta" href="{esc(b["url"])}" target="_blank" rel="noopener">'
+           f'view it in action in the wild here<span aria-hidden="true">→</span></a>'
+           if b.get("cta") else "")
     return f"""
       <article class="build">
         <div class="build-top">
@@ -522,9 +529,10 @@ def built_card(b):
         </div>
         <p class="build-what">{esc(b['what'])}</p>
         <ul class="build-evidence">{ev}</ul>
+        {cta}
         <div class="build-foot">
           {foot}
-          <div class="chips">{chips}</div>
+          {f'<div class="chips">{chips}</div>' if chips else ''}
         </div>
       </article>"""
 
@@ -671,11 +679,11 @@ nav.mast-nav a:hover{color:var(--accent)}
 
 /* hero */
 .hero{padding:76px 0 54px;border-bottom:1px solid var(--rule)}
-.hero .eyebrow{display:grid;gap:5px;
+.hero .eyebrow{display:block;
   font:600 10.8px/1.5 var(--sans);letter-spacing:.185em;text-transform:uppercase;
   color:var(--accent);margin-bottom:26px}
-.hero .eyebrow span{display:block}
-.hero .eyebrow span+span{color:#737a80}   /* one accent, two supporting lines */
+.hero .eyebrow span{display:block;max-width:26em;line-height:1.6}
+
 .hero h1{font-size:clamp(38px,5.6vw,64px);line-height:1.05;letter-spacing:-.022em;
   font-weight:400;margin:0 0 26px;max-width:16em}
 .hero h1 em{font-style:italic;color:var(--accent);white-space:nowrap}
@@ -813,7 +821,8 @@ section{padding:66px 0 10px}
 .build h3 a{text-decoration:none}
 .build h3 a:hover{color:var(--accent)}
 .build-role{font:600 9.5px/1.3 var(--sans);letter-spacing:.13em;text-transform:uppercase;
-  color:var(--muted);text-align:right;white-space:nowrap}
+  overflow-wrap:anywhere;white-space:normal;
+  color:var(--muted);text-align:right}
 .build-what{font-size:15px;line-height:1.55;color:#3a3f44;margin:0 0 12px;overflow-wrap:break-word}
 .build-evidence{list-style:none;margin:0 0 14px;padding:0}
 .build-evidence li{font-size:13.4px;line-height:1.5;color:#4a5055;padding:4px 0 4px 15px;
@@ -824,6 +833,12 @@ section{padding:66px 0 10px}
   font:600 9.5px/1 var(--sans);letter-spacing:.16em;text-transform:uppercase;color:#1d7a4c}
 .live .dot{width:7px;height:7px;border-radius:50%;background:#1d7a4c;
   box-shadow:0 0 0 3px rgba(29,122,76,.14)}
+.build-cta{display:inline-flex;align-items:center;gap:9px;margin:2px 0 16px;
+  padding:11px 16px;border:1px solid #e7e2d6;border-radius:3px;text-decoration:none;
+  font:600 10.5px/1 var(--sans);letter-spacing:.14em;text-transform:uppercase;color:#f4f0e7}
+.build-cta span{transition:transform .15s ease}
+.build-cta:hover{background:#f4f0e7;color:#141210}
+.build-cta:hover span{transform:translateX(3px)}
 .closed{display:inline-flex;align-items:center;gap:7px;font:600 9.5px/1 var(--sans);
   letter-spacing:.16em;text-transform:uppercase;color:#8d949a}
 .closed .dot{width:7px;height:7px;border-radius:50%;background:#5d646a}
@@ -962,13 +977,13 @@ def build():
 <main>
   <div class="wrap">
     <section class="hero">
-      <div class="eyebrow"><span>AI Infrastructure and Autonomous Systems Writer</span><span>Autonomous Cognitive Infrastructure Engineer</span><span>Autonomous Cognitive Infrastructure Operator</span></div>
-      <h1>The market never refused these merchants. <em>The software did.</em></h1>
-      <p class="lede">I rebuild the software: merchant rails, reconciliation ledgers and autonomous
-      AI operations that still hold a record when the connection drops. Thirteen published works
-      on trade, technology and constraint — seven books, four working papers and two short
-      volumes — come out of the same practice, each produced from a source file and shipped in
-      four formats.</p>
+      <div class="eyebrow"><span>Autonomous Cognitive Infrastructure Engineer, Operator, Writer</span></div>
+      <h1>Demand was never the problem. <em>Infrastructure was.</em></h1>
+      <p class="lede">Autonomous cognitive infrastructure for markets the last decade priced out:
+      merchant rails, reconciliation ledgers and agent operations that hold a record when the
+      connection drops. Thirteen published works on trade, technology and constraint — seven
+      books, four working papers and two short volumes — come out of the same practice, each
+      produced from a source file and shipped in four formats.</p>
       <div class="stats">
         <div class="stat"><div class="n">13</div><div class="k">Published works</div></div>
         <div class="stat"><div class="n">{total_pages:,}</div><div class="k">Pages in print</div></div>
@@ -1020,12 +1035,12 @@ def build():
     <div class="wrap">
       <div class="sec-head">
         <h2>Built and running</h2>
-        <div class="kicker">Eight systems · six answer a browser</div>
+        <div class="kicker">Seven systems · five answer a browser</div>
       </div>
       <p class="sec-intro">A portfolio of writing is an argument; a portfolio of running
-      systems is evidence. Six of these answer a browser today — one of those only with
-      credentials. Two are closed consoles and say so rather than pretending. Nothing here is
-      a mock-up or a screenshot.</p>
+      systems is evidence. Five of these open to a browser today, one more answers only with
+      credentials, and one is a closed console that says so rather than pretending. Every link
+      goes to the working product — nothing here is a mock-up or a screenshot.</p>
       <div class="builds">{builds}</div>
     </div>
   </section>
@@ -1048,16 +1063,16 @@ def build():
       </div>
       <div class="about">
         <div>
-          <p>I write about commerce in places where the assumptions baked into
-          software — always-on power, card rails, a postcode, a credit history — are
-          simply false. Then I build the thing the writing describes.</p>
-          <p>I am an <b>AI infrastructure and autonomous systems writer</b>, an
-          <b>autonomous cognitive infrastructure engineer</b> and an
-          <b>autonomous cognitive infrastructure operator</b> — three descriptions of one
-          job: design systems that act on their own, write down how they fail, and stay
-          answerable for the run. The writing is governance-first architecture, evidence and
-          constraint. The building is merchant rails, operator consoles, learning platforms
-          and publishing pipelines, each deployed and each documented in public.</p>
+          <p>The writing starts where the assumptions imported into a market simply do not
+          hold — always-on power, card rails, a postcode, a credit history. The building
+          follows: autonomous cognitive infrastructure that assumes none of them, and keeps a
+          record when the connection drops.</p>
+          <p><b>Autonomous Cognitive Infrastructure Engineer, Operator, Writer.</b> Three
+          descriptions of one job: design systems that act on their own, write down how they
+          fail, and stay answerable for the run. The writing is governance-first architecture,
+          evidence and constraint. The building is merchant rails, operator consoles, learning
+          platforms, hiring infrastructure and publishing pipelines — each deployed, each
+          documented in public.</p>
           <p>No single product defines the practice. <b>Tapstall</b> is one of the systems
           that came out of it, and the books are another: the catalogue above is the written
           half, and the systems above that are the running half.</p>
@@ -1076,8 +1091,7 @@ def build():
         <aside class="aside">
           <h4>At a glance</h4>
           <ul>
-            <li><b>Roles</b> — AI infrastructure and autonomous systems writer; autonomous
-            cognitive infrastructure engineer; autonomous cognitive infrastructure operator</li>
+            <li><b>Role</b> — Autonomous Cognitive Infrastructure Engineer, Operator, Writer</li>
             <li><b>Books</b> — seven long-form titles</li>
             <li><b>Research</b> — four working papers, DCAI series</li>
             <li><b>Essays &amp; reports</b> — two shorter volumes</li>
@@ -1103,10 +1117,10 @@ def build():
       <div class="contact">
         <div>
           <p class="contact-note"><b>Available for</b> systems design, AI operations reviews,
-          autonomous-agent and infrastructure work, and building commerce or learning
+          autonomous cognitive infrastructure work, and building commerce or learning
           infrastructure for constrained markets. I work
           remote-first and I am comfortable with intermittent power and bandwidth, because
-          that is the environment the software has to run in.</p>
+          that is the environment the infrastructure has to run in.</p>
           <p class="contact-note"><b>Best first message:</b> what the system has to do, who
           uses it, and what happens today when it fails. If the answer is "nothing yet", that
           is a fine place to start.</p>
