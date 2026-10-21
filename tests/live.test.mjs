@@ -4657,3 +4657,83 @@ test('1.1.0 Whop: signed payment activates, forgery/replay/companion/failure do 
     delete env.GMAIL_OWNER_USER; delete env.GMAIL_OWNER_APP_PASSWORD;
   }
 });
+
+/* ------------------------------------------------------------------ the selling rail
+ * v1.7.0. The unit tests prove the arithmetic; these prove the Worker can serve it: a
+ * statement a merchant can open, an event log that is idempotent through HTTP, a catalogue
+ * that answers for this shop, vetting that gates the cross-border leg, and a collect leg that
+ * refuses honestly when no processor key exists.
+ * -------------------------------------------------------------------------- */
+test('the settlement statement, the event log and the vetting gate work through the Worker', async () => {
+  const reg = await call('/api/register', {
+    method: 'POST',
+    body: { shop_name: 'Rail Test Kitchen', handle: 'railtest', owner_email: 'rail@example.com',
+      whatsapp: '263770001234', currency: 'USD', feed_url: 'https://stub/menu.csv',
+      rail: 'ecocash_usd', pay_account: '0770001234', tax_pct: 0, delivery_fee: 0 },
+  });
+  assert.equal(reg.status, 201, reg.text);
+  const { cookie } = await loginWithPin(reg.json.key, reg.json.pin);
+  assert.ok(cookie, 'no session cookie');
+
+  // an order exists, so the book expects money
+  const o = await call('/api/order', { method: 'POST', ip: '196.0.0.61', body: {
+    handle: 'railtest', service: 'pickup', buyer: { name: 'Rail Buyer', phone: '263780001234' },
+    items: [{ id: 'railtest-item', name: 'Kota', price: 10, qty: 1 }],
+  } });
+  assert.equal(o.status, 201, o.text);
+  const code = o.json.order.code;
+
+  // nothing signed in: no statement
+  assert.equal((await call('/api/settle?handle=railtest')).status, 401, 'a statement without a login leaks the shop’s money');
+
+  const today = new Date().toISOString().slice(0, 10);
+  const s1 = await call('/api/settle?handle=railtest&day=' + today, { cookie });
+  assert.equal(s1.status, 200, s1.text);
+  assert.equal(s1.json.ok, true);
+  assert.ok(s1.json.totals.expected > 0, 'the order book says money is due');
+  assert.equal(s1.json.totals.matched, 0);
+  assert.ok(s1.json.totals.awaiting_match > 0, 'and the statement names what to chase');
+
+  // a money event, written twice, is written once
+  const ev = { handle: 'railtest', kind: 'matched', amount: Number(s1.json.totals.expected), order: code, rail: 'ecocash_usd', reference: 'TESTREF1' };
+  const w1 = await call('/api/settle/event', { method: 'POST', cookie, body: ev });
+  assert.equal(w1.status, 200, w1.text);
+  assert.equal(w1.json.wrote, true);
+  assert.equal(w1.json.statement.totals.matched > 0, true, 'the money is now matched');
+  const w2 = await call('/api/settle/event', { method: 'POST', cookie, body: ev });
+  assert.equal(w2.json.wrote, false, 'the same event twice must not double the statement');
+
+  // a bad event is refused with the list of what is allowed
+  const bad = await call('/api/settle/event', { method: 'POST', cookie, body: { handle: 'railtest', kind: 'interesting', amount: 5 } });
+  assert.equal(bad.status, 422);
+  assert.match(bad.json.note, /matched/);
+
+  // CSV: the accountant's copy, from the same arithmetic as the screen
+  const csv = await call('/api/settle?handle=railtest&day=' + today + '&fmt=csv', { cookie });
+  assert.equal(csv.status, 200);
+  assert.match(csv.text, /^"shop","window","rail"/);
+  assert.match(csv.text, /"TOTAL"/);
+
+  // the catalogue answers for this shop, and vetting is honestly incomplete
+  const rail = await call('/api/rail?handle=railtest', { cookie });
+  assert.equal(rail.status, 200, rail.text);
+  assert.ok(rail.json.rails.length >= 10, 'the shop’s own rails are in the catalogue');
+  assert.equal(rail.json.vet.ready, false, 'a fresh shop has not been vetted');
+  assert.equal(rail.json.collect_ready, false, 'and cannot be offered a cross-border leg');
+
+  const vet1 = await call('/api/rail/vet', { method: 'POST', cookie, body: { handle: 'railtest', answers: { rails: true, refunds: true, records: true } } });
+  assert.equal(vet1.json.vet.can_take_local, true, 'a shop may take its own money with three answers');
+  assert.equal(vet1.json.vet.can_collect_cross_border, false, 'the processor still wants identity and sanctions');
+  const vet2 = await call('/api/rail/vet', { method: 'POST', cookie, body: { handle: 'railtest', answers: { identity: 'Rail Test Kitchen (t/a)', contact: '+263 77 000 1234', sanctions: true } } });
+  assert.equal(vet2.json.vet.ready, true);
+
+  // the collect leg: with no processor key the answer is honest, not a pretend invoice
+  const inv = await call('/api/collect/invoice', { method: 'POST', cookie, body: { handle: 'railtest', order: code } });
+  assert.equal(inv.status, 503);
+  assert.equal(inv.json.error, 'collect_not_configured');
+  assert.match(inv.json.note, /Nothing was charged/);
+
+  // the webhook refuses an unsigned claim, and refuses without a secret rather than trusting it
+  const hook = await call('/api/hook/nowpayments?h=railtest', { method: 'POST', body: '{"order_id":"x"}' });
+  assert.ok(hook.status === 401 || hook.status === 503, 'an unsigned IPN is rejected: ' + hook.status);
+});

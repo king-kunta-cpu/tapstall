@@ -1,5 +1,43 @@
 # Tapstall — status
 
+## v1.7.0 (2026-10-21): the settlement layer — the rail we can actually sell
+
+The owner asked which of the missing rail pieces are needed **now**, and told us to build them.
+The answer, after reading the code: the order ledger, receipts, books CSV and VAT return already
+exist, so the genuine gaps were the five below. All are built, tested, and wired behind the same
+admin gate as the dashboard.
+
+- **`worker/rail.js`** — the settlement layer, pure and tested (`tests/rail.test.mjs`, 10 tests):
+  - **payment ledger** distinct from the order ledger (`seen / matched / unmatched / refunded /
+    disputed / resolved / written_off`), idempotent by event id, one KV document per shop per
+    month so a statement is read-heavy and cheap;
+  - **one rail catalogue** shaping built-ins (`core.RAILS`), operator extras (`rails:extra`) and
+    processors into the same object — `presentable`, `machine_confirmable`, `custody: 'none'`;
+  - **reference allocation** with a 72-hour TTL, collision retry and a reuse window, so odd cents
+    stay a reference instead of a lottery;
+  - **settlement statement** per rail and per day: expected vs matched vs unmatched vs refunded,
+    fees, net, and the one number a merchant should act on (`awaiting_match`) — plus CSV;
+  - **vetting** — six evidence-based steps, two levels: a shop can take its own money on
+    `rails/refunds/records`, while a cross-border leg also needs `identity/contact/sanctions`;
+  - **refund/dispute state machine** that cannot jump states, with a five-year records clock;
+  - **cross-border collect leg** in the pipeline: server-side price lock, the adopted 1% stablecoin
+    tolerance, `collectSettlement()` that never calls an underpayment paid, and **HMAC-SHA256
+    webhook verification on the raw body** with a constant-time compare.
+- **Worker routes** (all merchant ones behind `adminGate`):
+  `GET /api/settle[?fmt=csv]`, `POST /api/settle/event`, `GET /api/rail` (catalogue + vetting),
+  `POST /api/rail/vet`, `POST /api/collect/invoice`, `POST /api/hook/nowpayments`.
+  The collect leg refuses honestly (`503 collect_not_configured`) without a processor key, and a
+  webhook **writes a ledger event, never a payment** — the shop still closes the order.
+- **The doctrine is asserted, not remembered**: a test fails the build if any rail export grows a
+  payout/balance/withdraw verb, and another asserts the routes cannot move money.
+- **Bundler**: `scripts/build_bundle.sh` now inlines `rail.js` as well as `core.js` (rail first, so
+  the core import regex cannot swallow it), which is what made the deployed Worker actually able
+  to answer a statement. Two helper names were renamed in `rail.js` (`railRound2`, `railClip`) so
+  the inlined bundle has no duplicate declarations.
+- **Docs**: `docs/AGENCY-PLAYBOOK.md` (the distribution answer: sell to agencies, 30-day calendar,
+  openers, metrics and a kill rule) and `docs/PARTNER-AGREEMENT.md` (the white-label agreement,
+  written so a lawyer can finish it and so no clause promises what the software cannot do).
+
 ## v1.6.0 (2026-10-21): the Emotion Doctrine, wired in
 
 The owner's standing rule: every touchpoint must *invoke* a true feeling and then *serve* it —

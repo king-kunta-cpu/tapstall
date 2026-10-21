@@ -15,6 +15,11 @@
  */
 
 import {
+  railCatalogue, railFor, allocateCents, paymentEvent, appendPaymentEvent, hasPaymentEvent,
+  settlement, settlementCsv, vettingPlan, refundTransition, retentionUntil,
+  collectInvoiceDraft, collectSettlement, verifyWebhook, payDocKey, PAY_EVENTS, COLLECT_PROVIDERS,
+} from './rail.js';
+import {
   RAILS, round2, clamp, slug, digits, isEmail, validHandle, parseCSV, normalizeFeedUrl,
   parseProducts, priceOrder, payInstructions, riskFlags, waSummary, publicStore, hash,
   applyMenu, sanitizeMenu, menuPrice, openNow, cleanWeek, cleanRailAccts, hoursText,
@@ -49,7 +54,7 @@ import {
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '1.6.0';
+const VERSION = '1.7.0';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
@@ -372,6 +377,15 @@ async function route(req, url, env, ctx) {
   // a buyer to meet, and nothing written. A month is a read of the row list; a receipt is a read
   // of one order.
   if (p === '/api/books') return booksView(req, url, env);
+  /* v1.7.0, the selling rail: a settlement statement, an event log, vetting, and the
+   * cross-border collect leg. Read-only by default; every write needs the same admin gate the
+   * dashboard uses, and none of it can move money. */
+  if (p === '/api/settle' && req.method === 'GET') return settleView(req, url, env);
+  if (p === '/api/settle/event' && req.method === 'POST') return settleEvent(req, url, env);
+  if (p === '/api/rail' && req.method === 'GET') return railView(req, url, env);
+  if (p === '/api/rail/vet' && req.method === 'POST') return railVet(req, url, env);
+  if (p === '/api/collect/invoice' && req.method === 'POST') return collectInvoice(req, url, env);
+  if (p === '/api/hook/nowpayments' && req.method === 'POST') return hookNowPayments(req, url, env);
   if (p === '/api/receipt') return receiptView(req, url, env);
   if (p === '/api/mesh') return meshView(req, url, env);
   if (p === '/api/mesh/seen' && req.method === 'POST') return meshSeen(req, env);
@@ -3075,6 +3089,209 @@ async function booksView(req, url, env) {
     rows: rows.slice(0, 200),
     note: 'Cash basis counts the day a payment was marked; accrual counts the day the order arrived. Rows written before this release carry no tax figure and are computed at the shop’s current rate, counted separately below.',
   }, 200, { 'Cache-Control': 'no-store' });
+}
+
+
+/* ---------------------------------------------------------------- the selling rail
+ * v1.7.0. What was missing before charging for a rail: a payment ledger separate from the order
+ * ledger, one catalogue for built-in / operator / processor rails, a settlement statement, a
+ * vetting gate and a refund trail. The doctrine is unchanged and enforced in worker/rail.js:
+ * **we never hold the money**, so there is no balance, no payout and no wallet anywhere below.
+ */
+
+/** The month documents a window touches. One read per month, because KV writes are the scarce
+ *  resource and a statement is a read-heavy page. */
+async function payEvents(env, handle, { day, from, to } = {}) {
+  const months = new Set();
+  if (day) months.add(String(day).slice(0, 7));
+  else {
+    const a = new Date(Number(from) || Date.now()), b = new Date(Number(to) || Date.now());
+    const cur = new Date(a.getUTCFullYear(), a.getUTCMonth(), 1);
+    const end = new Date(b.getUTCFullYear(), b.getUTCMonth(), 1);
+    let guard = 0;
+    while (cur <= end && guard++ < 24) { months.add(cur.toISOString().slice(0, 7)); cur.setUTCMonth(cur.getUTCMonth() + 1); }
+  }
+  if (!months.size) months.add(new Date().toISOString().slice(0, 7));
+  const out = [];
+  for (const m of months) {
+    const doc = await env.ORDERS.get('pay:' + handle + ':' + m, 'json').catch(() => null);
+    if (doc && Array.isArray(doc.events)) out.push(...doc.events);
+  }
+  return out;
+}
+
+async function payWrite(env, handle, event) {
+  const key = payDocKey(handle, event.at);
+  const doc = await env.ORDERS.get(key, 'json').catch(() => null);
+  const res = appendPaymentEvent(doc, event);
+  if (!res.wrote) return { wrote: false, doc: res.doc };
+  await env.ORDERS.put(key, JSON.stringify(res.doc));
+  return { wrote: true, doc: res.doc, key };
+}
+
+function settleOpts(url) {
+  const day = String(url.searchParams.get('day') || '').slice(0, 10);
+  const from = url.searchParams.get('from'), to = url.searchParams.get('to');
+  if (day && /^\d{4}-\d{2}-\d{2}$/.test(day)) return { day };
+  return {
+    from: from ? Date.parse(from + 'T00:00:00Z') : undefined,
+    to: to ? Date.parse(to + 'T23:59:59Z') : undefined,
+  };
+}
+
+async function settleView(req, url, env) {
+  const handle = slug(url.searchParams.get('handle') || '');
+  const g = await adminGate(req, env, handle);
+  if (g.res) return g.res;
+  const st = g.who.st;
+  const opt = settleOpts(url);
+  const rows = await ledgerRows(env, handle);
+  const events = await payEvents(env, handle, opt);
+  const doc = settlement(rows, events, opt);
+  if (String(url.searchParams.get('fmt') || '').toLowerCase() === 'csv') {
+    return new Response(settlementCsv(doc, st), { headers: {
+      'content-type': 'text/csv; charset=utf-8', 'cache-control': 'no-store',
+      'content-disposition': 'attachment; filename="' + handle + '-settlement-' + (opt.day || 'all') + '.csv"',
+    } });
+  }
+  return json({ ok: true, handle, ...doc, currency: st.currency || 'USD' }, 200, { 'Cache-Control': 'no-store' });
+}
+
+async function settleEvent(req, url, env) {
+  const b = await readBody(req);
+  const handle = slug(b.handle || url.searchParams.get('handle') || '');
+  const g = await adminGate(req, env, handle);
+  if (g.res) return g.res;
+  let event;
+  try {
+    event = paymentEvent({
+      kind: b.kind, amount: b.amount, order: b.order, rail: b.rail, reference: b.reference,
+      note: b.note, evidence: b.evidence, by: 'merchant', at: b.at,
+    });
+  } catch (e) {
+    return json({ ok: false, error: 'bad_event', note: String(e.message || e) + '. Kinds: ' + PAY_EVENTS.join(', ') + '.' }, 422);
+  }
+  const res = await payWrite(env, handle, event);
+  const rows = await ledgerRows(env, handle);
+  const events = await payEvents(env, handle, { day: new Date(event.at).toISOString().slice(0, 10) });
+  return json({ ok: true, wrote: res.wrote, event,
+    statement: settlement(rows, events, { day: new Date(event.at).toISOString().slice(0, 10) }) },
+    200, { 'Cache-Control': 'no-store' });
+}
+
+/** The rails this shop can actually offer, in one shape — built-ins, the operator's KV extras and
+ *  any processor we hold credentials for. Vetting rides along because a cross-border leg without
+ *  it is a promise made with somebody else's licence. */
+async function railView(req, url, env) {
+  const handle = slug(url.searchParams.get('handle') || '');
+  const g = await adminGate(req, env, handle);
+  if (g.res) return g.res;
+  const st = g.who.st;
+  const extras = (env.STORES ? await env.STORES.get('rails:extra', 'json').catch(() => null) : null) || st.rails_extra || {};
+  const collect = {};
+  for (const key of Object.keys(COLLECT_PROVIDERS)) {
+    if (env['NOWPAYMENTS_API_KEY'] && key === 'nowpayments') collect[key] = { label: COLLECT_PROVIDERS[key].label, type: 'collect', ipn: true, presentable: true };
+  }
+  const vetAnswers = (env.STORES ? await env.STORES.get('vet:' + handle, 'json').catch(() => null) : null) || {};
+  const vet = vettingPlan(st, vetAnswers);
+  const cat = railCatalogue({ coreRails: RAILS, extras, collect });
+  return json({
+    ok: true, handle, rails: cat,
+    store_rails: Object.keys(st.rails || {}).length ? st.rails : null,
+    vet,
+    collect_ready: Object.keys(collect).length > 0 && vet.can_collect_cross_border,
+    note: 'A rail is data, not code: the operator can add one to KV (rails:extra) and a shop can describe the one its buyers already use. We never touch the money, so a rail only has to answer what the buyer dials and how the payment is proven.',
+  }, 200, { 'Cache-Control': 'no-store' });
+}
+
+async function railVet(req, url, env) {
+  const b = await readBody(req);
+  const handle = slug(b.handle || url.searchParams.get('handle') || '');
+  const g = await adminGate(req, env, handle);
+  if (g.res) return g.res;
+  if (!env.STORES) return json({ ok: false, error: 'no_store_kv' }, 503);
+  const cur = (await env.STORES.get('vet:' + handle, 'json').catch(() => null)) || {};
+  const answers = (b.answers && typeof b.answers === 'object') ? b.answers : {};
+  const next = { ...cur };
+  for (const [k, v] of Object.entries(answers)) {
+    if (!k || k.length > 24) continue;
+    next[k] = (v && typeof v === 'object') ? { ok: !!v.ok, at: Date.now(), evidence: String(v.evidence || '').slice(0, 160) }
+      : { ok: !!v, at: Date.now(), evidence: '' };
+  }
+  await env.STORES.put('vet:' + handle, JSON.stringify(next));
+  return json({ ok: true, vet: vettingPlan(g.who.st, next) }, 200, { 'Cache-Control': 'no-store' });
+}
+
+/** Cross-border collect: a price locked server-side, an invoice the processor issues, and no
+ *  money of ours anywhere in the flow. Refuses honestly when the key is not configured rather
+ *  than pretending the leg exists. */
+async function collectInvoice(req, url, env) {
+  const b = await readBody(req);
+  const handle = slug(b.handle || url.searchParams.get('handle') || '');
+  const g = await adminGate(req, env, handle);
+  if (g.res) return g.res;
+  const key = env.NOWPAYMENTS_API_KEY;
+  if (!key) return json({ ok: false, error: 'collect_not_configured',
+    note: 'No processor key is set, so this shop cannot be offered a cross-border leg yet. Nothing was charged and nothing was promised.' }, 503);
+  const vet = vettingPlan(g.who.st, (await env.STORES.get('vet:' + handle, 'json').catch(() => null)) || {});
+  if (!vet.can_collect_cross_border) return json({ ok: false, error: 'vetting_incomplete', missing: vet.missing, note: vet.note }, 409);
+  const want = String(b.order || '').slice(0, 60);
+  const rows = await ledgerRows(env, handle);
+  const row = rows.find((r) => r && (String(r.id) === want || String(r.code || '').toLowerCase() === want.toLowerCase()));
+  if (!row) return json({ ok: false, error: 'no_such_order', note: 'Only this shop’s own orders can be invoiced, and the amount must come from the order — never from the page.' }, 404);
+  const draft = collectInvoiceDraft({
+    provider: 'nowpayments', amount: Number(row.pay_now || row.total), order: String(row.code || row.id),
+    description: (g.who.st.shop_name || 'Shop') + ' — order ' + (row.code || row.id),
+    ipnUrl: url.origin + '/api/hook/nowpayments?h=' + encodeURIComponent(handle),
+    payCurrency: b.pay_currency,
+  });
+  if (!draft.ok) return json(draft, 422);
+  const res = await fetch('https://api.nowpayments.io/v1/invoice', {
+    method: 'POST', headers: { 'x-api-key': key, 'content-type': 'application/json' },
+    body: JSON.stringify(draft.payload),
+  });
+  const out = await res.json().catch(() => ({}));
+  if (!res.ok || !out.invoice_url) {
+    return json({ ok: false, error: 'processor_refused', status: res.status,
+      note: 'The processor did not issue an invoice. No money moved and the order is unchanged.',
+      detail: String(out.message || out.error || '').slice(0, 200) }, 502);
+  }
+  return json({ ok: true, invoice_url: out.invoice_url, id: out.id, order: draft.payload.order_id,
+    amount: draft.payload.price_amount, currency: draft.payload.price_currency,
+    tolerance_pct: draft.tolerance_pct, expires_in_min: draft.expires_in_min,
+    note: 'Send this link to the buyer. The processor is the counterparty and pays the merchant directly; Tapstall holds no balance and makes no payout.' },
+    200, { 'Cache-Control': 'no-store' });
+}
+
+/** The webhook: a claim until the signature checks out on the raw body. It writes a ledger
+ *  event, not a payment — the shop still closes the order, and the statement shows why. */
+async function hookNowPayments(req, url, env) {
+  const handle = slug(url.searchParams.get('h') || '');
+  const st = handle ? await getStore(env, handle) : null;
+  if (!st) return json({ ok: false, error: 'no_store' }, 404);
+  const raw = await req.text();
+  const sig = req.headers.get('x-nowpayments-sig') || req.headers.get('x-nowpayments-signature');
+  const check = await verifyWebhook(env.NOWPAYMENTS_IPN_SECRET, raw, sig);
+  if (!check.ok) return json({ ok: false, error: check.reason }, check.reason === 'no_secret_configured' ? 503 : 401);
+  let body = {};
+  try { body = JSON.parse(raw); } catch (e) { return json({ ok: false, error: 'bad_json' }, 400); }
+  const paid = Number(body.actually_paid || body.price_amount || 0);
+  const price = Number(body.price_amount || 0);
+  const s = collectSettlement({ price, paid, status: body.payment_status });
+  const order = String(body.order_id || '');
+  const event = paymentEvent({
+    kind: s.ok ? 'seen' : 'unmatched',
+    amount: s.ok ? price : paid,
+    order,
+    rail: 'collect:nowpayments',
+    reference: String(body.payment_id || ''),
+    by: 'processor',
+    note: s.ok ? 'Processor reports ' + String(body.payment_status) + '. The shop still closes the order.' : 'Processor says ' + s.reason + '; a human decides what to do.',
+    evidence: { type: 'ipn', ref: String(body.payment_id || '') },
+  });
+  const res = await payWrite(env, handle, event);
+  return json({ ok: true, wrote: res.wrote, settled: s.ok, reason: s.reason, shortfall: s.shortfall || 0,
+    note: 'Recorded as a ledger event only. Nothing was marked paid automatically: an IPN is the processor’s word, and the shop’s confirmation is still the thing that closes an order.' });
 }
 
 async function receiptView(req, url, env) {
