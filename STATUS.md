@@ -29,6 +29,11 @@ importantly, shipped.
   countdowns, no invented stock numbers, no pretend testimonials, no fake “someone is viewing”.
   A test greps every public page for manufactured-scarcity language and fails the build.
 
+**Live (v1.6.0).** `5259ce6`, deploy run `39591213060` — worker + pages, `success`.
+`/__ping` → `{"ok":true,"version":"1.6.0"}`. `/` serves the new landing page (12.1 KB, the
+leverage line present in the bytes), `/onboard` and `/fees` 200, `/s/mamatoe` 200 with the new
+footer. `/renew` is per-store, so a bare `/renew` 404s exactly as it did before.
+
 ## v1.5.6 (2026-10-21): the identity plate
 
 The owner's last note was blunt: “the only ugly thing left on the storefronts is your
