@@ -1,0 +1,144 @@
+{
+  "author": "Courage Garikai",
+  "publisher": "Jacaranda Labs Press · Harare",
+  "updated": "2026-10-21",
+  "works": [
+    {
+      "id": "ledger",
+      "kind": "book",
+      "title": "The Ledger and the Shopkeeper",
+      "subtitle": "Building commerce for the markets the platforms forgot",
+      "year": "2026",
+      "pages": 77,
+      "words": 14595,
+      "publisher": "Jacaranda Labs Press · Harare",
+      "licence": "CC BY 4.0",
+      "blurb": "A trade book on building a merchant rail for shops the platforms skipped — written from the release log rather than the pitch deck. Part one is the gap: the forty-tab panic, and why the obvious answer is wrong. Part two is the machine: a shop in one link, a statement that can be recomputed, quotas as a design material, the first hundred prospects, and the number that could not be dialled. Part three is the rules: never hold the money, never lie in the copy, never post to your customers. Part four is the craft — what broke, in five failure classes, and the uncomfortable arithmetic that follows.",
+      "note": "Print edition typeset from a single Markdown source; 77 pages, running heads, resolved contents.",
+      "formats": {
+        "PDF": "https://github.com/king-kunta-cpu/tapstall/raw/main/book/the-ledger-and-the-shopkeeper.pdf",
+        "EPUB": "https://github.com/king-kunta-cpu/tapstall/raw/main/book/the-ledger-and-the-shopkeeper.epub",
+        "HTML": "https://github.com/king-kunta-cpu/tapstall/raw/main/book/the-ledger-and-the-shopkeeper.html",
+        "MD": "https://github.com/king-kunta-cpu/tapstall/raw/main/book/the-ledger-and-the-shopkeeper.md"
+      }
+    },
+    {
+      "id": "intelligence",
+      "kind": "book",
+      "title": "Intelligence, Data and Judgement",
+      "subtitle": "An applied introduction to artificial intelligence, with a production case",
+      "year": "2026",
+      "pages": 159,
+      "words": 31930,
+      "publisher": "Jacaranda Labs Press · Harare",
+      "licence": "CC BY 4.0",
+      "blurb": "A textbook written to be taught from. Twenty-two chapters in five parts — foundations, the material, the machine, the case, and judgement — each with learning outcomes, a worked example, graded exercises and further reading. The disciplinary spine is three widely used curricula: COMCEC's introduction to AI and its fundamental concepts, Microsoft's Fundamentals of AI Module 1, and NITI Aayog's Let's Learn AI Base Module, each attributed and mapped chapter by chapter in the appendix. Tapstall runs through the middle of the book as the worked case, including its failures.",
+      "note": "Eleven tables, two pseudocode listings, a sixty-term glossary, eight labs and an annotated bibliography.",
+      "formats": {
+        "PDF": "https://github.com/king-kunta-cpu/tapstall/raw/main/book/intelligence-data-and-judgement.pdf",
+        "EPUB": "https://github.com/king-kunta-cpu/tapstall/raw/main/book/intelligence-data-and-judgement.epub",
+        "HTML": "https://github.com/king-kunta-cpu/tapstall/raw/main/book/intelligence-data-and-judgement.html",
+        "MD": "https://github.com/king-kunta-cpu/tapstall/raw/main/book/intelligence-data-and-judgement.md"
+      }
+    },
+    {
+      "id": "custody",
+      "kind": "research",
+      "title": "Order Without Custody",
+      "subtitle": "Governance-first design for merchant commerce rails in low-infrastructure economies",
+      "year": "2026",
+      "pages": 30,
+      "words": 11628,
+      "publisher": "DCAI working paper 3",
+      "licence": "CC BY 4.0",
+      "blurb": "Small merchants already sell at scale — through chat threads, pages and a phone number painted on a wall — but they sell without a record. This paper argues that the binding constraint at that tier is not payment capability but reconciliation, and that reconcilability is an architectural property rather than a feature. Five mechanisms are formalised against artefacts a reader can inspect: the No-Custody Rail, Admission-Gated Discovery, Reserve-Ladder Scheduling, Surface-Disjoint Multi-Tenancy and the Constrained Persuasion Doctrine. The empirical section is forensic: five classes of governance failure, each stated as a signature, a detector and a design response.",
+      "note": "Candid about its limits: no paying customers in the measurement window, no control condition, no inference beyond the case.",
+      "formats": {
+        "PDF": "https://github.com/king-kunta-cpu/tapstall/raw/main/papers/tapstall-2026-order-without-custody.pdf",
+        "EPUB": "https://github.com/king-kunta-cpu/tapstall/raw/main/papers/tapstall-2026-order-without-custody.epub",
+        "HTML": "https://github.com/king-kunta-cpu/tapstall/raw/main/papers/tapstall-2026-order-without-custody.html",
+        "MD": "https://github.com/king-kunta-cpu/tapstall/raw/main/papers/tapstall-2026-order-without-custody.md"
+      }
+    },
+    {
+      "id": "musk-mirror",
+      "kind": "book",
+      "title": "The Musk Mirror",
+      "subtitle": "How one billionaire exposed the cracks in China's innovation dream",
+      "year": "2026",
+      "pages": 286,
+      "words": null,
+      "publisher": "Courage Garikai, Harare",
+      "licence": "All rights reserved",
+      "blurb": "A gallery of expert predictions, set against what was actually built. The book reads as a mirror rather than a weapon: on the rocket sceptics, the communications 'experts', the business-model critics and the CEO chorus, and on what their confidence cost. Its argument is about expertise without humility, and about the difference between a claim that sounds authoritative and a number that can be checked.",
+      "note": "Dedicated to engineers building impossible things in constrained environments.",
+      "formats": {
+        "PDF": "https://github.com/king-kunta-cpu/tapstall/releases/download/publications-2026-10/the-musk-mirror.pdf"
+      }
+    },
+    {
+      "id": "traffic",
+      "kind": "book",
+      "title": "Traffic Is the New Oil",
+      "subtitle": "The African digital wealth formula",
+      "year": "2026",
+      "pages": 256,
+      "words": null,
+      "publisher": "Jacaranda Labs",
+      "licence": "All rights reserved",
+      "blurb": "Six chapters on the only formula that has ever run the internet — traffic, ads, money — argued for a continent that supplies the eyeballs and keeps too little of the revenue. From the awakening, through the traffic layer and the ad market, to what actually enters an account while the power is out, and a zero-capital route from nothing to a first four-figure month.",
+      "note": "Written for the operator with a phone, a connection and no capital.",
+      "formats": {
+        "PDF": "https://github.com/king-kunta-cpu/tapstall/releases/download/publications-2026-10/traffic-is-the-new-oil.pdf"
+      }
+    },
+    {
+      "id": "pinterest",
+      "kind": "book",
+      "title": "Pinterest Goldmine",
+      "subtitle": "The traffic source nobody told you about",
+      "year": "2026",
+      "pages": 242,
+      "words": null,
+      "publisher": "Jacaranda Labs",
+      "licence": "All rights reserved",
+      "blurb": "A complete operating manual for one under-used traffic channel: the psychology of the scroll-stop, a pin factory run from Canva on a phone, the search optimisation playbook, a scheduling system that survives real-life disruption, and the money layer that turns attention into a payout.",
+      "note": "Includes the Sunday System: a week of output in forty-five minutes.",
+      "formats": {
+        "PDF": "https://github.com/king-kunta-cpu/tapstall/releases/download/publications-2026-10/pinterest-goldmine.pdf"
+      }
+    },
+    {
+      "id": "rocket-man",
+      "kind": "essay",
+      "title": "The Rocket Man Reckoning",
+      "subtitle": "How China mocked Elon Musk — and why they are now panicking",
+      "year": "2026",
+      "pages": 29,
+      "words": null,
+      "publisher": "Jacaranda Labs",
+      "licence": "All rights reserved",
+      "blurb": "The arrogance of a rising superpower, the collapse of its myths, and what one company's success reveals about the future of innovation. A short book about a decade of ridicule from established voices — academic, industrial and editorial — and what happened when the engineering arrived anyway.",
+      "note": "Companion to The Musk Mirror.",
+      "formats": {
+        "PDF": "https://github.com/king-kunta-cpu/tapstall/releases/download/publications-2026-10/the-rocket-man-reckoning.pdf"
+      }
+    },
+    {
+      "id": "unchained",
+      "kind": "essay",
+      "title": "Unchained Blueprint",
+      "subtitle": "What to build when every payment door is closed",
+      "year": "2026",
+      "pages": 13,
+      "words": null,
+      "publisher": "Jacaranda Labs",
+      "licence": "All rights reserved",
+      "blurb": "Every single door was closed: the processor that does not support your country, the payouts that are unavailable in your region, the account that has been limited. This blueprint starts from the observation that these are decisions rather than accidents, and works out what a builder in that position can still put in place.",
+      "note": "Version 1 — a working document, not a finished book.",
+      "formats": {
+        "PDF": "https://github.com/king-kunta-cpu/tapstall/releases/download/publications-2026-10/unchained-blueprint-v1.pdf"
+      }
+    }
+  ]
+}
