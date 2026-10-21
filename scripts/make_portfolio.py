@@ -117,6 +117,54 @@ WORKS = [
         },
     },
     {
+        "id": "sovereign",
+        "kind": "research",
+        "featured": True,
+        "title": "The Sovereign Micro-Enterprise",
+        "subtitle": "A governance-first architecture for zero-capital agentic businesses",
+        "year": "2026", "pages": 33, "words": None,
+        "publisher": "DCAI field report 1", "licence": "CC BY 4.0",
+        "blurb": (
+            "Frontier models pushed the price of machine cognition toward zero, and the "
+            "obvious inference — that any connected individual now owns a software company — "
+            "proves fragile in practice. Producing is easy; operating is hard. This report "
+            "documents the design, deployment and near-real-time failure forensics of a "
+            "one-person, zero-capital sales and content business run entirely by autonomous "
+            "agents under a governance architecture: guarded capability, a ledgered agent "
+            "pattern with an idle witness, a zero-capital ladder, and effectuation-in-the-loop. "
+            "Seven figures carry the anatomy, the cadence and the incident traces."
+        ),
+        "note": "Silent-failure taxonomy with detection-time bounds, offered as reusable diagnostic vocabulary.",
+        "formats": {
+            "PDF": f"{RAW}/papers/sovereign-micro-enterprise.pdf",
+            "HTML": f"{RAW}/papers/sovereign-micro-enterprise.html",
+            "MD": f"{RAW}/papers/sovereign-micro-enterprise.md",
+        },
+    },
+    {
+        "id": "cadence",
+        "kind": "research",
+        "featured": True,
+        "title": "Grounded Cadence",
+        "subtitle": "Fact-bound content operations as a governance architecture",
+        "year": "2026", "pages": 17, "words": None,
+        "publisher": "DCAI working paper", "licence": "CC BY 4.0",
+        "blurb": (
+            "Anyone can now emit a week of social copy. Almost no one can emit it on a "
+            "schedule, from a company's own facts, without inventing customers or numbers, "
+            "without spending the operator's quota on a stranger, and without a silent failure "
+            "looking like a green run. This paper reports a live zero-capital writing service "
+            "and formalises four mechanisms with production incidents attached: fact-bound "
+            "generation, value–promo cadence, capability isolation, and fail-loud operations."
+        ),
+        "note": "Honest where it matters: the Worker is in production, the test surface is documented, paying customers are zero.",
+        "formats": {
+            "PDF": f"{RAW}/papers/grounded-cadence.pdf",
+            "HTML": f"{RAW}/papers/grounded-cadence.html",
+            "MD": f"{RAW}/papers/grounded-cadence.md",
+        },
+    },
+    {
         "id": "musk-mirror",
         "kind": "book",
         "featured": False,
@@ -514,12 +562,12 @@ def build():
     <section class="hero">
       <div class="eyebrow">Writer · Engineer · Operator</div>
       <h1>I build commerce for the markets the platforms skip, and write down <em>what happens next</em>.</h1>
-      <p class="lede">Eight published works on trade, technology and constraint — two of them
-      typeset books, one a research paper, the rest field reports from the same practice.
+      <p class="lede">Ten published works on trade, technology and constraint — five books, three
+      working papers and two short volumes, all from the same practice.
       Everything here is produced from a source file and shipped in four formats, because a
       reader should not need a particular app to read a book.</p>
       <div class="stats">
-        <div class="stat"><div class="n">8</div><div class="k">Published works</div></div>
+        <div class="stat"><div class="n">10</div><div class="k">Published works</div></div>
         <div class="stat"><div class="n">{total_pages:,}</div><div class="k">Pages</div></div>
         <div class="stat"><div class="n">4</div><div class="k">Formats per title</div></div>
         <div class="stat"><div class="n">$0</div><div class="k">Marginal cost to serve</div></div>
@@ -547,10 +595,11 @@ def build():
     <div class="wrap">
       <div class="sec-head">
         <h2>Research</h2>
-        <div class="kicker">Peer-readable, self-published</div>
+        <div class="kicker">Three working papers</div>
       </div>
-      <p class="sec-intro">The paper that the books and the practice both come out of: a
-      single-case study of a merchant rail built to be auditable before it is profitable.</p>
+      <p class="sec-intro">The papers the books come out of — each a single-case study of a
+      system built to be auditable before it is profitable, and each candid about what has
+      not been proven yet.</p>
       <div class="featured">{research_block}</div>
     </div>
   </section>
@@ -591,7 +640,7 @@ def build():
           <h4>At a glance</h4>
           <ul>
             <li><b>Books</b> — five long-form titles</li>
-            <li><b>Research</b> — one working paper, DCAI series</li>
+            <li><b>Research</b> — three working papers, DCAI series</li>
             <li><b>Essays &amp; reports</b> — two shorter volumes</li>
             <li><b>Formats</b> — PDF, EPUB, HTML, Markdown</li>
             <li><b>Words in print</b> — {total_words:,} across the four text-native works</li>

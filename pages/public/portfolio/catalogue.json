@@ -61,6 +61,42 @@
       }
     },
     {
+      "id": "sovereign",
+      "kind": "research",
+      "title": "The Sovereign Micro-Enterprise",
+      "subtitle": "A governance-first architecture for zero-capital agentic businesses",
+      "year": "2026",
+      "pages": 33,
+      "words": null,
+      "publisher": "DCAI field report 1",
+      "licence": "CC BY 4.0",
+      "blurb": "Frontier models pushed the price of machine cognition toward zero, and the obvious inference — that any connected individual now owns a software company — proves fragile in practice. Producing is easy; operating is hard. This report documents the design, deployment and near-real-time failure forensics of a one-person, zero-capital sales and content business run entirely by autonomous agents under a governance architecture: guarded capability, a ledgered agent pattern with an idle witness, a zero-capital ladder, and effectuation-in-the-loop. Seven figures carry the anatomy, the cadence and the incident traces.",
+      "note": "Silent-failure taxonomy with detection-time bounds, offered as reusable diagnostic vocabulary.",
+      "formats": {
+        "PDF": "https://github.com/king-kunta-cpu/tapstall/raw/main/papers/sovereign-micro-enterprise.pdf",
+        "HTML": "https://github.com/king-kunta-cpu/tapstall/raw/main/papers/sovereign-micro-enterprise.html",
+        "MD": "https://github.com/king-kunta-cpu/tapstall/raw/main/papers/sovereign-micro-enterprise.md"
+      }
+    },
+    {
+      "id": "cadence",
+      "kind": "research",
+      "title": "Grounded Cadence",
+      "subtitle": "Fact-bound content operations as a governance architecture",
+      "year": "2026",
+      "pages": 17,
+      "words": null,
+      "publisher": "DCAI working paper",
+      "licence": "CC BY 4.0",
+      "blurb": "Anyone can now emit a week of social copy. Almost no one can emit it on a schedule, from a company's own facts, without inventing customers or numbers, without spending the operator's quota on a stranger, and without a silent failure looking like a green run. This paper reports a live zero-capital writing service and formalises four mechanisms with production incidents attached: fact-bound generation, value–promo cadence, capability isolation, and fail-loud operations.",
+      "note": "Honest where it matters: the Worker is in production, the test surface is documented, paying customers are zero.",
+      "formats": {
+        "PDF": "https://github.com/king-kunta-cpu/tapstall/raw/main/papers/grounded-cadence.pdf",
+        "HTML": "https://github.com/king-kunta-cpu/tapstall/raw/main/papers/grounded-cadence.html",
+        "MD": "https://github.com/king-kunta-cpu/tapstall/raw/main/papers/grounded-cadence.md"
+      }
+    },
+    {
       "id": "musk-mirror",
       "kind": "book",
       "title": "The Musk Mirror",
