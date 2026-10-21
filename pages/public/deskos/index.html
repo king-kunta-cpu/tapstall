@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DeskOS — an operator command centre that can show its working</title>
+<meta name="description" content="DeskOS is an operator command centre in ten modules: overview and ECU, units and wCells, lead hunting, outreach, approvals, and a ledger that makes every step auditable. The console is closed; access by arrangement.">
+<meta name="author" content="Courage Garikai">
+<meta property="og:title" content="DeskOS — an operator command centre that can show its working">
+<meta property="og:description" content="Ten modules, one shell, and a ledger that makes every step auditable. Examined as a design-science case in The Governable Enterprise.">
+<meta property="og:type" content="website">
+<link rel="icon" href="../portfolio/logos/deskos.svg" type="image/svg+xml">
+<style>
+  :root{
+    --night:#0a1526; --night-2:#0e1d33; --line:#1e3554; --line-2:#2b4a72;
+    --ink:#e8eef7; --dim:#96a7bd; --gold:#f0b429; --gold-2:#fcd34d; --sky:#5aa9f7;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif;
+    --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--night);color:var(--ink);
+    font:16px/1.62 var(--sans);-webkit-font-smoothing:antialiased}
+  a{color:var(--gold)}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+
+  /* masthead */
+  header.mast{position:sticky;top:0;z-index:20;background:rgba(10,21,38,.92);
+    backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+  .mast .wrap{display:flex;align-items:center;justify-content:space-between;gap:18px;
+    min-height:64px}
+  .brand{display:flex;align-items:center;gap:11px;text-decoration:none;color:var(--ink)}
+  .brand img{width:30px;height:30px;display:block}
+  .brand b{font:600 14.5px/1 var(--sans);letter-spacing:.16em;text-transform:uppercase}
+  nav.top{display:flex;gap:22px;font:600 10.5px/1 var(--sans);letter-spacing:.15em;
+    text-transform:uppercase}
+  nav.top a{color:var(--dim);text-decoration:none}
+  nav.top a:hover{color:var(--gold)}
+
+  /* hero */
+  .hero{padding:76px 0 64px;border-bottom:1px solid var(--line)}
+  .eyebrow{font:600 10.5px/1.6 var(--sans);letter-spacing:.2em;text-transform:uppercase;
+    color:var(--gold)}
+  h1{font:400 clamp(38px,5.4vw,62px)/1.06 var(--serif);letter-spacing:-.02em;margin:20px 0 22px;
+    max-width:20em}
+  h1 em{font-style:italic;color:var(--gold-2)}
+  .lede{font-size:19px;line-height:1.6;color:#c2cfdf;max-width:34em;margin:0 0 32px}
+  .cta-row{display:flex;gap:14px;flex-wrap:wrap;align-items:center}
+  .btn{display:inline-flex;align-items:center;gap:10px;padding:14px 22px;border-radius:3px;
+    text-decoration:none;font:600 11px/1 var(--sans);letter-spacing:.14em;text-transform:uppercase}
+  .btn-primary{background:var(--gold);color:#17233a}
+  .btn-primary:hover{background:var(--gold-2)}
+  .btn-ghost{border:1px solid var(--line-2);color:var(--ink)}
+  .btn-ghost:hover{border-color:var(--gold);color:var(--gold)}
+  .stat-strip{display:flex;gap:40px;flex-wrap:wrap;margin-top:46px;padding-top:26px;
+    border-top:1px solid var(--line)}
+  .stat-strip div b{display:block;font:400 30px/1 var(--serif);color:var(--gold-2)}
+  .stat-strip div span{font:600 9.5px/1.4 var(--sans);letter-spacing:.16em;
+    text-transform:uppercase;color:var(--dim)}
+
+  /* sections */
+  section{padding:66px 0;border-bottom:1px solid var(--line)}
+  .sec-head{display:flex;align-items:baseline;justify-content:space-between;gap:18px;
+    border-bottom:1px solid var(--line-2);padding-bottom:14px;margin-bottom:34px}
+  h2{font:400 30px/1.15 var(--serif);letter-spacing:-.012em;margin:0}
+  .sec-head span{font:600 9.8px/1 var(--sans);letter-spacing:.18em;text-transform:uppercase;
+    color:var(--dim)}
+  .intro{color:#b8c6d8;max-width:38em;margin:0 0 34px}
+
+  /* modules */
+  .mods{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:1px;
+    background:var(--line);border:1px solid var(--line)}
+  .mod{background:var(--night-2);padding:20px 20px 22px}
+  .mod .n{font:600 9.5px/1 var(--mono);letter-spacing:.12em;color:var(--sky)}
+  .mod h3{font:400 18px/1.25 var(--serif);margin:9px 0 7px}
+  .mod p{margin:0;font-size:13.6px;line-height:1.55;color:#9fb0c6}
+
+  /* ledger / steps */
+  .steps{counter-reset:s;list-style:none;margin:0;padding:0;display:grid;gap:0}
+  .steps li{counter-increment:s;display:grid;grid-template-columns:52px minmax(0,1fr);
+    gap:18px;padding:18px 0;border-top:1px solid var(--line)}
+  .steps li:last-child{border-bottom:1px solid var(--line)}
+  .steps li::before{content:"0" counter(s);font:600 11px/1.9 var(--mono);letter-spacing:.1em;
+    color:var(--gold)}
+  .steps b{display:block;font:600 14.5px/1.4 var(--sans);margin-bottom:3px}
+  .steps p{margin:0;color:#9fb0c6;font-size:14px;line-height:1.6}
+
+  /* rules */
+  .rules{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:26px}
+  .rule{border-left:2px solid var(--gold);padding:2px 0 2px 16px}
+  .rule b{display:block;font:600 13.5px/1.4 var(--sans);margin-bottom:4px}
+  .rule p{margin:0;font-size:13.8px;line-height:1.6;color:#9fb0c6}
+
+  /* case study */
+  .case{display:grid;grid-template-columns:1fr 1fr;gap:44px;align-items:center}
+  .case .book{border:1px solid var(--line-2);background:linear-gradient(160deg,#0e1d33,#0a1526);
+    padding:26px;border-radius:4px}
+  .case .book .k{font:600 9.5px/1 var(--sans);letter-spacing:.18em;text-transform:uppercase;
+    color:var(--gold)}
+  .case .book h3{font:400 25px/1.2 var(--serif);margin:12px 0 8px}
+  .case .book p{margin:0 0 18px;color:#9fb0c6;font-size:14px;line-height:1.6}
+
+  /* access */
+  .access{background:var(--night-2);border:1px solid var(--line);padding:34px;
+    display:grid;grid-template-columns:1.2fr .8fr;gap:34px;align-items:center;border-radius:4px}
+  .access h2{margin-bottom:10px}
+  .access p{margin:0;color:#a9b8cb;font-size:15px;max-width:34em}
+  .access .right{display:grid;gap:10px}
+  .access .right a{display:flex;justify-content:space-between;gap:12px;text-decoration:none;
+    border:1px solid var(--line-2);padding:13px 15px;border-radius:3px;color:var(--ink);
+    font:600 11px/1 var(--sans);letter-spacing:.1em;text-transform:uppercase}
+  .access .right a:hover{border-color:var(--gold);color:var(--gold)}
+  .access .right a span{color:var(--dim);font-weight:400;letter-spacing:.04em;
+    text-transform:none;font-family:var(--mono);font-size:11.5px}
+
+  footer{padding:40px 0 64px;color:var(--dim);font-size:13px}
+  footer .wrap{display:flex;justify-content:space-between;gap:18px;flex-wrap:wrap}
+  footer a{color:var(--dim);text-decoration:underline;text-underline-offset:2px}
+  footer a:hover{color:var(--gold)}
+
+  @media (max-width:820px){
+    .case,.access{grid-template-columns:1fr;gap:26px}
+    .stat-strip{gap:26px}
+    nav.top{gap:14px;font-size:9.5px}
+    .hero{padding:54px 0 46px}
+  }
+  @media (max-width:520px){
+    .mast .wrap{flex-direction:column;align-items:flex-start;gap:10px;padding-top:14px;
+      padding-bottom:12px}
+    .stat-strip div b{font-size:25px}
+  }
+</style>
+</head>
+<body>
+
+<header class="mast">
+  <div class="wrap">
+    <a class="brand" href="./"><img src="../portfolio/logos/deskos.svg" alt="" width="30" height="30"><b>DeskOS</b></a>
+    <nav class="top">
+      <a href="#modules">Modules</a>
+      <a href="#ledger">Ledger</a>
+      <a href="#rules">Rules</a>
+      <a href="#case">Case study</a>
+      <a href="#access">Access</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+  <section class="hero">
+    <div class="wrap">
+      <div class="eyebrow">Operator command centre · STPi</div>
+      <h1>Every step an operator takes, <em>written down and answerable.</em></h1>
+      <p class="lede">DeskOS runs the operating day in one shell: units and wCells, lead hunting,
+      outreach, approvals, and a ledger that makes each step auditable after the fact. Ten modules,
+      one console — built for the case where someone will later ask <i>who decided this, on what
+      evidence, and who authorised it.</i></p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="#access">Request access</a>
+        <a class="btn btn-ghost" href="#modules">See the ten modules</a>
+      </div>
+      <div class="stat-strip">
+        <div><b>10</b><span>Modules, one shell</span></div>
+        <div><b>~300 KB</b><span>Served application</span></div>
+        <div><b>1</b><span>Ledger behind every step</span></div>
+        <div><b>$0</b><span>Infrastructure cost</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="modules">
+    <div class="wrap">
+      <div class="sec-head"><h2>Ten modules</h2><span>One operating day</span></div>
+      <p class="intro">The console is not a dashboard bolted onto a spreadsheet. Each module is a
+      step of the same loop, and each writes to the same ledger.</p>
+      <div class="mods">
+        <div class="mod"><div class="n">01</div><h3>Overview &amp; ECU</h3>
+          <p>The operating day at a glance, with the exception control unit naming what is overdue,
+          stuck, or waiting on a person.</p></div>
+        <div class="mod"><div class="n">02</div><h3>Units</h3>
+          <p>Every unit of work — a candidate, a campaign, a stock line — with its owner, its state
+          and its history.</p></div>
+        <div class="mod"><div class="n">03</div><h3>wCells</h3>
+          <p>Work cells: the small, bounded queues that a thing moves through. A cell has an entry
+          rule and an exit rule, not a mood.</p></div>
+        <div class="mod"><div class="n">04</div><h3>Lead hunting</h3>
+          <p>Country-specific sources swept on a schedule, deduplicated and admitted under rules
+          rather than scraped into a list.</p></div>
+        <div class="mod"><div class="n">05</div><h3>Admission</h3>
+          <p>Nothing enters the pipeline without passing the gate. A record that fails is refused
+          before it exists, not deleted after.</p></div>
+        <div class="mod"><div class="n">06</div><h3>Scoring</h3>
+          <p>Each candidate is scored against a real profile, and the score kept with the evidence
+          that produced it.</p></div>
+        <div class="mod"><div class="n">07</div><h3>Outreach</h3>
+          <p>Drafts prepared for a human decision. Approval sends from the operator's own mailbox;
+          rejection removes the artefacts on the spot.</p></div>
+        <div class="mod"><div class="n">08</div><h3>Approvals</h3>
+          <p>The queue where a person spends a minute and the machine spends a day. Every decision
+          is attributed.</p></div>
+        <div class="mod"><div class="n">09</div><h3>Touch log</h3>
+          <p>Who was contacted, when, from which mailbox, and what came back — including the
+          do-not-contact list, which nothing overrides.</p></div>
+        <div class="mod"><div class="n">10</div><h3>Ledger</h3>
+          <p>The append-only record that makes the other nine auditable. If it is not in the
+          ledger, it did not happen.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="ledger">
+    <div class="wrap">
+      <div class="sec-head"><h2>How a unit moves</h2><span>Same loop, every time</span></div>
+      <ol class="steps">
+        <li><div><b>Discovery</b><p>Sources are swept inside a quota. A sweep that would exceed it
+        waits; it does not silently truncate.</p></div></li>
+        <li><div><b>Admission</b><p>The gate applies the rules — region, duplicates, the
+        do-not-contact ledger — and refuses before a record is created.</p></div></li>
+        <li><div><b>Preparation</b><p>Work is drafted against facts the operator can check. No
+        invented history, no invented numbers.</p></div></li>
+        <li><div><b>Decision</b><p>A person approves or rejects. Nothing with an outward effect
+        happens without that tap.</p></div></li>
+        <li><div><b>Effect</b><p>Approval sends and is attributed; rejection deletes the drafts.
+        Either way the ledger keeps the decision, not just the outcome.</p></div></li>
+        <li><div><b>Review</b><p>The exception control unit surfaces what failed and why — the
+        part most tools leave to memory.</p></div></li>
+      </ol>
+    </div>
+  </section>
+
+  <section id="rules">
+    <div class="wrap">
+      <div class="sec-head"><h2>What it refuses to do</h2><span>Design, not policy</span></div>
+      <div class="rules">
+        <div class="rule"><b>It never sends unattended</b><p>A person approves each outward action.
+        The machine can prepare a day's work; it cannot commit it.</p></div>
+        <div class="rule"><b>It never invents a record</b><p>Every field traces to a source the
+        operator can inspect. Where the evidence is thin, the output says so.</p></div>
+        <div class="rule"><b>It never overrides the do-not-contact list</b><p>The exclusion is
+        checked at admission, so a blocked party is never prepared for in the first place.</p></div>
+        <div class="rule"><b>It never hides a failure</b><p>Runs are bounded and fail loudly, with
+        the log streaming. A quiet failure is treated as a defect.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="case">
+    <div class="wrap">
+      <div class="case">
+        <div>
+          <h2>The case study</h2>
+          <p class="intro" style="margin-top:14px">DeskOS is examined as a bounded design-science
+          case rather than a product-success claim: what was built, what it refused to do, and
+          which of its failures were structural. The method is in the book; the console stays with
+          the operator.</p>
+          <a class="btn btn-ghost" href="../portfolio/#card-governable">Read about the book</a>
+        </div>
+        <div class="book">
+          <div class="k">Case study · first edition</div>
+          <h3>The Governable Enterprise</h3>
+          <p>A practical guide to evidence, authority and AI operations — 24 chapters, 10 operating
+          tools, built from running DeskOS. Constructed examples are identified as such.</p>
+          <a class="btn btn-ghost" href="../portfolio/#card-governable">Open the entry</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="access" style="border-bottom:0">
+    <div class="wrap">
+      <div class="access">
+        <div>
+          <h2>Access by arrangement</h2>
+          <p style="margin-top:12px">DeskOS is a working console, not a public demo. It runs live;
+          the screens are not published, and there is no sign-up button. Access is granted to an
+          operator who will run it, after a short conversation about what the console would have to
+          be accountable for in that business.</p>
+        </div>
+        <div class="right">
+          <a href="mailto:couragegarikai@atomicmail.io?subject=DeskOS%20access">Email<span>couragegarikai@atomicmail.io</span></a>
+          <a href="https://wa.me/263784600904">WhatsApp<span>+263 78 460 0904</span></a>
+          <a href="tel:+263779674212">Calls<span>+263 77 967 4212</span></a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div><b>DeskOS</b> · Jacaranda Labs · Harare · 2026</div>
+    <div><a href="../portfolio/">Catalogue</a> · <a href="https://jacaranda-labs.whop.site/">Jacaranda Labs</a></div>
+  </div>
+</footer>
+
+</body>
+</html>

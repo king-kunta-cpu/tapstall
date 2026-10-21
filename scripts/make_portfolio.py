@@ -380,7 +380,8 @@ BUILT = [
         "title": "DeskOS",
         "logo": "logos/deskos.svg",
         "role": "Architect · operator command centre",
-        "url": None,
+        "url": "deskos/",
+        "cta": True,
         "access": "Closed console — access by arrangement",
         "demo": [],
         "what": ("An operator command centre in ten modules: overview and ECU, units and wCells, "
@@ -478,11 +479,22 @@ SKILLS = [
 ]
 
 CONTACT = [
-    ("Email", "mawangochengetai@gmail.com", "mailto:mawangochengetai@gmail.com"),
+    ("Email", "couragegarikai@atomicmail.io", "mailto:couragegarikai@atomicmail.io"),
+    ("Calls", "+263 77 967 4212", "tel:+263779674212"),
     ("WhatsApp", "+263 78 460 0904", "https://wa.me/263784600904"),
     ("Telegram", "+263 78 460 0904", "https://t.me/+263784600904"),
-    ("Source", "github.com/king-kunta-cpu", "https://github.com/king-kunta-cpu"),
     ("Press & permissions", "Jacaranda Labs, Harare", None),
+]
+
+# The source link is replaced by the storefronts a reader can actually visit. Every URL
+# here is checked live; a store that is not published yet is not linked.
+SITES = [
+    ("Jacaranda Labs", "jacaranda-labs.whop.site", "https://jacaranda-labs.whop.site/"),
+    ("Tapstall", "tapstall.zlnew.workers.dev", "https://tapstall.zlnew.workers.dev/"),
+    ("ContentOps", "contentops-edge.simalidudu.workers.dev/demo",
+     "https://contentops-edge.simalidudu.workers.dev/demo"),
+    ("DeskOS", "king-kunta-cpu.github.io/tapstall/deskos",
+     "https://king-kunta-cpu.github.io/tapstall/deskos/"),
 ]
 
 KIND_LABEL = {"book": "Book", "research": "Research", "essay": "Essay & field report"}
@@ -893,6 +905,11 @@ section{padding:66px 0 10px}
 /* contact */
 .contact{display:grid;grid-template-columns:1.1fr .9fr;gap:48px;align-items:start}
 .contact-list{list-style:none;margin:0;padding:0}
+.sites-label{font:600 10px/1 var(--sans);letter-spacing:.19em;text-transform:uppercase;
+  color:var(--muted);margin:26px 0 4px;padding-top:20px;border-top:1px solid var(--rule)}
+.contact-list.sites li .c-value a{color:var(--ink)}
+.contact-list.sites li .c-value{font-variant-numeric:tabular-nums;text-align:right;
+  overflow-wrap:anywhere;font-size:12.5px}
 .contact-list li{display:flex;justify-content:space-between;gap:18px;align-items:baseline;
   padding:13px 0;border-bottom:1px solid var(--rule)}
 .c-label{font:600 10px/1.3 var(--sans);letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
@@ -991,6 +1008,10 @@ def build():
     builds = "".join(built_card(b, i + 1) for i, b in enumerate(BUILT))
     skills = skills_block()
     contacts = contact_block()
+    sites = "".join(
+        f'<li><span class="c-label">{esc(name)}</span>'
+        f'<span class="c-value"><a href="{esc(url)}" target="_blank" rel="noopener">{esc(shown)}</a></span></li>'
+        for name, shown, url in SITES)
     research_block = "".join(featured_card(w) for w in research)
     rows = "".join(shelf_row(w) for w in essays)
 
@@ -1146,7 +1167,8 @@ def build():
           <h4>Correspondence</h4>
           <ul>
             <li>Press and permissions — Jacaranda Labs, Harare</li>
-            <li>Source and errata — <a href="{REPO}">the repository</a></li>
+            <li>Email — <a href="mailto:couragegarikai@atomicmail.io">couragegarikai@atomicmail.io</a></li>
+            <li>Calls — <a href="tel:+263779674212">+263 77 967 4212</a></li>
           </ul>
         </aside>
       </div>
@@ -1170,7 +1192,11 @@ def build():
           uses it, and what happens today when it fails. If the answer is "nothing yet", that
           is a fine place to start.</p>
         </div>
-        <ul class="contact-list">{contacts}</ul>
+        <div>
+          <ul class="contact-list">{contacts}</ul>
+          <div class="sites-label">Where it runs</div>
+          <ul class="contact-list sites">{sites}</ul>
+        </div>
       </div>
     </section>
   </div>

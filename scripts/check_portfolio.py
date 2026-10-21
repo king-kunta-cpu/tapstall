@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SITE = ROOT / "pages" / "public" / "portfolio"
+SITE = ROOT / "pages" / "public"   # the portfolio and every page published beside it
 
 # Hosts that must never be named in public output: closed consoles, internal
 # manuals, retired products. Substring match, case-insensitive.
@@ -61,7 +61,7 @@ GOOGLE_PATTERNS = [
 ]
 
 # Only the address the author chose to publish may appear.
-ALLOWED_EMAILS = {"mawangochengetai@gmail.com"}
+ALLOWED_EMAILS = {"couragegarikai@atomicmail.io"}
 EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 
 TEXT_SUFFIXES = {".html", ".htm", ".json", ".css", ".js", ".svg", ".md", ".txt", ".xml"}
