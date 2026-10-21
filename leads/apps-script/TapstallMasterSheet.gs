@@ -84,7 +84,9 @@ function tpsProps_() {
     syncTab: p.getProperty('TPS_SYNC_TAB') || TPS_DEFAULTS.SYNC_TAB,
     pipeTab: p.getProperty('TPS_PIPE_TAB') || TPS_DEFAULTS.PIPE_TAB,
     // set TPS_INCLUDE_UNSOURCED=true only to import the pre-gate backlog knowingly
-    includeUnsourced: String(p.getProperty('TPS_INCLUDE_UNSOURCED') || '').toLowerCase() === 'true'
+    includeUnsourced: String(p.getProperty('TPS_INCLUDE_UNSOURCED') || '').toLowerCase() === 'true',
+    // Tab 4 has one owner. It is not this file unless somebody says so.
+    ownQueue: String(p.getProperty('TPS_OWN_QUEUE') || '').toLowerCase() === 'true'
   };
 }
 
@@ -472,6 +474,12 @@ function tpsPost_(url, body) {
  */
 function tapstallRebuildQueue() {
   var cfg = tpsProps_();
+  if (!cfg.ownQueue) {
+    return tpsAlert_('Tab 4 is owned by the STPi/DeskOS script — its refreshTomorrowQueue() reads every '
+      + 'row of Tab 3, Tapstall rows included, so they already appear in tomorrow\'s queue.\n\n'
+      + 'Two writers clearing and rewriting one view is how rows flicker and disappear. If you ever want '
+      + 'this file to own Tab 4 instead, set TPS_OWN_QUEUE = true in Script Properties.');
+  }
   var crm = tpsCrm_(cfg);
   var cols = tpsColumns_(crm);
   var last = crm.getLastRow();
@@ -622,9 +630,13 @@ function tapstallInstallTriggers() {
     if (h === 'tapstallSyncTick' || h === 'tapstallQueueTick') ScriptApp.deleteTrigger(all[i]);
   }
   ScriptApp.newTrigger('tapstallSyncTick').timeBased().everyHours(2).create();
-  ScriptApp.newTrigger('tapstallQueueTick').timeBased().atHour(6).everyDays(1).create();
-  tpsAlert_('On. Tapstall syncs and pushes stages every 2 hours; the queue rebuilds at 06:00.\n\n'
-    + 'The other engines\' triggers are untouched.');
+  // Tab 4 is rebuilt by the STPi/DeskOS script (menu item 8, its daily trigger and its morning
+  // digest all call refreshTomorrowQueue). A second writer would clear and rewrite the same view
+  // twice a day, so this file only rebuilds it if somebody explicitly asks it to (TPS_OWN_QUEUE).
+  if (tpsProps_().ownQueue) ScriptApp.newTrigger('tapstallQueueTick').timeBased().atHour(6).everyDays(1).create();
+  tpsAlert_('On. Tapstall syncs and pushes stages every 2 hours.\n\n'
+    + (tpsProps_().ownQueue ? 'Tab 4 rebuild: ON (TPS_OWN_QUEUE=true).' : 'Tab 4 is left to the STPi/DeskOS script, which already includes Tapstall rows.')
+    + '\nThe other engines\' triggers are untouched.');
 }
 
 function tapstallRemoveTriggers() {
@@ -632,23 +644,60 @@ function tapstallRemoveTriggers() {
   var n = 0;
   for (var i = 0; i < all.length; i++) {
     var h = all[i].getHandlerFunction();
-    if (h === 'tapstallSyncTick' || h === 'tapstallQueueTick') { ScriptApp.deleteTrigger(all[i]); n++; }
+    if (h === 'tapstallSyncTick' || h === 'tapstallQueueTick' || h === 'tpsOnOpen') { ScriptApp.deleteTrigger(all[i]); n++; }
   }
   tpsAlert_(n ? 'Tapstall timers removed. The other engines keep theirs.' : 'No Tapstall timers were installed.');
 }
 
-function onOpen() {
-  var ui = SpreadsheetApp.getUi();
-  ui.createMenu('⚡ Tapstall')
-    .addItem('Sync Tapstall leads now', 'tapstallSyncNow')
-    .addItem('Push stage changes to Tapstall', 'tapstallPushStages')
-    .addSeparator()
-    .addItem('Rebuild tomorrow\'s queue (all engines)', 'tapstallRebuildQueue')
-    .addItem('Pipeline health', 'tapstallStatus')
-    .addSeparator()
-    .addItem('Turn on 2-hour sync', 'tapstallInstallTriggers')
-    .addItem('Turn off Tapstall timers', 'tapstallRemoveTriggers')
-    .addToUi();
+/**
+ * The menu is built by an INSTALLABLE on-open trigger, not by an `onOpen` function.
+ *
+ * The sheet's existing Code.gs already defines `onOpen`. Two functions with the same name in one
+ * Apps Script project do not merge — one replaces the other, silently, and the menu that loses is
+ * whichever file the editor loaded last. So this file has no `onOpen` at all: it registers
+ * `tpsOnOpen` as a spreadsheet on-open trigger instead, and both menus appear, each owned by the
+ * file that builds it.
+ *
+ * Run `tapstallInstallAll` once from the editor to register it (that is also what turns on the
+ * 2-hour sync). Nothing else in the project is touched.
+ */
+function tpsOnOpen(e) {
+  void e;
+  try {
+    SpreadsheetApp.getUi().createMenu('⚡ Tapstall')
+      .addItem('Sync Tapstall leads now', 'tapstallSyncNow')
+      .addItem('Push stage changes to Tapstall', 'tapstallPushStages')
+      .addSeparator()
+      .addItem('Pipeline health', 'tapstallStatus')
+      .addItem('Rebuild Tab 4 myself (only if STPi/DeskOS stops owning it)', 'tapstallRebuildQueue')
+      .addSeparator()
+      .addItem('Turn on 2-hour sync', 'tapstallInstallTriggers')
+      .addItem('Turn off Tapstall timers', 'tapstallRemoveTriggers')
+      .addToUi();
+  } catch (err) { tpsLog_('menu: ' + String(err && err.message || err)); }
+}
+
+/** One function to run once, from the Apps Script editor, after pasting this file. */
+function tapstallInstallAll() {
+  var cfg = tpsProps_();
+  if (!cfg.key) return tpsAlert_('Set TAPSTALL_SHEET_KEY in Project Settings → Script Properties first.\n\n'
+    + 'The key is in ~/SHEET-KEY.txt on the build machine.');
+  tpsInstallMenuTrigger_();
+  tapstallInstallTriggers();
+  tpsOnOpen({});
+  return tpsAlert_('Tapstall is installed.\n\n'
+    + 'Menu: ⚡ Tapstall (also visible after the next reload).\n'
+    + 'Sync + stage push: every 2 hours.\n'
+    + 'Tab 4 stays owned by the STPi/DeskOS script — it already reads every row of Tab 3, so Tapstall '
+    + 'leads appear in tomorrow\'s queue without this file touching it.');
+}
+
+function tpsInstallMenuTrigger_() {
+  var all = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < all.length; i++) {
+    if (all[i].getHandlerFunction() === 'tpsOnOpen') ScriptApp.deleteTrigger(all[i]);
+  }
+  ScriptApp.newTrigger('tpsOnOpen').forSpreadsheet(SpreadsheetApp.getActiveSpreadsheet()).onOpen().create();
 }
 
 function tpsAlert_(msg) {

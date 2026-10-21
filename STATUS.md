@@ -20,6 +20,17 @@ DeskOS into one 17-column contact ledger. Tapstall is now the third engine, with
 - **416/416** (the GAS file is tested too: a VM with faked Spreadsheet/UrlFetch/Properties/Lock
   globals, asserting the row it produces and that a second run adds nothing).
 - Docs: `docs/CRM-SHEET.md`.
+- **Checked against their live script, not assumed.** `stpi-deskos…/deskos/master-sheet-code.gs`
+  (32 KB, 200) was fetched and read. It found two collisions and both are now gone:
+  their `Code.gs` defines `onOpen`, so a second `onOpen` in the same Apps Script project would
+  silently replace one of the two menus — this file now has none and installs `tpsOnOpen` as a
+  spreadsheet on-open trigger via one function, `tapstallInstallAll`. And their
+  `refreshTomorrowQueue()` already reads *every* row of Tab 3 with no engine filter, so Tapstall rows
+  appear in Tab 4 and in their morning digest without this file touching it — so it no longer touches
+  it (`TPS_OWN_QUEUE` opts in). Their `indexExisting_` dedupes on Lead ID / email / website, which is
+  why our IDs are namespaced `tapstall-`.
+- **The 47 pre-gate leads were deleted** from production KV after reading every one (47 removed,
+  0 failed); the single real lead, Cainway Holdings, was kept. The queue is 1 row.
 
 ## v1.9.0 (2026-10-21): discovery stops being one source in one country
 

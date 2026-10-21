@@ -136,7 +136,7 @@ function load(book, opts = {}) {
   const wrapped = new Function(...Object.keys(ctx), SRC + '\n;return {' + [
     'tpsLeadToRow_', 'tpsLeadId_', 'tpsStageAction_', 'tpsIsDue_', 'tpsSegmentLabel_', 'tpsChannel_',
     'tpsDiscussion_', 'tpsNextAction_', 'tpsIsTerminal_', 'tapstallSyncNow', 'tapstallPushStages',
-    'tapstallRebuildQueue', 'tpsProps_',
+    'tapstallRebuildQueue', 'tpsProps_', 'tpsOnOpen',
   ].join(',') + '};');
   const api = wrapped(...Object.values(ctx));
   api._calls = calls;
@@ -310,10 +310,10 @@ test('stages are pushed once, on change, and only for Tapstall rows', () => {
   assert.equal(lastLine[2], 'dnc', 'and it was the do-not-contact action that was refused, which matters');
 });
 
-test('the queue rebuild is engine-aware and never queues a dead lead', () => {
+test('the queue rebuild is engine-aware and never queues a dead lead (when this file is told to own Tab 4)', () => {
   const book = crmBook();
   const api = load(book, {
-    props: { TAPSTALL_SHEET_KEY: 'k'.repeat(32) },
+    props: { TAPSTALL_SHEET_KEY: 'k'.repeat(32), TPS_OWN_QUEUE: 'true' },
     responses: [() => ({ code: 200, body: { ok: true, leads: [LEAD] } })],
   });
   api.tapstallSyncNow();
@@ -364,4 +364,32 @@ test('the pre-gate backlog in the live queue is counted, not imported as prospec
   });
   api2.tapstallSyncNow();
   assert.equal(book2.getSheetByName('3_CRM_Who_We_Talked_To').values.length, 5, 'with the property set, all three land');
+});
+
+test('it does not fight the STPi/DeskOS script for the two shared surfaces', () => {
+  // 1. the menu. Their Code.gs defines onOpen; a second onOpen in the same project silently
+  //    replaces one of the two menus, so this file must not define one.
+  assert.ok(!/^function onOpen\s*\(/m.test(SRC), 'no onOpen in the Tapstall file');
+  assert.match(SRC, /function tpsOnOpen\(/, 'the menu is built by an installable on-open trigger instead');
+  assert.match(SRC, /newTrigger\('tpsOnOpen'\)\.forSpreadsheet\([\s\S]{0,80}onOpen\(\)/, 'registered on the spreadsheet, not globally');
+
+  // 2. Tab 4. Their refreshTomorrowQueue() clears and rewrites it from every row of Tab 3, so
+  //    Tapstall rows land there without this file touching it. A second writer would flicker.
+  const api = load(crmBook(), { props: { TAPSTALL_SHEET_KEY: 'k'.repeat(32) } });
+  assert.equal(api.tpsProps_().ownQueue, false, 'Tab 4 is not ours by default');
+  const msg = api.tapstallRebuildQueue();
+  assert.match(String(msg), /owned by the STPi\/DeskOS script/, 'and it says whose it is instead of writing');
+
+  // 3. the columns we write are the ones their indexExisting_ and ingestLeadList_ read
+  const row = api.tpsLeadToRow_(LEAD, { owner: 'simali', today: '2026-10-21' });
+  assert.equal(row[0].indexOf('tapstall-'), 0, 'Lead ID — their dedupe keys on this and will not re-add us');
+  assert.ok(row[12] || row[13], 'email or website — also in their dedupe index');
+  assert.equal(row[16], 'tapstall', 'Source — their Tab 4 rebuild reads all rows, so this is what labels us');
+});
+
+test('the install path is one function, and it does not install a Tab 4 timer unless asked', () => {
+  assert.match(SRC, /function tapstallInstallAll\(/, 'one thing to run from the editor');
+  assert.match(SRC, /tpsInstallMenuTrigger_\(\)/, 'which installs the menu trigger');
+  assert.match(SRC, /if \(tpsProps_\(\)\.ownQueue\) ScriptApp\.newTrigger\('tapstallQueueTick'\)/,
+    'and the Tab 4 timer only when TPS_OWN_QUEUE is true');
 });
