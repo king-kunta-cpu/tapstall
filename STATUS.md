@@ -26,6 +26,13 @@ grey pills that read like debug output: `Prices in USD` · `● Closed — opens
   closed week: header height 77 px on desktop, 114 px when a name needs two lines, no
   horizontal overflow anywhere.
 
+**Live (v1.5.6).** `4e10d4f`, deploy run `39589120462` — worker + pages, `success`.
+`/__ping` → `{"ok":true,"version":"1.5.6"}`. `/s/mamatoe` reads: mark `MT`, name
+`Mama Too Catering`, pill `pill shut` / `Closed — opens Mon at 09:00`, meta
+`Prices in USD · Share · WhatsApp`, share door `share.txt` with the spoken label. The shelf,
+the options sheet, the cart bar and the pairs all still behave; `scrollWidth == clientWidth ==
+390` on a phone and no page errors.
+
 ## v1.5.5 (2026-10-21): one storefront per trade
 
 The owner's objection was that every shop got the same card in a different colour. A food
