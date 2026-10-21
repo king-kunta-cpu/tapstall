@@ -82,7 +82,9 @@ function tpsProps_() {
     crmTab: p.getProperty('TPS_CRM_TAB') || TPS_DEFAULTS.CRM_TAB,
     queueTab: p.getProperty('TPS_QUEUE_TAB') || TPS_DEFAULTS.QUEUE_TAB,
     syncTab: p.getProperty('TPS_SYNC_TAB') || TPS_DEFAULTS.SYNC_TAB,
-    pipeTab: p.getProperty('TPS_PIPE_TAB') || TPS_DEFAULTS.PIPE_TAB
+    pipeTab: p.getProperty('TPS_PIPE_TAB') || TPS_DEFAULTS.PIPE_TAB,
+    // set TPS_INCLUDE_UNSOURCED=true only to import the pre-gate backlog knowingly
+    includeUnsourced: String(p.getProperty('TPS_INCLUDE_UNSOURCED') || '').toLowerCase() === 'true'
   };
 }
 
@@ -320,7 +322,7 @@ function tapstallSyncNow() {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(30000)) return tpsAlert_('Another sync is still running. Try again in a moment.');
 
-  var out = { added: 0, seen: 0, skipped: 0, error: '' };
+  var out = { added: 0, seen: 0, skipped: 0, unattributed: 0, error: '' };
   try {
     var crm = tpsCrm_(cfg);
     var cols = tpsColumns_(crm);
@@ -351,6 +353,12 @@ function tapstallSyncNow() {
       // a lead with no way to answer is not a lead; Tapstall should not send one, and the sheet
       // must not invent one
       if (!lead.phone && !lead.email && !lead.source_url) { out.skipped++; continue; }
+      // Every lead filed since the gate existed carries a source (a directory, the map, the partners
+      // page). A row with none predates it, and in the live queue those are page titles — "WhatsApp
+      // Web", "Order - definition of order", a bank's charges calculator. Importing them would put
+      // forty pieces of nothing in front of the first seller, so they are counted and left where
+      // they are, visible, rather than quietly dropped or quietly imported.
+      if (!String(lead.source || '').trim() && !cfg.includeUnsourced) { out.unattributed++; continue; }
       var row = tpsLeadToRow_(lead, { owner: cfg.owner });
       // pad to the table width if another engine added columns after ours
       while (row.length < cols.width) row.push('');
@@ -365,10 +373,11 @@ function tapstallSyncNow() {
     }
 
     tpsLog_('sync: ' + out.added + ' added, ' + out.skipped + ' already known, ' + out.seen + ' in feed');
-    tpsWritePipeline_(cfg, { added: out.added, seen: out.seen, skipped: out.skipped, via: feed.via, at: feed.at });
+    tpsWritePipeline_(cfg, { added: out.added, seen: out.seen, skipped: out.skipped, unattributed: out.unattributed, via: feed.via, at: feed.at });
     PropertiesService.getScriptProperties().setProperty('TPS_LAST_SYNC', new Date().toISOString());
     return tpsAlert_('Tapstall: ' + out.added + ' new lead' + (out.added === 1 ? '' : 's')
-      + ' added to ' + cfg.crmTab + ' (' + out.seen + ' in the queue, ' + out.skipped + ' already here).'
+      + ' added to ' + cfg.crmTab + ' (' + out.seen + ' in the queue, ' + out.skipped + ' already here'
+      + (out.unattributed ? ', ' + out.unattributed + ' with no source and therefore not imported' : '') + ').'
       + (out.added ? '\n\nStage them there as you work them; the sheet pushes the stage back to Tapstall.' : ''));
   } finally {
     lock.releaseLock();
@@ -559,6 +568,7 @@ function tpsWritePipeline_(cfg, patch) {
     ['Last run', state.last_run || 'never'],
     ['Last feed size', state.seen || 0],
     ['Added last sync', state.added || 0],
+    ['Skipped: no source (pre-gate rows)', state.unattributed || 0],
     ['Stages pushed last run', state.pushed || 0],
     ['Refused last run', state.failed || 0],
     ['Last error', state.error || 'none'],

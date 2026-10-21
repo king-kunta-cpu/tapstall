@@ -339,3 +339,29 @@ test('the sheet never sends anything, and never holds the platform admin secret'
   // and the one thing it must never do: create a contact that Tapstall did not find
   assert.ok(!/String\(Math\.random|fake|placeholder|dummy/i.test(SRC), 'nothing invents a contact');
 });
+
+test('the pre-gate backlog in the live queue is counted, not imported as prospects', () => {
+  const book = crmBook();
+  const junk = [
+    { id: 'ld_j1', business: 'Ecocash Charges Calculator 2026 - USD | Econet', segment: 'other', country: 'ZW', phone: '263771112223' },
+    { id: 'ld_j2', business: 'Order - definition of order by The Free Dictionary', segment: 'other', country: 'ZW', email: 'x@dict.example' },
+  ];
+  const api = load(book, {
+    props: { TAPSTALL_SHEET_KEY: 'k'.repeat(32) },
+    responses: [() => ({ code: 200, body: { ok: true, leads: [...junk, LEAD] } })],
+  });
+  api.tapstallSyncNow();
+  const sheet = book.getSheetByName('3_CRM_Who_We_Talked_To');
+  const ids = sheet.values.slice(2).map((r) => r[0]);
+  assert.deepEqual(ids, ['tapstall-ld_a1b2c3'], 'only the lead with a source was filed');
+  assert.equal(JSON.parse(api._props.get('TPS_STATE')).unattributed, 2, 'and the two were counted, not silently dropped');
+
+  // the escape hatch exists for the day somebody wants the backlog on purpose
+  const book2 = crmBook();
+  const api2 = load(book2, {
+    props: { TAPSTALL_SHEET_KEY: 'k'.repeat(32), TPS_INCLUDE_UNSOURCED: 'true' },
+    responses: [() => ({ code: 200, body: { ok: true, leads: [...junk, LEAD] } })],
+  });
+  api2.tapstallSyncNow();
+  assert.equal(book2.getSheetByName('3_CRM_Who_We_Talked_To').values.length, 5, 'with the property set, all three land');
+});

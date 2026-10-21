@@ -63,6 +63,14 @@ reported, so a new word is visible rather than silent):
 
 A trailing date or note (`Trial link sent 21/10`) still maps, because people type like people.
 
+## The pre-gate backlog
+
+The live queue still holds 47 rows filed before the gate existed — page titles like *WhatsApp Web*,
+*Order - definition of order*, a bank's charges calculator. They carry no `source`, and a lead whose
+hook nobody can check is not a lead. The sync **counts** them (`Skipped: no source`) and does not
+import them; nothing is deleted. Set `TPS_INCLUDE_UNSOURCED = true` only if you ever want that
+backlog in the sheet on purpose.
+
 ## What it will never do
 
 - Send an email, a WhatsApp, a DM or a post. There is no mail surface in the file; a test fails if
