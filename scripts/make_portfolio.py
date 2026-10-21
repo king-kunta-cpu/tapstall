@@ -652,7 +652,8 @@ section{padding:66px 0 10px}
 .cover{background:var(--panel);color:var(--panel-ink);aspect-ratio:3/4.3;padding:20px 19px;
   display:flex;flex-direction:column;justify-content:space-between;position:relative;
   overflow:hidden}
-.cover.has-art{background:#efece4;padding:0;display:block;overflow:hidden}
+.cover.has-art{background:#fff;padding:0;display:block;overflow:hidden;
+  border:1px solid #d8d3c6;box-shadow:0 10px 24px -14px rgba(20,18,16,.45)}
 .cover.has-art img{width:100%;height:100%;object-fit:contain;display:block;background:#fff}
 .cover.has-art::after{display:none}
 .cover::after{content:"";position:absolute;inset:0;
