@@ -17,7 +17,8 @@ import {
   stripTags, usableHost, hostOf, businessFromTitle, hookFor, readPageEvidence, candidateLead,
   discoverySummary, runDiscovery, placeOf, COUNTRY_NAMES, admitCandidate, phonePlausible,
   marketMention, MARKET_CITIES, overpassQuery, parseOverpass, OSM_TAGS, OSM_CITIES, OVERPASS_URL,
-  OVERPASS_MIRRORS, OVERPASS_TIMEOUTS,
+  OVERPASS_MIRRORS, OVERPASS_TIMEOUTS, parseDirectory, parseDirectoryIndex, DIRECTORY_KEYWORDS,
+  DIRECTORY_INDEX,
 } from '../worker/discover.js';
 import { LEAD_SEGMENTS, PARTNER_TIERS, PARTNER_TIER_KEYS, cleanLead, cleanLeadEvidence } from '../worker/core.js';
 
@@ -146,6 +147,9 @@ test('a candidate carries the page it came from, and the pipeline keeps that pro
     { has_whatsapp: true, has_order_button: false, has_price_page: false, page_checked: true }, 'only a real true counts');
 });
 
+/** A directory source with no categories: for tests that are about another source. */
+const EMPTY_DIR = async () => ({ ok: true, text: async () => '<html><body><a href="/x">nothing</a></body></html>' });
+
 test('the gate refuses a platform, a stranger, a slogan and a dead end — the first live pass taught it', () => {
   const page = (title, extra = '') => '<html><head><title>' + title + '</title></head><body>'
     + '<h1>Websites for restaurants in Harare</h1><a href="mailto:hello@harareweb.example">mail</a>' + extra + '</body></html>';
@@ -206,6 +210,7 @@ test('the gate refuses a platform, a stranger, a slogan and a dead end — the f
 
 test('a run files only what the gate admitted, and says what it refused', async () => {
   const fetcher = async (url) => {
+    if (String(url).includes('classifieds.co.zw')) return EMPTY_DIR();
     if (String(url).includes('overpass')) return { ok: true, text: async () => '{"elements":[]}' };
     if (String(url).includes('bing.com/search')) {
       return { ok: true, text: async () => '<rss><channel>'
@@ -220,10 +225,11 @@ test('a run files only what the gate admitted, and says what it refused', async 
     return { ok: true, text: async () => '<html><title>Jakarta Studio</title><body>Jakarta agencies.'
       + '<a href="mailto:hi@jakarta-studio.example">mail</a></body></html>' };
   };
-  const run = await runDiscovery({ fetch: fetcher, perRun: 2, limit: 4, perQuery: 3, countries: ['ZW'], nowMs: 20747 * 864e5 });
-  assert.equal(run.candidates.length, 1, 'one real business out of the feed');
-  assert.equal(run.candidates[0].business, 'Harare Web Studio');
-  assert.equal(run.rejected.no_local_signal, 1, 'and the stranger is counted, not quietly dropped: ' + JSON.stringify(run.rejected));
+  const run = await runDiscovery({ fetch: fetcher, perRun: 6, limit: 6, perQuery: 3, countries: ['ZW'], nowMs: 20747 * 864e5 });
+  const names = run.candidates.map((c) => c.business);
+  assert.ok(names.includes('Harare Web Studio'), 'the in-market business is filed: ' + names.join(', '));
+  assert.ok(!names.some((n) => /Jakarta/i.test(n)), 'the stranger is not: ' + names.join(', '));
+  assert.ok(run.rejected.no_local_signal >= 1, 'and the stranger is counted, not quietly dropped: ' + JSON.stringify(run.rejected));
 });
 
 test('the summary counts what a person can act on today, and says so plainly', () => {
@@ -245,6 +251,7 @@ test('a run reads a search feed and the pages behind it, and stops at the limit'
   const asked = [];
   const fetcher = async (url) => {
     asked.push(url);
+    if (String(url).includes('classifieds.co.zw')) return EMPTY_DIR();
     if (String(url).includes('overpass')) return { ok: true, text: async () => '{"elements":[]}' };
     if (String(url).includes('bing.com/search')) {
       return { ok: true, text: async () => [
@@ -259,16 +266,16 @@ test('a run reads a search feed and the pages behind it, and stops at the limit'
     return { ok: true, text: async () => '<html><title>Harare Studio</title><body>Harare, Zimbabwe. '
       + 'Website design for restaurants.<a href="mailto:hi@' + hostOf(url) + '">mail</a></body></html>' };
   };
-  // three jobs: the map (empty in this stub) and two search queries
-  const run = await runDiscovery({ fetch: fetcher, perRun: 3, limit: 4, perQuery: 2, countries: ['ZW'], nowMs: 20300 * 864e5 });
+  // five jobs: the directory (empty here), the map (empty), and three search queries
+  const run = await runDiscovery({ fetch: fetcher, perRun: 5, limit: 4, perQuery: 2, countries: ['ZW'], nowMs: 20300 * 864e5 });
   assert.equal(run.ok, true);
-  assert.equal(run.ran.length, 3, 'three jobs ran: ' + run.ran.map((r) => r.source).join(','));
+  assert.equal(run.ran.length, 4, 'four jobs ran before the limit filled it: ' + run.ran.map((r) => r.source).join(','));
   assert.equal(run.candidates.length, 4, 'two from each query, and no more than the limit: ' + run.candidates.length);
 
   // the limit is a ceiling, not a suggestion: one query offering six results still yields the cap
-  const capped = await runDiscovery({ fetch: fetcher, perRun: 3, limit: 1, perQuery: 3, countries: ['ZW'], nowMs: 20300 * 864e5 });
+  const capped = await runDiscovery({ fetch: fetcher, perRun: 5, limit: 1, perQuery: 3, countries: ['ZW'], nowMs: 20300 * 864e5 });
   assert.equal(capped.candidates.length, 1, 'one is the ceiling it was given');
-  assert.equal(capped.ran.length, 2, 'and it stopped asking once it had enough');
+  assert.equal(capped.ran.length, 3, 'and it stopped asking once it had enough: ' + capped.ran.map((r) => r.source).join(','));
   assert.ok(run.candidates.every((c) => c.segment && c.source_url && c.evidence.page_checked), 'each candidate was read on its page');
   assert.ok(asked.every((u) => /^https:\/\//.test(u)), 'only https');
   assert.ok(!asked.some((u) => u.includes('facebook')), 'nothing did a social platform');
@@ -317,10 +324,11 @@ test('a map candidate with no website is filed, with the hook that makes it shar
   const asked = [];
   const fetcher = async (url) => {
     asked.push(String(url));
+    if (String(url).includes('classifieds.co.zw')) return EMPTY_DIR();
     if (String(url).includes('overpass')) return { ok: true, text: async () => JSON.stringify(osm) };
     return { ok: false, status: 404, text: async () => '' };
   };
-  const run = await runDiscovery({ fetch: fetcher, perRun: 1, limit: 5, countries: ['ZW'], nowMs: 20750 * 864e5 });
+  const run = await runDiscovery({ fetch: fetcher, perRun: 2, limit: 5, countries: ['ZW'], nowMs: 20750 * 864e5 });
   assert.equal(run.candidates.length, 1, 'one of the two can be answered');
   const c = run.candidates[0];
   assert.equal(c.business, 'Kwekwe Tills');
@@ -369,26 +377,72 @@ test('one Overpass mirror at capacity is not a lost day: fall through, then fall
   const fetcher = async (url) => {
     const u = String(url);
     asked.push(u);
+    if (u.includes('classifieds.co.zw')) return EMPTY_DIR();
     if (u.includes('overpass-api.de')) return { ok: false, status: 502, text: async () => 'at capacity' };
     if (u.includes('overpass')) return { ok: true, text: async () => JSON.stringify(osm) };
     return { ok: true, text: async () => '<rss><channel></channel></rss>' };
   };
   const cv = { cacheGet: async (k) => store[k], cachePut: async (k, v) => { store[k] = v; } };
-  const first = await runDiscovery({ fetch: fetcher, perRun: 1, limit: 4, countries: ['ZW'], nowMs: 20747 * 864e5, ...cv });
+  const first = await runDiscovery({ fetch: fetcher, perRun: 2, limit: 4, countries: ['ZW'], nowMs: 20747 * 864e5, ...cv });
   assert.equal(first.candidates.length, 1, 'the second mirror answered where the first refused');
-  assert.match(first.ran[0].mirror, /private\.coffee|osm\.ch|osm\.jp/, 'and the run says which one: ' + first.ran[0].mirror);
+  const osmRun = first.ran.find((r) => r.source === 'osm');
+  assert.match(osmRun.mirror, /private\.coffee|osm\.ch|osm\.jp/, 'and the run says which one: ' + osmRun.mirror);
   assert.ok(asked.some((u) => u.includes('overpass-api.de')), 'the failed mirror was actually tried first');
 
   // every mirror down, but the answer from earlier today is in KV: the list still gets built
-  const down = async () => ({ ok: false, status: 502, text: async () => '' });
-  const second = await runDiscovery({ fetch: down, perRun: 1, limit: 4, countries: ['ZW'], nowMs: 20747 * 864e5, ...cv });
+  const down = async (u) => (String(u).includes('classifieds.co.zw')
+    ? EMPTY_DIR() : { ok: false, status: 502, text: async () => '' });
+  const second = await runDiscovery({ fetch: down, perRun: 2, limit: 4, countries: ['ZW'], nowMs: 20747 * 864e5, ...cv });
   assert.equal(second.candidates.length, 1, 'a capacity spike must not empty the queue for the day');
-  assert.equal(second.ran[0].cached, true, 'and the run is honest that the answer came from the cache');
+  assert.equal(second.ran.find((r) => r.source === 'osm').cached, true, 'and the run is honest that the answer came from the cache');
 
   // with no cache and no server, the failure is named, not hidden
-  const bare = await runDiscovery({ fetch: down, perRun: 1, limit: 4, countries: ['ZW'], nowMs: 20747 * 864e5 });
+  const bare = await runDiscovery({ fetch: down, perRun: 2, limit: 4, countries: ['ZW'], nowMs: 20747 * 864e5 });
   assert.equal(bare.candidates.length, 0);
-  assert.match(bare.errors[0].error, /all_mirrors_failed/, 'the error the state document keeps says what happened: ' + JSON.stringify(bare.errors));
+  const osmErr = bare.errors.find((e) => /osm/.test(e.job));
+  assert.match(osmErr.error, /all_mirrors_failed/, 'the error the state document keeps says what happened: ' + JSON.stringify(bare.errors));
+});
+
+// The markup here is the shape the live directory actually serves (v1.7.6 verified against a real
+// page): a `listing` panel per business, the name in an h3 link, the number inside the WhatsApp
+// button's data-href, and the category in a link of its own.
+const DIR_PAGE = [
+  '<html><body><div class="listings">',
+  '<div id="advertiser-187221" class="listing panel panel-default panel-listing bd" data-id="187221">',
+  '<h3 class="ellipsis"><a href="https://www.classifieds.co.zw/macbyte-systems13">MacByte Systems</a></h3>',
+  '<a class="panel-header__category" href="https://www.classifieds.co.zw/directory/computer-services-software">Computer Services &amp; Software</a>',
+  '<button data-href="https://api.whatsapp.com/send?phone=263773098427&amp;text=Hi">WhatsApp</button>',
+  '</div>',
+  '<div id="advertiser-2" class="listing panel panel-default" data-id="2">',
+  '<h3 class="ellipsis"><a href="https://www.classifieds.co.zw/the-future-store">The Future Store</a></h3>',
+  '<a href="https://thefuturestore.co.zw/">our site</a>',
+  '<button data-href="https://api.whatsapp.com/send?phone=279927998279">WhatsApp</button>',
+  '</div>',
+  '</div></body></html>',
+].join('');
+
+test('the directory source reads a listing page into named businesses with a number that works', () => {
+  const items = parseDirectory(DIR_PAGE, 'https://www.classifieds.co.zw/directory/computer-services-software');
+  assert.equal(items.length, 2, 'two listings, two businesses');
+  assert.equal(items[0].title, 'MacByte Systems');
+  assert.equal(items[0].contact.phone, '263773098427', 'the number the advertiser published');
+  assert.equal(items[0].url, 'https://www.classifieds.co.zw/macbyte-systems13', 'and the page that proves the lead');
+  assert.equal(items[0].site, '', 'the listing’s own WhatsApp button is not the business’s website');
+  assert.match(items[0].note, /no website of its own/, 'so the note says the true thing: ' + items[0].note);
+  assert.equal(items[1].site, 'https://thefuturestore.co.zw/', 'a real outbound link is the site');
+  assert.equal(items[1].contact.phone, '', 'an Indonesian id in the button is not a Zimbabwean number');
+  assert.equal(items[1].fromDirectory, true);
+
+  const index = parseDirectoryIndex('<a href="https://www.classifieds.co.zw/directory/computer-services-software">Computer Services &amp; Software</a>'
+    + '<a href="https://www.classifieds.co.zw/directory/estate-agents-valuers">Estate Agents</a>');
+  assert.equal(index.length, 2);
+  assert.equal(index[0].slug, 'computer-services-software');
+  assert.equal(index[1].label, 'Estate Agents', 'entities decoded, or every match is a near-miss');
+  assert.ok(DIRECTORY_KEYWORDS.agencies.some((p) => p.test('Web Design & Hosting')));
+  assert.ok(DIRECTORY_KEYWORDS.accountants.some((p) => p.test('Accountants & Bookkeepers')));
+  assert.match(DIRECTORY_INDEX, /classifieds\.co\.zw/);
+  // and the directory host can never be filed as a business itself
+  assert.equal(usableHost('https://www.classifieds.co.zw/macbyte-systems13'), false);
 });
 
 test('the three tiers are flat prices in data', () => {

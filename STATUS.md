@@ -1,5 +1,32 @@
 # Tapstall — status
 
+## v1.7.6 (2026-10-21): a third source that is neither global nor behind a queue
+
+v1.7.5's diagnostics answered the question and the answer was bad: from the Worker,
+`overpass-api.de` returns **521**, `private.coffee` times out, and `osm.ch` replies `200` with a
+dataset that does not contain Zimbabwe. Every other public Overpass mirror answered nothing at all.
+So the map source is kept (it is the right idea, and one reachable mirror makes it live) but it is
+no longer the only structured source. Verified end to end from this sandbox:
+
+- **Bing's RSS ignores the market entirely.** Asked `web design agency site:co.zw` it returned ten
+  American agencies; asked `web design Harare site:co.zw` it returned Wikipedia and WhatsApp Web.
+  The operators and the city are discarded. It stays in the rotation as a long shot, and the gate
+  refuses what it returns — which is why the refusals outnumber the admissions.
+- **The Zimbabwe business directory does not.** `classifieds.co.zw/directory` is static HTML, one
+  request, and every listing is a Zimbabwean business by construction: a name, a page that proves
+  it, and the number the advertiser published in the WhatsApp button. Read live: the
+  `computer-services-software` category returned MacByte Systems and The Future Store with
+  `263773098427` and `263773785638`.
+- **`worker/discover.js` gained a directory source** — `DIRECTORY_INDEX`, `DIRECTORY_KEYWORDS`
+  (agencies → web/design/marketing, accountants → account/bookkeep/tax, POS → computer/hardware/
+  point of sale/electronics), `parseDirectoryIndex`, `parseDirectory`, and a plan that gives every
+  Zimbabwe segment a directory job before the map and search jobs.
+- **A directory is a source, never a business.** `classifieds.co.zw` is on the blocklist that can
+  never be filed as a lead; it appears on a lead only as the page the lead was found on. A listing's
+  own WhatsApp button is not a website either — the first *outbound* link that is a real site is,
+  and the note says which of the two it found.
+- Tests: 401/401.
+
 ## v1.7.5 (2026-10-21): Overpass queues, it does not refuse
 
 v1.7.4's diagnostics did their job on the first run: `last_errors` read back
