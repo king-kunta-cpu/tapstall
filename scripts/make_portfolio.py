@@ -43,7 +43,8 @@ WORKS = [
         "featured": True,
         "title": "The Ledger and the Shopkeeper",
         "subtitle": "Building commerce for the markets the platforms forgot",
-        "year": "2026", "pages": 77, "words": 14595,
+        "year": "2026",
+        "status": "First edition", "pages": 77, "words": 14595,
         "publisher": PRESS, "licence": "CC BY 4.0",
         "blurb": (
             "A trade book on building a merchant rail for shops the platforms skipped — "
@@ -69,7 +70,8 @@ WORKS = [
         "featured": True,
         "title": "Intelligence, Data and Judgement",
         "subtitle": "An applied introduction to artificial intelligence, with a production case",
-        "year": "2026", "pages": 159, "words": 31930,
+        "year": "2026",
+        "status": "First edition", "pages": 159, "words": 31930,
         "publisher": PRESS, "licence": "CC BY 4.0",
         "blurb": (
             "A textbook written to be taught from. Twenty-two chapters in five parts — "
@@ -95,7 +97,8 @@ WORKS = [
         "featured": True,
         "title": "Order Without Custody",
         "subtitle": "Governance-first design for merchant commerce rails in low-infrastructure economies",
-        "year": "2026", "pages": 30, "words": 11628,
+        "year": "2026",
+        "status": "Working paper; not peer reviewed", "pages": 30, "words": 11628,
         "publisher": "DCAI working paper 3", "licence": "CC BY 4.0",
         "blurb": (
             "Small merchants already sell at scale — through chat threads, pages and a phone "
@@ -122,8 +125,9 @@ WORKS = [
         "featured": True,
         "title": "The Sovereign Micro-Enterprise",
         "subtitle": "A governance-first architecture for zero-capital agentic businesses",
-        "year": "2026", "pages": 33, "words": None,
-        "publisher": "DCAI field report 1", "licence": "CC BY 4.0",
+        "year": "2026",
+        "status": "Working manuscript", "pages": 33, "words": None,
+        "publisher": "DCAI field report 1", "licence": "All rights reserved",
         "blurb": (
             "Frontier models pushed the price of machine cognition toward zero, and the "
             "obvious inference — that any connected individual now owns a software company — "
@@ -147,8 +151,9 @@ WORKS = [
         "featured": True,
         "title": "Grounded Cadence",
         "subtitle": "Fact-bound content operations as a governance architecture",
-        "year": "2026", "pages": 17, "words": None,
-        "publisher": "DCAI working paper", "licence": "CC BY 4.0",
+        "year": "2026",
+        "status": "Working paper", "pages": 17, "words": None,
+        "publisher": "DCAI working paper", "licence": "All rights reserved",
         "blurb": (
             "Anyone can now emit a week of social copy. Almost no one can emit it on a "
             "schedule, from a company's own facts, without inventing customers or numbers, "
@@ -164,13 +169,77 @@ WORKS = [
             "MD": f"{RAW}/papers/grounded-cadence.md",
         },
     },
+    # --- works catalogued from the author's publications catalogue. The catalogue states
+    # their editions and that full text is not distributed publicly, so these entries carry
+    # a status and no download links; inventing a link would be inventing an edition.
+    {
+        "id": "governable",
+        "kind": "book",
+        "featured": True,
+        "title": "The Governable Enterprise",
+        "subtitle": "A practical guide to evidence, authority and AI operations — lessons from DeskOS",
+        "year": "2026",
+        "status": "Complete first edition",
+        "pages": 221, "extent": "24 developed chapters · 10 operating tools", "words": None,
+        "publisher": "Jacaranda Labs Think Tank", "licence": "No open-content licence granted",
+        "blurb": (
+            "A practitioner guide to designing AI operations that can explain their evidence, "
+            "limit their authority, account for resources and recover from uncertainty. "
+            "DeskOS is examined as a candid, bounded case rather than a product-success claim, "
+            "and the ten operating tools are given as methods a reader can adopt rather than "
+            "results a reader should assume. Prepared in PDF, editable Word, EPUB, HTML and "
+            "Markdown; full text is not distributed publicly."
+        ),
+        "note": "24 developed chapters, 221 pages, 10 operating tools. Constructed examples are identified as such in the work.",
+        "formats": {},
+    },
+    {
+        "id": "emotional",
+        "kind": "book",
+        "featured": False,
+        "title": "Emotional Engineering for AI-Oriented Infrastructure Operators",
+        "subtitle": "Trust, agency and ethical adoption in systems that act",
+        "year": "2026",
+        "status": "Private author-review edition",
+        "pages": None, "extent": "author-review edition", "words": None,
+        "publisher": "Jacaranda Labs Think Tank", "licence": "No open-content licence granted",
+        "blurb": (
+            "An examination of how evidence, meaningful choice and recovery can support "
+            "appropriate reliance on automated systems. It distinguishes ethical adoption from "
+            "emotional pressure, and treats operating methods as proposals rather than validated "
+            "sales formulas — a distinction that matters most to the operator who has to decide "
+            "what to say to a customer on a bad day."
+        ),
+        "note": "Author-review edition: not a public release.",
+        "formats": {},
+    },
+    {
+        "id": "autonomy",
+        "kind": "research",
+        "featured": True,
+        "title": "From Spreadsheet Interface to Governable Autonomy",
+        "subtitle": "DeskOS as a critical design-science case of evidence, agency and resource-constrained AI infrastructure",
+        "year": "2026",
+        "status": "Working paper; not peer reviewed",
+        "pages": None, "extent": "working paper", "words": None,
+        "publisher": "DCAI working paper", "licence": "No open-content licence granted",
+        "blurb": (
+            "A bounded implementation study separating generated artefacts from verified "
+            "intelligence — the distinction that decides whether an operator is being informed "
+            "or flattered. It proposes an Evidence–Authority–Resource Contract and a prospective "
+            "evaluation protocol, and reports no customer-outcome experiment, because none was run."
+        ),
+        "note": "Working paper, not peer reviewed. The contract and protocol are proposals, tested prospectively or not at all.",
+        "formats": {},
+    },
     {
         "id": "musk-mirror",
         "kind": "book",
         "featured": False,
         "title": "The Musk Mirror",
         "subtitle": "How one billionaire exposed the cracks in China's innovation dream",
-        "year": "2026", "pages": 286, "words": None,
+        "year": "2026",
+        "status": "First edition", "pages": 286, "words": None,
         "publisher": "Courage Garikai, Harare", "licence": "All rights reserved",
         "blurb": (
             "A gallery of expert predictions, set against what was actually built. The book "
@@ -189,7 +258,8 @@ WORKS = [
         "featured": False,
         "title": "Traffic Is the New Oil",
         "subtitle": "The African digital wealth formula",
-        "year": "2026", "pages": 256, "words": None,
+        "year": "2026",
+        "status": "First edition", "pages": 256, "words": None,
         "publisher": "Jacaranda Labs", "licence": "All rights reserved",
         "blurb": (
             "Six chapters on the only formula that has ever run the internet — traffic, ads, "
@@ -207,7 +277,8 @@ WORKS = [
         "featured": False,
         "title": "Pinterest Goldmine",
         "subtitle": "The traffic source nobody told you about",
-        "year": "2026", "pages": 242, "words": None,
+        "year": "2026",
+        "status": "First edition", "pages": 242, "words": None,
         "publisher": "Jacaranda Labs", "licence": "All rights reserved",
         "blurb": (
             "A complete operating manual for one under-used traffic channel: the psychology "
@@ -224,7 +295,8 @@ WORKS = [
         "featured": False,
         "title": "The Rocket Man Reckoning",
         "subtitle": "How China mocked Elon Musk — and why they are now panicking",
-        "year": "2026", "pages": 29, "words": None,
+        "year": "2026",
+        "status": "First edition", "pages": 29, "words": None,
         "publisher": "Jacaranda Labs", "licence": "All rights reserved",
         "blurb": (
             "The arrogance of a rising superpower, the collapse of its myths, and what one "
@@ -241,7 +313,8 @@ WORKS = [
         "featured": False,
         "title": "Unchained Blueprint",
         "subtitle": "What to build when every payment door is closed",
-        "year": "2026", "pages": 13, "words": None,
+        "year": "2026",
+        "status": "Version 1 — working document", "pages": 13, "words": None,
         "publisher": "Jacaranda Labs", "licence": "All rights reserved",
         "blurb": (
             "Every single door was closed: the processor that does not support your country, "
@@ -256,6 +329,14 @@ WORKS = [
 ]
 
 KIND_LABEL = {"book": "Book", "research": "Research", "essay": "Essay & field report"}
+
+
+def extent(w):
+    """What is actually known about a work's size. A page count we have is stated;
+    one we do not have is stated as what it is — a chapter count or nothing."""
+    if w.get("pages"):
+        return f"{w['pages']} pages"
+    return w.get("extent") or "extent not published"
 
 
 def esc(s):
@@ -280,12 +361,17 @@ def cover(w, cls="cover"):
         </div>
         <div class="cov-foot">
           <span>{esc(AUTHOR)}</span>
-          <span>{w['pages']} pp</span>
+          <span>{esc(w['pages'] and str(w['pages']) + ' pp' or 'catalogue')}</span>
         </div>
       </div>"""
 
 
 def chips(w):
+    """Download links where an edition exists. Where it does not, say so plainly —
+    a missing link is information, and a fake one would be a lie about a book."""
+    if not w["formats"]:
+        return ('<div class="chips"><span class="chip chip-none">Catalogue entry · '
+                'no public edition</span></div>')
     out = []
     for label, url in w["formats"].items():
         out.append(f'<a class="chip" href="{esc(url)}" target="_blank" rel="noopener">{esc(label)}</a>')
@@ -293,7 +379,7 @@ def chips(w):
 
 
 def facts(w):
-    bits = [f"{w['pages']} pages"]
+    bits = [extent(w)]
     if w["words"]:
         bits.append(f"{w['words']:,} words")
     bits.append(w["licence"])
@@ -306,6 +392,7 @@ def featured_card(w):
         {cover(w)}
         <div class="card-body">
           <div class="card-meta">{esc(KIND_LABEL[w['kind']])} · {esc(w['year'])}</div>
+          <div class="status">{esc(w['status'])}</div>
           <h2><a href="#{esc(w['id'])}">{esc(w['title'])}</a></h2>
           <p class="sub">{esc(w['subtitle'])}</p>
           <p class="blurb">{esc(w['blurb'])}</p>
@@ -325,6 +412,7 @@ def shelf_row(w):
         <div class="row-main">
           <h3><span class="row-title">{esc(w['title'])}</span>
             <span class="row-sub">{esc(w['subtitle'])}</span></h3>
+          <div class="status status-row">{esc(w['status'])}</div>
           <p class="blurb">{esc(w['blurb'])}</p>
           <div class="card-foot">
             <span class="facts">{facts(w)}</span>
@@ -413,6 +501,11 @@ section{padding:66px 0 10px}
 .card-body{display:flex;flex-direction:column;min-height:100%}
 .card-meta{font:600 10px/1 var(--sans);letter-spacing:.16em;text-transform:uppercase;
   color:var(--accent);margin-bottom:9px}
+.status{font:600 10px/1.3 var(--sans);letter-spacing:.13em;text-transform:uppercase;
+  color:var(--muted);margin:-3px 0 11px}
+.status-row{margin:2px 0 10px}
+.band .status{color:#9aa1a7}
+.chip-none{border-style:dashed;color:var(--muted);cursor:default}
 .card h2{font:400 27px/1.16 var(--serif);margin:0 0 7px;letter-spacing:-.012em}
 .card h2 a{text-decoration:none}
 .card h2 a:hover{color:var(--accent)}
@@ -525,7 +618,7 @@ def build():
     also = [w for w in books if not w["featured"]]
     essays = [w for w in WORKS if w["kind"] == "essay"]
 
-    total_pages = sum(w["pages"] for w in WORKS)
+    total_pages = sum(w["pages"] or 0 for w in WORKS)
     total_words = sum(w["words"] or 0 for w in WORKS)
 
     cards = "".join(featured_card(w) for w in flagship)
@@ -562,13 +655,13 @@ def build():
     <section class="hero">
       <div class="eyebrow">Writer · Engineer · Operator</div>
       <h1>I build commerce for the markets the platforms skip, and write down <em>what happens next</em>.</h1>
-      <p class="lede">Ten published works on trade, technology and constraint — five books, three
+      <p class="lede">Thirteen published works on trade, technology and constraint — seven books, four
       working papers and two short volumes, all from the same practice.
       Everything here is produced from a source file and shipped in four formats, because a
       reader should not need a particular app to read a book.</p>
       <div class="stats">
-        <div class="stat"><div class="n">10</div><div class="k">Published works</div></div>
-        <div class="stat"><div class="n">{total_pages:,}</div><div class="k">Pages</div></div>
+        <div class="stat"><div class="n">13</div><div class="k">Published works</div></div>
+        <div class="stat"><div class="n">{total_pages:,}</div><div class="k">Pages in print</div></div>
         <div class="stat"><div class="n">4</div><div class="k">Formats per title</div></div>
         <div class="stat"><div class="n">$0</div><div class="k">Marginal cost to serve</div></div>
       </div>
@@ -595,7 +688,7 @@ def build():
     <div class="wrap">
       <div class="sec-head">
         <h2>Research</h2>
-        <div class="kicker">Three working papers</div>
+        <div class="kicker">Four working papers</div>
       </div>
       <p class="sec-intro">The papers the books come out of — each a single-case study of a
       system built to be auditable before it is profitable, and each candid about what has
@@ -635,14 +728,21 @@ def build():
           rights, and produced as Markdown first. The page you are reading was generated by
           a script from the same repository the books live in, so the catalogue cannot drift
           from the files.</p>
+          <p><b>On edition status.</b> Each entry states what it actually is — first edition,
+          complete first edition, working manuscript, working paper, private author-review
+          edition, or a catalogue entry with no public text. Where no download is offered the
+          work exists but its full text is not distributed publicly, and the entry says so
+          rather than hiding an absent link. A working paper is not represented here as
+          peer-reviewed, and a bounded case study is not represented as measured customer
+          success.</p>
         </div>
         <aside class="aside">
           <h4>At a glance</h4>
           <ul>
-            <li><b>Books</b> — five long-form titles</li>
-            <li><b>Research</b> — three working papers, DCAI series</li>
+            <li><b>Books</b> — seven long-form titles</li>
+            <li><b>Research</b> — four working papers, DCAI series</li>
             <li><b>Essays &amp; reports</b> — two shorter volumes</li>
-            <li><b>Formats</b> — PDF, EPUB, HTML, Markdown</li>
+            <li><b>Formats</b> — PDF, EPUB, HTML, Markdown where an edition is public</li>
             <li><b>Words in print</b> — {total_words:,} across the four text-native works</li>
           </ul>
           <h4>Correspondence</h4>
@@ -700,7 +800,11 @@ def main():
     print(f"{site}/index.html      {len(doc):,} bytes")
     print(f"{site}/catalogue.json  {len(WORKS)} works, {total_pages:,} pages catalogued")
     for w in WORKS:
-        missing = [k for k in ("title", "subtitle", "blurb", "formats") if not w.get(k)]
+        # `formats` may be an empty dict — a catalogued work without a public edition is a
+        # legitimate entry. Every other listed field must carry text.
+        missing = [k for k in ("title", "subtitle", "blurb", "status") if not w.get(k)]
+        if "formats" not in w:
+            missing.append("formats")
         if missing:
             raise SystemExit(f"{w['id']}: missing {missing}")
     # every format link must be absolute and point at the repository or its releases

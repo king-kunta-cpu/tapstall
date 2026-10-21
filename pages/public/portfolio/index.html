@@ -85,6 +85,11 @@ section{padding:66px 0 10px}
 .card-body{display:flex;flex-direction:column;min-height:100%}
 .card-meta{font:600 10px/1 var(--sans);letter-spacing:.16em;text-transform:uppercase;
   color:var(--accent);margin-bottom:9px}
+.status{font:600 10px/1.3 var(--sans);letter-spacing:.13em;text-transform:uppercase;
+  color:var(--muted);margin:-3px 0 11px}
+.status-row{margin:2px 0 10px}
+.band .status{color:#9aa1a7}
+.chip-none{border-style:dashed;color:var(--muted);cursor:default}
 .card h2{font:400 27px/1.16 var(--serif);margin:0 0 7px;letter-spacing:-.012em}
 .card h2 a{text-decoration:none}
 .card h2 a:hover{color:var(--accent)}
@@ -193,13 +198,13 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
     <section class="hero">
       <div class="eyebrow">Writer · Engineer · Operator</div>
       <h1>I build commerce for the markets the platforms skip, and write down <em>what happens next</em>.</h1>
-      <p class="lede">Ten published works on trade, technology and constraint — five books, three
+      <p class="lede">Thirteen published works on trade, technology and constraint — seven books, four
       working papers and two short volumes, all from the same practice.
       Everything here is produced from a source file and shipped in four formats, because a
       reader should not need a particular app to read a book.</p>
       <div class="stats">
-        <div class="stat"><div class="n">10</div><div class="k">Published works</div></div>
-        <div class="stat"><div class="n">1,142</div><div class="k">Pages</div></div>
+        <div class="stat"><div class="n">13</div><div class="k">Published works</div></div>
+        <div class="stat"><div class="n">1,363</div><div class="k">Pages in print</div></div>
         <div class="stat"><div class="n">4</div><div class="k">Formats per title</div></div>
         <div class="stat"><div class="n">$0</div><div class="k">Marginal cost to serve</div></div>
       </div>
@@ -236,6 +241,7 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
       </div>
         <div class="card-body">
           <div class="card-meta">Book · 2026</div>
+          <div class="status">First edition</div>
           <h2><a href="#ledger">The Ledger and the Shopkeeper</a></h2>
           <p class="sub">Building commerce for the markets the platforms forgot</p>
           <p class="blurb">A trade book on building a merchant rail for shops the platforms skipped — written from the release log rather than the pitch deck. Part one is the gap: the forty-tab panic, and why the obvious answer is wrong. Part two is the machine: a shop in one link, a statement that can be recomputed, quotas as a design material, the first hundred prospects, and the number that could not be dialled. Part three is the rules: never hold the money, never lie in the copy, never post to your customers. Part four is the craft — what broke, in five failure classes, and the uncomfortable arithmetic that follows.</p>
@@ -265,6 +271,7 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
       </div>
         <div class="card-body">
           <div class="card-meta">Book · 2026</div>
+          <div class="status">First edition</div>
           <h2><a href="#intelligence">Intelligence, Data and Judgement</a></h2>
           <p class="sub">An applied introduction to artificial intelligence, with a production case</p>
           <p class="blurb">A textbook written to be taught from. Twenty-two chapters in five parts — foundations, the material, the machine, the case, and judgement — each with learning outcomes, a worked example, graded exercises and further reading. The disciplinary spine is three widely used curricula: COMCEC&#x27;s introduction to AI and its fundamental concepts, Microsoft&#x27;s Fundamentals of AI Module 1, and NITI Aayog&#x27;s Let&#x27;s Learn AI Base Module, each attributed and mapped chapter by chapter in the appendix. Tapstall runs through the middle of the book as the worked case, including its failures.</p>
@@ -274,14 +281,58 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
             <div class="chips"><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/book/intelligence-data-and-judgement.pdf" target="_blank" rel="noopener">PDF</a><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/book/intelligence-data-and-judgement.epub" target="_blank" rel="noopener">EPUB</a><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/book/intelligence-data-and-judgement.html" target="_blank" rel="noopener">HTML</a><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/book/intelligence-data-and-judgement.md" target="_blank" rel="noopener">MD</a></div>
           </div>
         </div>
+      </article>
+      <article class="card" data-kind="book" id="card-governable">
+        
+      <div class="cover">
+        <div class="cov-top">
+          <span class="cov-kicker">Book</span>
+          <span class="cov-year">2026</span>
+        </div>
+        <div class="cov-body">
+          <div class="cov-rule"></div>
+          <h3>The Governable Enterprise</h3>
+          <p>A practical guide to evidence, authority and AI operations — lessons from DeskOS</p>
+        </div>
+        <div class="cov-foot">
+          <span>Courage Garikai</span>
+          <span>221 pp</span>
+        </div>
+      </div>
+        <div class="card-body">
+          <div class="card-meta">Book · 2026</div>
+          <div class="status">Complete first edition</div>
+          <h2><a href="#governable">The Governable Enterprise</a></h2>
+          <p class="sub">A practical guide to evidence, authority and AI operations — lessons from DeskOS</p>
+          <p class="blurb">A practitioner guide to designing AI operations that can explain their evidence, limit their authority, account for resources and recover from uncertainty. DeskOS is examined as a candid, bounded case rather than a product-success claim, and the ten operating tools are given as methods a reader can adopt rather than results a reader should assume. Prepared in PDF, editable Word, EPUB, HTML and Markdown; full text is not distributed publicly.</p>
+          <p class="note">24 developed chapters, 221 pages, 10 operating tools. Constructed examples are identified as such in the work.</p>
+          <div class="card-foot">
+            <span class="facts">221 pages · No open-content licence granted</span>
+            <div class="chips"><span class="chip chip-none">Catalogue entry · no public edition</span></div>
+          </div>
+        </div>
       </article></div>
       <div class="subhead"><span>Also in the catalogue</span></div>
       <div class="rows">
+      <article class="row" data-kind="book" id="emotional">
+        <div class="row-year">2026</div>
+        <div class="row-main">
+          <h3><span class="row-title">Emotional Engineering for AI-Oriented Infrastructure Operators</span>
+            <span class="row-sub">Trust, agency and ethical adoption in systems that act</span></h3>
+          <div class="status status-row">Private author-review edition</div>
+          <p class="blurb">An examination of how evidence, meaningful choice and recovery can support appropriate reliance on automated systems. It distinguishes ethical adoption from emotional pressure, and treats operating methods as proposals rather than validated sales formulas — a distinction that matters most to the operator who has to decide what to say to a customer on a bad day.</p>
+          <div class="card-foot">
+            <span class="facts">author-review edition · No open-content licence granted</span>
+            <div class="chips"><span class="chip chip-none">Catalogue entry · no public edition</span></div>
+          </div>
+        </div>
+      </article>
       <article class="row" data-kind="book" id="musk-mirror">
         <div class="row-year">2026</div>
         <div class="row-main">
           <h3><span class="row-title">The Musk Mirror</span>
             <span class="row-sub">How one billionaire exposed the cracks in China&#x27;s innovation dream</span></h3>
+          <div class="status status-row">First edition</div>
           <p class="blurb">A gallery of expert predictions, set against what was actually built. The book reads as a mirror rather than a weapon: on the rocket sceptics, the communications &#x27;experts&#x27;, the business-model critics and the CEO chorus, and on what their confidence cost. Its argument is about expertise without humility, and about the difference between a claim that sounds authoritative and a number that can be checked.</p>
           <div class="card-foot">
             <span class="facts">286 pages · All rights reserved</span>
@@ -294,6 +345,7 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
         <div class="row-main">
           <h3><span class="row-title">Traffic Is the New Oil</span>
             <span class="row-sub">The African digital wealth formula</span></h3>
+          <div class="status status-row">First edition</div>
           <p class="blurb">Six chapters on the only formula that has ever run the internet — traffic, ads, money — argued for a continent that supplies the eyeballs and keeps too little of the revenue. From the awakening, through the traffic layer and the ad market, to what actually enters an account while the power is out, and a zero-capital route from nothing to a first four-figure month.</p>
           <div class="card-foot">
             <span class="facts">256 pages · All rights reserved</span>
@@ -306,6 +358,7 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
         <div class="row-main">
           <h3><span class="row-title">Pinterest Goldmine</span>
             <span class="row-sub">The traffic source nobody told you about</span></h3>
+          <div class="status status-row">First edition</div>
           <p class="blurb">A complete operating manual for one under-used traffic channel: the psychology of the scroll-stop, a pin factory run from Canva on a phone, the search optimisation playbook, a scheduling system that survives real-life disruption, and the money layer that turns attention into a payout.</p>
           <div class="card-foot">
             <span class="facts">242 pages · All rights reserved</span>
@@ -320,7 +373,7 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
     <div class="wrap">
       <div class="sec-head">
         <h2>Research</h2>
-        <div class="kicker">Three working papers</div>
+        <div class="kicker">Four working papers</div>
       </div>
       <p class="sec-intro">The papers the books come out of — each a single-case study of a
       system built to be auditable before it is profitable, and each candid about what has
@@ -345,6 +398,7 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
       </div>
         <div class="card-body">
           <div class="card-meta">Research · 2026</div>
+          <div class="status">Working paper; not peer reviewed</div>
           <h2><a href="#custody">Order Without Custody</a></h2>
           <p class="sub">Governance-first design for merchant commerce rails in low-infrastructure economies</p>
           <p class="blurb">Small merchants already sell at scale — through chat threads, pages and a phone number painted on a wall — but they sell without a record. This paper argues that the binding constraint at that tier is not payment capability but reconciliation, and that reconcilability is an architectural property rather than a feature. Five mechanisms are formalised against artefacts a reader can inspect: the No-Custody Rail, Admission-Gated Discovery, Reserve-Ladder Scheduling, Surface-Disjoint Multi-Tenancy and the Constrained Persuasion Doctrine. The empirical section is forensic: five classes of governance failure, each stated as a signature, a detector and a design response.</p>
@@ -374,12 +428,13 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
       </div>
         <div class="card-body">
           <div class="card-meta">Research · 2026</div>
+          <div class="status">Working manuscript</div>
           <h2><a href="#sovereign">The Sovereign Micro-Enterprise</a></h2>
           <p class="sub">A governance-first architecture for zero-capital agentic businesses</p>
           <p class="blurb">Frontier models pushed the price of machine cognition toward zero, and the obvious inference — that any connected individual now owns a software company — proves fragile in practice. Producing is easy; operating is hard. This report documents the design, deployment and near-real-time failure forensics of a one-person, zero-capital sales and content business run entirely by autonomous agents under a governance architecture: guarded capability, a ledgered agent pattern with an idle witness, a zero-capital ladder, and effectuation-in-the-loop. Seven figures carry the anatomy, the cadence and the incident traces.</p>
           <p class="note">Silent-failure taxonomy with detection-time bounds, offered as reusable diagnostic vocabulary.</p>
           <div class="card-foot">
-            <span class="facts">33 pages · CC BY 4.0</span>
+            <span class="facts">33 pages · All rights reserved</span>
             <div class="chips"><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/papers/sovereign-micro-enterprise.pdf" target="_blank" rel="noopener">PDF</a><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/papers/sovereign-micro-enterprise.html" target="_blank" rel="noopener">HTML</a><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/papers/sovereign-micro-enterprise.md" target="_blank" rel="noopener">MD</a></div>
           </div>
         </div>
@@ -403,13 +458,44 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
       </div>
         <div class="card-body">
           <div class="card-meta">Research · 2026</div>
+          <div class="status">Working paper</div>
           <h2><a href="#cadence">Grounded Cadence</a></h2>
           <p class="sub">Fact-bound content operations as a governance architecture</p>
           <p class="blurb">Anyone can now emit a week of social copy. Almost no one can emit it on a schedule, from a company&#x27;s own facts, without inventing customers or numbers, without spending the operator&#x27;s quota on a stranger, and without a silent failure looking like a green run. This paper reports a live zero-capital writing service and formalises four mechanisms with production incidents attached: fact-bound generation, value–promo cadence, capability isolation, and fail-loud operations.</p>
           <p class="note">Honest where it matters: the Worker is in production, the test surface is documented, paying customers are zero.</p>
           <div class="card-foot">
-            <span class="facts">17 pages · CC BY 4.0</span>
+            <span class="facts">17 pages · All rights reserved</span>
             <div class="chips"><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/papers/grounded-cadence.pdf" target="_blank" rel="noopener">PDF</a><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/papers/grounded-cadence.html" target="_blank" rel="noopener">HTML</a><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/raw/main/papers/grounded-cadence.md" target="_blank" rel="noopener">MD</a></div>
+          </div>
+        </div>
+      </article>
+      <article class="card" data-kind="research" id="card-autonomy">
+        
+      <div class="cover">
+        <div class="cov-top">
+          <span class="cov-kicker">Research</span>
+          <span class="cov-year">2026</span>
+        </div>
+        <div class="cov-body">
+          <div class="cov-rule"></div>
+          <h3>From Spreadsheet Interface to Governable Autonomy</h3>
+          <p>DeskOS as a critical design-science case of evidence, agency and resource-constrained AI infrastructure</p>
+        </div>
+        <div class="cov-foot">
+          <span>Courage Garikai</span>
+          <span>catalogue</span>
+        </div>
+      </div>
+        <div class="card-body">
+          <div class="card-meta">Research · 2026</div>
+          <div class="status">Working paper; not peer reviewed</div>
+          <h2><a href="#autonomy">From Spreadsheet Interface to Governable Autonomy</a></h2>
+          <p class="sub">DeskOS as a critical design-science case of evidence, agency and resource-constrained AI infrastructure</p>
+          <p class="blurb">A bounded implementation study separating generated artefacts from verified intelligence — the distinction that decides whether an operator is being informed or flattered. It proposes an Evidence–Authority–Resource Contract and a prospective evaluation protocol, and reports no customer-outcome experiment, because none was run.</p>
+          <p class="note">Working paper, not peer reviewed. The contract and protocol are proposals, tested prospectively or not at all.</p>
+          <div class="card-foot">
+            <span class="facts">working paper · No open-content licence granted</span>
+            <div class="chips"><span class="chip chip-none">Catalogue entry · no public edition</span></div>
           </div>
         </div>
       </article></div>
@@ -430,6 +516,7 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
         <div class="row-main">
           <h3><span class="row-title">The Rocket Man Reckoning</span>
             <span class="row-sub">How China mocked Elon Musk — and why they are now panicking</span></h3>
+          <div class="status status-row">First edition</div>
           <p class="blurb">The arrogance of a rising superpower, the collapse of its myths, and what one company&#x27;s success reveals about the future of innovation. A short book about a decade of ridicule from established voices — academic, industrial and editorial — and what happened when the engineering arrived anyway.</p>
           <div class="card-foot">
             <span class="facts">29 pages · All rights reserved</span>
@@ -442,6 +529,7 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
         <div class="row-main">
           <h3><span class="row-title">Unchained Blueprint</span>
             <span class="row-sub">What to build when every payment door is closed</span></h3>
+          <div class="status status-row">Version 1 — working document</div>
           <p class="blurb">Every single door was closed: the processor that does not support your country, the payouts that are unavailable in your region, the account that has been limited. This blueprint starts from the observation that these are decisions rather than accidents, and works out what a builder in that position can still put in place.</p>
           <div class="card-foot">
             <span class="facts">13 pages · All rights reserved</span>
@@ -471,14 +559,21 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
           rights, and produced as Markdown first. The page you are reading was generated by
           a script from the same repository the books live in, so the catalogue cannot drift
           from the files.</p>
+          <p><b>On edition status.</b> Each entry states what it actually is — first edition,
+          complete first edition, working manuscript, working paper, private author-review
+          edition, or a catalogue entry with no public text. Where no download is offered the
+          work exists but its full text is not distributed publicly, and the entry says so
+          rather than hiding an absent link. A working paper is not represented here as
+          peer-reviewed, and a bounded case study is not represented as measured customer
+          success.</p>
         </div>
         <aside class="aside">
           <h4>At a glance</h4>
           <ul>
-            <li><b>Books</b> — five long-form titles</li>
-            <li><b>Research</b> — three working papers, DCAI series</li>
+            <li><b>Books</b> — seven long-form titles</li>
+            <li><b>Research</b> — four working papers, DCAI series</li>
             <li><b>Essays &amp; reports</b> — two shorter volumes</li>
-            <li><b>Formats</b> — PDF, EPUB, HTML, Markdown</li>
+            <li><b>Formats</b> — PDF, EPUB, HTML, Markdown where an edition is public</li>
             <li><b>Words in print</b> — 58,153 across the four text-native works</li>
           </ul>
           <h4>Correspondence</h4>
