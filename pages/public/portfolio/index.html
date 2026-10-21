@@ -64,12 +64,15 @@ section{padding:66px 0 10px}
 .filters button[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:var(--paper)}
 
 /* featured cards */
-.featured{display:grid;grid-template-columns:1fr;gap:42px}
-.card{display:grid;grid-template-columns:214px minmax(0,1fr);gap:30px;align-items:start;
-  border-top:3px solid var(--ink);padding-top:24px}
+.featured{display:grid;grid-template-columns:1fr;gap:40px}
+.card{display:grid;grid-template-columns:172px minmax(0,1fr);gap:30px;align-items:start;
+  border-top:3px solid var(--ink);padding-top:22px}
 .cover{background:var(--panel);color:var(--panel-ink);aspect-ratio:3/4.3;padding:20px 19px;
   display:flex;flex-direction:column;justify-content:space-between;position:relative;
   overflow:hidden}
+.cover.has-art{background:#efece4;padding:0;display:block;overflow:hidden}
+.cover.has-art img{width:100%;height:100%;object-fit:contain;display:block;background:#fff}
+.cover.has-art::after{display:none}
 .cover::after{content:"";position:absolute;inset:0;
   background:linear-gradient(160deg,rgba(255,255,255,.055),rgba(0,0,0,.28));pointer-events:none}
 .cov-top{display:flex;justify-content:space-between;align-items:baseline;
@@ -79,7 +82,7 @@ section{padding:66px 0 10px}
 .cov-body{position:relative;z-index:1}
 .cov-rule{width:30px;height:2px;background:var(--accent);margin-bottom:14px}
 .cover h3{font:400 21px/1.16 var(--serif);letter-spacing:-.012em;margin:0 0 11px}
-.cover p{font:italic 400 11.5px/1.42 var(--serif);color:#cdc6b8;margin:0}
+.cover h3{font-size:15.5px;line-height:1.32;word-break:normal;overflow-wrap:break-word;hyphens:auto}
 .cov-foot{display:flex;justify-content:space-between;font:600 8.4px/1 var(--sans);
   letter-spacing:.14em;text-transform:uppercase;color:#9d968a;position:relative;z-index:1}
 .card-body{display:flex;flex-direction:column;min-height:100%}
@@ -90,11 +93,11 @@ section{padding:66px 0 10px}
 .status-row{margin:2px 0 10px}
 .band .status{color:#9aa1a7}
 .chip-none{border-style:dashed;color:var(--muted);cursor:default}
-.card h2{font:400 27px/1.16 var(--serif);margin:0 0 7px;letter-spacing:-.012em}
+.card h2{font:400 26px/1.18 var(--serif);margin:0 0 7px;letter-spacing:-.012em}
 .card h2 a{text-decoration:none}
 .card h2 a:hover{color:var(--accent)}
 .sub{font-style:italic;color:var(--muted);font-size:15px;margin:0 0 13px}
-.blurb{font-size:14.6px;line-height:1.58;color:#3a3f44;margin:0 0 12px}
+.blurb{font-size:14.8px;line-height:1.58;color:#3a3f44;margin:0 0 12px}
 .note{font:600 10.5px/1.5 var(--sans);letter-spacing:.02em;color:var(--muted);
   border-left:2px solid var(--rule);padding-left:10px;margin:0 0 16px}
 .card-foot{margin-top:auto;padding-top:14px;border-top:1px solid var(--rule);
@@ -111,8 +114,11 @@ section{padding:66px 0 10px}
 .subhead span{font:600 10.5px/1 var(--sans);letter-spacing:.2em;text-transform:uppercase;
   color:var(--muted)}
 .rows{border-top:1px solid var(--rule)}
-.row{display:grid;grid-template-columns:74px 1fr;gap:26px;padding:30px 0;
-  border-bottom:1px solid var(--rule)}
+.row{display:grid;grid-template-columns:74px 92px 1fr;gap:26px;padding:30px 0;
+  border-bottom:1px solid var(--rule);align-items:start}
+.row-thumb{width:92px;aspect-ratio:3/4.2;object-fit:cover;display:block;
+  box-shadow:0 1px 0 var(--rule),0 6px 18px rgba(0,0,0,.10);background:#efece4}
+.row-thumb-none{background:linear-gradient(150deg,#e9e5db,#dbd6ca);box-shadow:none}
 .row-year{font:400 15px/1 var(--serif);color:var(--muted);padding-top:5px;
   border-right:1px solid var(--rule)}
 .row h3{margin:0 0 7px;font:400 23px/1.2 var(--serif);letter-spacing:-.01em}
@@ -151,6 +157,48 @@ section{padding:66px 0 10px}
 .aside li{font-size:14.6px;color:#3a3f44;padding:7px 0;border-bottom:1px solid var(--rule)}
 .aside li b{font-weight:600}
 
+
+/* built / live work */
+.builds{align-items:start;display:grid;grid-template-columns:1fr 1fr;gap:0 40px}
+.build{border-top:1px solid var(--rule);padding:24px 0 22px}
+.build-head{display:flex;align-items:baseline;justify-content:space-between;gap:14px;margin-bottom:8px}
+.build h3{font:400 23px/1.2 var(--serif);margin:0;letter-spacing:-.01em}
+.build h3 a{text-decoration:none}
+.build h3 a:hover{color:var(--accent)}
+.build-role{font:600 9.5px/1.3 var(--sans);letter-spacing:.13em;text-transform:uppercase;
+  color:var(--muted);text-align:right;white-space:nowrap}
+.build-what{font-size:15px;line-height:1.55;color:#3a3f44;margin:0 0 12px}
+.build-evidence{list-style:none;margin:0 0 14px;padding:0}
+.build-evidence li{font-size:13.4px;line-height:1.5;color:#4a5055;padding:4px 0 4px 15px;
+  position:relative;border-bottom:1px solid #f0ece3}
+.build-evidence li::before{content:"—";position:absolute;left:0;color:var(--accent)}
+.build-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.live{display:inline-flex;align-items:center;gap:7px;text-decoration:none;
+  font:600 9.5px/1 var(--sans);letter-spacing:.16em;text-transform:uppercase;color:#1d7a4c}
+.live .dot{width:7px;height:7px;border-radius:50%;background:#1d7a4c;
+  box-shadow:0 0 0 3px rgba(29,122,76,.14)}
+.live:hover{color:var(--accent)}
+.live:hover .dot{background:var(--accent);box-shadow:0 0 0 3px rgba(168,51,44,.14)}
+
+/* skills */
+.skills{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:34px 32px}
+.skill h4{font:600 10.5px/1.4 var(--sans);letter-spacing:.17em;text-transform:uppercase;
+  color:var(--accent);margin:0 0 10px;padding-bottom:8px;border-bottom:2px solid var(--ink)}
+.skill ul{list-style:none;margin:0;padding:0}
+.skill li{font-size:14.2px;line-height:1.5;color:#3a3f44;padding:6px 0;border-bottom:1px solid var(--rule)}
+
+/* contact */
+.contact{display:grid;grid-template-columns:1.1fr .9fr;gap:48px;align-items:start}
+.contact-list{list-style:none;margin:0;padding:0}
+.contact-list li{display:flex;justify-content:space-between;gap:18px;align-items:baseline;
+  padding:13px 0;border-bottom:1px solid var(--rule)}
+.c-label{font:600 10px/1.3 var(--sans);letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+.c-value{font-size:15.5px;text-align:right}
+.c-value a{text-decoration:none;border-bottom:1px solid var(--rule)}
+.c-value a:hover{color:var(--accent);border-color:var(--accent)}
+.contact-note{font-size:14.6px;line-height:1.6;color:#3a3f44}
+.contact-note b{font-weight:600;color:var(--ink)}
+
 /* colophon */
 footer.colophon{border-top:2px solid var(--ink);margin-top:40px;padding:34px 0 70px;
   font:12.5px/1.6 var(--sans);color:var(--muted)}
@@ -159,8 +207,12 @@ footer.colophon .l{max-width:40em}
 footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--rule)}
 
 @media (max-width:900px){
-  .card,.band .card{grid-template-columns:170px minmax(0,1fr);gap:22px}
+  .featured{grid-template-columns:1fr}
+  .card,.band .card{grid-template-columns:132px minmax(0,1fr);gap:20px}
+  .cover h3{font-size:16px}
   .cover{aspect-ratio:3/4.2}
+  .builds{grid-template-columns:1fr;gap:0}
+  .contact{grid-template-columns:1fr;gap:30px}
   .about{grid-template-columns:1fr;gap:34px}
   .aside{border-left:0;border-top:1px solid var(--rule);padding:26px 0 0}
 }
@@ -171,8 +223,14 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
   .cover{aspect-ratio:3/2.9}
   .wrap{padding:0 20px}
   .hero{padding:48px 0 40px}
-  .row{grid-template-columns:1fr;gap:8px}
-  .row-year{border-right:0;padding-top:0}
+  .row{grid-template-columns:76px 1fr;gap:16px}
+  .row-year{border-right:0;padding-top:0;grid-column:1/-1;margin-bottom:2px}
+  .row-thumb{width:76px}
+  .row-main{grid-column:2}
+  .skills{grid-template-columns:1fr;gap:28px}
+  .contact-list li{flex-direction:column;align-items:flex-start;gap:2px}
+  .build-head{display:block}
+  .build-role{display:block;margin-top:5px;text-align:left}
   .mast .wrap{flex-direction:column;align-items:flex-start;gap:11px}
   nav.mast-nav{gap:16px}
 }
@@ -187,8 +245,9 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
     <nav class="mast-nav">
       <a href="#books">Books</a>
       <a href="#research">Research</a>
-      <a href="#shelf">Essays</a>
-      <a href="#about">About</a>
+      <a href="#work">Built</a>
+      <a href="#skills">Skills</a>
+      <a href="#contact">Contact</a>
     </nav>
   </div>
 </header>
@@ -232,7 +291,6 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
         <div class="cov-body">
           <div class="cov-rule"></div>
           <h3>The Ledger and the Shopkeeper</h3>
-          <p>Building commerce for the markets the platforms forgot</p>
         </div>
         <div class="cov-foot">
           <span>Courage Garikai</span>
@@ -262,7 +320,6 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
         <div class="cov-body">
           <div class="cov-rule"></div>
           <h3>Intelligence, Data and Judgement</h3>
-          <p>An applied introduction to artificial intelligence, with a production case</p>
         </div>
         <div class="cov-foot">
           <span>Courage Garikai</span>
@@ -292,7 +349,6 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
         <div class="cov-body">
           <div class="cov-rule"></div>
           <h3>The Governable Enterprise</h3>
-          <p>A practical guide to evidence, authority and AI operations — lessons from DeskOS</p>
         </div>
         <div class="cov-foot">
           <span>Courage Garikai</span>
@@ -311,55 +367,75 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
             <div class="chips"><span class="chip chip-none">Catalogue entry · no public edition</span></div>
           </div>
         </div>
-      </article></div>
-      <div class="subhead"><span>Also in the catalogue</span></div>
-      <div class="rows">
-      <article class="row" data-kind="book" id="emotional">
-        <div class="row-year">2026</div>
-        <div class="row-main">
-          <h3><span class="row-title">Emotional Engineering for AI-Oriented Infrastructure Operators</span>
-            <span class="row-sub">Trust, agency and ethical adoption in systems that act</span></h3>
-          <div class="status status-row">Private author-review edition</div>
+      </article>
+      <article class="card" data-kind="book" id="card-emotional">
+        
+      <div class="cover">
+        <div class="cov-top">
+          <span class="cov-kicker">Book</span>
+          <span class="cov-year">2026</span>
+        </div>
+        <div class="cov-body">
+          <div class="cov-rule"></div>
+          <h3>Emotional Engineering for AI-Oriented Infrastructure Operators</h3>
+        </div>
+        <div class="cov-foot">
+          <span>Courage Garikai</span>
+          <span></span>
+        </div>
+      </div>
+        <div class="card-body">
+          <div class="card-meta">Book · 2026</div>
+          <div class="status">Private author-review edition</div>
+          <h2><a href="#emotional">Emotional Engineering for AI-Oriented Infrastructure Operators</a></h2>
+          <p class="sub">Trust, agency and ethical adoption in systems that act</p>
           <p class="blurb">An examination of how evidence, meaningful choice and recovery can support appropriate reliance on automated systems. It distinguishes ethical adoption from emotional pressure, and treats operating methods as proposals rather than validated sales formulas — a distinction that matters most to the operator who has to decide what to say to a customer on a bad day.</p>
+          <p class="note">Author-review edition: not a public release.</p>
           <div class="card-foot">
             <span class="facts">author-review edition · No open-content licence granted</span>
             <div class="chips"><span class="chip chip-none">Catalogue entry · no public edition</span></div>
           </div>
         </div>
       </article>
-      <article class="row" data-kind="book" id="musk-mirror">
-        <div class="row-year">2026</div>
-        <div class="row-main">
-          <h3><span class="row-title">The Musk Mirror</span>
-            <span class="row-sub">How one billionaire exposed the cracks in China&#x27;s innovation dream</span></h3>
-          <div class="status status-row">First edition</div>
+      <article class="card" data-kind="book" id="card-musk-mirror">
+        <div class="cover has-art"><img src="covers/musk-mirror.jpg" alt="Cover of The Musk Mirror" loading="lazy" decoding="async"/></div>
+        <div class="card-body">
+          <div class="card-meta">Book · 2026</div>
+          <div class="status">First edition</div>
+          <h2><a href="#musk-mirror">The Musk Mirror</a></h2>
+          <p class="sub">How one billionaire exposed the cracks in China&#x27;s innovation dream</p>
           <p class="blurb">A gallery of expert predictions, set against what was actually built. The book reads as a mirror rather than a weapon: on the rocket sceptics, the communications &#x27;experts&#x27;, the business-model critics and the CEO chorus, and on what their confidence cost. Its argument is about expertise without humility, and about the difference between a claim that sounds authoritative and a number that can be checked.</p>
+          <p class="note">Dedicated to engineers building impossible things in constrained environments.</p>
           <div class="card-foot">
             <span class="facts">286 pages · All rights reserved</span>
             <div class="chips"><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/releases/download/publications-2026-10/the-musk-mirror.pdf" target="_blank" rel="noopener">PDF</a></div>
           </div>
         </div>
       </article>
-      <article class="row" data-kind="book" id="traffic">
-        <div class="row-year">2026</div>
-        <div class="row-main">
-          <h3><span class="row-title">Traffic Is the New Oil</span>
-            <span class="row-sub">The African digital wealth formula</span></h3>
-          <div class="status status-row">First edition</div>
+      <article class="card" data-kind="book" id="card-traffic">
+        <div class="cover has-art"><img src="covers/traffic.jpg" alt="Cover of Traffic Is the New Oil" loading="lazy" decoding="async"/></div>
+        <div class="card-body">
+          <div class="card-meta">Book · 2026</div>
+          <div class="status">First edition</div>
+          <h2><a href="#traffic">Traffic Is the New Oil</a></h2>
+          <p class="sub">The African digital wealth formula</p>
           <p class="blurb">Six chapters on the only formula that has ever run the internet — traffic, ads, money — argued for a continent that supplies the eyeballs and keeps too little of the revenue. From the awakening, through the traffic layer and the ad market, to what actually enters an account while the power is out, and a zero-capital route from nothing to a first four-figure month.</p>
+          <p class="note">Written for the operator with a phone, a connection and no capital.</p>
           <div class="card-foot">
             <span class="facts">256 pages · All rights reserved</span>
             <div class="chips"><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/releases/download/publications-2026-10/traffic-is-the-new-oil.pdf" target="_blank" rel="noopener">PDF</a></div>
           </div>
         </div>
       </article>
-      <article class="row" data-kind="book" id="pinterest">
-        <div class="row-year">2026</div>
-        <div class="row-main">
-          <h3><span class="row-title">Pinterest Goldmine</span>
-            <span class="row-sub">The traffic source nobody told you about</span></h3>
-          <div class="status status-row">First edition</div>
+      <article class="card" data-kind="book" id="card-pinterest">
+        <div class="cover has-art"><img src="covers/pinterest.jpg" alt="Cover of Pinterest Goldmine" loading="lazy" decoding="async"/></div>
+        <div class="card-body">
+          <div class="card-meta">Book · 2026</div>
+          <div class="status">First edition</div>
+          <h2><a href="#pinterest">Pinterest Goldmine</a></h2>
+          <p class="sub">The traffic source nobody told you about</p>
           <p class="blurb">A complete operating manual for one under-used traffic channel: the psychology of the scroll-stop, a pin factory run from Canva on a phone, the search optimisation playbook, a scheduling system that survives real-life disruption, and the money layer that turns attention into a payout.</p>
+          <p class="note">Includes the Sunday System: a week of output in forty-five minutes.</p>
           <div class="card-foot">
             <span class="facts">242 pages · All rights reserved</span>
             <div class="chips"><a class="chip" href="https://github.com/king-kunta-cpu/tapstall/releases/download/publications-2026-10/pinterest-goldmine.pdf" target="_blank" rel="noopener">PDF</a></div>
@@ -389,7 +465,6 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
         <div class="cov-body">
           <div class="cov-rule"></div>
           <h3>Order Without Custody</h3>
-          <p>Governance-first design for merchant commerce rails in low-infrastructure economies</p>
         </div>
         <div class="cov-foot">
           <span>Courage Garikai</span>
@@ -419,7 +494,6 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
         <div class="cov-body">
           <div class="cov-rule"></div>
           <h3>The Sovereign Micro-Enterprise</h3>
-          <p>A governance-first architecture for zero-capital agentic businesses</p>
         </div>
         <div class="cov-foot">
           <span>Courage Garikai</span>
@@ -449,7 +523,6 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
         <div class="cov-body">
           <div class="cov-rule"></div>
           <h3>Grounded Cadence</h3>
-          <p>Fact-bound content operations as a governance architecture</p>
         </div>
         <div class="cov-foot">
           <span>Courage Garikai</span>
@@ -479,11 +552,10 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
         <div class="cov-body">
           <div class="cov-rule"></div>
           <h3>From Spreadsheet Interface to Governable Autonomy</h3>
-          <p>DeskOS as a critical design-science case of evidence, agency and resource-constrained AI infrastructure</p>
         </div>
         <div class="cov-foot">
           <span>Courage Garikai</span>
-          <span>catalogue</span>
+          <span></span>
         </div>
       </div>
         <div class="card-body">
@@ -513,6 +585,7 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
       <div class="rows">
       <article class="row" data-kind="essay" id="rocket-man">
         <div class="row-year">2026</div>
+        <img class="row-thumb" src="covers/rocket-man.jpg" alt="" loading="lazy" decoding="async"/>
         <div class="row-main">
           <h3><span class="row-title">The Rocket Man Reckoning</span>
             <span class="row-sub">How China mocked Elon Musk — and why they are now panicking</span></h3>
@@ -526,6 +599,7 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
       </article>
       <article class="row" data-kind="essay" id="unchained">
         <div class="row-year">2026</div>
+        <img class="row-thumb" src="covers/unchained.jpg" alt="" loading="lazy" decoding="async"/>
         <div class="row-main">
           <h3><span class="row-title">Unchained Blueprint</span>
             <span class="row-sub">What to build when every payment door is closed</span></h3>
@@ -538,6 +612,121 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
         </div>
       </article></div>
     </section>
+
+  <section class="band" id="work">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2>Built and running</h2>
+        <div class="kicker">Every link opens today</div>
+      </div>
+      <p class="sec-intro">A portfolio of writing is an argument; a portfolio of running
+      systems is evidence. Each entry below is deployed and reachable — open it, use it, and
+      hold it against what the books claim. Nothing here is a mock-up or a screenshot.</p>
+      <div class="builds">
+      <article class="build">
+        <div class="build-head">
+          <h3><a href="https://tapstall.zlnew.workers.dev/" target="_blank" rel="noopener">Tapstall</a></h3>
+          <span class="build-role">Founder &amp; engineer · 2026</span>
+        </div>
+        <p class="build-what">A merchant commerce rail for Zimbabwe, South Africa, Kenya and Nigeria: a shop in one link, one-tap buyer confirmation, and a settlement statement that reconciles orders against money the merchant received directly. It holds no customer funds, charges a flat fee, and runs on free infrastructure.</p>
+        <ul class="build-evidence"><li>Single Cloudflare Worker + KV, $0/month, version 1.9.1 live</li><li>420 passing assertions on a ~14.8k-line codebase</li><li>Quota reserve ladder 1000/975/900/800/700 — order submission is the last thing refused</li><li>Public self-test endpoint reports every invariant it claims</li></ul>
+        <div class="build-foot">
+          <a class="live" href="https://tapstall.zlnew.workers.dev/" target="_blank" rel="noopener">
+            <span class="dot" aria-hidden="true"></span>live</a>
+          <div class="chips"><a class="chip" href="https://tapstall.zlnew.workers.dev/fees.html" target="_blank" rel="noopener">Fee calculator</a><a class="chip" href="https://tapstall.zlnew.workers.dev/onboard" target="_blank" rel="noopener">Merchant onboarding</a><a class="chip" href="https://tapstall.zlnew.workers.dev/partners" target="_blank" rel="noopener">Partner terms</a><a class="chip" href="https://tapstall.zlnew.workers.dev/guide/payment-reference-matching" target="_blank" rel="noopener">Payment-matching guide</a></div>
+        </div>
+      </article>
+      <article class="build">
+        <div class="build-head">
+          <h3><a href="https://open-practice.zlnew.workers.dev/" target="_blank" rel="noopener">Open Practice</a></h3>
+          <span class="build-role">Designer &amp; engineer · 2026</span>
+        </div>
+        <p class="build-what">An independent, non-accredited AI learning platform: 50 illustrated activities, a curriculum, a tool field desk and a facilitator kit. Learner accounts sync across devices; downloaded workspaces stay usable offline.</p>
+        <ul class="build-evidence"><li>Cloudflare Worker + Durable Object + Workers AI, live</li><li>68 repository tests passing on the deployed revision</li><li>First-party learning analytics; export and delete honoured</li><li>No advertising trackers, by construction</li></ul>
+        <div class="build-foot">
+          <a class="live" href="https://open-practice.zlnew.workers.dev/" target="_blank" rel="noopener">
+            <span class="dot" aria-hidden="true"></span>live</a>
+          <div class="chips"><a class="chip" href="https://open-practice.zlnew.workers.dev/activities.html" target="_blank" rel="noopener">The workshops</a><a class="chip" href="https://open-practice.zlnew.workers.dev/" target="_blank" rel="noopener">Starter challenge</a></div>
+        </div>
+      </article>
+      <article class="build">
+        <div class="build-head">
+          <h3><a href="https://stpi-deskos.stpi-cloud.workers.dev/" target="_blank" rel="noopener">DeskOS</a></h3>
+          <span class="build-role">Architect · operator command centre</span>
+        </div>
+        <p class="build-what">The operating console behind STPI: ten modules covering overview, units, global lead hunting, outreach, and the ledger that makes each step auditable. It is the case studied in The Governable Enterprise.</p>
+        <ul class="build-evidence"><li>Live console, ~300KB of served application</li><li>Ten operating modules in one shell</li><li>Everything the case study describes is visible here</li></ul>
+        <div class="build-foot">
+          <a class="live" href="https://stpi-deskos.stpi-cloud.workers.dev/" target="_blank" rel="noopener">
+            <span class="dot" aria-hidden="true"></span>live</a>
+          <div class="chips"><a class="chip" href="https://stpi-deskos.stpi-cloud.workers.dev/" target="_blank" rel="noopener">Operator console</a></div>
+        </div>
+      </article>
+      <article class="build">
+        <div class="build-head">
+          <h3><a href="https://contentops-edge.simalidudu.workers.dev/" target="_blank" rel="noopener">ContentOps</a></h3>
+          <span class="build-role">Engineer · 2026</span>
+        </div>
+        <p class="build-what">A zero-capital writing service: a week of posts for twenty platforms, drafted from a client&#x27;s own facts, then checked by a deterministic editor before anything may publish. When the check fails, the slot stays empty.</p>
+        <ul class="build-evidence"><li>Worker + D1 in production; 185 Python and 101 Worker cases</li><li>Fact-bound generation: no invented numbers, no invented customers</li><li>Clients hold their own model keys — capability isolation</li><li>Formalised with its incidents in the Grounded Cadence paper</li></ul>
+        <div class="build-foot">
+          <a class="live" href="https://contentops-edge.simalidudu.workers.dev/" target="_blank" rel="noopener">
+            <span class="dot" aria-hidden="true"></span>live</a>
+          <div class="chips"><a class="chip" href="https://contentops-edge.simalidudu.workers.dev/demo" target="_blank" rel="noopener">Live demo</a></div>
+        </div>
+      </article>
+      <article class="build">
+        <div class="build-head">
+          <h3><a href="https://bsky-audit.simalidudu.workers.dev/" target="_blank" rel="noopener">Bluesky Growth Audit</a></h3>
+          <span class="build-role">Engineer · 2026</span>
+        </div>
+        <p class="build-what">A free, no-signup audit of a Bluesky account: posting cadence, engagement shape, content mix and timing, with specific fixes rather than a score.</p>
+        <ul class="build-evidence"><li>Live and free to use</li><li>No account, no tracker, no email capture</li><li>Reads public data only</li></ul>
+        <div class="build-foot">
+          <a class="live" href="https://bsky-audit.simalidudu.workers.dev/" target="_blank" rel="noopener">
+            <span class="dot" aria-hidden="true"></span>live</a>
+          <div class="chips"><a class="chip" href="https://bsky-audit.simalidudu.workers.dev/" target="_blank" rel="noopener">Run an audit</a></div>
+        </div>
+      </article>
+      <article class="build">
+        <div class="build-head">
+          <h3><a href="https://courage-publications.zlnew.workers.dev/" target="_blank" rel="noopener">Courage Garikai — Publications</a></h3>
+          <span class="build-role">Author &amp; engineer · 2026</span>
+        </div>
+        <p class="build-what">The publications catalogue: four works with their exact edition status, a research thread, and an explicit statement of what is and is not claimed.</p>
+        <ul class="build-evidence"><li>Live catalogue, served from a Worker</li><li>States edition status per work rather than implying a full-text library</li><li>Discloses funding and relationship</li></ul>
+        <div class="build-foot">
+          <a class="live" href="https://courage-publications.zlnew.workers.dev/" target="_blank" rel="noopener">
+            <span class="dot" aria-hidden="true"></span>live</a>
+          <div class="chips"><a class="chip" href="https://courage-publications.zlnew.workers.dev/" target="_blank" rel="noopener">Catalogue</a></div>
+        </div>
+      </article>
+      <article class="build">
+        <div class="build-head">
+          <h3><a href="https://hunta-leads.simalidudu.workers.dev/" target="_blank" rel="noopener">Hunta lead console</a></h3>
+          <span class="build-role">Engineer · internal</span>
+        </div>
+        <p class="build-what">The lead pipeline behind the hunta field report: discovery, admission gating and a do-not-contact ledger, driven by scheduled agents.</p>
+        <ul class="build-evidence"><li>Deployed and gated (HTTP 401 without credentials — working as designed)</li><li>Admission gate refuses before a record exists, not at send time</li></ul>
+        <div class="build-foot">
+          <a class="live" href="https://hunta-leads.simalidudu.workers.dev/" target="_blank" rel="noopener">
+            <span class="dot" aria-hidden="true"></span>live</a>
+          <div class="chips"><span class="chip chip-none">internal · gated</span></div>
+        </div>
+      </article></div>
+    </div>
+  </section>
+
+  <div class="wrap">
+    <section id="skills">
+      <div class="sec-head">
+        <h2>What I do</h2>
+        <div class="kicker">Skills and experience</div>
+      </div>
+      <div class="skills"><div class="skill"><h4>Systems &amp; backend</h4><ul><li>Cloudflare Workers, KV, D1, Durable Objects</li><li>Node.js, Python</li><li>Serverless cost ceilings and quota design</li><li>Event-sourced ledgers</li><li>Idempotency and recovery design</li></ul></div><div class="skill"><h4>AI in production</h4><ul><li>LLM provider ladders and failover</li><li>Retrieval and fact-binding</li><li>Deterministic post-checks on generated text</li><li>Prompt and evaluation design</li><li>Agent scheduling with human taps</li></ul></div><div class="skill"><h4>Product &amp; front end</h4><ul><li>Accessible single-file web apps</li><li>Per-business-type storefront design</li><li>Make-in-one-link flows for low-end Android</li><li>Offline-first workspaces</li></ul></div><div class="skill"><h4>Delivery &amp; operations</h4><ul><li>GitHub Actions CI/CD</li><li>Test suites that pin refusals, not just outputs</li><li>Production forensics and incident write-ups</li><li>Zero-budget infrastructure</li></ul></div><div class="skill"><h4>Writing &amp; research</h4><ul><li>Long-form non-fiction and textbooks</li><li>Typesetting pipelines (Markdown → PDF/EPUB)</li><li>Design-science case studies</li><li>Reproducible document builds</li></ul></div></div>
+    </section>
+
+  </div>
 
     <section id="about">
       <div class="sec-head">
@@ -582,6 +771,27 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
             <li>Source and errata — <a href="https://github.com/king-kunta-cpu/tapstall">the repository</a></li>
           </ul>
         </aside>
+      </div>
+    </section>
+  </div>
+
+  <div class="wrap">
+    <section id="contact">
+      <div class="sec-head">
+        <h2>Contact</h2>
+        <div class="kicker">Harare, Zimbabwe · CAT/SAST</div>
+      </div>
+      <div class="contact">
+        <div>
+          <p class="contact-note"><b>Available for</b> systems design, AI operations reviews,
+          and building commerce or learning infrastructure for constrained markets. I work
+          remote-first and I am comfortable with intermittent power and bandwidth, because
+          that is the environment the software has to run in.</p>
+          <p class="contact-note"><b>Best first message:</b> what the system has to do, who
+          uses it, and what happens today when it fails. If the answer is "nothing yet", that
+          is a fine place to start.</p>
+        </div>
+        <ul class="contact-list"><li><span class="c-label">Email</span><span class="c-value"><a href="mailto:mawangochengetai@gmail.com">mawangochengetai@gmail.com</a></span></li><li><span class="c-label">WhatsApp</span><span class="c-value"><a href="https://wa.me/263784600904">+263 78 460 0904</a></span></li><li><span class="c-label">Telegram</span><span class="c-value"><a href="https://t.me/+263784600904">+263 78 460 0904</a></span></li><li><span class="c-label">Source</span><span class="c-value"><a href="https://github.com/king-kunta-cpu">github.com/king-kunta-cpu</a></span></li><li><span class="c-label">Press &amp; permissions</span><span class="c-value">Jacaranda Labs, Harare</span></li></ul>
       </div>
     </section>
   </div>

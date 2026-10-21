@@ -234,6 +234,7 @@ WORKS = [
     },
     {
         "id": "musk-mirror",
+        "cover": "covers/musk-mirror.jpg",
         "kind": "book",
         "featured": False,
         "title": "The Musk Mirror",
@@ -254,6 +255,7 @@ WORKS = [
     },
     {
         "id": "traffic",
+        "cover": "covers/traffic.jpg",
         "kind": "book",
         "featured": False,
         "title": "Traffic Is the New Oil",
@@ -273,6 +275,7 @@ WORKS = [
     },
     {
         "id": "pinterest",
+        "cover": "covers/pinterest.jpg",
         "kind": "book",
         "featured": False,
         "title": "Pinterest Goldmine",
@@ -291,6 +294,7 @@ WORKS = [
     },
     {
         "id": "rocket-man",
+        "cover": "covers/rocket-man.jpg",
         "kind": "essay",
         "featured": False,
         "title": "The Rocket Man Reckoning",
@@ -309,6 +313,7 @@ WORKS = [
     },
     {
         "id": "unchained",
+        "cover": "covers/unchained.jpg",
         "kind": "essay",
         "featured": False,
         "title": "Unchained Blueprint",
@@ -328,6 +333,124 @@ WORKS = [
     },
 ]
 
+# --------------------------------------------------------------------------- what is running
+#
+# Every entry below was fetched live on 21 October 2026 and answered 200 (or, where noted,
+# is protected by design). A portfolio that lists what someone intends to build is a plan;
+# this list is what a reader can open right now.
+BUILT = [
+    {
+        "title": "Tapstall",
+        "role": "Founder & engineer · 2026",
+        "url": "https://tapstall.zlnew.workers.dev/",
+        "demo": [("Fee calculator", "https://tapstall.zlnew.workers.dev/fees.html"),
+                 ("Merchant onboarding", "https://tapstall.zlnew.workers.dev/onboard"),
+                 ("Partner terms", "https://tapstall.zlnew.workers.dev/partners"),
+                 ("Payment-matching guide", "https://tapstall.zlnew.workers.dev/guide/payment-reference-matching")],
+        "what": ("A merchant commerce rail for Zimbabwe, South Africa, Kenya and Nigeria: a shop "
+                 "in one link, one-tap buyer confirmation, and a settlement statement that "
+                 "reconciles orders against money the merchant received directly. It holds no "
+                 "customer funds, charges a flat fee, and runs on free infrastructure."),
+        "evidence": ["Single Cloudflare Worker + KV, $0/month, version 1.9.1 live",
+                     "420 passing assertions on a ~14.8k-line codebase",
+                     "Quota reserve ladder 1000/975/900/800/700 — order submission is the last thing refused",
+                     "Public self-test endpoint reports every invariant it claims"],
+    },
+    {
+        "title": "Open Practice",
+        "role": "Designer & engineer · 2026",
+        "url": "https://open-practice.zlnew.workers.dev/",
+        "demo": [("The workshops", "https://open-practice.zlnew.workers.dev/activities.html"),
+                 ("Starter challenge", "https://open-practice.zlnew.workers.dev/")],
+        "what": ("An independent, non-accredited AI learning platform: 50 illustrated activities, "
+                 "a curriculum, a tool field desk and a facilitator kit. Learner accounts sync "
+                 "across devices; downloaded workspaces stay usable offline."),
+        "evidence": ["Cloudflare Worker + Durable Object + Workers AI, live",
+                     "68 repository tests passing on the deployed revision",
+                     "First-party learning analytics; export and delete honoured",
+                     "No advertising trackers, by construction"],
+    },
+    {
+        "title": "DeskOS",
+        "role": "Architect · operator command centre",
+        "url": "https://stpi-deskos.stpi-cloud.workers.dev/",
+        "demo": [("Operator console", "https://stpi-deskos.stpi-cloud.workers.dev/")],
+        "what": ("The operating console behind STPI: ten modules covering overview, units, global "
+                 "lead hunting, outreach, and the ledger that makes each step auditable. It is "
+                 "the case studied in The Governable Enterprise."),
+        "evidence": ["Live console, ~300KB of served application",
+                     "Ten operating modules in one shell",
+                     "Everything the case study describes is visible here"],
+    },
+    {
+        "title": "ContentOps",
+        "role": "Engineer · 2026",
+        "url": "https://contentops-edge.simalidudu.workers.dev/",
+        "demo": [("Live demo", "https://contentops-edge.simalidudu.workers.dev/demo")],
+        "what": ("A zero-capital writing service: a week of posts for twenty platforms, drafted "
+                 "from a client's own facts, then checked by a deterministic editor before "
+                 "anything may publish. When the check fails, the slot stays empty."),
+        "evidence": ["Worker + D1 in production; 185 Python and 101 Worker cases",
+                     "Fact-bound generation: no invented numbers, no invented customers",
+                     "Clients hold their own model keys — capability isolation",
+                     "Formalised with its incidents in the Grounded Cadence paper"],
+    },
+    {
+        "title": "Bluesky Growth Audit",
+        "role": "Engineer · 2026",
+        "url": "https://bsky-audit.simalidudu.workers.dev/",
+        "demo": [("Run an audit", "https://bsky-audit.simalidudu.workers.dev/")],
+        "what": ("A free, no-signup audit of a Bluesky account: posting cadence, engagement shape, "
+                 "content mix and timing, with specific fixes rather than a score."),
+        "evidence": ["Live and free to use", "No account, no tracker, no email capture",
+                     "Reads public data only"],
+    },
+    {
+        "title": "Courage Garikai — Publications",
+        "role": "Author & engineer · 2026",
+        "url": "https://courage-publications.zlnew.workers.dev/",
+        "demo": [("Catalogue", "https://courage-publications.zlnew.workers.dev/")],
+        "what": ("The publications catalogue: four works with their exact edition status, a "
+                 "research thread, and an explicit statement of what is and is not claimed."),
+        "evidence": ["Live catalogue, served from a Worker",
+                     "States edition status per work rather than implying a full-text library",
+                     "Discloses funding and relationship"],
+    },
+    {
+        "title": "Hunta lead console",
+        "role": "Engineer · internal",
+        "url": "https://hunta-leads.simalidudu.workers.dev/",
+        "demo": [],
+        "what": ("The lead pipeline behind the hunta field report: discovery, admission gating and "
+                 "a do-not-contact ledger, driven by scheduled agents."),
+        "evidence": ["Deployed and gated (HTTP 401 without credentials — working as designed)",
+                     "Admission gate refuses before a record exists, not at send time"],
+    },
+]
+
+SKILLS = [
+    ("Systems & backend", ["Cloudflare Workers, KV, D1, Durable Objects", "Node.js, Python",
+                           "Serverless cost ceilings and quota design", "Event-sourced ledgers",
+                           "Idempotency and recovery design"]),
+    ("AI in production", ["LLM provider ladders and failover", "Retrieval and fact-binding",
+                          "Deterministic post-checks on generated text", "Prompt and evaluation design",
+                          "Agent scheduling with human taps"]),
+    ("Product & front end", ["Accessible single-file web apps", "Per-business-type storefront design",
+                             "Make-in-one-link flows for low-end Android", "Offline-first workspaces"]),
+    ("Delivery & operations", ["GitHub Actions CI/CD", "Test suites that pin refusals, not just outputs",
+                               "Production forensics and incident write-ups", "Zero-budget infrastructure"]),
+    ("Writing & research", ["Long-form non-fiction and textbooks", "Typesetting pipelines (Markdown → PDF/EPUB)",
+                            "Design-science case studies", "Reproducible document builds"]),
+]
+
+CONTACT = [
+    ("Email", "mawangochengetai@gmail.com", "mailto:mawangochengetai@gmail.com"),
+    ("WhatsApp", "+263 78 460 0904", "https://wa.me/263784600904"),
+    ("Telegram", "+263 78 460 0904", "https://t.me/+263784600904"),
+    ("Source", "github.com/king-kunta-cpu", "https://github.com/king-kunta-cpu"),
+    ("Press & permissions", "Jacaranda Labs, Harare", None),
+]
+
 KIND_LABEL = {"book": "Book", "research": "Research", "essay": "Essay & field report"}
 
 
@@ -345,8 +468,49 @@ def esc(s):
 
 # --------------------------------------------------------------------------- rendering
 
+def built_card(b):
+    demo = "".join(f'<a class="chip" href="{esc(u)}" target="_blank" rel="noopener">{esc(l)}</a>'
+                   for l, u in b["demo"])
+    ev = "".join(f"<li>{esc(e)}</li>" for e in b["evidence"])
+    return f"""
+      <article class="build">
+        <div class="build-head">
+          <h3><a href="{esc(b['url'])}" target="_blank" rel="noopener">{esc(b['title'])}</a></h3>
+          <span class="build-role">{esc(b['role'])}</span>
+        </div>
+        <p class="build-what">{esc(b['what'])}</p>
+        <ul class="build-evidence">{ev}</ul>
+        <div class="build-foot">
+          <a class="live" href="{esc(b['url'])}" target="_blank" rel="noopener">
+            <span class="dot" aria-hidden="true"></span>live</a>
+          <div class="chips">{demo or '<span class="chip chip-none">internal · gated</span>'}</div>
+        </div>
+      </article>"""
+
+
+def skills_block():
+    return "".join(
+        f'<div class="skill"><h4>{esc(name)}</h4><ul>' +
+        "".join(f"<li>{esc(x)}</li>" for x in items) + "</ul></div>"
+        for name, items in SKILLS)
+
+
+def contact_block():
+    out = []
+    for label, value, href in CONTACT:
+        v = f'<a href="{esc(href)}">{esc(value)}</a>' if href else esc(value)
+        out.append(f'<li><span class="c-label">{esc(label)}</span><span class="c-value">{v}</span></li>')
+    return "".join(out)
+
+
 def cover(w, cls="cover"):
-    """A CSS-drawn cover. No image files, so the page stays self-contained."""
+    """The author's own cover artwork where the source file carried it; a typographic
+    panel where it did not. The panel is deliberately plain and never imitates art —
+    a made-up cover for a real book would be a small forgery."""
+    if w.get("cover"):
+        return (f'<div class="{cls} has-art">'
+                f'<img src="{esc(w["cover"])}" alt="Cover of {esc(w["title"])}" '
+                f'loading="lazy" decoding="async"/></div>')
     kicker = KIND_LABEL[w["kind"]]
     return f"""
       <div class="{cls}">
@@ -357,11 +521,10 @@ def cover(w, cls="cover"):
         <div class="cov-body">
           <div class="cov-rule"></div>
           <h3>{esc(w['title'])}</h3>
-          <p>{esc(w['subtitle'])}</p>
         </div>
         <div class="cov-foot">
           <span>{esc(AUTHOR)}</span>
-          <span>{esc(w['pages'] and str(w['pages']) + ' pp' or 'catalogue')}</span>
+          <span>{esc(str(w['pages']) + ' pp' if w['pages'] else '')}</span>
         </div>
       </div>"""
 
@@ -406,9 +569,12 @@ def featured_card(w):
 
 
 def shelf_row(w):
+    thumb = (f'<img class="row-thumb" src="{esc(w["cover"])}" alt="" loading="lazy" decoding="async"/>'
+             if w.get("cover") else '<div class="row-thumb row-thumb-none"></div>')
     return f"""
       <article class="row" data-kind="{w['kind']}" id="{esc(w['id'])}">
         <div class="row-year">{esc(w['year'])}</div>
+        {thumb}
         <div class="row-main">
           <h3><span class="row-title">{esc(w['title'])}</span>
             <span class="row-sub">{esc(w['subtitle'])}</span></h3>
@@ -480,12 +646,15 @@ section{padding:66px 0 10px}
 .filters button[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:var(--paper)}
 
 /* featured cards */
-.featured{display:grid;grid-template-columns:1fr;gap:42px}
-.card{display:grid;grid-template-columns:214px minmax(0,1fr);gap:30px;align-items:start;
-  border-top:3px solid var(--ink);padding-top:24px}
+.featured{display:grid;grid-template-columns:1fr;gap:40px}
+.card{display:grid;grid-template-columns:172px minmax(0,1fr);gap:30px;align-items:start;
+  border-top:3px solid var(--ink);padding-top:22px}
 .cover{background:var(--panel);color:var(--panel-ink);aspect-ratio:3/4.3;padding:20px 19px;
   display:flex;flex-direction:column;justify-content:space-between;position:relative;
   overflow:hidden}
+.cover.has-art{background:#efece4;padding:0;display:block;overflow:hidden}
+.cover.has-art img{width:100%;height:100%;object-fit:contain;display:block;background:#fff}
+.cover.has-art::after{display:none}
 .cover::after{content:"";position:absolute;inset:0;
   background:linear-gradient(160deg,rgba(255,255,255,.055),rgba(0,0,0,.28));pointer-events:none}
 .cov-top{display:flex;justify-content:space-between;align-items:baseline;
@@ -495,7 +664,7 @@ section{padding:66px 0 10px}
 .cov-body{position:relative;z-index:1}
 .cov-rule{width:30px;height:2px;background:var(--accent);margin-bottom:14px}
 .cover h3{font:400 21px/1.16 var(--serif);letter-spacing:-.012em;margin:0 0 11px}
-.cover p{font:italic 400 11.5px/1.42 var(--serif);color:#cdc6b8;margin:0}
+.cover h3{font-size:15.5px;line-height:1.32;word-break:normal;overflow-wrap:break-word;hyphens:auto}
 .cov-foot{display:flex;justify-content:space-between;font:600 8.4px/1 var(--sans);
   letter-spacing:.14em;text-transform:uppercase;color:#9d968a;position:relative;z-index:1}
 .card-body{display:flex;flex-direction:column;min-height:100%}
@@ -506,11 +675,11 @@ section{padding:66px 0 10px}
 .status-row{margin:2px 0 10px}
 .band .status{color:#9aa1a7}
 .chip-none{border-style:dashed;color:var(--muted);cursor:default}
-.card h2{font:400 27px/1.16 var(--serif);margin:0 0 7px;letter-spacing:-.012em}
+.card h2{font:400 26px/1.18 var(--serif);margin:0 0 7px;letter-spacing:-.012em}
 .card h2 a{text-decoration:none}
 .card h2 a:hover{color:var(--accent)}
 .sub{font-style:italic;color:var(--muted);font-size:15px;margin:0 0 13px}
-.blurb{font-size:14.6px;line-height:1.58;color:#3a3f44;margin:0 0 12px}
+.blurb{font-size:14.8px;line-height:1.58;color:#3a3f44;margin:0 0 12px}
 .note{font:600 10.5px/1.5 var(--sans);letter-spacing:.02em;color:var(--muted);
   border-left:2px solid var(--rule);padding-left:10px;margin:0 0 16px}
 .card-foot{margin-top:auto;padding-top:14px;border-top:1px solid var(--rule);
@@ -527,8 +696,11 @@ section{padding:66px 0 10px}
 .subhead span{font:600 10.5px/1 var(--sans);letter-spacing:.2em;text-transform:uppercase;
   color:var(--muted)}
 .rows{border-top:1px solid var(--rule)}
-.row{display:grid;grid-template-columns:74px 1fr;gap:26px;padding:30px 0;
-  border-bottom:1px solid var(--rule)}
+.row{display:grid;grid-template-columns:74px 92px 1fr;gap:26px;padding:30px 0;
+  border-bottom:1px solid var(--rule);align-items:start}
+.row-thumb{width:92px;aspect-ratio:3/4.2;object-fit:cover;display:block;
+  box-shadow:0 1px 0 var(--rule),0 6px 18px rgba(0,0,0,.10);background:#efece4}
+.row-thumb-none{background:linear-gradient(150deg,#e9e5db,#dbd6ca);box-shadow:none}
 .row-year{font:400 15px/1 var(--serif);color:var(--muted);padding-top:5px;
   border-right:1px solid var(--rule)}
 .row h3{margin:0 0 7px;font:400 23px/1.2 var(--serif);letter-spacing:-.01em}
@@ -567,6 +739,48 @@ section{padding:66px 0 10px}
 .aside li{font-size:14.6px;color:#3a3f44;padding:7px 0;border-bottom:1px solid var(--rule)}
 .aside li b{font-weight:600}
 
+
+/* built / live work */
+.builds{align-items:start;display:grid;grid-template-columns:1fr 1fr;gap:0 40px}
+.build{border-top:1px solid var(--rule);padding:24px 0 22px}
+.build-head{display:flex;align-items:baseline;justify-content:space-between;gap:14px;margin-bottom:8px}
+.build h3{font:400 23px/1.2 var(--serif);margin:0;letter-spacing:-.01em}
+.build h3 a{text-decoration:none}
+.build h3 a:hover{color:var(--accent)}
+.build-role{font:600 9.5px/1.3 var(--sans);letter-spacing:.13em;text-transform:uppercase;
+  color:var(--muted);text-align:right;white-space:nowrap}
+.build-what{font-size:15px;line-height:1.55;color:#3a3f44;margin:0 0 12px}
+.build-evidence{list-style:none;margin:0 0 14px;padding:0}
+.build-evidence li{font-size:13.4px;line-height:1.5;color:#4a5055;padding:4px 0 4px 15px;
+  position:relative;border-bottom:1px solid #f0ece3}
+.build-evidence li::before{content:"—";position:absolute;left:0;color:var(--accent)}
+.build-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.live{display:inline-flex;align-items:center;gap:7px;text-decoration:none;
+  font:600 9.5px/1 var(--sans);letter-spacing:.16em;text-transform:uppercase;color:#1d7a4c}
+.live .dot{width:7px;height:7px;border-radius:50%;background:#1d7a4c;
+  box-shadow:0 0 0 3px rgba(29,122,76,.14)}
+.live:hover{color:var(--accent)}
+.live:hover .dot{background:var(--accent);box-shadow:0 0 0 3px rgba(168,51,44,.14)}
+
+/* skills */
+.skills{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:34px 32px}
+.skill h4{font:600 10.5px/1.4 var(--sans);letter-spacing:.17em;text-transform:uppercase;
+  color:var(--accent);margin:0 0 10px;padding-bottom:8px;border-bottom:2px solid var(--ink)}
+.skill ul{list-style:none;margin:0;padding:0}
+.skill li{font-size:14.2px;line-height:1.5;color:#3a3f44;padding:6px 0;border-bottom:1px solid var(--rule)}
+
+/* contact */
+.contact{display:grid;grid-template-columns:1.1fr .9fr;gap:48px;align-items:start}
+.contact-list{list-style:none;margin:0;padding:0}
+.contact-list li{display:flex;justify-content:space-between;gap:18px;align-items:baseline;
+  padding:13px 0;border-bottom:1px solid var(--rule)}
+.c-label{font:600 10px/1.3 var(--sans);letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+.c-value{font-size:15.5px;text-align:right}
+.c-value a{text-decoration:none;border-bottom:1px solid var(--rule)}
+.c-value a:hover{color:var(--accent);border-color:var(--accent)}
+.contact-note{font-size:14.6px;line-height:1.6;color:#3a3f44}
+.contact-note b{font-weight:600;color:var(--ink)}
+
 /* colophon */
 footer.colophon{border-top:2px solid var(--ink);margin-top:40px;padding:34px 0 70px;
   font:12.5px/1.6 var(--sans);color:var(--muted)}
@@ -575,8 +789,12 @@ footer.colophon .l{max-width:40em}
 footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid var(--rule)}
 
 @media (max-width:900px){
-  .card,.band .card{grid-template-columns:170px minmax(0,1fr);gap:22px}
+  .featured{grid-template-columns:1fr}
+  .card,.band .card{grid-template-columns:132px minmax(0,1fr);gap:20px}
+  .cover h3{font-size:16px}
   .cover{aspect-ratio:3/4.2}
+  .builds{grid-template-columns:1fr;gap:0}
+  .contact{grid-template-columns:1fr;gap:30px}
   .about{grid-template-columns:1fr;gap:34px}
   .aside{border-left:0;border-top:1px solid var(--rule);padding:26px 0 0}
 }
@@ -587,8 +805,14 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
   .cover{aspect-ratio:3/2.9}
   .wrap{padding:0 20px}
   .hero{padding:48px 0 40px}
-  .row{grid-template-columns:1fr;gap:8px}
-  .row-year{border-right:0;padding-top:0}
+  .row{grid-template-columns:76px 1fr;gap:16px}
+  .row-year{border-right:0;padding-top:0;grid-column:1/-1;margin-bottom:2px}
+  .row-thumb{width:76px}
+  .row-main{grid-column:2}
+  .skills{grid-template-columns:1fr;gap:28px}
+  .contact-list li{flex-direction:column;align-items:flex-start;gap:2px}
+  .build-head{display:block}
+  .build-role{display:block;margin-top:5px;text-align:left}
   .mast .wrap{flex-direction:column;align-items:flex-start;gap:11px}
   nav.mast-nav{gap:16px}
 }
@@ -614,15 +838,17 @@ def build():
     featured = [w for w in WORKS if w["featured"]]
     research = [w for w in featured if w["kind"] == "research"]
     books = [w for w in WORKS if w["kind"] == "book"]
-    flagship = [w for w in books if w["featured"]]
-    also = [w for w in books if not w["featured"]]
+    flagship = books          # every book gets a card, and therefore a cover
+    also = []                 # no second-class books
     essays = [w for w in WORKS if w["kind"] == "essay"]
 
     total_pages = sum(w["pages"] or 0 for w in WORKS)
     total_words = sum(w["words"] or 0 for w in WORKS)
 
     cards = "".join(featured_card(w) for w in flagship)
-    more_rows = "".join(shelf_row(w) for w in also)
+    builds = "".join(built_card(b) for b in BUILT)
+    skills = skills_block()
+    contacts = contact_block()
     research_block = "".join(featured_card(w) for w in research)
     rows = "".join(shelf_row(w) for w in essays)
 
@@ -644,8 +870,9 @@ def build():
     <nav class="mast-nav">
       <a href="#books">Books</a>
       <a href="#research">Research</a>
-      <a href="#shelf">Essays</a>
-      <a href="#about">About</a>
+      <a href="#work">Built</a>
+      <a href="#skills">Skills</a>
+      <a href="#contact">Contact</a>
     </nav>
   </div>
 </header>
@@ -679,8 +906,6 @@ def build():
         <button data-filter="essay" aria-pressed="false">Essays</button>
       </div>
       <div class="featured">{cards}</div>
-      <div class="subhead"><span>Also in the catalogue</span></div>
-      <div class="rows">{more_rows}</div>
     </section>
   </div>
 
@@ -707,6 +932,30 @@ def build():
       blueprint for a builder whose payment doors are all closed.</p>
       <div class="rows">{rows}</div>
     </section>
+
+  <section class="band" id="work">
+    <div class="wrap">
+      <div class="sec-head">
+        <h2>Built and running</h2>
+        <div class="kicker">Every link opens today</div>
+      </div>
+      <p class="sec-intro">A portfolio of writing is an argument; a portfolio of running
+      systems is evidence. Each entry below is deployed and reachable — open it, use it, and
+      hold it against what the books claim. Nothing here is a mock-up or a screenshot.</p>
+      <div class="builds">{builds}</div>
+    </div>
+  </section>
+
+  <div class="wrap">
+    <section id="skills">
+      <div class="sec-head">
+        <h2>What I do</h2>
+        <div class="kicker">Skills and experience</div>
+      </div>
+      <div class="skills">{skills}</div>
+    </section>
+
+  </div>
 
     <section id="about">
       <div class="sec-head">
@@ -751,6 +1000,27 @@ def build():
             <li>Source and errata — <a href="{REPO}">the repository</a></li>
           </ul>
         </aside>
+      </div>
+    </section>
+  </div>
+
+  <div class="wrap">
+    <section id="contact">
+      <div class="sec-head">
+        <h2>Contact</h2>
+        <div class="kicker">Harare, Zimbabwe · CAT/SAST</div>
+      </div>
+      <div class="contact">
+        <div>
+          <p class="contact-note"><b>Available for</b> systems design, AI operations reviews,
+          and building commerce or learning infrastructure for constrained markets. I work
+          remote-first and I am comfortable with intermittent power and bandwidth, because
+          that is the environment the software has to run in.</p>
+          <p class="contact-note"><b>Best first message:</b> what the system has to do, who
+          uses it, and what happens today when it fails. If the answer is "nothing yet", that
+          is a fine place to start.</p>
+        </div>
+        <ul class="contact-list">{contacts}</ul>
       </div>
     </section>
   </div>

@@ -151,6 +151,7 @@
     },
     {
       "id": "musk-mirror",
+      "cover": "covers/musk-mirror.jpg",
       "kind": "book",
       "title": "The Musk Mirror",
       "subtitle": "How one billionaire exposed the cracks in China's innovation dream",
@@ -168,6 +169,7 @@
     },
     {
       "id": "traffic",
+      "cover": "covers/traffic.jpg",
       "kind": "book",
       "title": "Traffic Is the New Oil",
       "subtitle": "The African digital wealth formula",
@@ -185,6 +187,7 @@
     },
     {
       "id": "pinterest",
+      "cover": "covers/pinterest.jpg",
       "kind": "book",
       "title": "Pinterest Goldmine",
       "subtitle": "The traffic source nobody told you about",
@@ -202,6 +205,7 @@
     },
     {
       "id": "rocket-man",
+      "cover": "covers/rocket-man.jpg",
       "kind": "essay",
       "title": "The Rocket Man Reckoning",
       "subtitle": "How China mocked Elon Musk — and why they are now panicking",
@@ -219,6 +223,7 @@
     },
     {
       "id": "unchained",
+      "cover": "covers/unchained.jpg",
       "kind": "essay",
       "title": "Unchained Blueprint",
       "subtitle": "What to build when every payment door is closed",
