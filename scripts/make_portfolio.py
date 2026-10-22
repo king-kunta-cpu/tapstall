@@ -1250,7 +1250,7 @@ def build():
 <link rel="apple-touch-icon" href="brand/icon-180.png">
 <meta name="theme-color" content="#15171a">
 <link rel="canonical" href="{esc(SITE)}/">
-<meta property="og:image" content="og/home.jpg">
+<meta property="og:image" content="{esc(SITE)}/og/home.jpg">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="Courage Garikai — autonomous cognitive infrastructure, books and research">
