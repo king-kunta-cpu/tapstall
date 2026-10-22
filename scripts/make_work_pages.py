@@ -135,7 +135,43 @@ def download_block(work):
       <ul class="fmts">{others}</ul>"""
 
 
+def work_jsonld(work, canonical):
+    """One work, marked up as what it is — a book or a scholarly article — with its
+    author, its publisher, its licence and the fact that a free edition exists."""
+    kind = "Book" if work["kind"] in ("book", "essay") else "ScholarlyArticle"
+    obj = {
+        "@context": "https://schema.org",
+        "@type": kind,
+        "name": work["title"],
+        "headline": work["title"],
+        "alternativeHeadline": work["subtitle"],
+        "url": canonical,
+        "author": {"@type": "Person", "name": mp.AUTHOR, "url": mp.SITE + "/"},
+        "publisher": {"@type": "Organization", "name": work["publisher"]},
+        "datePublished": work["year"],
+        "inLanguage": "en",
+        "abstract": work["blurb"],
+        "description": f"{work['subtitle']}. {work['note']}",
+        "copyrightHolder": {"@type": "Person", "name": mp.AUTHOR},
+        "isAccessibleForFree": bool(work["formats"]),
+        "encoding": [{"@type": "MediaObject", "contentUrl": url,
+                      "encodingFormat": {"PDF": "application/pdf",
+                                         "EPUB": "application/epub+zip",
+                                         "HTML": "text/html",
+                                         "MD": "text/markdown"}.get(k, "application/octet-stream")}
+                     for k, url in work["formats"].items()],
+    }
+    if "CC BY" in work["licence"]:
+        obj["license"] = "https://creativecommons.org/licenses/by/4.0/"
+    if work.get("pages"):
+        obj["numberOfPages"] = work["pages"]
+    if work.get("cover"):
+        obj["image"] = f"{mp.SITE}/{work['cover']}"
+    return ('<script type="application/ld+json">'
+            + mp.json.dumps(obj, ensure_ascii=False) + "</script>")
+
 def head(work, title, description, canonical):
+    work_ld = work_jsonld(work, canonical)
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -149,7 +185,17 @@ def head(work, title, description, canonical):
 <meta property="og:description" content="{mp.esc(description)}">
 <meta property="og:type" content="article">
 <meta property="og:url" content="{mp.esc(canonical)}">
-<meta property="og:image" content="{mp.esc(mp.SITE)}/brand/icon-512.png">
+<meta property="og:site_name" content="{mp.esc(mp.AUTHOR)}">
+<meta property="og:image" content="{mp.esc(mp.SITE)}/og/{mp.esc(work['id'])}.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Cover of {mp.esc(work['title'])} by {mp.esc(mp.AUTHOR)}">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{mp.esc(work['title'])} — {mp.esc(mp.AUTHOR)}">
+<meta name="twitter:description" content="{mp.esc(work['subtitle'])}">
+<meta name="twitter:image" content="{mp.esc(mp.SITE)}/og/{mp.esc(work['id'])}.jpg">
+<link rel="llms" href="../../llms.txt">
+{work_ld}
 <title>{mp.esc(title)}</title>
 <meta name="description" content="{mp.esc(description)}">
 <meta name="author" content="{mp.esc(mp.AUTHOR)}">

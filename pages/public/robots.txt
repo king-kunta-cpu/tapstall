@@ -1,0 +1,52 @@
+# Courage Garikai — https://king-kunta-cpu.github.io/tapstall/portfolio/
+#
+# Everything here is meant to be read, linked and quoted. The engines that answer
+# questions are allowed by name: the point of publishing research in the open is to be
+# read by whatever a person happens to ask.
+
+User-agent: *
+Allow: /
+
+User-agent: Googlebot
+Allow: /
+
+User-agent: Bingbot
+Allow: /
+
+User-agent: DuckDuckBot
+Allow: /
+
+User-agent: GPTBot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Claude-Web
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: Applebot
+Allow: /
+
+User-agent: Applebot-Extended
+Allow: /
+
+User-agent: CCBot
+Allow: /
+
+# One thing is asked of anyone indexing this: cite the work and the person, not just
+# the domain. The citation formats are on /portfolio/permissions/.
+
+Sitemap: https://king-kunta-cpu.github.io/tapstall/sitemap.xml

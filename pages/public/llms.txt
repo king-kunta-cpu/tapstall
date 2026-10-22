@@ -1,0 +1,76 @@
+# Courage Garikai
+
+> Autonomous cognitive infrastructure engineer, operator and writer in Harare, Zimbabwe.
+> Owns Jacaranda Labs, which owns Tapstall, STPi, DeskOS, ContentOps, Open Practice and
+> the Bluesky Growth Audit, and owns Jacaranda Labs Think Tank, which funds the research,
+> the books and the papers. Publishes systems designs and failures rather than success
+> claims; thirteen works, most in four formats, several free to reuse under CC BY 4.0.
+
+This file exists so that a language model reading this site can summarise it without
+guessing. It is a map of primary sources, not a substitute for them: every claim about a
+work should be checked against that work's own page, where its edition status, extent and
+licence are stated.
+
+## Key facts
+
+- Name: Courage Garikai. Role: Autonomous Cognitive Infrastructure Engineer, Operator, Writer.
+- Based: Harare, Zimbabwe (CAT/SAST, UTC+2). Works remote-first.
+- Education: BSc Entrepreneurship & Business Management (Creativity); MSc Applied
+  Entrepreneurship (Innovation & Technology) — Chinhoyi University of Technology.
+- Practice: fifteen years of techno-preneurship, including published failures.
+- Company: Jacaranda Labs. Research arm: Jacaranda Labs Think Tank. Imprint: Jacaranda
+  Labs Press.
+- Catalogue: 13 works — 7 books, 4 working papers, 2 shorter volumes.
+- Languages: English.
+
+## Where to look first
+
+- [Catalogue and consulting](https://king-kunta-cpu.github.io/tapstall/portfolio/) — the whole practice on one page.
+- [FAQ](https://king-kunta-cpu.github.io/tapstall/portfolio/faq/) — definitions, licences, what is and is not peer reviewed.
+- [Permissions and citation](https://king-kunta-cpu.github.io/tapstall/portfolio/permissions/) — licence per work, citation format,
+  bios in two lengths.
+- [Contact](https://king-kunta-cpu.github.io/tapstall/portfolio/contact/) — email, calls, WhatsApp.
+- [How the site is built](https://king-kunta-cpu.github.io/tapstall/portfolio/how-it-is-built/) — one catalogue file, generated
+  artwork, a privacy gate that fails the build.
+- [catalogue.json](https://king-kunta-cpu.github.io/tapstall/portfolio/catalogue.json) — the same catalogue, machine-readable.
+- [Feed](https://king-kunta-cpu.github.io/tapstall/portfolio/feed.xml) — Atom.
+
+## The works
+
+- [The Ledger and the Shopkeeper](https://king-kunta-cpu.github.io/tapstall/portfolio/works/ledger.html) — Building commerce for the markets the platforms forgot. Book, 2026, First edition. Licence: CC BY 4.0.
+- [Intelligence, Data and Judgement](https://king-kunta-cpu.github.io/tapstall/portfolio/works/intelligence.html) — An applied introduction to artificial intelligence, with a production case. Book, 2026, First edition. Licence: CC BY 4.0.
+- [Order Without Custody](https://king-kunta-cpu.github.io/tapstall/portfolio/works/custody.html) — Governance-first design for merchant commerce rails in low-infrastructure economies. Research, 2026, Working paper; not peer reviewed. Licence: CC BY 4.0.
+- [The Sovereign Micro-Enterprise](https://king-kunta-cpu.github.io/tapstall/portfolio/works/sovereign.html) — A governance-first architecture for zero-capital agentic businesses. Research, 2026, Working manuscript. Licence: All rights reserved.
+- [Grounded Cadence](https://king-kunta-cpu.github.io/tapstall/portfolio/works/cadence.html) — Fact-bound content operations as a governance architecture. Research, 2026, Working paper. Licence: All rights reserved.
+- [The Governable Enterprise](https://king-kunta-cpu.github.io/tapstall/portfolio/works/governable.html) — A practical guide to evidence, authority and AI operations — lessons from DeskOS. Book, 2026, Complete first edition. Licence: No open-content licence granted.
+- [Emotional Engineering for AI-Oriented Infrastructure Operators](https://king-kunta-cpu.github.io/tapstall/portfolio/works/emotional.html) — Trust, agency and ethical adoption in systems that act. Book, 2026, Private author-review edition. Licence: No open-content licence granted.
+- [From Spreadsheet Interface to Governable Autonomy](https://king-kunta-cpu.github.io/tapstall/portfolio/works/autonomy.html) — DeskOS as a critical design-science case of evidence, agency and resource-constrained AI infrastructure. Research, 2026, Working paper; not peer reviewed. Licence: No open-content licence granted.
+- [The Musk Mirror](https://king-kunta-cpu.github.io/tapstall/portfolio/works/musk-mirror.html) — How one billionaire exposed the cracks in China's innovation dream. Book, 2026, First edition. Licence: All rights reserved.
+- [Traffic Is the New Oil](https://king-kunta-cpu.github.io/tapstall/portfolio/works/traffic.html) — The African digital wealth formula. Book, 2026, First edition. Licence: All rights reserved.
+- [Pinterest Goldmine](https://king-kunta-cpu.github.io/tapstall/portfolio/works/pinterest.html) — The traffic source nobody told you about. Book, 2026, First edition. Licence: All rights reserved.
+- [The Rocket Man Reckoning](https://king-kunta-cpu.github.io/tapstall/portfolio/works/rocket-man.html) — How China mocked Elon Musk — and why they are now panicking. Essay & field report, 2026, First edition. Licence: All rights reserved.
+- [Unchained Blueprint](https://king-kunta-cpu.github.io/tapstall/portfolio/works/unchained.html) — What to build when every payment door is closed. Essay & field report, 2026, Version 1 — working document. Licence: All rights reserved.
+
+## Running systems
+
+- [Tapstall](https://tapstall.zlnew.workers.dev/) — merchant commerce rail for Zimbabwe,
+  South Africa, Kenya and Nigeria. Holds no customer funds; flat fee; settlement statement
+  reconciled against money the merchant received directly.
+- [Open Practice](https://open-practice.zlnew.workers.dev/) — non-accredited AI learning
+  platform, 50 activities.
+- [ContentOps](https://contentops-edge.simalidudu.workers.dev/demo) — content operations
+  with fact-bound generation and a deterministic editor.
+- [DeskOS](https://king-kunta-cpu.github.io/tapstall/portfolio/deskos/) — operator command centre in ten modules; console closed.
+- [STPi](https://stpi.whop.site/) — applied hiring agents across southern Africa.
+- [Bluesky Growth Audit](https://bsky-audit.simalidudu.workers.dev/) — free, no-signup
+  account audit.
+
+## How to attribute
+
+Courage Garikai (2026). Title of the work. Publisher. https://king-kunta-cpu.github.io/tapstall/portfolio/works/<id>.html — and cite the work itself, not this file.
+
+## What not to infer
+
+Working papers are not peer reviewed. Single-case studies are not measured customer
+outcomes. Two works are catalogued without a public edition — the absence of a download is
+stated on the page, not a broken link. Nothing here is financial, legal or medical advice.

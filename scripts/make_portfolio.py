@@ -1113,6 +1113,11 @@ section{padding:66px 0 10px}
 .contact-note b{font-weight:600;color:var(--ink)}
 
 /* colophon */
+footer.colophon .foot-nav{display:flex;flex-wrap:wrap;gap:4px 14px;
+  font:600 9px/1.7 var(--sans);letter-spacing:.16em;text-transform:uppercase;
+  margin-bottom:10px;max-width:300px}
+footer.colophon .foot-nav a{text-decoration:none;color:var(--ink)}
+footer.colophon .foot-nav a:hover{color:var(--accent)}
 footer.colophon{border-top:2px solid var(--ink);margin-top:40px;padding:34px 0 70px;
   font:12.5px/1.6 var(--sans);color:var(--muted)}
 footer.colophon .wrap{display:flex;justify-content:space-between;gap:30px;flex-wrap:wrap}
@@ -1233,6 +1238,7 @@ def build():
     share_row = share_bar(SITE + "/", f"{AUTHOR} — books, research and running systems",
                           "Share the catalogue")
     floating = float_contact()
+    structured_data_html = structured_data()
 
     doc = f"""<!DOCTYPE html>
 <html lang="en">
@@ -1243,7 +1249,22 @@ def build():
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="apple-touch-icon" href="brand/icon-180.png">
 <meta name="theme-color" content="#15171a">
-<meta property="og:image" content="brand/icon-512.png">
+<link rel="canonical" href="{esc(SITE)}/">
+<meta property="og:image" content="og/home.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Courage Garikai — autonomous cognitive infrastructure, books and research">
+<meta property="og:url" content="{esc(SITE)}/">
+<meta property="og:site_name" content="{esc(AUTHOR)}">
+<meta property="og:locale" content="en_ZW">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{esc(AUTHOR)} — AI infrastructure, autonomous systems, books and research">
+<meta name="twitter:description" content="Merchant rails and autonomous AI operations for low-infrastructure markets. Books, research papers and field reports, in PDF, EPUB, HTML and Markdown.">
+<meta name="twitter:image" content="{esc(SITE)}/og/home.jpg">
+<link rel="alternate" type="application/atom+xml" title="Catalogue feed" href="feed.xml">
+<link rel="alternate" type="application/json" title="Catalogue, machine-readable" href="catalogue.json">
+<link rel="llms" href="../llms.txt">
+{structured_data_html}
 <title>{esc(AUTHOR)} — AI infrastructure, autonomous systems, books and research</title>
 <meta name="description" content="{esc(AUTHOR)} writes and builds merchant rails and autonomous AI operations for low-infrastructure markets. Books, research papers and field reports, in PDF, EPUB, HTML and Markdown.">
 <meta name="author" content="{esc(AUTHOR)}">
@@ -1540,8 +1561,18 @@ def build():
       Prices, where a work is sold, are set by the press, not by this page.
     </div>
     <div>
-      Built as one HTML file.<br>
-      <a href="#books">Back to the books</a>
+      <nav class="foot-nav" aria-label="Site">
+        <a href="faq/">FAQ</a>
+        <a href="permissions/">Permissions</a>
+        <a href="contact/">Contact</a>
+        <a href="how-it-is-built/">How it is built</a>
+        <a href="accessibility/">Accessibility</a>
+        <a href="privacy/">Privacy</a>
+        <a href="terms/">Terms</a>
+        <a href="feed.xml">Feed</a>
+        <a href="../llms.txt">llms.txt</a>
+      </nav>
+      Built as one HTML file, generated from one catalogue.
     </div>
   </div>
 </footer>
@@ -1576,6 +1607,76 @@ READ_SCRIPT = """
 })();
 </script>
 """
+
+
+def structured_data():
+    """What a search engine or an answer engine should be able to lift without guessing:
+    who this is, what the site is, and the catalogue as items with real authors."""
+    person = {
+        "@type": "Person",
+        "@id": SITE + "/#person",
+        "name": AUTHOR,
+        "url": SITE + "/",
+        "jobTitle": "Autonomous Cognitive Infrastructure Engineer, Operator, Writer",
+        "description": ("Builds autonomous cognitive infrastructure — merchant rails and "
+                        "agent systems for low-infrastructure markets — and publishes the "
+                        "research and the failures behind them."),
+        "address": {"@type": "PostalAddress", "addressLocality": "Harare",
+                    "addressCountry": "ZW"},
+        "email": "mailto:couragegarikai@atomicmail.io",
+        "telephone": "+263779674212",
+        "knowsAbout": ["autonomous agents", "AI governance", "merchant commerce rails",
+                       "design science research", "low-infrastructure markets",
+                       "content operations", "Cloudflare Workers"],
+        "sameAs": ["https://github.com/king-kunta-cpu",
+                   "https://jacaranda-labs.whop.site/"],
+    }
+    org = {
+        "@type": "Organization",
+        "@id": SITE + "/#org",
+        "name": "Jacaranda Labs",
+        "url": "https://jacaranda-labs.whop.site/",
+        "founder": {"@id": SITE + "/#person"},
+        "address": {"@type": "PostalAddress", "addressLocality": "Harare",
+                    "addressCountry": "ZW"},
+        "owns": [{"@type": "Organization", "name": "Jacaranda Labs Think Tank"},
+                 {"@type": "Organization", "name": "Jacaranda Labs Press"}],
+    }
+    items = [{
+        "@type": "ListItem",
+        "position": i,
+        "item": {
+            "@type": "Book" if w["kind"] in ("book", "essay") else "ScholarlyArticle",
+            "name": w["title"],
+            "url": f"{SITE}/works/{w['id']}.html",
+            "author": {"@id": SITE + "/#person"},
+            "publisher": {"@type": "Organization", "name": w["publisher"]},
+            "datePublished": w["year"],
+            "description": w["subtitle"],
+            "inLanguage": "en",
+            "copyrightHolder": {"@id": SITE + "/#person"},
+            "license": ("https://creativecommons.org/licenses/by/4.0/"
+                        if "CC BY" in w["licence"] else None),
+            "image": (f"{SITE}/{w['cover']}" if w.get("cover") else None),
+            "numberOfPages": w.get("pages"),
+        },
+    } for i, w in enumerate(WORKS, 1)]
+    clean = lambda o: (o if not isinstance(o, dict) else
+                       {k: clean(v) for k, v in o.items() if v is not None})
+    graph = {
+        "@context": "https://schema.org",
+        "@graph": [
+            clean(person), clean(org),
+            {"@type": "WebSite", "@id": SITE + "/#site", "url": SITE + "/",
+             "name": AUTHOR, "inLanguage": "en",
+             "publisher": {"@id": SITE + "/#person"}},
+            {"@type": "ProfilePage", "url": SITE + "/", "mainEntity": {"@id": SITE + "/#person"},
+             "isPartOf": {"@id": SITE + "/#site"}},
+            {"@type": "ItemList", "name": "Catalogue", "itemListElement": [clean(i) for i in items]},
+        ],
+    }
+    return ('<script type="application/ld+json">'
+            + json.dumps(graph, ensure_ascii=False) + "</script>")
 
 
 def read_view(w):
@@ -1698,6 +1799,13 @@ def main():
     }
     (site / "catalogue.json").write_text(json.dumps(cat, indent=2, ensure_ascii=False) + "\n",
                                          encoding="utf-8")
+
+    # the legal, FAQ and press pages, robots, sitemap, llms.txt, feed and share cards
+    site_pages = subprocess.run([sys.executable, str(Path(__file__).with_name("make_site_pages.py"))],
+                                capture_output=True, text=True)
+    if site_pages.returncode != 0:
+        raise SystemExit("site pages failed:\n" + site_pages.stderr)
+    print(site_pages.stdout.strip().splitlines()[-1])
 
     # the page behind every card, built from the same catalogue
     works = subprocess.run([sys.executable, str(Path(__file__).with_name("make_work_pages.py"))],
