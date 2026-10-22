@@ -18,6 +18,21 @@ not a release. See *Markets are data, not code*.
 **Live:** `https://tapstall.zlnew.workers.dev/onboard`
 Storefront `…/s/<handle>` · dashboard `…/a` · rate calculator `…/fees`
 
+### The practice this comes out of
+
+Tapstall is one of seven running systems built by the same practice, and this repository
+also carries the books and papers written about them.
+
+- **The practice, the company and the catalogue** — <https://king-kunta-cpu.github.io/tapstall/portfolio/>
+- **FAQ** — what is and is not peer reviewed, what is free, how projects start — <https://king-kunta-cpu.github.io/tapstall/portfolio/faq/>
+- **Permissions and citation** — the licence of every work, in one table — <https://king-kunta-cpu.github.io/tapstall/portfolio/permissions/>
+- **How the site is built** — one catalogue file, generated artwork, a gate that fails the build — <https://king-kunta-cpu.github.io/tapstall/portfolio/how-it-is-built/>
+
+Books and papers live in `book/` and `papers/`, typeset from a single Markdown source into
+PDF, EPUB, HTML and Markdown. The catalogue is also published as
+[`catalogue.json`](https://king-kunta-cpu.github.io/tapstall/portfolio/catalogue.json) and
+as [`llms.txt`](https://king-kunta-cpu.github.io/tapstall/llms.txt).
+
 ---
 
 ## Why this is $0 and stays $0
