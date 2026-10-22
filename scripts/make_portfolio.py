@@ -704,6 +704,52 @@ nav.mast-nav{display:flex;gap:22px;font:500 11.5px/1 var(--sans);letter-spacing:
   text-transform:uppercase}
 nav.mast-nav a{text-decoration:none;color:var(--muted)}
 nav.mast-nav a:hover{color:var(--accent)}
+nav.mast-nav a.nav-consult{color:var(--ink);font-weight:700}
+
+
+/* ---- consulting opening: the first thing a visitor reads ---------------- */
+.hero-consult{background:var(--ink);color:#f2eee4;padding:74px 0 66px;
+  border-bottom:1px solid #2a2c30}
+.hero.hero-consult .eyebrow{color:#d8b26a}
+.hero.hero-consult h1{color:#f7f4ec}
+.hero.hero-consult h1 em{color:#e0b978}
+.hero.hero-consult .lede{color:#cdc8bc;font-size:19px;line-height:1.62;max-width:35em;margin-bottom:0}
+.hero-consult .wrap{max-width:1080px;margin:0 auto;padding:0 32px}
+.cta-row{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin:30px 0 46px}
+.btn-solid{display:inline-flex;align-items:center;gap:10px;padding:15px 22px;border-radius:2px;
+  background:#e0b978;color:#15171a;text-decoration:none;
+  font:600 11px/1 var(--sans);letter-spacing:.14em;text-transform:uppercase}
+.btn-solid:hover{background:#f2d7a4}
+.btn-solid span{transition:transform .15s ease}
+.btn-solid:hover span{transform:translateX(4px)}
+.btn-line{display:inline-flex;align-items:center;padding:15px 18px;border:1px solid #3a3d42;
+  border-radius:2px;color:#e7e2d6;text-decoration:none;
+  font:600 11px/1 var(--sans);letter-spacing:.13em;text-transform:uppercase}
+.btn-line:hover{border-color:#e0b978;color:#e0b978}
+.grit{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:1px;
+  background:#2a2c30;border:1px solid #2a2c30;margin:0 0 44px}
+.grit-card{background:#15171a;padding:24px 22px 26px}
+.grit-card h2{font:400 19px/1.25 var(--serif);margin:0 0 10px;color:#f7f4ec;
+  padding-bottom:10px;border-bottom:1px solid #34373c}
+.grit-card p{margin:0;font-size:14.2px;line-height:1.62;color:#b7b2a6}
+.offer{margin:0 0 44px}
+.offer h2{font:600 10.5px/1 var(--sans);letter-spacing:.2em;text-transform:uppercase;
+  color:#d8b26a;margin:0 0 16px;padding:0;border:0}
+.offer ul{list-style:none;margin:0;padding:0;display:grid;gap:12px;max-width:52em}
+.offer li{position:relative;padding-left:22px;font-size:14.8px;line-height:1.6;color:#c9c4b8}
+.offer li::before{content:"—";position:absolute;left:0;color:#e0b978}
+.offer li b{color:#f7f4ec;font-weight:600}
+.hero.hero-consult .stats{border-top:1px solid #2a2c30;padding-top:24px;margin:0 0 26px}
+.hero.hero-consult .stat .n{color:#e0b978}
+.hero.hero-consult .stat .k{color:#949086}
+.credentials{font-size:13.4px;line-height:1.6;color:#a9a49a;margin:0 0 22px;max-width:46em;
+  padding-top:20px;border-top:1px solid #2a2c30}
+.honesty{font-size:14.6px;line-height:1.65;color:#c9c4b8;margin:0;max-width:44em;
+  border-left:2px solid #3a3d42;padding-left:16px}
+/* the thesis line that carries the reader from the offer into the catalogue */
+.thesis{padding:34px 0 10px}
+.thesis p{margin:0;max-width:52em;font-size:16.4px;line-height:1.65;color:#3d4247}
+.thesis b{color:var(--ink);font-weight:600}
 
 /* hero */
 .hero{padding:76px 0 54px;border-bottom:1px solid var(--rule)}
@@ -939,8 +985,16 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
   .about{grid-template-columns:1fr;gap:34px}
   .aside{border-left:0;border-top:1px solid var(--rule);padding:26px 0 0}
 }
+@media (max-width:900px){
+  .hero-consult{padding:52px 0 50px}
+  .hero-consult .wrap{padding:0 20px}
+  .hero-consult .lede{font-size:17.6px}
+}
 @media (max-width:620px){
   .stats{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+  .cta-row .btn-solid,.cta-row .btn-line{width:100%;justify-content:center}
+  .hero-consult .stat .n{font-size:26px}
+  .grit-card{padding:20px 18px 22px}
   .build{grid-template-columns:minmax(0,1fr);padding:32px 0 30px}
   .build-num{display:none}
   .build-side{grid-column:1}
@@ -1031,6 +1085,7 @@ def build():
   <div class="wrap">
     <div class="brand">{esc(AUTHOR)} <span>·</span> Harare</div>
     <nav class="mast-nav">
+      <a href="#consult" class="nav-consult">Consulting</a>
       <a href="#books">Books</a>
       <a href="#research">Research</a>
       <a href="#work">Built</a>
@@ -1041,21 +1096,84 @@ def build():
 </header>
 
 <main>
-  <div class="wrap">
-    <section class="hero">
-      <div class="eyebrow"><span>Autonomous Cognitive Infrastructure Engineer, Operator, Writer</span></div>
-      <h1>Demand was never the problem. <em>Infrastructure was.</em></h1>
-      <p class="lede">Autonomous cognitive infrastructure for markets the last decade priced out:
-      merchant rails, reconciliation ledgers and agent operations that hold a record when the
-      connection drops. Thirteen published works on trade, technology and constraint — seven
-      books, four working papers and two short volumes — come out of the same practice, each
-      produced from a source file and shipped in four formats.</p>
-      <div class="stats">
-        <div class="stat"><div class="n">13</div><div class="k">Published works</div></div>
-        <div class="stat"><div class="n">{total_pages:,}</div><div class="k">Pages in print</div></div>
-        <div class="stat"><div class="n">4</div><div class="k">Formats per title</div></div>
-        <div class="stat"><div class="n">$0</div><div class="k">Marginal cost to serve</div></div>
+  <section class="hero hero-consult" id="consult">
+    <div class="wrap">
+      <div class="eyebrow"><span>Consulting · Harare · southern Africa and remote</span></div>
+      <h1>You do not need another deck. You need someone who has already
+      watched this fail — <em>and knows which part is structural.</em></h1>
+      <p class="lede">Fifteen years of techno-preneurship: merchant rails, agent systems, learning
+      platforms, publishing pipelines. Some of it runs today and is linked on this page. More of it
+      failed, and the failures are the part I am proudest of, because they are the part I can hand
+      you as a map instead of a warning.</p>
+
+      <div class="cta-row">
+        <a class="btn-solid" href="mailto:couragegarikai@atomicmail.io?subject=Consulting%20—%20what%20I%20am%20trying%20to%20build">Start a conversation<span aria-hidden="true">→</span></a>
+        <a class="btn-line" href="https://wa.me/263784600904">WhatsApp</a>
+        <a class="btn-line" href="tel:+263779674212">+263 77 967 4212</a>
       </div>
+
+      <div class="grit">
+        <div class="grit-card">
+          <h2>Dirt under the fingernails</h2>
+          <p>These systems have been run as the operator, not admired from an advisory seat: the
+          3am incident, the post-mortem written the same night, the fix shipped, the explanation
+          given to the person paying for it. Advice from someone who has never carried the pager is
+          a guess with a typeface.</p>
+        </div>
+        <div class="grit-card">
+          <h2>A failure log, not a logo wall</h2>
+          <p>Instead of client badges, there is a taxonomy of the five ways this class of system
+          fails — each with a signature, a detector and a design response — written up in a
+          working paper anyone can read. Failure is the expensive half of the education. Mine is
+          documented, and I will walk you through it.</p>
+        </div>
+        <div class="grit-card">
+          <h2>Constraint-native, not constraint-aware</h2>
+          <p>Built for intermittent power, low-end Android, bandwidth that disappears, no card
+          rails and no credit history — because that is where the demand already is. If your plan
+          assumes a postcode and always-on internet, the constraints are not a footnote in the
+          brief. They are the brief.</p>
+        </div>
+      </div>
+
+      <div class="offer">
+        <h2>What I am hired to do</h2>
+        <ul>
+          <li><b>AI operations and agent governance.</b> Where an agent may act, where a person
+          must tap, and how to prove afterwards that it did what you said it did.</li>
+          <li><b>Merchant commerce and reconciliation.</b> Rails that hold no customer funds, and
+          statements that can be recomputed by someone who does not trust you yet.</li>
+          <li><b>Zero-budget infrastructure.</b> Systems that run at $0 marginal cost with the
+          ceilings stated — because a cost ceiling is a design material, not an afterthought.</li>
+          <li><b>Learning platforms and facilitation.</b> Curriculum, activities and offline-first
+          workspaces that survive a bad connection and a shared phone.</li>
+          <li><b>Publishing pipelines.</b> One source file to PDF, EPUB, HTML and Markdown, per
+          title. Thirteen works are the receipt.</li>
+        </ul>
+      </div>
+
+      <div class="stats">
+        <div class="stat"><div class="n">15</div><div class="k">Years techno-preneurship</div></div>
+        <div class="stat"><div class="n">7</div><div class="k">Systems running now</div></div>
+        <div class="stat"><div class="n">13</div><div class="k">Published works</div></div>
+        <div class="stat"><div class="n">420</div><div class="k">Assertions in the suite</div></div>
+      </div>
+
+      <p class="credentials">BSc Entrepreneurship &amp; Business Management (Creativity) ·
+      MSc Applied Entrepreneurship (Innovation &amp; Technology) —
+      Chinhoyi University of Technology, Zimbabwe's technology university.</p>
+
+      <p class="honesty">No availability theatre and no scarcity clock: if the problem is real and
+      the constraints are yours, write. If it is not, that gets said in the first call — it has
+      happened before, and it is cheaper for both of us than a proposal nobody believes.</p>
+    </div>
+  </section>
+
+    <section class="thesis">
+      <p><b>Demand was never the problem. Infrastructure was.</b> Thirteen published works on
+      trade, technology and constraint — seven books, four working papers and two short volumes —
+      come out of the same practice: each produced from a single source file and shipped in four
+      formats, so a reader needs no particular app to read a book.</p>
     </section>
 
     <section id="books">
@@ -1132,7 +1250,9 @@ def build():
           <p>The writing starts where the assumptions imported into a market simply do not
           hold — always-on power, card rails, a postcode, a credit history. The building
           follows: autonomous cognitive infrastructure that assumes none of them, and keeps a
-          record when the connection drops.</p>
+          record when the connection drops. Consulting is the same work with a client in the
+          room: fifteen years of running these things, including the ones that failed, brought to
+          bear on someone else's problem.</p>
           <p><b>Autonomous Cognitive Infrastructure Engineer, Operator, Writer.</b> Three
           descriptions of one job: design systems that act on their own, write down how they
           fail, and stay answerable for the run. The writing is governance-first architecture,
@@ -1158,6 +1278,11 @@ def build():
           <h4>At a glance</h4>
           <ul>
             <li><b>Role</b> — Autonomous Cognitive Infrastructure Engineer, Operator, Writer</li>
+            <li><b>Available for</b> — consulting engagements, in southern Africa and remote</li>
+            <li><b>Education</b> — BSc Entrepreneurship &amp; Business Management (Creativity);
+            MSc Applied Entrepreneurship (Innovation &amp; Technology), Chinhoyi University of
+            Technology</li>
+            <li><b>Practice</b> — 15 years of techno-preneurship, including the failures</li>
             <li><b>Books</b> — seven long-form titles</li>
             <li><b>Research</b> — four working papers, DCAI series</li>
             <li><b>Essays &amp; reports</b> — two shorter volumes</li>
