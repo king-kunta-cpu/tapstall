@@ -119,6 +119,64 @@ h1{font-size:clamp(30px,4.4vw,46px);line-height:1.08;letter-spacing:-.02em;margi
 .toc-part ol{list-style:none;margin:0;padding:0}
 .toc-part li{font-size:14.5px;line-height:1.5;padding:3px 0;border-bottom:1px dotted #ddd7c8}
 
+
+/* more from the author: a rail, not a slideshow — it scrolls, it snaps, and it never
+   hides a work behind an animation nobody can pause */
+.more-from{border-top:1px solid var(--ink);margin-top:38px;padding:30px 0 6px}
+.mf-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;
+  margin:0 0 18px}
+.mf-head>div:first-child{flex:1 1 auto;min-width:0}
+.mf-head h2{font-size:13px;font-weight:600;letter-spacing:.2em;text-transform:uppercase;
+  font-family:var(--sans);margin:0}
+.mf-head .mf-sub{font-size:13.5px;color:var(--muted);margin:5px 0 0;max-width:68ch}
+.mf-nav{display:flex;gap:6px;flex:0 0 auto}
+.mf-nav button{width:32px;height:32px;display:grid;place-items:center;padding:0;cursor:pointer;
+  border:1px solid var(--rule);border-radius:50%;background:transparent;color:var(--ink);
+  font:400 14px/1 var(--sans);transition:background .15s,color .15s,border-color .15s}
+.mf-nav button:hover:not(:disabled){background:var(--ink);border-color:var(--ink);
+  color:var(--paper)}
+.mf-nav button:disabled{opacity:.3;cursor:default}
+.rail{list-style:none;margin:0;padding:0 0 14px;display:flex;gap:20px;overflow-x:auto;
+  scroll-snap-type:x mandatory;scroll-behavior:smooth;scrollbar-width:thin;
+  -webkit-overflow-scrolling:touch}
+.rail:focus-visible{outline:2px solid var(--accent);outline-offset:6px}
+.rail::-webkit-scrollbar{height:6px}
+.rail::-webkit-scrollbar-track{background:transparent}
+.rail::-webkit-scrollbar-thumb{background:#d8d2c4;border-radius:999px}
+.rail-card{scroll-snap-align:start;flex:0 0 226px;min-width:0;display:flex;
+  flex-direction:column;border-top:1px solid var(--rule);padding-top:14px}
+.rail-cover{display:block;text-decoration:none}
+.rail-cover img{width:100%;aspect-ratio:3/4.3;object-fit:cover;
+  border:1px solid #d8d3c6;background:#fff;box-shadow:0 12px 22px -18px rgba(20,18,16,.55)}
+.mini-art{display:flex;flex-direction:column;justify-content:space-between;
+  aspect-ratio:3/4.3;padding:14px 13px;background:var(--panel);color:var(--panel-ink);
+  box-shadow:0 12px 22px -18px rgba(20,18,16,.55)}
+.ma-k{font:600 7.5px/1 var(--sans);letter-spacing:.18em;text-transform:uppercase;
+  color:#b9b2a5}
+.ma-r{display:block;width:24px;height:2px;background:var(--accent);margin:8px 0 auto}
+.ma-t{font:400 14px/1.24 var(--serif);letter-spacing:-.01em;overflow-wrap:break-word;
+  hyphens:auto;margin:0 0 10px}
+.ma-a{font:600 7.5px/1 var(--sans);letter-spacing:.16em;text-transform:uppercase;
+  color:#9d968a}
+.rail-kicker{font:600 8.5px/1 var(--sans);letter-spacing:.18em;text-transform:uppercase;
+  color:var(--accent);margin:12px 0 6px}
+.rail-title{display:block;text-decoration:none;font:400 16.5px/1.22 var(--serif);
+  letter-spacing:-.01em;margin:0 0 7px}
+.rail-title:hover{color:var(--accent)}
+.rail-desc{font-size:13px;line-height:1.5;color:#57534d;margin:0 0 13px;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.rail-btn{align-self:flex-start;margin-top:auto;text-decoration:none;border:1px solid var(--ink);
+  border-radius:2px;padding:8px 12px;font:600 9px/1 var(--sans);letter-spacing:.16em;
+  text-transform:uppercase;color:var(--ink);transition:background .15s,color .15s}
+.rail-btn:hover{background:var(--ink);color:var(--paper)}
+@media (max-width:860px){
+  .rail{gap:14px}
+  .rail-card{flex:0 0 196px}
+  .mf-head{margin-bottom:14px}
+  .mf-sub{display:none}
+}
+@media print{.more-from{display:none}}
+
 /* about + pager */
 .about{border-top:1px solid var(--rule);margin-top:34px;padding:30px 0 0;
   display:grid;grid-template-columns:minmax(0,1fr) 260px;gap:40px}
@@ -252,6 +310,106 @@ footer.colophon{border-top:1px solid var(--rule);margin-top:44px;padding:24px 0 
         </dl>
       </div>
   </section>
+  
+  <section class="more-from" aria-labelledby="mf-title">
+    <div class="mf-head">
+      <div>
+        <h2 id="mf-title">More from the author</h2>
+        <p class="mf-sub">12 other works — books, working papers and field
+        reports. Each has a page of its own: what it argues, what is inside it, and
+        every format that is published.</p>
+      </div>
+      <div class="mf-nav" id="mf-nav"></div>
+    </div>
+    <ul class="rail" id="rail" tabindex="0" role="region"
+        aria-label="More works by Courage Garikai, scroll sideways">
+      
+        <li class="rail-card">
+          <a class="rail-cover" href="ledger.html" tabindex="-1" aria-hidden="true"><img src="../covers/ledger.jpg" loading="lazy" decoding="async" alt="Cover of The Ledger and the Shopkeeper"></a>
+          <p class="rail-kicker">Book · 2026</p>
+          <a class="rail-title" href="ledger.html">The Ledger and the Shopkeeper</a>
+          <p class="rail-desc">Building commerce for the markets the platforms forgot. A trade book on building a merchant rail for shops the platforms skipped — written from the release log rather than the pitch deck. Part one is the gap: the forty-tab panic, and why the obvious answer is wrong. Part two is the machine: a shop in one link, a statement that can be recomputed, quotas as a design material, the first hundred prospects, and the number that could not be dialled. Part three is the rules: never hold the money, never lie in the copy, never post to your customers. Part four is the craft — what broke, in five failure classes, and the uncomfortable arithmetic that follows.</p>
+          <a class="rail-btn" href="ledger.html">See the details</a>
+        </li>
+        <li class="rail-card">
+          <a class="rail-cover" href="intelligence.html" tabindex="-1" aria-hidden="true"><img src="../covers/intelligence.jpg" loading="lazy" decoding="async" alt="Cover of Intelligence, Data and Judgement"></a>
+          <p class="rail-kicker">Book · 2026</p>
+          <a class="rail-title" href="intelligence.html">Intelligence, Data and Judgement</a>
+          <p class="rail-desc">An applied introduction to artificial intelligence, with a production case. A textbook written to be taught from. Twenty-two chapters in five parts — foundations, the material, the machine, the case, and judgement — each with learning outcomes, a worked example, graded exercises and further reading. The disciplinary spine is three widely used curricula: COMCEC&#x27;s introduction to AI and its fundamental concepts, Microsoft&#x27;s Fundamentals of AI Module 1, and NITI Aayog&#x27;s Let&#x27;s Learn AI Base Module, each attributed and mapped chapter by chapter in the appendix. Tapstall runs through the middle of the book as the worked case, including its failures.</p>
+          <a class="rail-btn" href="intelligence.html">See the details</a>
+        </li>
+        <li class="rail-card">
+          <a class="rail-cover" href="custody.html" tabindex="-1" aria-hidden="true"><span class="mini-art"><span class="ma-k">Research · 2026</span><span class="ma-r"></span><span class="ma-t">Order Without Custody</span><span class="ma-a">Courage Garikai</span></span></a>
+          <p class="rail-kicker">Research · 2026</p>
+          <a class="rail-title" href="custody.html">Order Without Custody</a>
+          <p class="rail-desc">Governance-first design for merchant commerce rails in low-infrastructure economies. Small merchants already sell at scale — through chat threads, pages and a phone number painted on a wall — but they sell without a record. This paper argues that the binding constraint at that tier is not payment capability but reconciliation, and that reconcilability is an architectural property rather than a feature. Five mechanisms are formalised against artefacts a reader can inspect: the No-Custody Rail, Admission-Gated Discovery, Reserve-Ladder Scheduling, Surface-Disjoint Multi-Tenancy and the Constrained Persuasion Doctrine. The empirical section is forensic: five classes of governance failure, each stated as a signature, a detector and a design response.</p>
+          <a class="rail-btn" href="custody.html">See the details</a>
+        </li>
+        <li class="rail-card">
+          <a class="rail-cover" href="sovereign.html" tabindex="-1" aria-hidden="true"><span class="mini-art"><span class="ma-k">Research · 2026</span><span class="ma-r"></span><span class="ma-t">The Sovereign Micro-Enterprise</span><span class="ma-a">Courage Garikai</span></span></a>
+          <p class="rail-kicker">Research · 2026</p>
+          <a class="rail-title" href="sovereign.html">The Sovereign Micro-Enterprise</a>
+          <p class="rail-desc">A governance-first architecture for zero-capital agentic businesses. Frontier models pushed the price of machine cognition toward zero, and the obvious inference — that any connected individual now owns a software company — proves fragile in practice. Producing is easy; operating is hard. This report documents the design, deployment and near-real-time failure forensics of a one-person, zero-capital sales and content business run entirely by autonomous agents under a governance architecture: guarded capability, a ledgered agent pattern with an idle witness, a zero-capital ladder, and effectuation-in-the-loop. Seven figures carry the anatomy, the cadence and the incident traces.</p>
+          <a class="rail-btn" href="sovereign.html">See the details</a>
+        </li>
+        <li class="rail-card">
+          <a class="rail-cover" href="cadence.html" tabindex="-1" aria-hidden="true"><span class="mini-art"><span class="ma-k">Research · 2026</span><span class="ma-r"></span><span class="ma-t">Grounded Cadence</span><span class="ma-a">Courage Garikai</span></span></a>
+          <p class="rail-kicker">Research · 2026</p>
+          <a class="rail-title" href="cadence.html">Grounded Cadence</a>
+          <p class="rail-desc">Fact-bound content operations as a governance architecture. Anyone can now emit a week of social copy. Almost no one can emit it on a schedule, from a company&#x27;s own facts, without inventing customers or numbers, without spending the operator&#x27;s quota on a stranger, and without a silent failure looking like a green run. This paper reports a live zero-capital writing service and formalises four mechanisms with production incidents attached: fact-bound generation, value–promo cadence, capability isolation, and fail-loud operations.</p>
+          <a class="rail-btn" href="cadence.html">See the details</a>
+        </li>
+        <li class="rail-card">
+          <a class="rail-cover" href="governable.html" tabindex="-1" aria-hidden="true"><img src="../covers/governable.jpg" loading="lazy" decoding="async" alt="Cover of The Governable Enterprise"></a>
+          <p class="rail-kicker">Book · 2026</p>
+          <a class="rail-title" href="governable.html">The Governable Enterprise</a>
+          <p class="rail-desc">A practical guide to evidence, authority and AI operations — lessons from DeskOS. A practitioner guide to designing AI operations that can explain their evidence, limit their authority, account for resources and recover from uncertainty. DeskOS is examined as a candid, bounded case rather than a product-success claim, and the ten operating tools are given as methods a reader can adopt rather than results a reader should assume. Prepared in PDF, editable Word, EPUB, HTML and Markdown; full text is not distributed publicly.</p>
+          <a class="rail-btn" href="governable.html">See the details</a>
+        </li>
+        <li class="rail-card">
+          <a class="rail-cover" href="emotional.html" tabindex="-1" aria-hidden="true"><img src="../covers/emotional.jpg" loading="lazy" decoding="async" alt="Cover of Emotional Engineering for AI-Oriented Infrastructure Operators"></a>
+          <p class="rail-kicker">Book · 2026</p>
+          <a class="rail-title" href="emotional.html">Emotional Engineering for AI-Oriented Infrastructure Operators</a>
+          <p class="rail-desc">Trust, agency and ethical adoption in systems that act. An examination of how evidence, meaningful choice and recovery can support appropriate reliance on automated systems. It distinguishes ethical adoption from emotional pressure, and treats operating methods as proposals rather than validated sales formulas — a distinction that matters most to the operator who has to decide what to say to a customer on a bad day.</p>
+          <a class="rail-btn" href="emotional.html">See the details</a>
+        </li>
+        <li class="rail-card">
+          <a class="rail-cover" href="musk-mirror.html" tabindex="-1" aria-hidden="true"><img src="../covers/musk-mirror.jpg" loading="lazy" decoding="async" alt="Cover of The Musk Mirror"></a>
+          <p class="rail-kicker">Book · 2026</p>
+          <a class="rail-title" href="musk-mirror.html">The Musk Mirror</a>
+          <p class="rail-desc">How one billionaire exposed the cracks in China&#x27;s innovation dream. A gallery of expert predictions, set against what was actually built. The book reads as a mirror rather than a weapon: on the rocket sceptics, the communications &#x27;experts&#x27;, the business-model critics and the CEO chorus, and on what their confidence cost. Its argument is about expertise without humility, and about the difference between a claim that sounds authoritative and a number that can be checked.</p>
+          <a class="rail-btn" href="musk-mirror.html">See the details</a>
+        </li>
+        <li class="rail-card">
+          <a class="rail-cover" href="traffic.html" tabindex="-1" aria-hidden="true"><img src="../covers/traffic.jpg" loading="lazy" decoding="async" alt="Cover of Traffic Is the New Oil"></a>
+          <p class="rail-kicker">Book · 2026</p>
+          <a class="rail-title" href="traffic.html">Traffic Is the New Oil</a>
+          <p class="rail-desc">The African digital wealth formula. Six chapters on the only formula that has ever run the internet — traffic, ads, money — argued for a continent that supplies the eyeballs and keeps too little of the revenue. From the awakening, through the traffic layer and the ad market, to what actually enters an account while the power is out, and a zero-capital route from nothing to a first four-figure month.</p>
+          <a class="rail-btn" href="traffic.html">See the details</a>
+        </li>
+        <li class="rail-card">
+          <a class="rail-cover" href="pinterest.html" tabindex="-1" aria-hidden="true"><img src="../covers/pinterest.jpg" loading="lazy" decoding="async" alt="Cover of Pinterest Goldmine"></a>
+          <p class="rail-kicker">Book · 2026</p>
+          <a class="rail-title" href="pinterest.html">Pinterest Goldmine</a>
+          <p class="rail-desc">The traffic source nobody told you about. A complete operating manual for one under-used traffic channel: the psychology of the scroll-stop, a pin factory run from Canva on a phone, the search optimisation playbook, a scheduling system that survives real-life disruption, and the money layer that turns attention into a payout.</p>
+          <a class="rail-btn" href="pinterest.html">See the details</a>
+        </li>
+        <li class="rail-card">
+          <a class="rail-cover" href="rocket-man.html" tabindex="-1" aria-hidden="true"><img src="../covers/rocket-man.jpg" loading="lazy" decoding="async" alt="Cover of The Rocket Man Reckoning"></a>
+          <p class="rail-kicker">Essay &amp; field report · 2026</p>
+          <a class="rail-title" href="rocket-man.html">The Rocket Man Reckoning</a>
+          <p class="rail-desc">How China mocked Elon Musk — and why they are now panicking. The arrogance of a rising superpower, the collapse of its myths, and what one company&#x27;s success reveals about the future of innovation. A short book about a decade of ridicule from established voices — academic, industrial and editorial — and what happened when the engineering arrived anyway.</p>
+          <a class="rail-btn" href="rocket-man.html">See the details</a>
+        </li>
+        <li class="rail-card">
+          <a class="rail-cover" href="unchained.html" tabindex="-1" aria-hidden="true"><img src="../covers/unchained.jpg" loading="lazy" decoding="async" alt="Cover of Unchained Blueprint"></a>
+          <p class="rail-kicker">Essay &amp; field report · 2026</p>
+          <a class="rail-title" href="unchained.html">Unchained Blueprint</a>
+          <p class="rail-desc">What to build when every payment door is closed. Every single door was closed: the processor that does not support your country, the payouts that are unavailable in your region, the account that has been limited. This blueprint starts from the observation that these are decisions rather than accidents, and works out what a builder in that position can still put in place.</p>
+          <a class="rail-btn" href="unchained.html">See the details</a>
+        </li>
+    </ul>
+  </section>
   <nav class="pager"><a href="emotional.html"><span class="k">Previous</span>Emotional Engineering for AI-Oriented Infrastructure Operators</a><a class="next" href="musk-mirror.html"><span class="k">Next</span>The Musk Mirror</a></nav>
 </main>
 <footer class="colophon"><div class="wrap">
@@ -267,5 +425,46 @@ footer.colophon{border-top:1px solid var(--rule);margin-top:44px;padding:24px 0 
     <img src="../contact-me.gif" width="360" height="128" alt="Contact me">
   </a>
 </div>
+
+<script>
+/* The arrows are created here rather than written into the page, so a reader without
+   JavaScript never meets a control that cannot work — the rail is an ordinary
+   horizontal scroll either way, and the arrow keys work once it has focus. */
+(function(){
+  var rail = document.getElementById('rail');
+  var nav = document.getElementById('mf-nav');
+  if (!rail || !nav) return;
+  function mk(label, glyph){
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = glyph;
+    b.setAttribute('aria-label', label);
+    b.title = label;
+    nav.appendChild(b);
+    return b;
+  }
+  var prev = mk('Earlier works', '←');
+  var next = mk('Later works', '→');
+  function step(){
+    var card = rail.querySelector('.rail-card');
+    return card ? Math.round(card.getBoundingClientRect().width) + 20 : 250;
+  }
+  function sync(){
+    var max = rail.scrollWidth - rail.clientWidth - 2;
+    prev.disabled = rail.scrollLeft <= 2;
+    next.disabled = rail.scrollLeft >= max;
+  }
+  prev.addEventListener('click', function(){
+    rail.scrollBy({left: -step() * 2, behavior: 'smooth'});
+  });
+  next.addEventListener('click', function(){
+    rail.scrollBy({left: step() * 2, behavior: 'smooth'});
+  });
+  rail.addEventListener('scroll', sync, {passive: true});
+  window.addEventListener('resize', sync);
+  sync();
+})();
+</script>
+
 </body>
 </html>

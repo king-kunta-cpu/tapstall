@@ -261,6 +261,64 @@ h1{font-size:clamp(30px,4.4vw,46px);line-height:1.08;letter-spacing:-.02em;margi
 .toc-part ol{list-style:none;margin:0;padding:0}
 .toc-part li{font-size:14.5px;line-height:1.5;padding:3px 0;border-bottom:1px dotted #ddd7c8}
 
+
+/* more from the author: a rail, not a slideshow — it scrolls, it snaps, and it never
+   hides a work behind an animation nobody can pause */
+.more-from{border-top:1px solid var(--ink);margin-top:38px;padding:30px 0 6px}
+.mf-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;
+  margin:0 0 18px}
+.mf-head>div:first-child{flex:1 1 auto;min-width:0}
+.mf-head h2{font-size:13px;font-weight:600;letter-spacing:.2em;text-transform:uppercase;
+  font-family:var(--sans);margin:0}
+.mf-head .mf-sub{font-size:13.5px;color:var(--muted);margin:5px 0 0;max-width:68ch}
+.mf-nav{display:flex;gap:6px;flex:0 0 auto}
+.mf-nav button{width:32px;height:32px;display:grid;place-items:center;padding:0;cursor:pointer;
+  border:1px solid var(--rule);border-radius:50%;background:transparent;color:var(--ink);
+  font:400 14px/1 var(--sans);transition:background .15s,color .15s,border-color .15s}
+.mf-nav button:hover:not(:disabled){background:var(--ink);border-color:var(--ink);
+  color:var(--paper)}
+.mf-nav button:disabled{opacity:.3;cursor:default}
+.rail{list-style:none;margin:0;padding:0 0 14px;display:flex;gap:20px;overflow-x:auto;
+  scroll-snap-type:x mandatory;scroll-behavior:smooth;scrollbar-width:thin;
+  -webkit-overflow-scrolling:touch}
+.rail:focus-visible{outline:2px solid var(--accent);outline-offset:6px}
+.rail::-webkit-scrollbar{height:6px}
+.rail::-webkit-scrollbar-track{background:transparent}
+.rail::-webkit-scrollbar-thumb{background:#d8d2c4;border-radius:999px}
+.rail-card{scroll-snap-align:start;flex:0 0 226px;min-width:0;display:flex;
+  flex-direction:column;border-top:1px solid var(--rule);padding-top:14px}
+.rail-cover{display:block;text-decoration:none}
+.rail-cover img{width:100%;aspect-ratio:3/4.3;object-fit:cover;
+  border:1px solid #d8d3c6;background:#fff;box-shadow:0 12px 22px -18px rgba(20,18,16,.55)}
+.mini-art{display:flex;flex-direction:column;justify-content:space-between;
+  aspect-ratio:3/4.3;padding:14px 13px;background:var(--panel);color:var(--panel-ink);
+  box-shadow:0 12px 22px -18px rgba(20,18,16,.55)}
+.ma-k{font:600 7.5px/1 var(--sans);letter-spacing:.18em;text-transform:uppercase;
+  color:#b9b2a5}
+.ma-r{display:block;width:24px;height:2px;background:var(--accent);margin:8px 0 auto}
+.ma-t{font:400 14px/1.24 var(--serif);letter-spacing:-.01em;overflow-wrap:break-word;
+  hyphens:auto;margin:0 0 10px}
+.ma-a{font:600 7.5px/1 var(--sans);letter-spacing:.16em;text-transform:uppercase;
+  color:#9d968a}
+.rail-kicker{font:600 8.5px/1 var(--sans);letter-spacing:.18em;text-transform:uppercase;
+  color:var(--accent);margin:12px 0 6px}
+.rail-title{display:block;text-decoration:none;font:400 16.5px/1.22 var(--serif);
+  letter-spacing:-.01em;margin:0 0 7px}
+.rail-title:hover{color:var(--accent)}
+.rail-desc{font-size:13px;line-height:1.5;color:#57534d;margin:0 0 13px;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.rail-btn{align-self:flex-start;margin-top:auto;text-decoration:none;border:1px solid var(--ink);
+  border-radius:2px;padding:8px 12px;font:600 9px/1 var(--sans);letter-spacing:.16em;
+  text-transform:uppercase;color:var(--ink);transition:background .15s,color .15s}
+.rail-btn:hover{background:var(--ink);color:var(--paper)}
+@media (max-width:860px){
+  .rail{gap:14px}
+  .rail-card{flex:0 0 196px}
+  .mf-head{margin-bottom:14px}
+  .mf-sub{display:none}
+}
+@media print{.more-from{display:none}}
+
 /* about + pager */
 .about{border-top:1px solid var(--rule);margin-top:34px;padding:30px 0 0;
   display:grid;grid-template-columns:minmax(0,1fr) 260px;gap:40px}
@@ -292,6 +350,96 @@ footer.colophon{border-top:1px solid var(--rule);margin-top:44px;padding:24px 0 
 """ + mp.SHARE_CSS
 
 
+def more_from(work, works):
+    """The other twelve, one scroll away: jacket, three lines, and a way in. A rail
+    rather than a carousel — nothing rotates on a timer, nothing is hidden behind an
+    animation, and without JavaScript it is simply a sideways scroll."""
+    cards = []
+    for other in works:
+        if other["id"] == work["id"]:
+            continue
+        href = f"{other['id']}.html"
+        if other.get("cover"):
+            art = (f'<img src="../{mp.esc(other["cover"])}" loading="lazy" decoding="async" '
+                   f'alt="Cover of {mp.esc(other["title"])}">')
+        else:
+            # no artwork: the same typographic panel the catalogue uses, cut small
+            art = (f'<span class="mini-art">'
+                   f'<span class="ma-k">{mp.esc(mp.KIND_LABEL[other["kind"]])} · '
+                   f'{mp.esc(other["year"])}</span>'
+                   f'<span class="ma-r"></span>'
+                   f'<span class="ma-t">{mp.esc(other["title"])}</span>'
+                   f'<span class="ma-a">{mp.esc(mp.AUTHOR)}</span></span>')
+        cards.append(f"""
+        <li class="rail-card">
+          <a class="rail-cover" href="{href}" tabindex="-1" aria-hidden="true">{art}</a>
+          <p class="rail-kicker">{mp.esc(mp.KIND_LABEL[other['kind']])} · {
+              mp.esc(other['year'])}</p>
+          <a class="rail-title" href="{href}">{mp.esc(other['title'])}</a>
+          <p class="rail-desc">{mp.esc(other['subtitle'])}. {mp.esc(other['blurb'])}</p>
+          <a class="rail-btn" href="{href}">See the details</a>
+        </li>""")
+    return f"""
+  <section class="more-from" aria-labelledby="mf-title">
+    <div class="mf-head">
+      <div>
+        <h2 id="mf-title">More from the author</h2>
+        <p class="mf-sub">{len(cards)} other works — books, working papers and field
+        reports. Each has a page of its own: what it argues, what is inside it, and
+        every format that is published.</p>
+      </div>
+      <div class="mf-nav" id="mf-nav"></div>
+    </div>
+    <ul class="rail" id="rail" tabindex="0" role="region"
+        aria-label="More works by {mp.esc(mp.AUTHOR)}, scroll sideways">
+      {"".join(cards)}
+    </ul>
+  </section>"""
+
+
+RAIL_SCRIPT = """
+<script>
+/* The arrows are created here rather than written into the page, so a reader without
+   JavaScript never meets a control that cannot work — the rail is an ordinary
+   horizontal scroll either way, and the arrow keys work once it has focus. */
+(function(){
+  var rail = document.getElementById('rail');
+  var nav = document.getElementById('mf-nav');
+  if (!rail || !nav) return;
+  function mk(label, glyph){
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = glyph;
+    b.setAttribute('aria-label', label);
+    b.title = label;
+    nav.appendChild(b);
+    return b;
+  }
+  var prev = mk('Earlier works', '\u2190');
+  var next = mk('Later works', '\u2192');
+  function step(){
+    var card = rail.querySelector('.rail-card');
+    return card ? Math.round(card.getBoundingClientRect().width) + 20 : 250;
+  }
+  function sync(){
+    var max = rail.scrollWidth - rail.clientWidth - 2;
+    prev.disabled = rail.scrollLeft <= 2;
+    next.disabled = rail.scrollLeft >= max;
+  }
+  prev.addEventListener('click', function(){
+    rail.scrollBy({left: -step() * 2, behavior: 'smooth'});
+  });
+  next.addEventListener('click', function(){
+    rail.scrollBy({left: step() * 2, behavior: 'smooth'});
+  });
+  rail.addEventListener('scroll', sync, {passive: true});
+  window.addEventListener('resize', sync);
+  sync();
+})();
+</script>
+"""
+
+
 def page(work, prev_work, next_work):
     canonical = f"{mp.SITE}/works/{work['id']}.html"
     kind = mp.KIND_LABEL[work["kind"]]
@@ -320,6 +468,7 @@ def page(work, prev_work, next_work):
     nav += "</nav>"
 
     share = mp.share_bar(canonical, f"{work['title']} — {mp.AUTHOR}", "Share this page")
+    more_from_block = more_from(work, mp.WORKS)
     return head(work, title, description, canonical) + f"""
 <body>
 <header class="bar">
@@ -360,6 +509,7 @@ def page(work, prev_work, next_work):
     </div>
     {side}
   </section>
+  {more_from_block}
   {nav}
 </main>
 <footer class="colophon"><div class="wrap">
@@ -367,6 +517,7 @@ def page(work, prev_work, next_work):
   <a href="../">the full catalogue</a>
 </div></footer>
 {mp.float_contact("../")}
+{RAIL_SCRIPT}
 </body>
 </html>
 """
