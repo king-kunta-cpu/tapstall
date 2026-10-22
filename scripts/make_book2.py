@@ -18,7 +18,7 @@ from pathlib import Path
 
 import markdown
 
-SRC = Path(sys.argv[1] if len(sys.argv) > 1 else "book/intelligence-data-and-judgement.md")
+SRC = Path(sys.argv[1] if len(sys.argv) > 1 else "book/Garikai-2026-Intelligence-Data-and-Judgement.md")
 OUT_HTML = SRC.with_suffix(".html")
 OUT_PDF = SRC.with_suffix(".pdf")
 

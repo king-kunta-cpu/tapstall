@@ -368,4 +368,22 @@ $$\text{promo}(t)\cdot x_{t,r,s} \ \Rightarrow\ \text{no promo on }t\ \text{with
 <p><strong>E.1 The cold rail at load.</strong> On 8 October the outreach rail ran batch <code>OUT-20261008-0853</code>: 75 leads queued, 68 sent, the drip self-continuing, with the day's reply triage green (two bounces retired to dead, one auto-reply absorbed, zero opt-outs). Per-batch ledgers — counts by status, per-mailbox split, copy, and a CSV of who got what, when, from which mailbox — now accompany every batch: the LAP control surface extended from the press branch to the demand programme.</p>
 <p><strong>E.2 Console-driven revocation.</strong> The owner console gained one-click governance over the selling machine: per-key caps (<code>daily_cap</code>, <code>weekly_cap</code>) with call-time resolution (environment value beats console override beats code default), <strong>Hold latest</strong> / <strong>Resume &amp; send</strong> batch gates, on-demand <strong>Compose now</strong>, and console <strong>Suppress</strong> writing do-not-contact rows that propagate into every subsequent batch. In GCG terms these are new instantiations of $R$ (revocation, still $O(1)$ and total) and of the EIL gate (one tap at precisely the statutory boundary); in LAP terms the database-backed config tier (<code>POST /config</code>, read back through <code>/stats</code>) is a second persistence leg beside the git ledger, verified by read-back smoke rather than by commit graph. Shipped 11 October with 165 worker tests green and live-verified against production without mutating it.</p>
 <p><strong>E.3 Documentation as custody.</strong> The operator handbook — technical guide, owner guide, client guide and five operating manuals — shipped inside the internal bible on 11 October. Custody that lives only in one operator's head is custody with a bus factor of one; the handbook retires that failure class the same way §7.4 retired the others: by writing the gate down.</p>
-<p><em>End of paper.</em></p><footer class="colophon">Courage Garikai · Owner, Jacaranda Labs · Distributed Cognitive Autonomous Infrastructure programme · Harare, Zimbabwe · September 2026 (expanded October 2026; attribution revised 11 October 2026). Published by Jacaranda Labs Press, Harare. Figures and tables are reproduced from the source document.</footer></body></html>
+<p><em>End of paper.</em></p><footer class="colophon">Courage Garikai · Owner, Jacaranda Labs · Distributed Cognitive Autonomous Infrastructure programme · Harare, Zimbabwe · September 2026 (expanded October 2026; attribution revised 11 October 2026). Published by Jacaranda Labs Press, Harare. Figures and tables are reproduced from the source document.</footer>
+<script>
+/* A work page links here with ?dl=<file>. The reading edition is the destination and
+   the download starts beside it, not instead of it. Nothing is dispatched unless a
+   work page asked for it, so a reader who lands here directly gets no surprise file. */
+(function(){
+  var p = new URLSearchParams(location.search).get('dl');
+  if (!p) return;
+  var a = document.createElement('a');
+  a.href = decodeURIComponent(p);
+  a.setAttribute('download', '');
+  a.rel = 'noopener';
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function(){ a.remove(); }, 5000);
+})();
+</script>
+</body></html>

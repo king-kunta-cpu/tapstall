@@ -230,9 +230,9 @@ def verify(path: Path):
 
 
 def main():
-    args = sys.argv[1:] or ["book/the-ledger-and-the-shopkeeper.md",
-                            "book/intelligence-data-and-judgement.md",
-                            "papers/tapstall-2026-order-without-custody.md"]
+    args = sys.argv[1:] or ["book/Garikai-2026-The-Ledger-and-the-Shopkeeper.md",
+                            "book/Garikai-2026-Intelligence-Data-and-Judgement.md",
+                            "papers/Garikai-2026-Order-Without-Custody-DCAI-Working-Paper-3.md"]
     for a in args:
         src = Path(a)
         out, n = build(src)

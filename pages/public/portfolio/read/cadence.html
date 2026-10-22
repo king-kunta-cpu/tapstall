@@ -312,4 +312,22 @@ p, li { orphans: 3; widows: 3; }
 <td>live on site save</td>
 </tr>
 </tbody>
-</table><footer class="colophon">Courage Garikai — Jacaranda Labs, Harare, Zimbabwe · Jacaranda Labs — Distributed Cognitive Autonomous Infrastructure · October 2026. Published by Jacaranda Labs Press, Harare. Figures and tables are reproduced from the source document.</footer></body></html>
+</table><footer class="colophon">Courage Garikai — Jacaranda Labs, Harare, Zimbabwe · Jacaranda Labs — Distributed Cognitive Autonomous Infrastructure · October 2026. Published by Jacaranda Labs Press, Harare. Figures and tables are reproduced from the source document.</footer>
+<script>
+/* A work page links here with ?dl=<file>. The reading edition is the destination and
+   the download starts beside it, not instead of it. Nothing is dispatched unless a
+   work page asked for it, so a reader who lands here directly gets no surprise file. */
+(function(){
+  var p = new URLSearchParams(location.search).get('dl');
+  if (!p) return;
+  var a = document.createElement('a');
+  a.href = decodeURIComponent(p);
+  a.setAttribute('download', '');
+  a.rel = 'noopener';
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function(){ a.remove(); }, 5000);
+})();
+</script>
+</body></html>

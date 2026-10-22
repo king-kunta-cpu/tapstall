@@ -1379,4 +1379,22 @@ hr { border:0; border-top:1px solid var(--rule); margin:38px 0; }
 <p>Written by Courage Garikai. Published by Jacaranda Labs Press, Harare.</p>
 <p>Typeset at 10.5 point on 15.5 point leading on a 6 × 9 inch page, with running heads, a contents list generated from the document structure, and part openers on their own pages. The print edition was produced from a single Markdown source via HTML and CSS, without a word processor, so that text and pagination remain reproducible.</p>
 <p>The book is released under a Creative Commons Attribution 4.0 International licence. You may copy, redistribute, remix and build upon it, including commercially, provided you attribute the author and indicate changes. The three source curricula are the property of their respective publishers and are used here with attribution under their own terms; a reader redistributing this book should verify those terms before redistributing substantial portions of the source material.</p>
-<p>The case described in Part Four is a live commercial system. Its figures, thresholds, predicates and failure accounts are reported as accurately as the author can make them, and the limitations stated in §18.5 — in particular the absence of paying customers — are part of the account rather than a disclaimer appended to it.</p></section></div></body></html>
+<p>The case described in Part Four is a live commercial system. Its figures, thresholds, predicates and failure accounts are reported as accurately as the author can make them, and the limitations stated in §18.5 — in particular the absence of paying customers — are part of the account rather than a disclaimer appended to it.</p></section></div>
+<script>
+/* A work page links here with ?dl=<file>. The reading edition is the destination and
+   the download starts beside it, not instead of it. Nothing is dispatched unless a
+   work page asked for it, so a reader who lands here directly gets no surprise file. */
+(function(){
+  var p = new URLSearchParams(location.search).get('dl');
+  if (!p) return;
+  var a = document.createElement('a');
+  a.href = decodeURIComponent(p);
+  a.setAttribute('download', '');
+  a.rel = 'noopener';
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function(){ a.remove(); }, 5000);
+})();
+</script>
+</body></html>

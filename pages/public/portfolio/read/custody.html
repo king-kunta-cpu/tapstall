@@ -690,4 +690,22 @@ after:   2347301771710     (13 digits, dialable)
 <h1>Appendix D — Statement specification (normative)</h1>
 <p>For a day <span class="m">D</span> and merchant <span class="m">m</span>, the statement MUST report: expected, matched, to chase, refunded, fees, net; a per-rail breakdown of orders and outstanding amounts; and a single next-action sentence. It MUST be computed as a function of the event log for <span class="m">D</span> alone (Proposition 1). It MUST NOT contain script, MUST carry <code>no-store</code>, and MUST be reachable only by a live session of <span class="m">m</span>. It MUST render an explicit quiet-day message in words rather than a table of zeros. It MUST NOT describe a matched order as paid, an expected order as owed, or the platform's fee as a share of volume. Any implementation that violates these clauses is non-conforming regardless of its correctness on ordinary input.</p>
 <p class="note">Working paper of the Distributed Cognitive Autonomous Infrastructure programme, Jacaranda Labs. The case system is in production; the claims are architectural and the evidence is reproducible from the repository and the live endpoints named in the appendices. Quotations from production traces are abridged with ellipses where marked.</p>
+
+<script>
+/* A work page links here with ?dl=<file>. The reading edition is the destination and
+   the download starts beside it, not instead of it. Nothing is dispatched unless a
+   work page asked for it, so a reader who lands here directly gets no surprise file. */
+(function(){
+  var p = new URLSearchParams(location.search).get('dl');
+  if (!p) return;
+  var a = document.createElement('a');
+  a.href = decodeURIComponent(p);
+  a.setAttribute('download', '');
+  a.rel = 'noopener';
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function(){ a.remove(); }, 5000);
+})();
+</script>
 </body></html>

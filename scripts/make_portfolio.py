@@ -23,6 +23,7 @@ import html
 import json
 import subprocess
 import sys
+import urllib.parse
 from pathlib import Path
 
 REPO = "https://github.com/king-kunta-cpu/tapstall"
@@ -30,6 +31,7 @@ RAW = REPO + "/raw/main"
 RELEASE = REPO + "/releases/download/publications-2026-10"
 
 AUTHOR = "Courage Garikai"
+SITE = "https://king-kunta-cpu.github.io/tapstall/portfolio"
 PRESS = "Jacaranda Labs Press · Harare"
 YEAR = "2026"
 
@@ -41,6 +43,7 @@ YEAR = "2026"
 WORKS = [
     {
         "id": "ledger",
+        "cover": "covers/ledger.jpg",
         "kind": "book",
         "featured": True,
         "title": "The Ledger and the Shopkeeper",
@@ -60,14 +63,15 @@ WORKS = [
         ),
         "note": "Print edition typeset from a single Markdown source; 77 pages, running heads, resolved contents.",
         "formats": {
-            "PDF": f"{RAW}/book/the-ledger-and-the-shopkeeper.pdf",
-            "EPUB": f"{RAW}/book/the-ledger-and-the-shopkeeper.epub",
-            "HTML": f"{RAW}/book/the-ledger-and-the-shopkeeper.html",
-            "MD": f"{RAW}/book/the-ledger-and-the-shopkeeper.md",
+            "PDF": f"{RELEASE}/Garikai-2026-The-Ledger-and-the-Shopkeeper.pdf",
+            "EPUB": f"{RAW}/book/Garikai-2026-The-Ledger-and-the-Shopkeeper.epub",
+            "HTML": f"{RAW}/book/Garikai-2026-The-Ledger-and-the-Shopkeeper.html",
+            "MD": f"{RAW}/book/Garikai-2026-The-Ledger-and-the-Shopkeeper.md",
         },
     },
     {
         "id": "intelligence",
+        "cover": "covers/intelligence.jpg",
         "kind": "book",
         "featured": True,
         "title": "Intelligence, Data and Judgement",
@@ -87,10 +91,10 @@ WORKS = [
         ),
         "note": "Eleven tables, two pseudocode listings, a sixty-term glossary, eight labs and an annotated bibliography.",
         "formats": {
-            "PDF": f"{RAW}/book/intelligence-data-and-judgement.pdf",
-            "EPUB": f"{RAW}/book/intelligence-data-and-judgement.epub",
-            "HTML": f"{RAW}/book/intelligence-data-and-judgement.html",
-            "MD": f"{RAW}/book/intelligence-data-and-judgement.md",
+            "PDF": f"{RELEASE}/Garikai-2026-Intelligence-Data-and-Judgement.pdf",
+            "EPUB": f"{RAW}/book/Garikai-2026-Intelligence-Data-and-Judgement.epub",
+            "HTML": f"{RAW}/book/Garikai-2026-Intelligence-Data-and-Judgement.html",
+            "MD": f"{RAW}/book/Garikai-2026-Intelligence-Data-and-Judgement.md",
         },
     },
     {
@@ -115,10 +119,10 @@ WORKS = [
         ),
         "note": "Candid about its limits: no paying customers in the measurement window, no control condition, no inference beyond the case.",
         "formats": {
-            "PDF": f"{RAW}/papers/tapstall-2026-order-without-custody.pdf",
-            "EPUB": f"{RAW}/papers/tapstall-2026-order-without-custody.epub",
-            "HTML": f"{RAW}/papers/tapstall-2026-order-without-custody.html",
-            "MD": f"{RAW}/papers/tapstall-2026-order-without-custody.md",
+            "PDF": f"{RELEASE}/Garikai-2026-Order-Without-Custody-DCAI-Working-Paper-3.pdf",
+            "EPUB": f"{RAW}/papers/Garikai-2026-Order-Without-Custody-DCAI-Working-Paper-3.epub",
+            "HTML": f"{RAW}/papers/Garikai-2026-Order-Without-Custody-DCAI-Working-Paper-3.html",
+            "MD": f"{RAW}/papers/Garikai-2026-Order-Without-Custody-DCAI-Working-Paper-3.md",
         },
     },
     {
@@ -142,9 +146,9 @@ WORKS = [
         ),
         "note": "Silent-failure taxonomy with detection-time bounds, offered as reusable diagnostic vocabulary.",
         "formats": {
-            "PDF": f"{RAW}/papers/sovereign-micro-enterprise.pdf",
-            "HTML": f"{RAW}/papers/sovereign-micro-enterprise.html",
-            "MD": f"{RAW}/papers/sovereign-micro-enterprise.md",
+            "PDF": f"{RELEASE}/Garikai-2026-The-Sovereign-Micro-Enterprise.pdf",
+            "HTML": f"{RAW}/papers/Garikai-2026-The-Sovereign-Micro-Enterprise.html",
+            "MD": f"{RAW}/papers/Garikai-2026-The-Sovereign-Micro-Enterprise.md",
         },
     },
     {
@@ -166,9 +170,9 @@ WORKS = [
         ),
         "note": "Honest where it matters: the Worker is in production, the test surface is documented, paying customers are zero.",
         "formats": {
-            "PDF": f"{RAW}/papers/grounded-cadence.pdf",
-            "HTML": f"{RAW}/papers/grounded-cadence.html",
-            "MD": f"{RAW}/papers/grounded-cadence.md",
+            "PDF": f"{RELEASE}/Garikai-2026-Grounded-Cadence.pdf",
+            "HTML": f"{RAW}/papers/Garikai-2026-Grounded-Cadence.html",
+            "MD": f"{RAW}/papers/Garikai-2026-Grounded-Cadence.md",
         },
     },
     # --- works catalogued from the author's publications catalogue. The catalogue states
@@ -176,6 +180,8 @@ WORKS = [
     # a status and no download links; inventing a link would be inventing an edition.
     {
         "id": "governable",
+        "cover": "covers/governable.jpg",
+        "cover_pdf": f"{RELEASE}/Garikai-2026-The-Governable-Enterprise-cover.pdf",
         "kind": "book",
         "featured": True,
         "title": "The Governable Enterprise",
@@ -197,6 +203,8 @@ WORKS = [
     },
     {
         "id": "emotional",
+        "cover": "covers/emotional.jpg",
+        "cover_pdf": f"{RELEASE}/Garikai-2026-Emotional-Engineering-cover.pdf",
         "kind": "book",
         "featured": False,
         "title": "Emotional Engineering for AI-Oriented Infrastructure Operators",
@@ -253,7 +261,7 @@ WORKS = [
             "that can be checked."
         ),
         "note": "Dedicated to engineers building impossible things in constrained environments.",
-        "formats": {"PDF": f"{RELEASE}/the-musk-mirror.pdf"},
+        "formats": {"PDF": f"{RELEASE}/Garikai-2026-The-Musk-Mirror.pdf"},
     },
     {
         "id": "traffic",
@@ -273,7 +281,7 @@ WORKS = [
             "route from nothing to a first four-figure month."
         ),
         "note": "Written for the operator with a phone, a connection and no capital.",
-        "formats": {"PDF": f"{RELEASE}/traffic-is-the-new-oil.pdf"},
+        "formats": {"PDF": f"{RELEASE}/Garikai-2026-Traffic-Is-the-New-Oil.pdf"},
     },
     {
         "id": "pinterest",
@@ -292,7 +300,7 @@ WORKS = [
             "and the money layer that turns attention into a payout."
         ),
         "note": "Includes the Sunday System: a week of output in forty-five minutes.",
-        "formats": {"PDF": f"{RELEASE}/pinterest-goldmine.pdf"},
+        "formats": {"PDF": f"{RELEASE}/Garikai-2026-Pinterest-Goldmine.pdf"},
     },
     {
         "id": "rocket-man",
@@ -311,7 +319,7 @@ WORKS = [
             "editorial — and what happened when the engineering arrived anyway."
         ),
         "note": "Companion to The Musk Mirror.",
-        "formats": {"PDF": f"{RELEASE}/the-rocket-man-reckoning.pdf"},
+        "formats": {"PDF": f"{RELEASE}/Garikai-2026-The-Rocket-Man-Reckoning.pdf"},
     },
     {
         "id": "unchained",
@@ -331,7 +339,7 @@ WORKS = [
             "put in place."
         ),
         "note": "Version 1 — a working document, not a finished book.",
-        "formats": {"PDF": f"{RELEASE}/unchained-blueprint-v1.pdf"},
+        "formats": {"PDF": f"{RELEASE}/Garikai-2026-Unchained-Blueprint-v1.pdf"},
     },
 ]
 
@@ -657,6 +665,8 @@ def featured_card(w):
             <span class="facts">{facts(w)}</span>
             {chips(w)}
           </div>
+          <a class="more" href="works/{esc(w['id'])}.html">What is inside, and every format
+          <span aria-hidden="true">→</span></a>
         </div>
       </article>"""
 
@@ -677,8 +687,112 @@ def shelf_row(w):
             <span class="facts">{facts(w)}</span>
             {chips(w)}
           </div>
+          <a class="more" href="works/{esc(w['id'])}.html">What is inside, and every format
+          <span aria-hidden="true">→</span></a>
         </div>
       </article>"""
+
+
+# --------------------------------------------------------------------------- sharing
+#
+# The icons are drawn here as paths rather than pulled from a brand kit: no network
+# at render time, nothing to break, and the widget survives being opened offline.
+
+SHARE_ICONS = {
+    "x": '<path d="M3.4 3.4l13.2 13.2M16.6 3.4L3.4 16.6"/>',
+    "linkedin": ('<rect x="2.6" y="2.6" width="14.8" height="14.8" rx="2.2"/>'
+                 '<path d="M6.4 8.2v5.4M6.4 5.5v.2M9.8 13.6V8.2m0 2.2a2 2 0 014 0v3.2"/>'),
+    "whatsapp": ('<path d="M10 2.9a7 7 0 00-5.9 10.6L3 17.1l3.7-1.1A7 7 0 1010 2.9z"/>'
+                 '<path d="M7.3 7.4c.2 2 1.8 3.7 3.8 4.2.6.2 1.2-.2 1.3-.8v-.5l-1.5-.6-.6.7a4.6 4.6 0 01-1.7-1.7l.7-.6-.6-1.5h-.5c-.5 0-.9.3-.9.8z" '
+                 'fill="currentColor" stroke="none"/>'),
+    "telegram": '<path d="M17 3.6L2.9 9.2l3.9 1.3 1.4 4.3 2-2.4 3.3 2.4z"/><path d="M6.8 10.5l8-4.9-5.3 6.4"/>',
+    "facebook": ('<rect x="2.6" y="2.6" width="14.8" height="14.8" rx="2.2"/>'
+                 '<path d="M12.3 17V10.8h2.1l.3-2.4h-2.4V6.9c0-.7.2-1.1 1.2-1.1h1.3V3.7c-.2 0-1-.1-1.9-.1-1.9 0-3.1 1.1-3.1 3.2v1.6H7.6v2.4h2.2V17z"/>'),
+    "mail": '<rect x="2.6" y="4.4" width="14.8" height="11.2" rx="1.6"/><path d="M3.2 5.4L10 10.6l6.8-5.2"/>',
+    "copy": ('<path d="M7.6 7.6h9v9h-9z"/><path d="M12.4 7.6V3.4h-9v9h4.2"/>'),
+    "phone": ('<path d="M5.2 3.4h2.6l1.2 3-1.6 1.2a8 8 0 004.9 4.9l1.2-1.6 3 1.2v2.6c0 .9-.7 1.6-1.6 1.6A13.4 13.4 0 013.6 5'
+              'c0-.9.7-1.6 1.6-1.6z"/>'),
+}
+
+
+def _icon(name):
+    return (f'<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">'
+            f'{SHARE_ICONS[name]}</svg>')
+
+
+def share_bar(url, title, label="Share"):
+    """A share row that works with scripts disabled: every target is a plain link to
+    the network's own share endpoint. The copy button is the only thing that needs
+    JavaScript, and it is the only thing that degrades."""
+    u = urllib.parse.quote(url, safe="")
+    t = urllib.parse.quote(title, safe="")
+    targets = [
+        ("x", f"https://twitter.com/intent/tweet?text={t}&url={u}", "Share on X"),
+        ("linkedin", f"https://www.linkedin.com/sharing/share-offsite/?url={u}", "Share on LinkedIn"),
+        ("whatsapp", f"https://wa.me/?text={t}%20{u}", "Share on WhatsApp"),
+        ("telegram", f"https://t.me/share/url?url={u}&text={t}", "Share on Telegram"),
+        ("facebook", f"https://www.facebook.com/sharer/sharer.php?u={u}", "Share on Facebook"),
+        ("mail", f"mailto:?subject={t}&body={u}", "Send by email"),
+    ]
+    links = "".join(
+        f'<a href="{href}" target="_blank" rel="noopener" aria-label="{esc(name)}" '
+        f'title="{esc(name)}">{_icon(icon)}</a>'
+        for icon, href, name in targets)
+    copy = (f'<button type="button" data-copy="{esc(url)}" aria-label="Copy the link" '
+            f'title="Copy the link">{_icon("copy")}</button>')
+    return f'<div class="share"><span class="sh-label">{esc(label)}</span>{links}{copy}</div>'
+
+
+def float_contact(prefix=""):
+    """The floating button: the animated mark, linked to the channel it names, with
+    one quieter call button beside it. Two honest actions, no menu, nothing hidden."""
+    return f"""
+<div class="fly" aria-label="Contact">
+  <a class="fly-call" href="tel:+263779674212" aria-label="Call Courage Garikai on +263 77 967 4212"
+     title="Call +263 77 967 4212">{_icon("phone")}</a>
+  <a class="fly-main" href="https://wa.me/263784600904" target="_blank" rel="noopener"
+     aria-label="Message Courage Garikai on WhatsApp at +263 78 460 0904, or call +263 77 967 4212">
+    <img src="{prefix}contact-me.gif" width="360" height="128" alt="Contact me">
+  </a>
+</div>"""
+
+
+SHARE_CSS = """
+/* sharing */
+.share{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:20px 0 0}
+.share .sh-label{font:600 9.5px/1 var(--sans,ui-sans-serif,system-ui,sans-serif);letter-spacing:.2em;text-transform:uppercase;
+  color:var(--muted,#6d6f74);flex:0 0 100%;margin:0 0 2px}
+.share a,.share button{width:32px;height:32px;display:inline-grid;place-items:center;padding:0;
+  border:1px solid var(--rule,#ddd7c8);border-radius:50%;background:transparent;color:inherit;
+  text-decoration:none;cursor:pointer;transition:background .15s,color .15s,border-color .15s}
+.share a:hover,.share button:hover,.share a:focus-visible,.share button:focus-visible{
+  background:currentColor;border-color:currentColor}
+.share a:hover svg,.share button:hover svg{stroke:var(--paper,#faf7f0)}
+.share a:hover svg [fill="currentColor"],.share button:hover svg [fill="currentColor"]{fill:var(--paper,#faf7f0)}
+.share svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.5;
+  stroke-linecap:round;stroke-linejoin:round}
+.share button.done{background:#2f6b4f;border-color:#2f6b4f;color:#fff}
+.band .share a,.band .share button,.dark .share a,.dark .share button{border-color:rgba(242,238,228,.32)}
+.band .share a:hover,.band .share button:hover{color:var(--panel);background:var(--panel-ink)}
+
+/* the floating contact button */
+.fly{position:fixed;right:16px;bottom:16px;z-index:60;display:flex;align-items:flex-end;
+  gap:8px;filter:drop-shadow(0 10px 24px rgba(15,14,12,.28))}
+.fly-main{display:block;line-height:0;border-radius:999px;transition:transform .18s ease}
+.fly-main img{width:clamp(132px,30vw,176px);height:auto;display:block;border-radius:999px}
+.fly-main:hover,.fly-main:focus-visible{transform:translateY(-2px)}
+.fly-call{width:42px;height:42px;display:grid;place-items:center;border-radius:50%;
+  background:var(--ink,#15171a);color:var(--paper,#faf7f0);border:1px solid rgba(250,247,240,.28);
+  text-decoration:none;transition:transform .18s ease}
+.fly-call svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.6;
+  stroke-linecap:round;stroke-linejoin:round}
+.fly-call:hover,.fly-call:focus-visible{transform:translateY(-2px);background:var(--accent,#a8332c)}
+@media (max-width:620px){
+  .fly{right:10px;bottom:10px;gap:6px}
+  .fly-call{width:38px;height:38px}
+}
+@media (prefers-reduced-motion:reduce){.fly-main:hover,.fly-call:hover{transform:none}}
+"""
 
 
 CSS = """
@@ -691,7 +805,7 @@ CSS = """
 }
 *{box-sizing:border-box}
 html{background:var(--paper);-webkit-text-size-adjust:100%}
-body{margin:0;color:var(--ink);font:17px/1.62 var(--serif);background:var(--paper)}
+body{margin:0;color:var(--ink);font:17px/1.62 var(--serif);background:var(--paper);padding-bottom:84px}
 a{color:inherit}
 .wrap{max-width:1060px;margin:0 auto;padding:0 34px}
 
@@ -859,6 +973,11 @@ section{padding:66px 0 10px}
   display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
 .facts{font:11.5px/1.4 var(--mono);color:var(--muted)}
 .chips{display:flex;gap:6px;flex-wrap:wrap}
+.more{display:inline-block;margin:12px 0 0;text-decoration:none;
+  font:600 9.5px/1.3 var(--sans);letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
+.more span{display:inline-block;transition:transform .15s}
+.more:hover span{transform:translateX(3px)}
+.band .more{color:var(--gold,#e0b978)}
 .chip{font:600 9.5px/1 var(--sans);letter-spacing:.12em;text-transform:uppercase;
   text-decoration:none;padding:6px 8px;border:1px solid var(--rule);border-radius:2px;
   color:#41474c;background:#fff}
@@ -1049,7 +1168,7 @@ footer.colophon a{color:var(--ink);text-decoration:none;border-bottom:1px solid 
   nav.mast-nav{gap:16px;flex-wrap:wrap;row-gap:8px}
 }
 @media print{ header.mast{position:static} .filters{display:none} body{background:#fff} }
-"""
+""" + SHARE_CSS
 
 JS = """
 /* Every download in the catalogue also opens the work in a window of its own.
@@ -1059,6 +1178,21 @@ document.querySelectorAll('[data-read]').forEach(function(a){
   a.addEventListener('click', function(){
     var w = window.open(a.getAttribute('data-read'), '_blank');
     if (w) { w.opener = null; }
+  });
+});
+
+document.querySelectorAll('[data-copy]').forEach(function(b){
+  b.addEventListener('click', function(){
+    var text = b.getAttribute('data-copy');
+    var done = function(){ b.classList.add('done'); setTimeout(function(){ b.classList.remove('done'); }, 1400); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, function(){});
+    } else {
+      var t = document.createElement('textarea');
+      t.value = text; t.setAttribute('readonly',''); document.body.appendChild(t);
+      t.select(); try { document.execCommand('copy'); done(); } catch (e) {}
+      document.body.removeChild(t);
+    }
   });
 });
 
@@ -1099,6 +1233,9 @@ def build():
         for name, shown, url in SITES)
     research_block = "".join(featured_card(w) for w in research)
     rows = "".join(shelf_row(w) for w in essays)
+    share_row = share_bar(SITE + "/", f"{AUTHOR} — books, research and running systems",
+                          "Share the catalogue")
+    floating = float_contact()
 
     doc = f"""<!DOCTYPE html>
 <html lang="en">
@@ -1391,6 +1528,7 @@ def build():
           <ul class="contact-list">{contacts}</ul>
           <div class="sites-label">Where it runs</div>
           <ul class="contact-list sites">{sites}</ul>
+          {share_row}
         </div>
       </div>
     </section>
@@ -1411,6 +1549,7 @@ def build():
   </div>
 </footer>
 
+{floating}
 <script>{JS}</script>
 </body>
 </html>
@@ -1420,6 +1559,26 @@ def build():
 
 OUT_DIR = Path("pages/public/portfolio")
 READ_DIR = OUT_DIR / "read"
+
+READ_SCRIPT = """
+<script>
+/* A work page links here with ?dl=<file>. The reading edition is the destination and
+   the download starts beside it, not instead of it. Nothing is dispatched unless a
+   work page asked for it, so a reader who lands here directly gets no surprise file. */
+(function(){
+  var p = new URLSearchParams(location.search).get('dl');
+  if (!p) return;
+  var a = document.createElement('a');
+  a.href = decodeURIComponent(p);
+  a.setAttribute('download', '');
+  a.rel = 'noopener';
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function(){ a.remove(); }, 5000);
+})();
+</script>
+"""
 
 
 def read_view(w):
@@ -1449,6 +1608,8 @@ def read_view(w):
                  "pre,code{overflow-wrap:anywhere;white-space:pre-wrap}}"
                  "</style>\n")
         book = book.replace("</head>", patch + "</head>", 1) if "</head>" in book else patch + book
+        book = (book.replace("</body>", READ_SCRIPT + "</body>", 1) if "</body>" in book
+                else book + READ_SCRIPT)
         target.write_text(book, encoding="utf-8")
         return f"read/{w['id']}.html"
     cover = (f'<img class="ed-cover" src="../{esc(w["cover"])}" '
@@ -1488,7 +1649,13 @@ def read_view(w):
   .note{{font-size:14px;color:#6f6961;margin-top:18px}}
   .back{{margin-top:34px;font-size:13.5px}}
   .back a{{color:#a8332c}}
+  .dl-note{{border:1px solid #ded8ca;background:#fff;padding:16px 18px;margin:0 0 20px;
+    font:14px/1.55 ui-sans-serif,system-ui,sans-serif;color:#4a453f}}
+  .dl-note b{{display:block;font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+    color:#a8332c;margin-bottom:6px}}
   @media (max-width:620px){{.cols{{grid-template-columns:1fr}}.ed-cover{{max-width:220px}}}}
+  body{{padding-bottom:96px}}
+  {SHARE_CSS}
 </style></head>
 <body><div class="wrap">
   <div class="kind">{esc(KIND_LABEL[w['kind']])} · {esc(w['status'])}</div>
@@ -1499,13 +1666,21 @@ def read_view(w):
       <p class="sub">{esc(w['subtitle'])}</p>
       <p class="blurb">{esc(w['blurb'])}</p>
       <p class="facts">{facts(w)}</p>
+      <div class="dl-note"><b>Reading edition</b>
+      The file downloads on its own if you arrived here from the work's page. If it did
+      not start, pick a format above — this page stays open so you can choose again.</div>
       {buttons}
       <p class="note">This edition is published as a PDF. Pick a format above and the file
       downloads; this page stays open so you can choose again.</p>
+      {share_bar(f"{SITE}/works/{w['id']}.html", f"{w['title']} — {AUTHOR}")}
     </div>
   </div>
-  <p class="back"><a href="../">Back to the catalogue</a></p>
-</div></body></html>
+  <p class="back"><a href="../works/{w['id']}.html">Back to the work</a> ·
+  <a href="../">All books and papers</a></p>
+</div>
+{float_contact("../")}
+{READ_SCRIPT}
+</body></html>
 """, encoding="utf-8")
     return f"read/{w['id']}.html"
 
@@ -1526,6 +1701,13 @@ def main():
     }
     (site / "catalogue.json").write_text(json.dumps(cat, indent=2, ensure_ascii=False) + "\n",
                                          encoding="utf-8")
+
+    # the page behind every card, built from the same catalogue
+    works = subprocess.run([sys.executable, str(Path(__file__).with_name("make_work_pages.py"))],
+                           capture_output=True, text=True)
+    if works.returncode != 0:
+        raise SystemExit("work pages failed:\n" + works.stderr)
+    print(works.stdout.strip().splitlines()[-1])
 
     check = subprocess.run([sys.executable, str(Path(__file__).with_name("check_portfolio.py"))],
                            capture_output=True, text=True)

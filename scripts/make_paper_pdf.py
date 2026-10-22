@@ -17,7 +17,7 @@ from pathlib import Path
 
 from weasyprint import HTML
 
-SRC = Path(sys.argv[1] if len(sys.argv) > 1 else "papers/tapstall-2026-order-without-custody.html")
+SRC = Path(sys.argv[1] if len(sys.argv) > 1 else "papers/Garikai-2026-Order-Without-Custody-DCAI-Working-Paper-3.html")
 OUT = SRC.with_suffix(".pdf")
 
 PRINT_CSS = """

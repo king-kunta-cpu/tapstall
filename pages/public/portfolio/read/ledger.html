@@ -596,4 +596,22 @@ hr { border:0; border-top:1px solid var(--rule); margin:38px 0; }
 <li><strong>Never lie in the copy.</strong> Five levers — earned resentment, morning relief, real territorial position, ownership, reciprocity — and four forbidden moves: manufactured scarcity, invented social proof, buyer shame, emotion overruling arithmetic.</li>
 <li><strong>Never address the people whose business it is to address others.</strong> Operators are never posted to. The audience of a generator is a closed set; operators are not in it.</li>
 </ol></section><section class="ch" id="ch-a-short-reading-list"><h2>A short reading list</h2><div class="chrule"></div><p>For the argument: Sarasvathy, <em>Effectuation</em> (2008), on building from means at hand; Baker and Nelson on bricolage in <em>Administrative Science Quarterly</em> (2005). For the craft of reliability: Beyer et al., <em>Site Reliability Engineering</em> (2016), and Oliner and Stearley on what system logs say (DSN, 2007). For the record: Ijiri, <em>Theory of Accounting Measurement</em> (1975), and Grigg's triple-entry accounting proposal (2005). For the boundary object: Star and Griesemer, in <em>Social Studies of Science</em> (1989). For the case method: Yin, <em>Case Study Research and Applications</em> (2018). For the regulatory frame around custody: the EU e-money directive (2009/110/EC) and the EU AI Act's oversight provisions (2024/1689).</p></section><section class="ch" id="ch-colophon"><h2>Colophon</h2><div class="chrule"></div><p>Set in Iowan Old Style (text) and system sans-serif (apparatus), rendered from a single Markdown source into HTML and print-ready PDF. The case system described here was, at the time of writing, deployed and versioned 1.9.1, with 419 passing assertions against a 14,855-line codebase, on free-tier infrastructure, in four markets. No merchant's money was held at any point in its construction.</p>
-<p>Jacaranda Labs Press · Harare · First edition, October 2026 · CC BY 4.0</p></section></div></body></html>
+<p>Jacaranda Labs Press · Harare · First edition, October 2026 · CC BY 4.0</p></section></div>
+<script>
+/* A work page links here with ?dl=<file>. The reading edition is the destination and
+   the download starts beside it, not instead of it. Nothing is dispatched unless a
+   work page asked for it, so a reader who lands here directly gets no surprise file. */
+(function(){
+  var p = new URLSearchParams(location.search).get('dl');
+  if (!p) return;
+  var a = document.createElement('a');
+  a.href = decodeURIComponent(p);
+  a.setAttribute('download', '');
+  a.rel = 'noopener';
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function(){ a.remove(); }, 5000);
+})();
+</script>
+</body></html>

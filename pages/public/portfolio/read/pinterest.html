@@ -30,7 +30,48 @@
   .note{font-size:14px;color:#6f6961;margin-top:18px}
   .back{margin-top:34px;font-size:13.5px}
   .back a{color:#a8332c}
+  .dl-note{border:1px solid #ded8ca;background:#fff;padding:16px 18px;margin:0 0 20px;
+    font:14px/1.55 ui-sans-serif,system-ui,sans-serif;color:#4a453f}
+  .dl-note b{display:block;font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+    color:#a8332c;margin-bottom:6px}
   @media (max-width:620px){.cols{grid-template-columns:1fr}.ed-cover{max-width:220px}}
+  body{padding-bottom:96px}
+  
+/* sharing */
+.share{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:20px 0 0}
+.share .sh-label{font:600 9.5px/1 var(--sans,ui-sans-serif,system-ui,sans-serif);letter-spacing:.2em;text-transform:uppercase;
+  color:var(--muted,#6d6f74);flex:0 0 100%;margin:0 0 2px}
+.share a,.share button{width:32px;height:32px;display:inline-grid;place-items:center;padding:0;
+  border:1px solid var(--rule,#ddd7c8);border-radius:50%;background:transparent;color:inherit;
+  text-decoration:none;cursor:pointer;transition:background .15s,color .15s,border-color .15s}
+.share a:hover,.share button:hover,.share a:focus-visible,.share button:focus-visible{
+  background:currentColor;border-color:currentColor}
+.share a:hover svg,.share button:hover svg{stroke:var(--paper,#faf7f0)}
+.share a:hover svg [fill="currentColor"],.share button:hover svg [fill="currentColor"]{fill:var(--paper,#faf7f0)}
+.share svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.5;
+  stroke-linecap:round;stroke-linejoin:round}
+.share button.done{background:#2f6b4f;border-color:#2f6b4f;color:#fff}
+.band .share a,.band .share button,.dark .share a,.dark .share button{border-color:rgba(242,238,228,.32)}
+.band .share a:hover,.band .share button:hover{color:var(--panel);background:var(--panel-ink)}
+
+/* the floating contact button */
+.fly{position:fixed;right:16px;bottom:16px;z-index:60;display:flex;align-items:flex-end;
+  gap:8px;filter:drop-shadow(0 10px 24px rgba(15,14,12,.28))}
+.fly-main{display:block;line-height:0;border-radius:999px;transition:transform .18s ease}
+.fly-main img{width:clamp(132px,30vw,176px);height:auto;display:block;border-radius:999px}
+.fly-main:hover,.fly-main:focus-visible{transform:translateY(-2px)}
+.fly-call{width:42px;height:42px;display:grid;place-items:center;border-radius:50%;
+  background:var(--ink,#15171a);color:var(--paper,#faf7f0);border:1px solid rgba(250,247,240,.28);
+  text-decoration:none;transition:transform .18s ease}
+.fly-call svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.6;
+  stroke-linecap:round;stroke-linejoin:round}
+.fly-call:hover,.fly-call:focus-visible{transform:translateY(-2px);background:var(--accent,#a8332c)}
+@media (max-width:620px){
+  .fly{right:10px;bottom:10px;gap:6px}
+  .fly-call{width:38px;height:38px}
+}
+@media (prefers-reduced-motion:reduce){.fly-main:hover,.fly-call:hover{transform:none}}
+
 </style></head>
 <body><div class="wrap">
   <div class="kind">Book · First edition</div>
@@ -41,10 +82,44 @@
       <p class="sub">The traffic source nobody told you about</p>
       <p class="blurb">A complete operating manual for one under-used traffic channel: the psychology of the scroll-stop, a pin factory run from Canva on a phone, the search optimisation playbook, a scheduling system that survives real-life disruption, and the money layer that turns attention into a payout.</p>
       <p class="facts">242 pages · All rights reserved</p>
-      <a class="ed-btn" href="https://github.com/king-kunta-cpu/tapstall/releases/download/publications-2026-10/pinterest-goldmine.pdf">PDF</a>
+      <div class="dl-note"><b>Reading edition</b>
+      The file downloads on its own if you arrived here from the work's page. If it did
+      not start, pick a format above — this page stays open so you can choose again.</div>
+      <a class="ed-btn" href="https://github.com/king-kunta-cpu/tapstall/releases/download/publications-2026-10/Garikai-2026-Pinterest-Goldmine.pdf">PDF</a>
       <p class="note">This edition is published as a PDF. Pick a format above and the file
       downloads; this page stays open so you can choose again.</p>
+      <div class="share"><span class="sh-label">Share</span><a href="https://twitter.com/intent/tweet?text=Pinterest%20Goldmine%20%E2%80%94%20Courage%20Garikai&url=https%3A%2F%2Fking-kunta-cpu.github.io%2Ftapstall%2Fportfolio%2Fworks%2Fpinterest.html" target="_blank" rel="noopener" aria-label="Share on X" title="Share on X"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M3.4 3.4l13.2 13.2M16.6 3.4L3.4 16.6"/></svg></a><a href="https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Fking-kunta-cpu.github.io%2Ftapstall%2Fportfolio%2Fworks%2Fpinterest.html" target="_blank" rel="noopener" aria-label="Share on LinkedIn" title="Share on LinkedIn"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><rect x="2.6" y="2.6" width="14.8" height="14.8" rx="2.2"/><path d="M6.4 8.2v5.4M6.4 5.5v.2M9.8 13.6V8.2m0 2.2a2 2 0 014 0v3.2"/></svg></a><a href="https://wa.me/?text=Pinterest%20Goldmine%20%E2%80%94%20Courage%20Garikai%20https%3A%2F%2Fking-kunta-cpu.github.io%2Ftapstall%2Fportfolio%2Fworks%2Fpinterest.html" target="_blank" rel="noopener" aria-label="Share on WhatsApp" title="Share on WhatsApp"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M10 2.9a7 7 0 00-5.9 10.6L3 17.1l3.7-1.1A7 7 0 1010 2.9z"/><path d="M7.3 7.4c.2 2 1.8 3.7 3.8 4.2.6.2 1.2-.2 1.3-.8v-.5l-1.5-.6-.6.7a4.6 4.6 0 01-1.7-1.7l.7-.6-.6-1.5h-.5c-.5 0-.9.3-.9.8z" fill="currentColor" stroke="none"/></svg></a><a href="https://t.me/share/url?url=https%3A%2F%2Fking-kunta-cpu.github.io%2Ftapstall%2Fportfolio%2Fworks%2Fpinterest.html&text=Pinterest%20Goldmine%20%E2%80%94%20Courage%20Garikai" target="_blank" rel="noopener" aria-label="Share on Telegram" title="Share on Telegram"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M17 3.6L2.9 9.2l3.9 1.3 1.4 4.3 2-2.4 3.3 2.4z"/><path d="M6.8 10.5l8-4.9-5.3 6.4"/></svg></a><a href="https://www.facebook.com/sharer/sharer.php?u=https%3A%2F%2Fking-kunta-cpu.github.io%2Ftapstall%2Fportfolio%2Fworks%2Fpinterest.html" target="_blank" rel="noopener" aria-label="Share on Facebook" title="Share on Facebook"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><rect x="2.6" y="2.6" width="14.8" height="14.8" rx="2.2"/><path d="M12.3 17V10.8h2.1l.3-2.4h-2.4V6.9c0-.7.2-1.1 1.2-1.1h1.3V3.7c-.2 0-1-.1-1.9-.1-1.9 0-3.1 1.1-3.1 3.2v1.6H7.6v2.4h2.2V17z"/></svg></a><a href="mailto:?subject=Pinterest%20Goldmine%20%E2%80%94%20Courage%20Garikai&body=https%3A%2F%2Fking-kunta-cpu.github.io%2Ftapstall%2Fportfolio%2Fworks%2Fpinterest.html" target="_blank" rel="noopener" aria-label="Send by email" title="Send by email"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><rect x="2.6" y="4.4" width="14.8" height="11.2" rx="1.6"/><path d="M3.2 5.4L10 10.6l6.8-5.2"/></svg></a><button type="button" data-copy="https://king-kunta-cpu.github.io/tapstall/portfolio/works/pinterest.html" aria-label="Copy the link" title="Copy the link"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M7.6 7.6h9v9h-9z"/><path d="M12.4 7.6V3.4h-9v9h4.2"/></svg></button></div>
     </div>
   </div>
-  <p class="back"><a href="../">Back to the catalogue</a></p>
-</div></body></html>
+  <p class="back"><a href="../works/pinterest.html">Back to the work</a> ·
+  <a href="../">All books and papers</a></p>
+</div>
+
+<div class="fly" aria-label="Contact">
+  <a class="fly-call" href="tel:+263779674212" aria-label="Call Courage Garikai on +263 77 967 4212"
+     title="Call +263 77 967 4212"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M5.2 3.4h2.6l1.2 3-1.6 1.2a8 8 0 004.9 4.9l1.2-1.6 3 1.2v2.6c0 .9-.7 1.6-1.6 1.6A13.4 13.4 0 013.6 5c0-.9.7-1.6 1.6-1.6z"/></svg></a>
+  <a class="fly-main" href="https://wa.me/263784600904" target="_blank" rel="noopener"
+     aria-label="Message Courage Garikai on WhatsApp at +263 78 460 0904, or call +263 77 967 4212">
+    <img src="../contact-me.gif" width="360" height="128" alt="Contact me">
+  </a>
+</div>
+
+<script>
+/* A work page links here with ?dl=<file>. The reading edition is the destination and
+   the download starts beside it, not instead of it. Nothing is dispatched unless a
+   work page asked for it, so a reader who lands here directly gets no surprise file. */
+(function(){
+  var p = new URLSearchParams(location.search).get('dl');
+  if (!p) return;
+  var a = document.createElement('a');
+  a.href = decodeURIComponent(p);
+  a.setAttribute('download', '');
+  a.rel = 'noopener';
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function(){ a.remove(); }, 5000);
+})();
+</script>
+
+</body></html>

@@ -151,6 +151,82 @@ def avatar_frames(size: int = 320) -> list[Image.Image]:
     return frames
 
 
+def contact_cta_frames(w: int = 360, h: int = 128) -> list[Image.Image]:
+    """The floating button: a pill that reads CONTACT ME, with a live dot and a
+    breathing rim. Deliberately a pill rather than a bare circle — the words are
+    the point, and a GIF that has to be explained has failed."""
+    ss = 3
+    W, H = w * ss, h * ss
+    frames = []
+    n = 18
+    sans = None
+    for path in ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                 "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"):
+        if Path(path).exists():
+            sans = path
+            break
+
+    def ttf(size):
+        return ImageFont.truetype(sans, size) if sans else ImageFont.load_default()
+
+    for i in range(n):
+        t = i / n
+        img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        d = ImageDraw.Draw(img)
+        pad = int(10 * ss)
+        r = (H - 2 * pad) // 2
+
+        # breathing rim, drawn first so the pill sits on top of it
+        pulse = 0.5 + 0.5 * math.sin(t * 2 * math.pi)
+        rim = int(pad * (0.55 + 0.45 * pulse))
+        d.rounded_rectangle([pad - rim, pad - rim, W - pad + rim, H - pad + rim],
+                            radius=r + rim, outline=(224, 185, 120, int(90 + 90 * pulse)),
+                            width=int(2.4 * ss))
+
+        d.rounded_rectangle([pad, pad, W - pad, H - pad], radius=r, fill=INK,
+                            outline=(224, 185, 120, 235), width=int(1.6 * ss))
+
+        # the mark, small, at the left
+        bx, by = pad + int(r * 1.05), H // 2
+        br = int(r * 0.42)
+        petals(d, bx, by, br, VIOLET, outline=VIOLET_LIGHT, width=ss,
+               tilt=math.radians(t * 14))
+        d.ellipse([bx - br * 0.34, by - br * 0.34, bx + br * 0.34, by + br * 0.34], fill=GOLD)
+
+        # the words — sized to the space left between the mark and the live dot
+        gx, gy = W - pad - int(r * 0.55), H // 2
+        gr = int(r * 0.17)
+        label = "CONTACT ME"
+        x0 = bx + br + int(15 * ss)
+        avail = (gx - gr * 3) - x0
+        size = int(26 * ss)
+        while size > int(9 * ss):
+            f = ttf(size)
+            spacing = 0.1 * size
+            tw = sum(d.textlength(c, font=f) for c in label) + spacing * (len(label) - 1)
+            if tw <= avail:
+                break
+            size -= ss
+        f = ttf(size)
+        spacing = 0.1 * size
+        tw = sum(d.textlength(c, font=f) for c in label) + spacing * (len(label) - 1)
+        x = x0 + (avail - tw) / 2
+        y = H / 2 - size * 0.36
+        for k, ch in enumerate(label):
+            lift = math.sin((t * 2 * math.pi) - k * 0.45) * (1.2 * ss)
+            d.text((x, y + lift), ch, font=f, fill=CREAM)
+            x += d.textlength(ch, font=f) + spacing
+
+        # a live dot, blinking on the beat — the only green on the site
+        glow = int(60 + 120 * pulse)
+        d.ellipse([gx - gr * 2, gy - gr * 2, gx + gr * 2, gy + gr * 2],
+                  fill=(37, 211, 102, glow))
+        d.ellipse([gx - gr, gy - gr, gx + gr, gy + gr], fill=(37, 211, 102, 255))
+
+        frames.append(img.resize((w, h), Image.LANCZOS).convert("RGB"))
+    return frames
+
+
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     png_dir = OUT / "brand"
@@ -172,7 +248,14 @@ def main() -> None:
                    duration=90, loop=0, disposal=2, optimize=True)
     frames[0].save(OUT / "avatar.png")
 
-    for p in ["favicon.ico", "favicon.svg", "avatar.gif", "avatar.png",
+    # the floating contact button
+    cta = contact_cta_frames()
+    pal = cta[0].quantize(colors=64, method=Image.MEDIANCUT)
+    cta_q = [f.quantize(palette=pal, dither=Image.NONE) for f in cta]
+    cta_q[0].save(OUT / "contact-me.gif", save_all=True, append_images=cta_q[1:],
+                  duration=85, loop=0, optimize=True)
+
+    for p in ["favicon.ico", "favicon.svg", "avatar.gif", "avatar.png", "contact-me.gif",
               "brand/icon-180.png", "brand/icon-512.png", "brand/icon-32.png"]:
         f = OUT / p
         print(f"{p:26s} {f.stat().st_size / 1024:8.1f} KB")

@@ -43,12 +43,12 @@ UPLOADS = Path(os.environ.get("UPLOADS_DIR", str(ROOT.parents[1] / "uploads")))
 
 ASSETS = [
     ("The Musk Mirror_ How One Billionaire Exposed the Cracks in China's Innovation Dream (2).pdf",
-     "the-musk-mirror.pdf"),
+     "Garikai-2026-The-Musk-Mirror.pdf"),
     ("TRAFFIC IS THE NEW OIL_ The African Digital Wealth Formula (1) (1).pdf",
-     "traffic-is-the-new-oil.pdf"),
-    ("PINTEREST GOLDMINE.pdf", "pinterest-goldmine.pdf"),
-    ("The Rocket Man Reckoning.pdf", "the-rocket-man-reckoning.pdf"),
-    ("Unchained Blueprint v1.pdf", "unchained-blueprint-v1.pdf"),
+     "Garikai-2026-Traffic-Is-the-New-Oil.pdf"),
+    ("PINTEREST GOLDMINE.pdf", "Garikai-2026-Pinterest-Goldmine.pdf"),
+    ("The Rocket Man Reckoning.pdf", "Garikai-2026-The-Rocket-Man-Reckoning.pdf"),
+    ("Unchained Blueprint v1.pdf", "Garikai-2026-Unchained-Blueprint-v1.pdf"),
 ]
 
 TOKEN = os.environ.get("GH_TOKEN", "").strip()
@@ -99,8 +99,8 @@ def main():
     if problems:
         raise SystemExit("\n".join(problems))
     for f in ["pages/public/portfolio/index.html", "pages/public/portfolio/catalogue.json",
-              "book/intelligence-data-and-judgement.epub",
-              "papers/tapstall-2026-order-without-custody.pdf"]:
+              "book/Garikai-2026-Intelligence-Data-and-Judgement.epub",
+              "papers/Garikai-2026-Order-Without-Custody-DCAI-Working-Paper-3.pdf"]:
         if not (ROOT / f).exists():
             raise SystemExit(f"not built: {f} — run the generators first")
 
@@ -177,7 +177,7 @@ def main():
     except Exception as e:  # noqa: BLE001 — first deploy can lag a few minutes
         print(f"  site not serving yet ({type(e).__name__}): {site_url} — Pages builds take a minute or two")
 
-    for path in ["book/intelligence-data-and-judgement.pdf", "pages/public/portfolio/index.html"]:
+    for path in ["book/Garikai-2026-Intelligence-Data-and-Judgement.pdf", "pages/public/portfolio/index.html"]:
         url = f"https://raw.githubusercontent.com/{OWNER}/{REPO}/main/{path}"
         with urllib.request.urlopen(urllib.request.Request(url, method="HEAD"), timeout=90) as r:
             print(f"  {r.status}  {path}")
