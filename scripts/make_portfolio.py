@@ -483,6 +483,8 @@ CONTACT = [
     ("Calls", "+263 77 967 4212", "tel:+263779674212"),
     ("WhatsApp", "+263 78 460 0904", "https://wa.me/263784600904"),
     ("Telegram", "+263 78 460 0904", "https://t.me/+263784600904"),
+    ("Company", "Jacaranda Labs — owner of the products on this page", None),
+    ("Research funding", "Jacaranda Labs Think Tank", None),
     ("Press & permissions", "Jacaranda Labs, Harare", None),
 ]
 
@@ -706,6 +708,35 @@ nav.mast-nav a{text-decoration:none;color:var(--muted)}
 nav.mast-nav a:hover{color:var(--accent)}
 nav.mast-nav a.nav-consult{color:var(--ink);font-weight:700}
 
+
+
+/* avatar lockup — the mark where a photograph would be */
+.lockup{display:flex;align-items:center;gap:20px;margin-bottom:26px}
+.avatar{width:104px;height:104px;border-radius:50%;display:block;flex:none;
+  box-shadow:0 12px 30px -14px rgba(0,0,0,.8),0 0 0 1px #2a2c30}
+.lockup-text .eyebrow{margin:0 0 8px}
+.lockup-name{font:400 17px/1 var(--serif);letter-spacing:.02em;color:#f7f4ec}
+@media (max-width:620px){
+  .avatar{width:76px;height:76px}
+  .lockup{gap:14px;margin-bottom:20px}
+  .lockup-name{font-size:15px}
+}
+
+/* ownership, stated once and plainly */
+.owner{border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);
+  padding:34px 0;margin:0 0 6px;display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);
+  gap:40px;align-items:start}
+.owner h2{font:400 26px/1.2 var(--serif);margin:0 0 10px;letter-spacing:-.012em}
+.owner p{margin:0;color:#41464b;font-size:14.8px;line-height:1.62}
+.owner .brands{display:grid;grid-template-columns:1fr 1fr;gap:10px 26px;list-style:none;
+  margin:16px 0 0;padding:0}
+.owner .brands li{font-size:14px;color:#3a3f44;padding:7px 0;border-bottom:1px solid var(--rule)}
+.owner .brands li b{font-weight:600;color:var(--ink)}
+.owner .think{grid-column:1/-1;border-left:2px solid var(--accent);padding:2px 0 2px 16px;
+  margin-top:6px}
+.owner .think b{color:var(--ink)}
+@media (max-width:820px){.owner{grid-template-columns:1fr;gap:22px}}
+@media (max-width:520px){.owner .brands{grid-template-columns:1fr}}
 
 /* ---- consulting opening: the first thing a visitor reads ---------------- */
 .hero-consult{background:var(--ink);color:#f2eee4;padding:74px 0 66px;
@@ -1074,6 +1105,11 @@ def build():
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="favicon.ico" sizes="16x16 32x32 48x48 64x64">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="apple-touch-icon" href="brand/icon-180.png">
+<meta name="theme-color" content="#15171a">
+<meta property="og:image" content="brand/icon-512.png">
 <title>{esc(AUTHOR)} — AI infrastructure, autonomous systems, books and research</title>
 <meta name="description" content="{esc(AUTHOR)} writes and builds merchant rails and autonomous AI operations for low-infrastructure markets. Books, research papers and field reports, in PDF, EPUB, HTML and Markdown.">
 <meta name="author" content="{esc(AUTHOR)}">
@@ -1086,6 +1122,7 @@ def build():
     <div class="brand">{esc(AUTHOR)} <span>·</span> Harare</div>
     <nav class="mast-nav">
       <a href="#consult" class="nav-consult">Consulting</a>
+      <a href="#company">Company</a>
       <a href="#books">Books</a>
       <a href="#research">Research</a>
       <a href="#work">Built</a>
@@ -1098,7 +1135,14 @@ def build():
 <main>
   <section class="hero hero-consult" id="consult">
     <div class="wrap">
-      <div class="eyebrow"><span>Consulting · Harare · southern Africa and remote</span></div>
+      <div class="lockup">
+        <img class="avatar" src="avatar.gif" alt="Courage Garikai" width="104" height="104"
+             loading="eager" decoding="async">
+        <div class="lockup-text">
+          <div class="eyebrow"><span>Consulting · Harare · southern Africa and remote</span></div>
+          <div class="lockup-name">Courage Garikai</div>
+        </div>
+      </div>
       <h1>You do not need another deck. You need someone who has already
       watched this fail — <em>and knows which part is structural.</em></h1>
       <p class="lede">Fifteen years of techno-preneurship: merchant rails, agent systems, learning
@@ -1169,6 +1213,29 @@ def build():
     </div>
   </section>
 
+    <div class="wrap">
+    <section class="owner" id="company">
+      <div>
+        <h2>The company behind the pieces</h2>
+        <p><b>Jacaranda Labs</b> is mine. It is the company that owns the products on this page —
+        not a label on a résumé, the entity that carries them.</p>
+      </div>
+      <div>
+        <ul class="brands">
+          <li><b>Tapstall</b> — merchant commerce rail</li>
+          <li><b>STPi</b> — applied hiring agents</li>
+          <li><b>DeskOS</b> — operator command centre</li>
+          <li><b>ContentOps</b> — content operations</li>
+          <li><b>Open Practice</b> — AI learning platform</li>
+          <li><b>Bluesky Audit</b> — growth audit</li>
+        </ul>
+        <p class="think"><b>Jacaranda Labs Think Tank</b> is the research arm, and the reason the
+        writing exists: it funds the research, the books and the papers. Editions are published
+        under Jacaranda Labs Press, and every working paper here states what it has and has not
+        proved — because a funder who wants the truth is worth naming accurately.</p>
+      </div>
+    </section>
+
     <section class="thesis">
       <p><b>Demand was never the problem. Infrastructure was.</b> Thirteen published works on
       trade, technology and constraint — seven books, four working papers and two short volumes —
@@ -1224,7 +1291,8 @@ def build():
       <p class="sec-intro">A portfolio of writing is an argument; a portfolio of running
       systems is evidence. Five of these open to a browser today, one more answers only with
       credentials, and one is a closed console that says so rather than pretending. Every link
-      goes to the working product — nothing here is a mock-up or a screenshot.</p>
+      goes to the working product — nothing here is a mock-up or a screenshot. All seven are
+      Jacaranda Labs products.</p>
       <div class="builds">{builds}</div>
     </div>
   </section>
@@ -1283,6 +1351,8 @@ def build():
             MSc Applied Entrepreneurship (Innovation &amp; Technology), Chinhoyi University of
             Technology</li>
             <li><b>Practice</b> — 15 years of techno-preneurship, including the failures</li>
+            <li><b>Company</b> — Jacaranda Labs, which owns the products on this page;
+            Jacaranda Labs Think Tank funds the research and publishing</li>
             <li><b>Books</b> — seven long-form titles</li>
             <li><b>Research</b> — four working papers, DCAI series</li>
             <li><b>Essays &amp; reports</b> — two shorter volumes</li>
@@ -1389,6 +1459,10 @@ def read_view(w):
     target.write_text(f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="../favicon.ico" sizes="16x16 32x32 48x48 64x64">
+<link rel="icon" type="image/svg+xml" href="../favicon.svg">
+<link rel="apple-touch-icon" href="../brand/icon-180.png">
+<meta name="theme-color" content="#15171a">
 <title>{esc(w['title'])} — {esc(AUTHOR)}</title>
 <style>
   body{{margin:0;background:#f7f4ec;color:#191714;
