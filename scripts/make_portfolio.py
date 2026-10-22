@@ -640,14 +640,11 @@ def facts(w):
 
 
 def primary_link(w, inner, cls=""):
-    """Title and cover behave like a format button: the file downloads, and the
-    reader opens in a window of its own so the catalogue is still where they left it."""
-    if not w["formats"]:
-        return inner
-    url = next(iter(w["formats"].values()))
-    read = f' data-read="{esc(w["read"])}"' if w.get("read") else ""
+    """Title and cover open the work's own page: jacket, argument, contents, every
+    format, and the one button that reads and downloads in the same click. Nothing
+    downloads by accident from the catalogue any more — the work page asks first."""
     c = f' class="{cls}"' if cls else ""
-    return f'<a{c} href="{esc(url)}"{read}>{inner}</a>'
+    return f'<a{c} href="works/{esc(w["id"])}.html">{inner}</a>'
 
 
 def featured_card(w):
