@@ -61,7 +61,7 @@ import {
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '2.0.0';
+const VERSION = '2.1.0';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
@@ -2097,6 +2097,12 @@ async function runCron(env) {
   catch (e) { out.dispatch = { error: String(e && e.message || e).slice(0, 160) }; }
   try { out.press = await pressTick(env); }        // also on the 20-minute tick; press:last dedupes a minute
   catch (e) { out.press = { error: String(e && e.message || e).slice(0, 160) }; }
+  if (nightly) {
+    // v2.1.0: the tick drains only when the queued-mail flag is set; once a day the queue is listed
+    // regardless, so a flag lost to a race delays mail by hours, never loses it.
+    try { out.mailq = await mailDrain(env, 3, { full: true }); } catch (e) { out.mailq = { error: String(e && e.message || e).slice(0, 120) }; }
+    try { out.lead_meta = await leadMetaBackfill(env, 60); } catch (e) { out.lead_meta = { error: String(e && e.message || e).slice(0, 120) }; }
+  }
   const watch = [];                                  // shops that asked for the chain reader
   const summary = { total: 0, live: 0, suspended: 0, expiring: [] };
   out.read_docs = 0; out.legacy_docs = 0; out.backfilled = 0;
@@ -5574,6 +5580,44 @@ async function sellerView(url, env) {
 }
 
 /* ---- leads ---- */
+/** What the outreach pick needs, carried on the key so a list answers it without a read per lead.
+ *  KV allows 1,024 bytes of metadata; this is ~120. A key written before v2.1.0 has none, and the
+ *  pick falls back to reading documents until the nightly sweep has re-filed it. */
+function leadMeta(l) {
+  return { s: String(l.status || ''), e: l.email ? 1 : 0, k: l.seller_code ? 1 : 0, t: Number(l.touches) || 0,
+    p: Number(l.score) || 0, f: String(l.next_follow_at || '').slice(0, 30), ls: String(l.last_sender || '').toLowerCase().slice(0, 80) };
+}
+/** One list, no reads: { rows (id + the metadata fields, listLeads order), legacy: keys without metadata }. */
+async function leadIndex(env) {
+  const rows = [], legacy = [];
+  let cursor, loops = 0;
+  do {
+    const l = await env.ORDERS.list({ prefix: 'lead:', limit: 1000, cursor }); quotaNote('lists', 'automation');
+    for (const k of (l.keys || [])) {
+      const m = k.metadata;
+      if (!m || typeof m.s !== 'string') { legacy.push(k.name); continue; }
+      rows.push({ id: String(k.name).slice(5), status: m.s, email: m.e ? 1 : '', seller_code: m.k ? 'x' : '', touches: m.t || 0,
+        score: m.p || 0, next_follow_at: m.f || '', last_sender: m.ls || '' });
+    }
+    cursor = l.list_complete ? null : l.cursor;
+  } while (cursor && loops++ < 3);
+  rows.sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0)
+    || String(a.next_follow_at || '9999').localeCompare(String(b.next_follow_at || '9999')));
+  return { rows, legacy };
+}
+/** Nightly: give pre-v2.1.0 lead keys their metadata (a read + a write each, once, capped). */
+async function leadMetaBackfill(env, cap) {
+  if (!env.ORDERS) return 0;
+  const { legacy } = await leadIndex(env);
+  let n = 0;
+  for (const k of legacy.slice(0, cap || 60)) {
+    const l = await env.ORDERS.get(k, 'json').catch(() => null);
+    if (!l || !l.id) continue;
+    await env.ORDERS.put(k, JSON.stringify(l), { metadata: leadMeta(l) }); quotaNote('writes', 'automation'); n++;
+  }
+  if (n) memDel('leads:all');
+  return n;
+}
 async function listLeads(env, filter) {
   const f = filter || {};
   if (!env.ORDERS) return [];
@@ -5626,13 +5670,13 @@ async function ingestLeads(env, rawList) {
       if (existing.status === 'research_hold' && merged.length >= 2 && !leadJunkReason(existing) && (existing.email || existing.phone)) existing.status = 'queued';
       if (!existing.source_url && lead.source_url) existing.source_url = lead.source_url;
       if (JSON.stringify([existing.signals, existing.status, existing.score]) !== before) {
-        await env.ORDERS.put('lead:' + lead.id, JSON.stringify(existing)); quotaNote('writes', 'automation'); memDel('leads:all'); counts.updated++;
+        await env.ORDERS.put('lead:' + lead.id, JSON.stringify(existing), { metadata: leadMeta(existing) }); quotaNote('writes', 'automation'); memDel('leads:all'); counts.updated++;
       } else counts.duplicate++;
       continue;
     }
     lead.seller_code = (lead.seller_code && activeCodes.includes(lead.seller_code))
       ? lead.seller_code : allocateSeller(lead.dedupe, activeCodes);
-    await env.ORDERS.put('lead:' + lead.id, JSON.stringify(lead)); quotaNote('writes', 'automation'); memDel('leads:all'); memDelPrefix('listkeys:');
+    await env.ORDERS.put('lead:' + lead.id, JSON.stringify(lead), { metadata: leadMeta(lead) }); quotaNote('writes', 'automation'); memDel('leads:all'); memDelPrefix('listkeys:');
     counts.added++; if (lead.status === 'research_hold') counts.research_hold++;
     if (added.length < 100) added.push(lead.id);
   }
@@ -5676,7 +5720,7 @@ async function leadsAct(req, env) {
   if (!t.ok) return json({ ok: false, conflict: !!t.conflict, error: t.error, ...(t.actions ? { actions: t.actions } : {}) }, t.conflict ? 409 : 422);
   if (b.note) t.lead.note = String(b.note).slice(0, 300);
   if (b.sender && isEmail(String(b.sender))) t.lead.last_sender = String(b.sender).toLowerCase().slice(0, 80);
-  await env.ORDERS.put('lead:' + id, JSON.stringify(t.lead)); quotaNote('writes', 'automation'); memDel('leads:all');
+  await env.ORDERS.put('lead:' + id, JSON.stringify(t.lead), { metadata: leadMeta(t.lead) }); quotaNote('writes', 'automation'); memDel('leads:all');
   if (b.action === 'dnc') {
     try {
       if (t.lead.email) await env.STORES.put('Lead:' + t.lead.email, JSON.stringify({ at: new Date().toISOString(), by: doc.code }));
@@ -5719,7 +5763,18 @@ async function discoveryPass(env, opts = {}) {
   // Every market the rail is sold in — a registry of directories is only worth what it is asked,
   // and ZW+ZA alone left Kenya and Nigeria wired but never queried.
   const countries = (opts.countries && opts.countries.length) ? opts.countries : ['ZW', 'ZA', 'KE', 'NG'];
+  // The free plan allows 50 fetches per invocation and a morning when every source answers nothing
+  // spent 51 (each mirror tried, each reserve job asked). The pass now carries its own budget with
+  // headroom, and stops asking when it is spent instead of collecting "Too many subrequests".
+  const fetchCap = Math.max(5, Math.min(48, Number(env.DISC_FETCH_CAP) || 42));
+  let fetched = 0;
+  const budgetFetch = async (u, init) => {
+    if (fetched >= fetchCap) { const e = new Error('discovery fetch budget spent (' + fetchCap + ')'); e.budget = true; throw e; }
+    fetched++;
+    return fetch(u, init);
+  };
   const run = await runDiscovery({
+    fetch: budgetFetch, spent: () => fetched >= fetchCap,
     nowMs: Date.now(), countries,
     // a paid/keyed provider if the Worker holds one; otherwise the search leg stays Bing RSS
     search: searchProvider(env),
@@ -5855,6 +5910,13 @@ async function pressTick(env) {
       sent: r.sent || 0, waiting: r.waiting || 0, duplicates: r.duplicates || 0, expired_slots: r.expired_slots || 0,
       token_present: !!r.token_present, error: r.error || '',
       ...(r.skipped ? { skipped: true, why: r.why || '' } : {}), ...(r.rails ? { rails: r.rails } : {}) })) };
+  // The slot is claimed so a retried tick cannot double-send a window. A tick that composed nothing
+  // and sent nothing has no window to protect, and rewriting an identical summary 72 times a day was
+  // the single largest line on the KV write budget. So an idle tick writes only when its picture
+  // differs from the last one, or once a day as a heartbeat the console can date.
+  const shape = (x) => JSON.stringify({ ...x, slot: '', at: '' });
+  const quiet = !sum.composed && !sum.sent && last && String(last.at || '').slice(0, 10) === sum.at.slice(0, 10) && shape(last) === shape(sum);
+  if (quiet) return { ...sum, unchanged: true };
   try { await env.ORDERS.put('press:last', JSON.stringify(sum)); } catch (e) { void e; }
   return sum;
 }
@@ -5862,6 +5924,12 @@ async function dispatchTick(env) {
   const day = new Date().getUTCDay();
   if (day === 0 || day === 6) return { skipped: 'weekend' };
   if (!env.ORDERS) return { ran: 0 };
+  // The 00:15 sweep is the first of a new UTC day, so it used to fire the Gmail runner at 02:15 in
+  // Harare: cold mail arriving in the night. The day's dispatch now belongs to 06:15 (08:15 local),
+  // with 12:15 and 18:15 as the retries.
+  const fh = env.DISPATCH_FROM_HOUR;
+  const fromHour = fh !== undefined && fh !== '' && Number.isFinite(Number(fh)) ? Number(fh) : 6;
+  if (new Date().getUTCHours() < fromHour) return { skipped: 'before ' + fromHour + ':00 UTC: mail goes out in business hours' };
   const stamp = new Date().toISOString().slice(0, 10);
   const last0 = await env.ORDERS.get('dispatch:last', 'json').catch(() => null);
   const last = (last0 && last0.day === stamp) ? last0 : null;
@@ -5928,7 +5996,7 @@ function outreachCompose(lead, origin, fromName, unsub, postal) {
   return { subject: subjects[touch], text: bodies[touch] + foot };
 }
 async function leadPut(env, lead) {
-  await env.ORDERS.put('lead:' + lead.id, JSON.stringify(lead)); quotaNote('writes', 'automation'); memDel('leads:all');
+  await env.ORDERS.put('lead:' + lead.id, JSON.stringify(lead), { metadata: leadMeta(lead) }); quotaNote('writes', 'automation'); memDel('leads:all');
 }
 async function leadDnc(env, lead, why, by) {
   const t = leadTransition(lead, 'dnc', 'owner', { now: Date.now() });
@@ -5950,10 +6018,16 @@ async function outreachTick(env, nowMs) {
   if (String(env.OUTREACH_WINDOW || '') !== 'always' && (wd === 0 || wd === 6 || h < 7 || h > 16)) return { skipped: 'outside the send window' };
   const lanes = mailLanes(env).filter((l) => l.outreach);
   if (!lanes.length) return { skipped: 'no outreach lane' };
+  // The lane allows one outreach message an hour, so the hour is decided on its first tick; the :25 and
+  // :45 ticks would only re-list the same leads to find the same answer (31 lists a weekday became 10).
+  if (String(env.OUTREACH_WINDOW || '') !== 'always' && d.getUTCMinutes() >= 20) return { skipped: 'outreach is decided on the first tick of the hour' };
   if (!await mailRoom(env, 'outreach')) return { skipped: 'lane has no outreach room this hour' };   // before the lead list: a full hour costs no reads
   const boxes = new Set(lanes.map((l) => l.user.toLowerCase()));
   const nowIso = d.toISOString();
-  const rows = await listLeads(env, { limit: 2000 });
+  // One list with metadata picks the candidates; only the (at most four) checked leads are read.
+  // Keys from before v2.1.0 carry no metadata, and while any exist the old full read is the honest path.
+  const idx = await leadIndex(env);
+  const rows = idx.legacy.length ? await listLeads(env, { limit: 2000 }) : idx.rows;
   const follow = rows.filter((l) => l.status === 'contacted' && !l.seller_code && l.email && (Number(l.touches) || 0) < OUT_MAX_TOUCHES
     && l.next_follow_at && l.next_follow_at <= nowIso && boxes.has(String(l.last_sender || '').toLowerCase()));
   const first = rows.filter((l) => l.status === 'queued' && !l.seller_code && l.email);
@@ -5961,7 +6035,8 @@ async function outreachTick(env, nowMs) {
   let checks = 0;
   for (const lead0 of [...follow, ...first]) {
     if (checks++ >= 4) break;                         // each check may cost a DNS fetch + a write
-    const lead = (await env.ORDERS.get('lead:' + lead0.id, 'json').catch(() => null)) || lead0;   // fresh: the runner may have moved it
+    const lead = await env.ORDERS.get('lead:' + lead0.id, 'json').catch(() => null);   // fresh: the runner may have moved it
+    if (!lead || !lead.id) continue;                  // gone, or an index row without its document
     if (!['queued', 'contacted'].includes(lead.status)) continue;
     const junk = leadJunkReason(lead);
     const email = leadEmailFor(lead.email, lead.source_url, lead.website);

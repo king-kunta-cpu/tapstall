@@ -1,5 +1,34 @@
 # Tapstall — status
 
+## v2.1.0 (2026-10-28): the same pipeline on a fraction of the quota
+
+Measured, not estimated: a day of the 76 cron invocations replayed against a snapshot of live KV
+(fresh isolate per invocation, every KV op and fetch counted), before and after.
+
+| per weekday (Workers Free) | v2.0.0 | v2.1.0 steady | limit |
+|---|---|---|---|
+| KV reads | 1,826 | ~315 | 100,000 |
+| KV writes | 82 | ~5 | 1,000 |
+| KV lists | 110 | ~21 | 1,000 |
+| max fetches in one invocation | 48–51 | 42 | 50 |
+
+At 300 sendable leads (the lane sending its 10 a day): v2.0.0 4,124 reads / 99 writes / 90 lists,
+v2.1.0 644 / 25 / 21. Cost no longer grows with the size of the lead list.
+
+- **press:last** is written only when the press did something or the picture changed (plus a daily
+  heartbeat). It was 75 identical writes a day.
+- **Mail queue**: the tick reads a `mailflag:queued` flag set on enqueue instead of listing `mailq:`
+  every 20 minutes; the 00:15 sweep lists once a day regardless, so a lost flag delays, never loses.
+- **Leads carry list metadata** (status, has-email, seller, touches, score, follow date, sender), so
+  the outreach pick is one list and at most four reads, not a read of every lead. Pre-2.1.0 keys are
+  re-filed by the nightly sweep (one time, ~51 writes) and read the old way until then.
+- **Outreach is decided on the first tick of the hour**: the lane allows one outreach message an hour,
+  so the :25/:45 ticks only repeated the same list.
+- **Dispatch waits for 06:15 UTC** (08:15 Harare). The 00:15 sweep was the first of each new day, so
+  the Gmail runner was mailing at 02:15 local. `DISPATCH_FROM_HOUR` overrides.
+- **Discovery has a fetch budget** (42, `DISC_FETCH_CAP`): a morning when every source answered
+  nothing spent 51 fetches and ended in "Too many subrequests".
+
 ## v2.0.0 (2026-10-28): a pipeline that can be worked for real
 
 An audit of the live pipeline found it was

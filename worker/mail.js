@@ -266,17 +266,33 @@ export async function mailDeliver(env, msg, opts) {
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     await env.ORDERS.put('mailq:' + id, JSON.stringify({ to: msg.to, subject: msg.subject, text: msg.text, replyTo: msg.replyTo || '',
       tries: 1, first: new Date().toISOString(), why: r.why }), { expirationTtl: 3 * 86400 });
+    // The flag the 20-minute tick reads instead of listing: a read is 1/100,000 of the day, a list 1/1,000.
+    try { await env.ORDERS.put(MAILQ_FLAG, String(Date.now()), { expirationTtl: 3 * 86400 }); } catch (e) { void e; }
     return { ...r, queued: true };
   } catch (e) { return r; }
 }
 
 /** The tick: retry parked transactional mail, oldest first, while a lane has room. */
-export async function mailDrain(env, max) {
+const MAILQ_FLAG = 'mailflag:queued';   // outside the mailq: prefix, so it is never mistaken for a message
+
+/** opts.full: list even without the flag (the nightly sweep does, so a flag lost to a race costs hours, not mail). */
+export async function mailDrain(env, max, opts) {
   const out = { sent: 0, failed: 0, dropped: 0, left: 0 };
   if (!mailArmed(env) || !env.ORDERS) return out;
+  const full = !!(opts && opts.full);
+  let flag = null;
+  if (!full) {
+    try { flag = await env.ORDERS.get(MAILQ_FLAG); } catch (e) { return out; }
+    if (!flag) { out.idle = true; return out; }
+  }
   let keys = [];
   try { keys = ((await env.ORDERS.list({ prefix: 'mailq:', limit: 50 })).keys || []).map((k) => k.name).sort(); } catch (e) { return out; }
   out.left = keys.length;
+  const clearFlag = async () => {
+    // Only the flag this pass saw: an enqueue that landed meanwhile re-set it with a newer stamp.
+    try { const now = await env.ORDERS.get(MAILQ_FLAG); if (now && (full || now === flag)) await env.ORDERS.delete(MAILQ_FLAG); } catch (e) { void e; }
+  };
+  if (!keys.length) { await clearFlag(); return out; }
   for (const k of keys.slice(0, max || 4)) {
     const m = await env.ORDERS.get(k, 'json').catch(() => null);
     if (!m) { continue; }
@@ -287,6 +303,8 @@ export async function mailDrain(env, max) {
     out.failed++;
     try { await env.ORDERS.put(k, JSON.stringify({ ...m, tries: (m.tries || 0) + 1, why: r.why }), { expirationTtl: 3 * 86400 }); } catch (e) { void e; }
   }
+  if (out.left <= 0) await clearFlag();
+  else if (full) { try { await env.ORDERS.put(MAILQ_FLAG, String(Date.now()), { expirationTtl: 3 * 86400 }); } catch (e) { void e; } }
   return out;
 }
 

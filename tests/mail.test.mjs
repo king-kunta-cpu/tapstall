@@ -65,6 +65,25 @@ test('lanes: nothing armed is a quiet no-op; transactional keeps a slot outreach
   assert.equal((await M.mailSend(env, { to: 'not-an-address', subject: 's', text: 't' }, { now })).permanent, true);
 });
 
+test('drain: an empty queue costs one read and no list; a queued message sets the flag the tick reads', async () => {
+  const env = { STORES: kv(), ORDERS: kv(), MAILBOXES: JSON.stringify([{ id: 'xx7', hourly: 5 }]), MAILBOX_XX7_USER: 'x@inbox.lv', MAILBOX_XX7_PASS: 'p',
+    MAIL_TEST_OPEN: async () => { throw new Error('greeting 421: busy'); } };
+  let lists = 0; const list0 = env.ORDERS.list; env.ORDERS.list = async (a) => { lists++; return list0(a); };
+  const idle = await M.mailDrain(env, 3);
+  assert.equal(idle.idle, true); assert.equal(lists, 0, 'no flag, no list');
+  assert.equal((await M.mailDeliver(env, { to: 'a@b.co', subject: 's', text: 't' })).queued, true);
+  assert.ok(env.ORDERS._m.get('mailflag:queued'), 'enqueue sets the flag');
+  await M.mailDrain(env, 3); assert.equal(lists, 1, 'the flag earns a list');
+  assert.ok(env.ORDERS._m.get('mailflag:queued'), 'mail still parked, flag stays');
+  env.MAIL_TEST_OPEN = async () => ({ async send() { return 'ok'; }, async quit() {} });
+  await env.STORES.delete('mail:lane:xx7');
+  const d = await M.mailDrain(env, 3);
+  assert.equal(d.sent, 1); assert.equal(env.ORDERS._m.get('mailflag:queued'), undefined, 'an emptied queue clears the flag');
+  env.ORDERS._m.set('mailq:zz', JSON.stringify({ to: 'c@d.co', subject: 's', text: 't', tries: 1 }));   // a message whose flag was lost
+  assert.equal((await M.mailDrain(env, 3)).idle, true);
+  assert.equal((await M.mailDrain(env, 3, { full: true })).sent, 1, 'the nightly full drain finds it anyway');
+});
+
 test('lanes: a busy hour parks transactional mail, the drain sends it later; a 535 parks the lane', async () => {
   let fail = 'busy';
   const env = { STORES: kv(), ORDERS: kv(), MAILBOXES: JSON.stringify([{ id: 'yy8', hourly: 5 }]), MAILBOX_YY8_USER: 'x@inbox.lv', MAILBOX_YY8_PASS: 'p',

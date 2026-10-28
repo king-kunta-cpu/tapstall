@@ -849,6 +849,7 @@ export async function runDiscovery(opts = {}) {
   for (const job of queue) {
     if (out.candidates.length >= limit) break;
     if (asked >= maxAttempts) break;
+    if (typeof opts.spent === 'function' && opts.spent()) { out.budget_spent = true; break; }
     asked++;
     const jobWithDay = { ...job, day: plan.day };
     let items = [];

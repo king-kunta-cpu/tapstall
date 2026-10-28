@@ -4877,7 +4877,7 @@ test('v2.0.0 dispatch: a failed workflow is retried on the next sweep, a dispatc
     }
     return saved(u, init);
   };
-  env.GH_DISPATCH_TOKEN = 't'; env.GH_REPO = 'o/r';
+  env.GH_DISPATCH_TOKEN = 't'; env.GH_REPO = 'o/r'; env.DISPATCH_FROM_HOUR = '0';
   const realDay = Date.prototype.getUTCDay;
   Date.prototype.getUTCDay = function () { return 3; };
   try {
@@ -4894,10 +4894,45 @@ test('v2.0.0 dispatch: a failed workflow is retried on the next sweep, a dispatc
     const second = await env.ORDERS.get('dispatch:last', 'json');
     assert.equal(second.outreach, 'dispatched');
   } finally {
-    globalThis.fetch = saved; delete env.GH_DISPATCH_TOKEN; delete env.GH_REPO; Date.prototype.getUTCDay = realDay;
+    globalThis.fetch = saved; delete env.GH_DISPATCH_TOKEN; delete env.GH_REPO; delete env.DISPATCH_FROM_HOUR; Date.prototype.getUTCDay = realDay;
     await env.ORDERS.delete('dispatch:last');
   }
 });
+
+test('v2.1.0 dispatch: before the business-hours mark the sweep fires nothing and writes nothing', async () => {
+  // DISPATCH_FROM_HOUR defaults to 6 (08:00 in Harare); 24 puts every real hour "before" it, so the
+  // gate is exercised without faking midnight (which would run the whole nightly sweep here).
+  const saved = globalThis.fetch; const fired = [];
+  globalThis.fetch = async (u, init) => { if (String(u).includes('api.github.com')) { fired.push(u); return new Response(null, { status: 204 }); } return saved(u, init); };
+  env.GH_DISPATCH_TOKEN = 't'; env.GH_REPO = 'o/r'; env.DISPATCH_FROM_HOUR = '24';
+  const realDay = Date.prototype.getUTCDay;
+  Date.prototype.getUTCDay = function () { return 3; };
+  try {
+    await env.ORDERS.delete('dispatch:last');
+    const w = await load();
+    const jobs = []; await w.scheduled({ cron: '15 6,12,18,0 * * *', scheduledTime: Date.now() }, env, { waitUntil: (p) => jobs.push(p) });
+    const out = await jobs[0];
+    assert.match(String(out.dispatch.skipped || ''), /business hours/, JSON.stringify(out.dispatch));
+    assert.equal(fired.length, 0);
+    assert.equal(await env.ORDERS.get('dispatch:last'), null, 'a skipped hour costs no write');
+  } finally {
+    globalThis.fetch = saved; delete env.GH_DISPATCH_TOKEN; delete env.GH_REPO; delete env.DISPATCH_FROM_HOUR;
+    Date.prototype.getUTCDay = realDay;
+  }
+});
+
+test('v2.1.0 quota: lead keys carry list metadata, and an idle press tick does not rewrite press:last', async () => {
+  const ing = await call('/api/leads/ingest', { method: 'POST', confirm: true, headers: { 'x-tapstall-admin': SECRET }, body: { leads: [
+    { business: 'Mbare Meta Bakery', email: 'hello@mbaremeta.co.zw', phone: '263771230001', source_url: 'https://mbaremeta.co.zw/', note: 'WhatsApp orders', country: 'ZW', segment: 'social_merchants' },
+  ] } });
+  assert.equal(ing.status, 200, ing.text);
+  const keys = (await env.ORDERS.list({ prefix: 'lead:' })).keys;
+  const row = keys.find((k) => k.metadata && JSON.parse(env.ORDERS._map.get(k.name).value).business === 'Mbare Meta Bakery');
+  assert.ok(row, 'the filed lead has metadata');
+  assert.equal(row.metadata.e, 1); assert.equal(typeof row.metadata.s, 'string');
+  assert.ok(JSON.stringify(row.metadata).length < 1024, 'inside the KV metadata limit');
+});
+
 
 /* ------------------------------------------------------------------ the selling rail
  * v1.7.0. The unit tests prove the arithmetic; these prove the Worker can serve it: a
