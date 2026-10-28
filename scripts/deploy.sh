@@ -80,7 +80,7 @@ python3 scripts/ui_kit.py check || die "pages/*.html are out of date with pages/
 #                             happening tonight. `--pages-clear <name>` takes it away again.
 #   PAGES_KV=1                also write the legacy `tpl:<name>` copies, so a rollback to a
 #                             pre-0.9.1 Worker still finds the current pages, not a stale month.
-TPL_NAMES="store onboard admin fees index partners confirm renew ops"
+TPL_NAMES="store onboard admin fees index partners confirm renew ops leads"
 for f in pages/guide-*.html; do          # the script has already cd'd to the repo root
   [[ -e "$f" ]] && TPL_NAMES="$TPL_NAMES $(basename "$f" .html)"
 done
@@ -135,7 +135,7 @@ fi
 # 00:15 on a host nobody is looking at still names a URL that exists.
 BASE="https://$WORKER_NAME.$(workers_subdomain | tail -1).workers.dev"
 NAME="$WORKER_NAME" STORES_ID="$STORES_ID" ORDERS_ID="$ORDERS_ID" \
-  PUBLIC_ORIGIN="$BASE" \
+  PUBLIC_ORIGIN="$BASE" MAILBOXES="${MAILBOXES:-}" \
   python3 scripts/gen_wrangler_toml.py
 
 say "publishing worker to Cloudflare"
@@ -216,6 +216,12 @@ put_secret ADMIN_SECRET "$ADMIN_SECRET"
 [[ -n "${WHOP_CHECKOUT_URL_MONTHLY:-}" ]] && put_secret WHOP_CHECKOUT_URL_MONTHLY "$WHOP_CHECKOUT_URL_MONTHLY" || true
 [[ -n "${WHOP_PLANS_JSON:-}" ]] && put_secret WHOP_PLANS_JSON "$WHOP_PLANS_JSON" || true
 [[ -n "${PLATFORM_PAY_DETAILS:-}" ]] && put_secret PLATFORM_PAY_DETAILS "$PLATFORM_PAY_DETAILS" || true
+# v2.0.0 mail lane (docs/MAIL.md): every lane in MAILBOXES reads MAILBOX_<ID>_USER/_PASS. Unset in
+# CI never wipes a value set on the Worker by hand; POSTAL_ADDRESS is the sender address the
+# unsubscribe footer of every outreach mail prints.
+for V in $(env | sed -n 's/^\(MAILBOX_[A-Z0-9]*_\(USER\|PASS\)\)=.*/\1/p') POSTAL_ADDRESS; do
+  [[ -n "${!V:-}" ]] && put_secret "$V" "${!V}" || true
+done
 
 rm -rf .build
 
@@ -223,20 +229,10 @@ rm -rf .build
 CF_TOKEN="$CF_TOKEN" CF_ACCOUNT="$CF_ACCOUNT" python3 scripts/set_triggers.py "$WORKER_NAME" "15 6,12,18,0 * * *" "5,25,45 * * * *" || warn "trigger check failed"
 
 # ---------------------------------------------------------------- self-check
-: "${BASE:?BASE is set above, before the publish that binds it}"# The wait is for *this build*, not merely for a live Worker. The edge keeps serving the previous
-# version for a few seconds after an upload, and a selftest printed inside that window shows
-# yesterday's number under a green deploy: that false alarm has now cost two investigations
-# (prod_check's "ping reports the version", and a 0.8.2 upload reporting 0.8.1 in the log). The
-# loop asks /__ping which version it is holding and stops when the answer matches. A mismatch
-# after the wait is a warning, not a failure — the upload is what it is, and propagation is not
-# a defect in the build.
-WANT="$(worker_version)"
-GOT=""
-for i in 1 2 3 4 5 6 7 8; do
-  GOT=$(curl -sf -A "Mozilla/5.0" --max-time 15 "$BASE/__ping" 2>/dev/null | jq -r '.version // ""' 2>/dev/null || true)
-  [[ "$GOT" == "$WANT" ]] && break
-  sleep 3
-done
+: "${BASE:?BASE is set above, before the publish that binds it}"
+# The wait is for *this build*, not merely for a live Worker: the edge keeps serving the previous
+# version for a few seconds after an upload, so the loop asks /__ping which version it holds and
+# stops when the answer matches git. (v2.0.0: one loop; there were two doing the same thing.)
 WANT=$(node -p "require('./package.json').version" 2>/dev/null || echo "")
 LIVE=""; PV=""
 for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
@@ -251,7 +247,6 @@ if [ -n "$WANT" ] && [ "$LIVE" != "$WANT" ]; then
 fi
 ok "version confirmed live: $LIVE" 
 ok "worker live: $BASE (version $LIVE)"
-[[ "$GOT" == "$WANT" ]] || warn "edge still answers ${GOT:-nothing} while this deploy uploaded $WANT — still propagating; the upload itself succeeded"
 echo "--- /__selftest ---"
 # This print is a status line, not the deploy's verdict: the /__ping loop above is what
 # proves the Worker serves. Cloudflare's edge answered one of today's hiccups with an

@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#0b0f14">
+<title>Tapstall — leads desk</title>
+<style>
+/* Tapstall UI kit — one visual language for both suites (merchant pages and the
+ * operator console). Every shipped page inlines this block instead of linking to
+ * it: a page that arrives as one file survives the KV template store, a mail
+ * preview, a sandboxed viewer and a 2G reconnect, none of which can be counted
+ * on to fetch a stylesheet. scripts/ui_kit.py regenerates the inlined copies,
+ * and a test fails if a page drifts from this file. */
+:root {
+  --ink: #101418;
+  --ink-2: #33404d;
+  --ink-3: #65788b;
+  --bg: #f4f6f8;
+  --card: #ffffff;
+  --line: #e6ebf0;
+  --line-2: #dde3e9;
+  --chrome: #0b0f14;
+  --chrome-2: #1a2530;
+  --chrome-ink: #aebbc7;
+  --accent: #0b5b34;
+  --accent-bg: #e8f7ef;
+  --warn: #8a5b00;
+  --warn-bg: #fff6e0;
+  --warn-line: #f0d9a8;
+  --bad: #b00020;
+  --bad-bg: #fffafa;
+  --bad-line: #f3c3c9;
+  --link: #8fd4ff;
+  --r-sm: 8px;
+  --r: 12px;
+  --r-lg: 16px;
+  --tap: 44px;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --shadow: 0 1px 2px rgba(16, 20, 24, .04), 0 8px 24px -18px rgba(16, 20, 24, .35);
+}
+* { box-sizing: border-box }
+.brandlock { display: inline-flex; align-items: center; gap: .55rem; min-width: 0 }
+.brandlock svg { flex: 0 0 auto; border-radius: 9px; box-shadow: 0 1px 8px rgba(0,0,0,.18) }
+.brandlock .bt { display:flex; flex-direction:column; line-height:1.05; min-width:0 }
+.brandlock .bt small { font-size:.62rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; opacity:.72 }
+html { -webkit-text-size-adjust: 100% }
+body {
+  margin: 0;
+  font: 16px/1.5 var(--sans);
+  color: var(--ink);
+  background: var(--bg);
+}
+h1, h2, h3 { line-height: 1.25; margin: 0 0 .5rem }
+h1 { font-size: 1.25rem }
+h2 { font-size: 1.08rem }
+h3 { font-size: .92rem }
+a { color: inherit }
+.num, b, td.n { font-variant-numeric: tabular-nums }
+.muted { color: var(--ink-3); font-size: .78rem }
+.tiny { font-size: .72rem }
+.mono { font-family: var(--mono); font-size: .8rem; word-break: break-all }
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: .9rem;
+  margin-bottom: .8rem;
+  box-shadow: var(--shadow);
+}
+.card.flat { box-shadow: none }
+.card > :last-child { margin-bottom: 0 }
+.stack > * + * { margin-top: .6rem }
+.row { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center }
+.row.between { justify-content: space-between }
+.row.end { justify-content: flex-end }
+.grid { display: grid; gap: .5rem }
+.grid.c2 { grid-template-columns: 1fr 1fr }
+.grid.c3 { grid-template-columns: repeat(3, 1fr) }
+.grid.c4 { grid-template-columns: repeat(4, 1fr) }
+@media (max-width: 30rem) { .grid.c3, .grid.c4 { grid-template-columns: 1fr 1fr } }
+label { display: block; font-size: .74rem; font-weight: 600; color: #42566a; margin-bottom: .2rem }
+input, select, textarea {
+  font: inherit;
+  width: 100%;
+  padding: .62rem .7rem;
+  min-height: var(--tap);
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+}
+textarea { min-height: 6rem; font-family: var(--mono); font-size: .8rem; line-height: 1.45 }
+input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible, a:focus-visible {
+  outline: 2px solid #1d6fd0;
+  outline-offset: 1px;
+}
+input[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--bad-line); background: var(--bad-bg) }
+button {
+  font: inherit;
+  font-weight: 600;
+  min-height: var(--tap);
+  padding: .6rem .9rem;
+  color: #fff;
+  background: var(--chrome);
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+}
+button:disabled { opacity: .55; cursor: progress }
+button.sec, .sm { color: var(--ink); background: #fff; border: 1px solid #cfd8e0; font-weight: 500 }
+button.ok { background: var(--accent) }
+button.danger { color: var(--bad); background: #fff; border: 1px solid var(--bad-line) }
+button.link { color: #2a5f9e; background: none; border: 0; text-decoration: underline; min-height: 0; padding: .2rem }
+.sm { font-size: .78rem; padding: .35rem .6rem; min-height: 0; border-radius: 8px }
+.badge {
+  display: inline-block;
+  font-size: .7rem;
+  padding: .12rem .45rem;
+  border-radius: 999px;
+  border: 1px solid #cfd8e0;
+  background: #f4f7fa;
+  color: #42566a;
+}
+.badge.ok { background: var(--accent-bg); border-color: #bfe6d0; color: var(--accent) }
+.badge.warn { background: var(--warn-bg); border-color: var(--warn-line); color: var(--warn) }
+.badge.bad { background: #fdecec; border-color: var(--bad-line); color: var(--bad) }
+.notice { border-radius: 10px; padding: .6rem .7rem; font-size: .82rem; border: 1px solid var(--line) }
+.notice.warn { background: var(--warn-bg); border-color: var(--warn-line); color: var(--warn) }
+.notice.bad { background: var(--bad-bg); border-color: var(--bad-line); color: var(--bad) }
+.notice.ok { background: var(--accent-bg); border-color: #bfe6d0; color: var(--accent) }
+.notice.info { background: #eef3f8; border-color: #cfdcea; color: #33526f }
+.tabs { display: flex; gap: .3rem; overflow-x: auto; scrollbar-width: none; padding-bottom: .1rem }
+.tabs::-webkit-scrollbar { display: none }
+.tabs button {
+  flex: 0 0 auto; min-height: 0; padding: .4rem .7rem; font-size: .8rem;
+  color: var(--ink-2); background: #fff; border: 1px solid var(--line-2); border-radius: 999px;
+}
+.tabs button[aria-selected="true"] { color: #fff; background: var(--chrome); border-color: var(--chrome) }
+.stat { background: var(--card); border: 1px solid var(--line); border-radius: var(--r); padding: .55rem .65rem }
+.stat b { display: block; font-size: 1.18rem }
+.stat span { font-size: .66rem; color: var(--ink-3); text-transform: uppercase; letter-spacing: .04em }
+.bar { display: flex; gap: .2rem; margin-top: .35rem }
+.bar i { height: 5px; flex: 1; border-radius: 999px; background: var(--line-2) }
+.bar i.on { background: var(--chrome) }
+table { width: 100%; border-collapse: collapse; font-size: .84rem }
+th, td { text-align: left; padding: .45rem .4rem; border-bottom: 1px solid var(--line) }
+th { font-size: .66rem; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-3) }
+tbody tr { cursor: pointer }
+tbody tr:hover td { background: #fbfcfd }
+.empty { text-align: center; color: var(--ink-3); padding: 1.6rem 1rem; font-size: .88rem }
+.skel { background: linear-gradient(90deg, #eef1f4 25%, #f7f9fa 50%, #eef1f4 75%); background-size: 200% 100%; animation: sk 1.2s infinite; border-radius: 8px; height: 2.6rem }
+@keyframes sk { to { background-position: -200% 0 } }
+@media (prefers-reduced-motion: reduce) { .skel { animation: none } }
+.sheet { position: fixed; inset: 0; background: rgba(11, 15, 20, .45); display: none; align-items: flex-end; z-index: 20 }
+.sheet.on { display: flex }
+.sheet > div {
+  background: var(--card); width: 100%; max-height: 88vh; overflow: auto;
+  padding: 1rem .95rem calc(1rem + env(safe-area-inset-bottom));
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+}
+@media (min-width: 44rem) { .sheet { align-items: center; justify-content: center } .sheet > div { max-width: 40rem; border-radius: var(--r-lg) } }
+.toast {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: 1rem; z-index: 30;
+  background: var(--chrome); color: #fff; font-size: .82rem; padding: .55rem .8rem; border-radius: 999px;
+  box-shadow: 0 10px 30px -12px rgba(0, 0, 0, .6); max-width: 92vw;
+}
+.chrome { background: var(--chrome); color: #fff; padding: .8rem 1rem; position: sticky; top: 0; z-index: 10 }
+.chrome .in { max-width: 60rem; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; gap: .6rem; flex-wrap: wrap }
+.chrome b { font-size: .95rem }
+.chrome a, .chrome button.sec { color: var(--link); font-size: .78rem; background: none; border: 0; text-decoration: none; min-height: 0; padding: .2rem }
+main { padding: 1rem; border-radius: var(--r-lg) var(--r-lg) 0 0; margin-top: .4rem; background: var(--bg) }
+main > .wrap { max-width: 60rem; margin: 0 auto }
+main > .wrap.narrow { max-width: 34rem }
+.hide { display: none !important }
+.only-mobile { display: initial }
+@media (min-width: 44rem) { .only-mobile { display: none } }
+/* operator console is read a lot at night and on a laptop: it may go dark */
+@media (prefers-color-scheme: dark) {
+  body.dark { --bg: #0b0f14; --card: #131b23; --line: #22303c; --line-2: #2c3d4c; --ink: #e7edf3; --ink-2: #c2cfd9; --ink-3: #8fa0af; --warn-bg: #2a2410; --bad-bg: #2a1416; --accent-bg: #10291e }
+  body.dark input, body.dark select, body.dark textarea { background: #0e151b; color: var(--ink); border-color: var(--line-2) }
+  body.dark .badge { background: #182430; border-color: #2c3d4c; color: #c2cfd9 }
+  body.dark tbody tr:hover td { background: #16202a }
+  body.dark button.sec, body.dark .sm { background: #182430; color: var(--ink); border-color: #2c3d4c }
+  body.dark button { background: #e7edf3; color: #0b0f14 }
+  body.dark button.ok { background: var(--accent); color: #fff }
+}
+.lead { border: 1px solid var(--line); border-radius: var(--r); padding: .75rem; margin-top: .6rem; background: #fff }
+.lead h4 { margin: 0 0 .15rem; font-size: 1rem }
+.lead .acts { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .55rem }
+.lead .acts button { padding: .4rem .7rem; font-size: .82rem }
+.lead .why { color: #a33; font-size: .82rem; margin-top: .35rem }
+.pill { display: inline-block; font-size: .72rem; padding: .1rem .45rem; border-radius: 99px; border: 1px solid var(--line); color: var(--ink-2) }
+.links a { margin-right: .7rem; font-size: .88rem }
+.tabsrow { display: flex; flex-wrap: wrap; gap: .35rem; margin: .4rem 0 }
+.tabsrow button.on { outline: 2px solid var(--ink) }
+</style>
+</head>
+<body>
+<div class="chrome"><div class="in"><span class="brandlock"><svg width="34" height="34" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" aria-hidden="true"><rect x="4" y="4" width="120" height="120" rx="28" fill="#0B5B34"/><path d="M24 52 L40 28 H88 L104 52 Z" fill="#FFB01E"/><circle cx="29" cy="52" r="7.5" fill="#FFB01E"/><circle cx="46.5" cy="52" r="7.5" fill="#FFFFFF"/><circle cx="64" cy="52" r="7.5" fill="#FFB01E"/><circle cx="81.5" cy="52" r="7.5" fill="#FFFFFF"/><circle cx="99" cy="52" r="7.5" fill="#FFB01E"/><rect x="28" y="54" width="7" height="38" rx="3" fill="#E8F7EF"/><rect x="93" y="54" width="7" height="38" rx="3" fill="#E8F7EF"/><rect x="20" y="92" width="88" height="10" rx="5" fill="#FFFFFF"/><circle cx="64" cy="73" r="12" fill="none" stroke="#FFFFFF" stroke-width="6"/><circle cx="64" cy="73" r="4.5" fill="#FFB01E"/></svg><b id="brand">Tapstall · plan</b></span><span><a href="/a">orders</a> · <a href="/s/" id="storeLn">my store</a></span></div></div>
+<main><div class="wrap narrow">
+  <div class="card" id="signin">
+    <h1>Leads desk</h1>
+    <p class="muted">The prospects allocated to you. Each one is yours alone: nobody else can claim it. Sign in with your seller code and the key you were given when you joined (the owner signs in as <span class="mono">owner</span> with the admin secret).</p>
+    <label for="code">Seller code</label><input id="code" autocomplete="username" placeholder="e.g. tino-sells">
+    <label for="key">Key</label><input id="key" type="password" autocomplete="current-password">
+    <div class="row" style="margin-top:.6rem"><button id="go">Open my leads</button><span class="muted" id="sOut"></span></div>
+  </div>
+
+  <div class="card hide" id="desk">
+    <div class="row" style="justify-content:space-between;align-items:baseline">
+      <h2 style="margin:0">Your leads <span class="muted" id="who"></span></h2>
+      <button class="sec sm" id="out">Sign out</button>
+    </div>
+    <p class="muted" id="counts" style="margin:.3rem 0"></p>
+    <div class="tabsrow" id="tabs">
+      <button class="sec sm on" data-t="work">To work</button>
+      <button class="sec sm" data-t="due">Follow-ups due</button>
+      <button class="sec sm" data-t="warm">Replied / trial</button>
+      <button class="sec sm" data-t="hold">Needs research</button>
+      <button class="sec sm" data-t="all">All</button>
+    </div>
+    <p class="tiny muted">Work in order: <b>Claim</b> when you start, <b>Contacted</b> after you message or call (a follow-up date is set for 3 days), <b>Replied</b> when they answer, <b>Trial</b> when they open a shop, <b>Closed</b> when they pay. Anyone who says stop: <b>Do not contact</b>, at once and for good.</p>
+    <div id="list"></div>
+  </div>
+</div></main>
+<script>
+(function () {
+  var S = { code: '', key: '', leads: [], tab: 'work' };
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  try { var saved = JSON.parse(sessionStorage.getItem('tp_leads') || 'null'); if (saved && saved.code) { S.code = saved.code; S.key = saved.key; } } catch (e) {}
+
+  function digits(p, cc) {
+    var d = String(p || '').replace(/[^0-9]/g, ''); if (d.indexOf('00') === 0) d = d.slice(2);
+    if (d.charAt(0) === '0') { var pre = { ZW: '263', ZA: '27' }[String(cc || '').toUpperCase()]; d = pre ? pre + d.slice(1) : ''; }
+    return d.length >= 9 ? d : '';
+  }
+  function link() { return location.origin + (S.code && S.code !== 'owner' ? '/r/' + encodeURIComponent(S.code) : '/onboard'); }
+  function opener(l) {
+    var place = (String(l.note || '').match(/ in ([A-Z][A-Za-z ]+)$/) || [])[1];
+    return 'Hi ' + (l.business || 'there') + ', ' + (place ? 'I found your shop on the map in ' + place + '. ' : '') +
+      'I help shops take WhatsApp orders with a simple shop link: your menu and prices on one page, orders arrive in your WhatsApp, and customers pay you directly. ' +
+      'The first 60 days are free. Shall I set it up with you? ' + link();
+  }
+  function due(l) { return l.status === 'contacted' && l.next_follow_at && Date.parse(l.next_follow_at) <= Date.now(); }
+  function inTab(l) {
+    if (S.tab === 'all') return true;
+    if (S.tab === 'work') return l.status === 'queued' || l.status === 'claimed';
+    if (S.tab === 'due') return due(l);
+    if (S.tab === 'warm') return l.status === 'replied' || l.status === 'trial';
+    if (S.tab === 'hold') return l.status === 'research_hold';
+    return true;
+  }
+  var ACTS = {
+    queued: ['claim', 'dnc'], research_hold: ['claim', 'dnc'], claimed: ['contacted', 'release', 'dnc'],
+    contacted: ['replied', 'contacted', 'follow', 'dnc'], replied: ['trial', 'closed', 'follow', 'dnc'],
+    trial: ['closed', 'follow', 'dnc'], closed: [], dnc: []
+  };
+  var LABEL = { claim: 'Claim', contacted: 'Contacted', release: 'Release', replied: 'Replied', trial: 'Trial', closed: 'Closed', dnc: 'Do not contact', follow: 'Remind me in 2 days', reopen: 'Reopen' };
+
+  function render() {
+    var by = {}; S.leads.forEach(function (l) { by[l.status] = (by[l.status] || 0) + 1; });
+    var dueN = S.leads.filter(due).length;
+    $('counts').textContent = S.leads.length + ' leads: ' + Object.keys(by).map(function (k) { return by[k] + ' ' + k.replace('_', ' '); }).join(', ') + (dueN ? ' — ' + dueN + ' follow-up' + (dueN > 1 ? 's' : '') + ' due' : '');
+    var rows = S.leads.filter(inTab).sort(function (a, b) { return String(a.next_follow_at || a.created_at || '').localeCompare(String(b.next_follow_at || b.created_at || '')); });
+    if (!rows.length) { $('list').innerHTML = '<p class="empty muted">Nothing here right now.</p>'; return; }
+    $('list').innerHTML = rows.slice(0, 200).map(function (l) {
+      var d = digits(l.phone, l.country), msg = encodeURIComponent(opener(l)), links = [];
+      if (d) links.push('<a href="https://wa.me/' + d + '?text=' + msg + '" target="_blank" rel="noopener">WhatsApp</a>', '<a href="tel:+' + d + '">Call ' + esc(l.phone) + '</a>');
+      if (l.email) links.push('<a href="mailto:' + esc(l.email) + '?subject=' + encodeURIComponent('Orders on WhatsApp for ' + (l.business || 'your shop')) + '&body=' + msg + '">' + esc(l.email) + '</a>');
+      if (l.website) links.push('<a href="' + esc(/^https?:/.test(l.website) ? l.website : 'https://' + l.website) + '" target="_blank" rel="noopener">Website</a>');
+      if (l.source_url) links.push('<a href="' + esc(l.source_url) + '" target="_blank" rel="noopener">Where we found them</a>');
+      var acts = (ACTS[l.status] || []).map(function (a) { return '<button class="' + (a === 'dnc' || a === 'release' ? 'sec ' : '') + 'sm" data-id="' + esc(l.id) + '" data-a="' + a + '">' + LABEL[a] + '</button>'; }).join('');
+      return '<div class="lead" id="L' + esc(l.id) + '"><h4>' + esc(l.business || '(no name)') + ' <span class="pill">' + esc(String(l.status).replace('_', ' ')) + '</span></h4>' +
+        '<div class="tiny muted">' + esc([l.note, l.country, l.touches ? l.touches + ' touch' + (l.touches > 1 ? 'es' : '') : '', l.next_follow_at ? 'follow up ' + String(l.next_follow_at).slice(0, 10) : ''].filter(Boolean).join(' · ')) + '</div>' +
+        '<div class="links" style="margin-top:.35rem">' + links.join('') + '</div><div class="acts">' + acts + '</div><div class="why" data-why></div></div>';
+    }).join('');
+  }
+
+  function load() {
+    $('sOut').textContent = 'Opening…';
+    fetch('/api/leads?code=' + encodeURIComponent(S.code) + '&key=' + encodeURIComponent(S.key), { cache: 'no-store' })
+      .then(function (r) { return r.json().then(function (j) { return { s: r.status, j: j }; }); })
+      .then(function (x) {
+        if (x.s !== 200 || !x.j.ok) { $('sOut').textContent = x.s === 401 ? 'That code and key do not match.' : (x.j.error || 'Could not open the desk.'); $('signin').classList.remove('hide'); $('desk').classList.add('hide'); return; }
+        sessionStorage.setItem('tp_leads', JSON.stringify({ code: S.code, key: S.key }));
+        S.leads = x.j.leads || []; $('who').textContent = '(' + S.code + ')'; $('sOut').textContent = '';
+        $('signin').classList.add('hide'); $('desk').classList.remove('hide'); render();
+      })
+      .catch(function () { $('sOut').textContent = 'No connection. Try again in a moment.'; });
+  }
+
+  function act(id, a, btn) {
+    var body = { code: S.code, key: S.key, id: id, action: a };
+    if (a === 'trial' || a === 'closed') { var h = prompt('Their shop handle (the part after /s/), if they have one:', ''); if (h === null) return; body.shop = h; }
+    if (a === 'dnc' && !confirm('Mark as do not contact? They will never be hunted or messaged again.')) return;
+    if (a === 'contacted') body.follow_days = 3;
+    if (a === 'follow') body.follow_days = 2;
+    btn.disabled = true;
+    fetch('/api/leads/act', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      .then(function (r) { return r.json().then(function (j) { return { s: r.status, j: j }; }); })
+      .then(function (x) {
+        if (x.j && x.j.ok && x.j.lead) { S.leads = S.leads.map(function (l) { return l.id === id ? x.j.lead : l; }); render(); return; }
+        btn.disabled = false;
+        var box = document.querySelector('#L' + CSS.escape(id) + ' [data-why]');
+        if (box) box.textContent = (x.j && x.j.junk ? 'Not a real prospect (' + x.j.junk + '). Mark it Do not contact to clear it.' : (x.j && x.j.error) || 'Refused.');
+      })
+      .catch(function () { btn.disabled = false; });
+  }
+
+  $('go').addEventListener('click', function () { S.code = $('code').value.trim().toLowerCase(); S.key = $('key').value.trim(); if (S.code && S.key) load(); });
+  $('key').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('go').click(); });
+  $('out').addEventListener('click', function () { sessionStorage.removeItem('tp_leads'); S = { code: '', key: '', leads: [], tab: 'work' }; $('desk').classList.add('hide'); $('signin').classList.remove('hide'); });
+  $('tabs').addEventListener('click', function (e) { var b = e.target.closest('button[data-t]'); if (!b) return; S.tab = b.getAttribute('data-t'); Array.prototype.forEach.call($('tabs').children, function (c) { c.classList.toggle('on', c === b); }); render(); });
+  $('list').addEventListener('click', function (e) { var b = e.target.closest('button[data-a]'); if (b) act(b.getAttribute('data-id'), b.getAttribute('data-a'), b); });
+  if (S.code) load();
+})();
+</script>
+</body>
+</html>

@@ -69,7 +69,7 @@ out = worker
 # its hand-publish door (it writes `tpl-ovr:<name>`, which outranks the bundle) precisely because
 # the emergency case is "the deploy is not available at 22:00 and the page is wrong now".
 pages = {}
-for n in ('store', 'onboard', 'admin', 'confirm', 'renew', 'ops', 'index', 'fees', 'partners',
+for n in ('store', 'onboard', 'admin', 'confirm', 'renew', 'ops', 'leads', 'index', 'fees', 'partners',
           'guide-whatsapp-shop-payments', 'guide-payment-reference-matching'):
     for cand in ('pages/%s.html', 'pages/public/%s.html', 'pages/public/guide/%s.html'):
         f = cand % n
@@ -87,7 +87,7 @@ open(sys.argv[1], "w", encoding="utf-8").write(out + "\n")
 print("bundle: worker.js + discover.js + core.js + rail.js inlined (%d lines, %d bytes)" % (len(out.splitlines()), len(out)))
 PYEOF
 
-for f in store.html onboard.html admin.html confirm.html renew.html ops.html; do cp "pages/$f" "$OUT/assets/$f"; done
+for f in store.html onboard.html admin.html confirm.html renew.html ops.html leads.html; do cp "pages/$f" "$OUT/assets/$f"; done
 # The mirror's own set. `_redirects` used to live here as a Netlify convention
 # that neither Pages nor this Worker implements, so it is gone; `onboard.html`
 # is the handoff that makes the mirror's sign-up link land somewhere real.

@@ -1,6 +1,37 @@
 # Tapstall — status
 
-## v1.9.1 (2026-10-21): Tapstall joins the Master Sheet CRM
+## v2.0.0 (2026-10-28): a pipeline that can be worked for real
+
+An audit of the live pipeline found it was
+emailing junk and could not send the mail it promised. Fixed together:
+
+- **Outreach had been emailing junk.** Web-search hunting filed `support@meta.com`, news desks and
+  placeholder addresses as leads, and the runner mailed them from the owner's personal Gmail. The
+  hunter is now OSM Overpass per city (ZW + ZA, two cities a day, mirror fallback), the Worker
+  gates every row (`leadJunkReason`: the address must belong to the business, the lead must sit in
+  its market), and `/api/leads/act` refuses to claim a legacy row that fails the gate. The 32 junk
+  rows already filed were marked do-not-contact.
+- **Merchant mail never left.** `new EmailMessage` had no import and no binding, so every reset
+  and notice since launch was a no-op. Now an inbox.lv SMTP lane (`worker/mail.js`) with an hourly
+  cap, a retry queue and a 6-hour park on auth failure. See `docs/MAIL.md`.
+- **PIN reset could be taken over** by anyone holding the WhatsApp number. It is now an emailed
+  one-hour link to a verified address; the WhatsApp + renew-link fallback holds the store for 24h
+  and rotates every credential afterwards.
+- **`dev-secret` fallback** removed: a missing `ADMIN_SECRET` is an error, not a public key.
+- **Whop payments** match only a verified email; anything else becomes a claim link.
+- **Outreach runner:** one voice per prospect, unsubscribe link plus RFC 8058 headers on every
+  touch, IMAP read-only (it used to mark the owner's mail as read), STOP read only in the
+  prospect's own words (a quoted footer had produced false opt-outs), bounces become do-not-contact.
+- **One clock.** The outreach and lead-hunt workflows lost their own schedules (the Worker
+  already dispatched them, so each ran twice a weekday); discovery left `runCron` ("Too many
+  subrequests").
+- **Google Sheets removed** (the CRM sheet, `SHEET_KEY`, the Apps Script). The new **leads desk** at
+  `/leads` replaces it for sellers and the owner, with WhatsApp/call/mail buttons and the same
+  claim rules.
+- `/ops/api/health` → `pipeline` now reports mail, the mail queue, the last dispatch and unmatched
+  Whop payments.
+
+## v1.9.1 (2026-10-21): Tapstall joins the Master Sheet CRM (removed in v2.0.0)
 
 The shared Master Sheet (`1j_ktMLCRmLlk6TOb0-YddYGTmfHChyI29wu84j7SJ8o`) already runs STPi and
 DeskOS into one 17-column contact ledger. Tapstall is now the third engine, without touching theirs.

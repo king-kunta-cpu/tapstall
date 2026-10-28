@@ -8,16 +8,6 @@ name: outreach
 # (2+ signals, under the touch cap, follow-up due) and files every outcome back through
 # POST /api/leads/act, including STOP -> the do-not-contact ledger.
 on:
-  # Autonomous, on the same ladder as hunting but an hour later. Unattended runs
-  # cannot type into the description box, so the defaults below are the real
-  # policy: send-and-poll, twenty sends per mailbox. Twenty is the owner's
-  # setting as of 21 October 2026 and sits inside the warm-up ladder (10 -> 20 ->
-  # 25 -> 40 -> 50 a day on a weekly step), so the ramp is still the point: a
-  # mailbox that opens at a hundred gets its domain burned, and a burned domain
-  # costs more than the week it saved. Raise it a rung at a time, and only while
-  # bounce and complaint rates stay flat. The Worker remains the judge: this only
-  # sends to leads it calls eligible (two signals, under the touch cap, follow-up
-  # due), and every STOP still lands in the do-not-contact ledger.
   # v2.0.0: no schedule. The Worker's 06:15 UTC sweep dispatches this on weekdays and, since
   # v2.0.0, retries a failed dispatch at the next sweep; a schedule here as well ran it twice a day.
   workflow_dispatch:

@@ -731,7 +731,7 @@ web-search leg was removed in v2.0.0 after it filed support@meta.com as a lead) 
 the facts and demands **two** before outreach (`research_hold` below that), dedupes on
 email→phone→business, allocates each prospect to exactly one seller by hash, and refuses anything on
 the `Lead:` do-not-contact ledger. Claims are anti-collision: a second seller gets a 409, not a
-double pitch. Sellers work the queue through `/api/leads/act` (v2.0.0: the Google Sheets CRM and
+double pitch. Sellers work the queue on the leads desk at `/leads`, which calls `/api/leads/act` (v2.0.0: the Google Sheets CRM and
 its `SHEET_KEY` were removed — no Sheets in the pipeline). v2.0.0 also adds a junk gate in
 `cleanLead` (address must belong to the business, lead must sit in its market) and an inbox.lv
 mail lane (`worker/mail.js`) for merchant mail and ~1 first touch an hour; see `docs/MAIL.md`.

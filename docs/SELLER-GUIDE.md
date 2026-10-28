@@ -69,8 +69,9 @@ The system hunts for operators selling the hard way and assigns each prospect to
 sometimes you. Your queue:
 
 - In your seller view: `lead_counts` shows how many are waiting at each stage.
-- In Google Sheets: the owner can give you the TapStall sheet template (see the sheet's first tab
-  for setup). "Sync my leads", work the rows, tick what you did, "Send actions".
+- On the **leads desk** (`/leads` on the Tapstall site): sign in with your seller code and key. Each
+  lead has a WhatsApp button with an opening message already written (your `/r/` link included), a
+  call button, and the buttons below. Tabs show what to work today and which follow-ups are due.
 - Rules that protect you: a lead assigned to another seller **cannot** be taken by you (the system
   refuses), and yours cannot be taken either. One voice per prospect — ever.
 - Work them in order: **claim** when you start, **contacted** when you have messaged/called,

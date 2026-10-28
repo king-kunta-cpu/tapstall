@@ -23,7 +23,7 @@ first (`cleanLead`, `leadTransition`, `sellerBoard`, `meshDirectSend`).
 Differs, deliberately. One repo, not four: TapStall is one product on one free tier, and splitting
 `product / owners / hunter / contentops` would quadruple CI ceremony for no isolation gain at this
 scale. The hunter is `scripts/lead_hunt.py` + `.github/workflows/leads-hunt.yml`; content ops is the
-press module in the Worker; the Sheets satellite is `leads/apps-script/Code.gs`. If a second product
+press module in the Worker; outreach is `scripts/mail_outreach.py` + `worker/mail.js` (docs/MAIL.md). If a second product
 ever shares this exoskeleton, split then — the file boundaries already say where the cuts are.
 
 ## Brick 2 — one clock, dispatching
@@ -119,8 +119,8 @@ green/chrome), wired into the landing page as inline SVG + favicon so the single
 
 Operators self-onboard (unchanged). Sellers: `scripts/seller_add.sh` or the owner console's sellers
 API; the key and links print once. Guides: `docs/SELLER-GUIDE.md` and `docs/OPERATOR-GUIDE.md`
-(action-oriented; sellers get links, the key, the pitch order, the 5-touch week and the Sheets
-surface; operators get the 7-step first week). The wet-ink contract remains the house practice —
+(action-oriented; sellers get links, the key, the pitch order, the 5-touch week and the leads
+panel; operators get the 7-step first week). The wet-ink contract remains the house practice —
 paper is not code's problem.
 
 ## Brick 10 — lead hunter
@@ -157,14 +157,14 @@ replied → trial → closed`, plus `research_hold`, `paused`, `dnc`), follow-up
 opt-out — POPIA §69 honoured in structure, not in a memo). The 6-class LLM inbox automation waits
 on the EMAIL binding (Brick 11); when it lands it writes the same transitions through the same door.
 
-## Brick 13 — Google Sheets command bot
+## Brick 13 — Google Sheets command bot (removed in v2.0.0)
 
-Implemented for free, the other way round: instead of a service account pushing into sheets, the
-Worker serves a per-seller TSV/JSON feed (`/api/leads/sheets-feed`) and `leads/apps-script/Code.gs`
-pulls it. Six tabs (`DASHBOARD`, `Leads`, `NEW_CONTACTS`, `DELETIONS`, `REGISTER_SELLER`,
-`SEND_SCHEDULE`); the sheet proposes actions in a DO column and the Worker judges them — the
-spreadsheet is a control surface, never an authority. Owner-gated doors (ingest, seller
-registration) stay owner-gated from the sheet too.
+Built in v1.9.1 as a per-seller feed pulled by Apps Script, removed in v2.0.0 by owner decision:
+no Google Sheets anywhere in the pipeline, because a second surface that can propose lead actions
+is a second thing that can break. Sellers work leads in the seller panel and the owner in
+`/ops`; both go through the same door (`/api/leads/act`), which since v2.0.0 also refuses a
+claim on a row that fails the junk gate. (A merchant's own menu feed may still be a published
+Google Sheet; that is the merchant's catalogue, not the CRM.)
 
 ## Brick 14 — press autopilot
 

@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#0b0f14">
+<title>Tapstall — leads desk</title>
+<style>
+/*__KIT__*/
+.lead { border: 1px solid var(--line); border-radius: var(--r); padding: .75rem; margin-top: .6rem; background: #fff }
+.lead h4 { margin: 0 0 .15rem; font-size: 1rem }
+.lead .acts { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .55rem }
+.lead .acts button { padding: .4rem .7rem; font-size: .82rem }
+.lead .why { color: #a33; font-size: .82rem; margin-top: .35rem }
+.pill { display: inline-block; font-size: .72rem; padding: .1rem .45rem; border-radius: 99px; border: 1px solid var(--line); color: var(--ink-2) }
+.links a { margin-right: .7rem; font-size: .88rem }
+.tabsrow { display: flex; flex-wrap: wrap; gap: .35rem; margin: .4rem 0 }
+.tabsrow button.on { outline: 2px solid var(--ink) }
+</style>
+</head>
+<body>
+<div class="chrome"><div class="in"><span class="brandlock"><svg width="34" height="34" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" aria-hidden="true"><rect x="4" y="4" width="120" height="120" rx="28" fill="#0B5B34"/><path d="M24 52 L40 28 H88 L104 52 Z" fill="#FFB01E"/><circle cx="29" cy="52" r="7.5" fill="#FFB01E"/><circle cx="46.5" cy="52" r="7.5" fill="#FFFFFF"/><circle cx="64" cy="52" r="7.5" fill="#FFB01E"/><circle cx="81.5" cy="52" r="7.5" fill="#FFFFFF"/><circle cx="99" cy="52" r="7.5" fill="#FFB01E"/><rect x="28" y="54" width="7" height="38" rx="3" fill="#E8F7EF"/><rect x="93" y="54" width="7" height="38" rx="3" fill="#E8F7EF"/><rect x="20" y="92" width="88" height="10" rx="5" fill="#FFFFFF"/><circle cx="64" cy="73" r="12" fill="none" stroke="#FFFFFF" stroke-width="6"/><circle cx="64" cy="73" r="4.5" fill="#FFB01E"/></svg><b id="brand">Tapstall · plan</b></span><span><a href="/a">orders</a> · <a href="/s/" id="storeLn">my store</a></span></div></div>
+<main><div class="wrap narrow">
+  <div class="card" id="signin">
+    <h1>Leads desk</h1>
+    <p class="muted">The prospects allocated to you. Each one is yours alone: nobody else can claim it. Sign in with your seller code and the key you were given when you joined (the owner signs in as <span class="mono">owner</span> with the admin secret).</p>
+    <label for="code">Seller code</label><input id="code" autocomplete="username" placeholder="e.g. tino-sells">
+    <label for="key">Key</label><input id="key" type="password" autocomplete="current-password">
+    <div class="row" style="margin-top:.6rem"><button id="go">Open my leads</button><span class="muted" id="sOut"></span></div>
+  </div>
+
+  <div class="card hide" id="desk">
+    <div class="row" style="justify-content:space-between;align-items:baseline">
+      <h2 style="margin:0">Your leads <span class="muted" id="who"></span></h2>
+      <button class="sec sm" id="out">Sign out</button>
+    </div>
+    <p class="muted" id="counts" style="margin:.3rem 0"></p>
+    <div class="tabsrow" id="tabs">
+      <button class="sec sm on" data-t="work">To work</button>
+      <button class="sec sm" data-t="due">Follow-ups due</button>
+      <button class="sec sm" data-t="warm">Replied / trial</button>
+      <button class="sec sm" data-t="hold">Needs research</button>
+      <button class="sec sm" data-t="all">All</button>
+    </div>
+    <p class="tiny muted">Work in order: <b>Claim</b> when you start, <b>Contacted</b> after you message or call (a follow-up date is set for 3 days), <b>Replied</b> when they answer, <b>Trial</b> when they open a shop, <b>Closed</b> when they pay. Anyone who says stop: <b>Do not contact</b>, at once and for good.</p>
+    <div id="list"></div>
+  </div>
+</div></main>
+<script>
+(function () {
+  var S = { code: '', key: '', leads: [], tab: 'work' };
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  try { var saved = JSON.parse(sessionStorage.getItem('tp_leads') || 'null'); if (saved && saved.code) { S.code = saved.code; S.key = saved.key; } } catch (e) {}
+
+  function digits(p, cc) {
+    var d = String(p || '').replace(/[^0-9]/g, ''); if (d.indexOf('00') === 0) d = d.slice(2);
+    if (d.charAt(0) === '0') { var pre = { ZW: '263', ZA: '27' }[String(cc || '').toUpperCase()]; d = pre ? pre + d.slice(1) : ''; }
+    return d.length >= 9 ? d : '';
+  }
+  function link() { return location.origin + (S.code && S.code !== 'owner' ? '/r/' + encodeURIComponent(S.code) : '/onboard'); }
+  function opener(l) {
+    var place = (String(l.note || '').match(/ in ([A-Z][A-Za-z ]+)$/) || [])[1];
+    return 'Hi ' + (l.business || 'there') + ', ' + (place ? 'I found your shop on the map in ' + place + '. ' : '') +
+      'I help shops take WhatsApp orders with a simple shop link: your menu and prices on one page, orders arrive in your WhatsApp, and customers pay you directly. ' +
+      'The first 60 days are free. Shall I set it up with you? ' + link();
+  }
+  function due(l) { return l.status === 'contacted' && l.next_follow_at && Date.parse(l.next_follow_at) <= Date.now(); }
+  function inTab(l) {
+    if (S.tab === 'all') return true;
+    if (S.tab === 'work') return l.status === 'queued' || l.status === 'claimed';
+    if (S.tab === 'due') return due(l);
+    if (S.tab === 'warm') return l.status === 'replied' || l.status === 'trial';
+    if (S.tab === 'hold') return l.status === 'research_hold';
+    return true;
+  }
+  var ACTS = {
+    queued: ['claim', 'dnc'], research_hold: ['claim', 'dnc'], claimed: ['contacted', 'release', 'dnc'],
+    contacted: ['replied', 'contacted', 'follow', 'dnc'], replied: ['trial', 'closed', 'follow', 'dnc'],
+    trial: ['closed', 'follow', 'dnc'], closed: [], dnc: []
+  };
+  var LABEL = { claim: 'Claim', contacted: 'Contacted', release: 'Release', replied: 'Replied', trial: 'Trial', closed: 'Closed', dnc: 'Do not contact', follow: 'Remind me in 2 days', reopen: 'Reopen' };
+
+  function render() {
+    var by = {}; S.leads.forEach(function (l) { by[l.status] = (by[l.status] || 0) + 1; });
+    var dueN = S.leads.filter(due).length;
+    $('counts').textContent = S.leads.length + ' leads: ' + Object.keys(by).map(function (k) { return by[k] + ' ' + k.replace('_', ' '); }).join(', ') + (dueN ? ' — ' + dueN + ' follow-up' + (dueN > 1 ? 's' : '') + ' due' : '');
+    var rows = S.leads.filter(inTab).sort(function (a, b) { return String(a.next_follow_at || a.created_at || '').localeCompare(String(b.next_follow_at || b.created_at || '')); });
+    if (!rows.length) { $('list').innerHTML = '<p class="empty muted">Nothing here right now.</p>'; return; }
+    $('list').innerHTML = rows.slice(0, 200).map(function (l) {
+      var d = digits(l.phone, l.country), msg = encodeURIComponent(opener(l)), links = [];
+      if (d) links.push('<a href="https://wa.me/' + d + '?text=' + msg + '" target="_blank" rel="noopener">WhatsApp</a>', '<a href="tel:+' + d + '">Call ' + esc(l.phone) + '</a>');
+      if (l.email) links.push('<a href="mailto:' + esc(l.email) + '?subject=' + encodeURIComponent('Orders on WhatsApp for ' + (l.business || 'your shop')) + '&body=' + msg + '">' + esc(l.email) + '</a>');
+      if (l.website) links.push('<a href="' + esc(/^https?:/.test(l.website) ? l.website : 'https://' + l.website) + '" target="_blank" rel="noopener">Website</a>');
+      if (l.source_url) links.push('<a href="' + esc(l.source_url) + '" target="_blank" rel="noopener">Where we found them</a>');
+      var acts = (ACTS[l.status] || []).map(function (a) { return '<button class="' + (a === 'dnc' || a === 'release' ? 'sec ' : '') + 'sm" data-id="' + esc(l.id) + '" data-a="' + a + '">' + LABEL[a] + '</button>'; }).join('');
+      return '<div class="lead" id="L' + esc(l.id) + '"><h4>' + esc(l.business || '(no name)') + ' <span class="pill">' + esc(String(l.status).replace('_', ' ')) + '</span></h4>' +
+        '<div class="tiny muted">' + esc([l.note, l.country, l.touches ? l.touches + ' touch' + (l.touches > 1 ? 'es' : '') : '', l.next_follow_at ? 'follow up ' + String(l.next_follow_at).slice(0, 10) : ''].filter(Boolean).join(' · ')) + '</div>' +
+        '<div class="links" style="margin-top:.35rem">' + links.join('') + '</div><div class="acts">' + acts + '</div><div class="why" data-why></div></div>';
+    }).join('');
+  }
+
+  function load() {
+    $('sOut').textContent = 'Opening…';
+    fetch('/api/leads?code=' + encodeURIComponent(S.code) + '&key=' + encodeURIComponent(S.key), { cache: 'no-store' })
+      .then(function (r) { return r.json().then(function (j) { return { s: r.status, j: j }; }); })
+      .then(function (x) {
+        if (x.s !== 200 || !x.j.ok) { $('sOut').textContent = x.s === 401 ? 'That code and key do not match.' : (x.j.error || 'Could not open the desk.'); $('signin').classList.remove('hide'); $('desk').classList.add('hide'); return; }
+        sessionStorage.setItem('tp_leads', JSON.stringify({ code: S.code, key: S.key }));
+        S.leads = x.j.leads || []; $('who').textContent = '(' + S.code + ')'; $('sOut').textContent = '';
+        $('signin').classList.add('hide'); $('desk').classList.remove('hide'); render();
+      })
+      .catch(function () { $('sOut').textContent = 'No connection. Try again in a moment.'; });
+  }
+
+  function act(id, a, btn) {
+    var body = { code: S.code, key: S.key, id: id, action: a };
+    if (a === 'trial' || a === 'closed') { var h = prompt('Their shop handle (the part after /s/), if they have one:', ''); if (h === null) return; body.shop = h; }
+    if (a === 'dnc' && !confirm('Mark as do not contact? They will never be hunted or messaged again.')) return;
+    if (a === 'contacted') body.follow_days = 3;
+    if (a === 'follow') body.follow_days = 2;
+    btn.disabled = true;
+    fetch('/api/leads/act', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      .then(function (r) { return r.json().then(function (j) { return { s: r.status, j: j }; }); })
+      .then(function (x) {
+        if (x.j && x.j.ok && x.j.lead) { S.leads = S.leads.map(function (l) { return l.id === id ? x.j.lead : l; }); render(); return; }
+        btn.disabled = false;
+        var box = document.querySelector('#L' + CSS.escape(id) + ' [data-why]');
+        if (box) box.textContent = (x.j && x.j.junk ? 'Not a real prospect (' + x.j.junk + '). Mark it Do not contact to clear it.' : (x.j && x.j.error) || 'Refused.');
+      })
+      .catch(function () { btn.disabled = false; });
+  }
+
+  $('go').addEventListener('click', function () { S.code = $('code').value.trim().toLowerCase(); S.key = $('key').value.trim(); if (S.code && S.key) load(); });
+  $('key').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('go').click(); });
+  $('out').addEventListener('click', function () { sessionStorage.removeItem('tp_leads'); S = { code: '', key: '', leads: [], tab: 'work' }; $('desk').classList.add('hide'); $('signin').classList.remove('hide'); });
+  $('tabs').addEventListener('click', function (e) { var b = e.target.closest('button[data-t]'); if (!b) return; S.tab = b.getAttribute('data-t'); Array.prototype.forEach.call($('tabs').children, function (c) { c.classList.toggle('on', c === b); }); render(); });
+  $('list').addEventListener('click', function (e) { var b = e.target.closest('button[data-a]'); if (b) act(b.getAttribute('data-id'), b.getAttribute('data-a'), b); });
+  if (S.code) load();
+})();
+</script>
+</body>
+</html>

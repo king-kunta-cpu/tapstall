@@ -36,7 +36,7 @@ enabled = false
 # v2.0.0: the inbox.lv lane. The box and its app password are Worker secrets
 # (MAILBOX_LV1_USER / MAILBOX_LV1_PASS); this var only names the lane and its hourly share of
 # a box that other products use too (inbox.lv allows 15/h per box in total).
-mailboxes = os.environ.get("MAILBOXES", '[{"id":"lv1","host":"mail.inbox.lv","fromName":"Tapstall","hourly":2}]').strip()
+mailboxes = os.environ.get("MAILBOXES", "").strip() or '[{"id":"lv1","host":"mail.inbox.lv","fromName":"Tapstall","hourly":2}]'
 out += "\n[vars]\n"
 if origin:
     out += f'PUBLIC_ORIGIN = "{origin}"\n'

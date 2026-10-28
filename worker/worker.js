@@ -448,6 +448,9 @@ async function route(req, url, env, ctx) {
    * outside the public path set: no CORS, no caching, no links in it that move
    * money without a POST. */
   if (p === '/ops' || p === '/ops/') return opsPage(req, env);
+  // v2.0.0: the leads desk replaces the Google Sheet as the place sellers (and the owner) work
+  // their queue. A static page: it holds no data until the code + key open /api/leads.
+  if (p === '/leads' || p === '/leads/') return html(await tpl(env, 'leads'), 200, { ...NOINDEX, 'Cache-Control': 'no-store' });
   if (p === '/ops/login') return req.method === 'POST' ? opsLogin(req, env) : json({ ok: false, error: 'method_not_allowed' }, 405, { Allow: 'POST' });
   if (p === '/ops/logout') {
     if (req.method !== 'POST') return json({ ok: false, error: 'method_not_allowed' }, 405, { Allow: 'POST' });
@@ -4503,7 +4506,7 @@ function secsToMidnightUTC() {
 }
 
 const OPS_COOKIE = 'tp_ops';
-const OPS_TPL_NAMES = ['store', 'onboard', 'admin', 'fees', 'index', 'confirm', 'renew', 'ops', 'sample-menu',
+const OPS_TPL_NAMES = ['store', 'onboard', 'admin', 'fees', 'index', 'confirm', 'renew', 'ops', 'leads', 'sample-menu',
   'guide-whatsapp-shop-payments', 'guide-payment-reference-matching'];
 const PAGES_URL = 'https://king-kunta-cpu.github.io/tapstall/';
 

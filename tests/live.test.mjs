@@ -4057,7 +4057,7 @@ test('0.9.1 the bundle carries every page, and no KV write stands between it and
   // pass every other test in this file by falling through to KV, which is exactly how a regression
   // here would hide.
   const st = await call('/__selftest');
-  assert.equal(st.json.pages_inlined, 12, 'every page the console can name is in the bundle (partners joined in v1.7.1): ' + JSON.stringify(st.json.pages_inlined));
+  assert.equal(st.json.pages_inlined, 13, 'every page the console can name is in the bundle (partners joined in v1.7.1, leads in v2.0.0): ' + JSON.stringify(st.json.pages_inlined));
   assert.ok(st.json.pages_bytes > 200000, 'and they are real pages, not markers: ' + st.json.pages_bytes + ' bytes');
   assert.equal(st.json.pages_store_from, 'bundle', 'the storefront a merchant is served comes out of the Worker, not a KV read');
   assert.equal(st.json.pages_served, true, 'and it is a page');
@@ -4617,6 +4617,12 @@ test('1.0.0 sellers, leads, recognised sales, and a press the clock runs by itse
   const junkDnc = await call('/api/leads/act', { method: 'POST',
     body: { code: 'owner', key: SECRET, id: 'legacy-junk-1', action: 'dnc' } });
   assert.equal(junkDnc.status, 200, 'retiring junk is still allowed: ' + junkDnc.text);
+  // v2.0.0: the leads desk is where this work happens now that the Sheet is gone
+  const desk = await call('/leads');
+  assert.equal(desk.status, 200);
+  assert.match(desk.text, /Leads desk/);
+  assert.match(desk.headers.get('x-robots-tag') || '', /noindex/);
+  assert.ok(desk.text.includes('/api/leads/act') && !desk.text.includes(SECRET), 'a static page that holds no credential');
   const reing = await ingest([weak]);
   assert.ok(reing.json.counts.dnc_skipped >= 1, 'a dnc prospect is never resurrected by a re-hunt');
 
