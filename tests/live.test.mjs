@@ -649,40 +649,65 @@ test('settings: a queued change lands on the next read, and old slips keep old d
   assert.ok(!JSON.stringify(o.pay).includes('0785551122'), 'yesterday’s buyer is never told to pay a new account');
 });
 
-test('losing the PIN does not need an operator: two details, a new PIN, and every other device dies', async () => {
-  // The whole argument for the PIN model is that the way back in is *knowledge*,
-  // not a message that may or may not arrive. These are the two things on the store.
-  const wrong = await call('/api/pin/reset', { method: 'POST', body: { key: 'mamatoe', owner_email: 'nobody@example.com', pay_account: '0785551122' } });
-  assert.equal(wrong.status, 403, 'one right answer is not enough: ' + wrong.text);
-  const partial = await call('/api/pin/reset', { method: 'POST', body: { key: 'mamatoe', owner_email: 'owner@example.com', pay_account: '0123' } });
-  assert.equal(partial.status, 403, 'nor the other one alone');
-  assert.ok(!partial.json.pin, 'and a refusal never leaks a candidate PIN');
+/* v2.0.0 mail harness: an armed inbox.lv lane whose SMTP session is a recorder. */
+function armMail() {
+  const sent = [];
+  Object.assign(env, { MAILBOXES: JSON.stringify([{ id: 'lv1', host: 'mail.test', fromName: 'Tapstall', hourly: 15 }]),
+    MAILBOX_LV1_USER: 'box@inbox.test', MAILBOX_LV1_PASS: 'pw',
+    MAIL_TEST_OPEN: async () => ({ async send(from, to, mime) { sent.push({ from, to, mime }); return '250 ok'; }, async quit() {} }) });
+  return sent;
+}
+function disarmMail() { for (const k of ['MAILBOXES', 'MAILBOX_LV1_USER', 'MAILBOX_LV1_PASS', 'MAIL_TEST_OPEN']) delete env[k]; }
+const mailBody = (m) => Buffer.from(m.mime.split('\r\n\r\n').slice(1).join('').replace(/\s+/g, ''), 'base64').toString('utf8');
 
-  const genBefore = JSON.parse(env.STORES._map.get('store:mamatoe').value).auth_gen;
-  const pinBefore = JSON.parse(env.STORES._map.get('store:mamatoe').value).pin.hash;
-  const ok = await call('/api/pin/reset', { method: 'POST', body: { key: 'mamatoe', owner_email: 'owner@example.com', pay_account: '0785551122' } });
-  assert.equal(ok.status, 200, ok.text);
-  assert.match(String(ok.json.pin), /^[0-9]{6}$/, 'a generated PIN, shown once, to the person who proved the details');
-  const st = JSON.parse(env.STORES._map.get('store:mamatoe').value);
-  assert.notEqual(st.auth_gen, genBefore, 'and the generation is bumped: every session that existed is now refused');
-  assert.notEqual(st.pin.hash, pinBefore, 'the old PIN stops working at the same moment');
-  assert.ok(!JSON.stringify(st.pin).includes(String(ok.json.pin)), 'only the hash of the new one is stored');
-  const stale = await call('/api/admin?handle=mamatoe', { cookie: store.cookie });
-  assert.equal(stale.status, 403, 'including this test’s own live session — a reset is a reset');
-  const reopened = await loginWithPin('mamatoe', ok.json.pin);
-  assert.equal(reopened.r.status, 200, 'and the new PIN works immediately');
-  store.pin = ok.json.pin; store.cookie = reopened.cookie;
+test('losing the PIN: a one-hour link goes to the email on file, works once, and every other device dies', async () => {
+  const sent = armMail();
+  try {
+    // v2.0.0: the old door took the owner email plus a "second detail" that could be the same email
+    const old = await call('/api/pin/reset', { method: 'POST', body: { key: 'mamatoe', owner_email: 'owner@example.com', pay_account: '0785551122' } });
+    assert.equal(old.status, 403, 'two facts a stranger can collect are not a reset any more: ' + old.text);
+    assert.ok(!old.json.pin, 'and a refusal never leaks a candidate PIN');
 
-  // and the door itself is rate-limited per store, in tiers, without touching the
-  // tenant's write budget: 12 wrong guesses must not be 12 KV writes
-  const puts0 = env.STORES._puts || null;
-  for (let i = 0; i < 12; i++) {
-    await call('/api/pin/reset', { method: 'POST', body: { key: 'mamatoe', owner_email: 'a@b.com', pay_account: 'x' } });
-  }
-  const frozen = await call('/api/pin/reset', { method: 'POST', body: { key: 'mamatoe', owner_email: 'owner@example.com', pay_account: '0785551122' } });
-  assert.equal(frozen.status, 429, 'twelve tries and the store is frozen, whoever you are: ' + frozen.text);
-  assert.ok(frozen.json.retry_in_sec > 0, 'with a stated wait, so the screen can count down instead of shrugging');
-  if (puts0 !== null) assert.ok(puts0.after - puts0.before <= 4, 'and the freeze cost at most a few writes, not one per guess');
+    const ask = await call('/api/pin/reset', { method: 'POST', body: { key: 'mamatoe' } });
+    assert.equal(ask.status, 200, ask.text);
+    assert.equal(ask.json.pin, undefined, 'asking for a link shows no PIN');
+    assert.equal(ask.json.sent_to, 'o***@example.com', 'only a masked address');
+    assert.ok(!ask.text.includes('owner@example.com'), 'the full address is never shown to whoever asked');
+    const mail = sent.find((m) => m.to === 'owner@example.com');
+    assert.ok(mail, 'the link went to the inbox on file');
+    const link = mailBody(mail).match(/\/a\?reset=(\S+)/);
+    assert.ok(link, mailBody(mail));
+    const cap = decodeURIComponent(link[1]);
+    const again = await call('/api/pin/reset', { method: 'POST', body: { key: 'mamatoe' } });
+    assert.equal(again.status, 200);
+    assert.equal(sent.length, 1, 'asking twice in ten minutes sends one email, not two');
+
+    const genBefore = JSON.parse(env.STORES._map.get('store:mamatoe').value).auth_gen;
+    const pinBefore = JSON.parse(env.STORES._map.get('store:mamatoe').value).pin.hash;
+    const ok = await call('/api/pin/reset', { method: 'POST', body: { cap, new_pin: '48151623' } });
+    assert.equal(ok.status, 200, ok.text);
+    assert.equal(ok.json.pin, '48151623');
+    const st = JSON.parse(env.STORES._map.get('store:mamatoe').value);
+    assert.notEqual(st.auth_gen, genBefore, 'the generation is bumped: every session that existed is now refused');
+    assert.notEqual(st.pin.hash, pinBefore, 'the old PIN stops working at the same moment');
+    assert.equal(st.email_verified, 'owner@example.com', 'and opening the link proved the inbox');
+    const stale = await call('/api/admin?handle=mamatoe', { cookie: store.cookie });
+    assert.equal(stale.status, 403, 'including this test’s own live session — a reset is a reset');
+    const replay = await call('/api/pin/reset', { method: 'POST', body: { cap, new_pin: '11223344' } });
+    assert.equal(replay.status, 403, 'the link works once: ' + replay.text);
+    assert.ok(sent.some((m) => m.to === 'owner@example.com' && /PIN was reset/.test(m.mime)), 'and the owner is told it happened');
+    const reopened = await loginWithPin('mamatoe', '48151623');
+    assert.equal(reopened.r.status, 200, 'and the new PIN works immediately');
+    store.pin = '48151623'; store.cookie = reopened.cookie;
+
+    // the door is rate-limited per store, in tiers, without one write per guess
+    for (let i = 0; i < 12; i++) {
+      await call('/api/pin/reset', { method: 'POST', body: { key: 'mamatoe', whatsapp: '000', renew: 'nope' } });
+    }
+    const frozen = await call('/api/pin/reset', { method: 'POST', body: { key: 'mamatoe' } });
+    assert.equal(frozen.status, 429, 'twelve tries and the store is frozen, whoever you are: ' + frozen.text);
+    assert.ok(frozen.json.retry_in_sec > 0, 'with a stated wait, so the screen can count down instead of shrugging');
+  } finally { disarmMail(); }
 });
 
 test('one write revokes every session and key for a store', async () => {
@@ -751,7 +776,7 @@ test('a stale v0.2 GET confirm link is inert, and the page it lands on explains 
   await env.STORES.delete('lock:mamatoe');
 });
 
-test('recovery works for a shop that never gave an email and takes cash', async () => {
+test('recovery works for a shop that never gave an email and takes cash — and money waits a day after', async () => {
   const r = await call('/api/register', {
     method: 'POST',
     body: { shop_name: 'Tino Tuck Shop', handle: 'tinotuck', whatsapp: '263710002222', feed_url: 'https://stub/menu.csv', currency: 'USD', rail: 'cash' },
@@ -760,26 +785,74 @@ test('recovery works for a shop that never gave an email and takes cash', async 
   const st = JSON.parse(env.STORES._map.get('store:tinotuck').value);
   assert.ok(!st.owner_email && !st.pay_account, 'no email, no payout account — the awkward case');
   assert.match(st.renew_url.split('/').pop(), /^[a-z0-9]{14}$/, 'and its renew token is path-safe');
+  assert.match(String(r.json.pin), /^[0-9]{6}$/, 'a cash shop gets a PIN like any other, on the same screen');
 
-  const pinFromSignup = r.json.pin;
-  assert.match(String(pinFromSignup), /^[0-9]{6}$/, 'a cash shop gets a PIN like any other, on the same screen');
-  const nope = await call('/api/pin/reset', { method: 'POST', body: { key: 'tinotuck', whatsapp: '263710002222', pay_account: 'guess' } });
-  assert.equal(nope.status, 403, 'a cash shop cannot be recovered by guessing an account');
-  assert.ok(!nope.json.pin, 'and a refusal carries no PIN');
-  const yes = await call('/api/pin/reset', { method: 'POST', body: { key: 'tinotuck', whatsapp: '263710002222', feed_url: 'https://stub/menu.csv' } });
+  const noMail = await call('/api/pin/reset', { method: 'POST', body: { key: 'tinotuck' } });
+  assert.equal(noMail.status, 409, 'no email on file says so, and names the other door: ' + noMail.text);
+  assert.match(noMail.json.error, /WhatsApp number and your renew link/);
+  const sheet = await call('/api/pin/reset', { method: 'POST', body: { key: 'tinotuck', whatsapp: '263710002222', feed_url: 'https://stub/menu.csv' } });
+  assert.equal(sheet.status, 403, 'a menu link is shared with buyers, so it is not a secret any more');
+  assert.ok(!sheet.json.pin, 'and a refusal carries no PIN');
+  const yes = await call('/api/pin/reset', { method: 'POST', body: { key: 'tinotuck', whatsapp: '263710002222', renew: r.json.renew_url } });
   assert.equal(yes.status, 200, yes.text);
-  assert.match(String(yes.json.pin), /^[0-9]{6}$/, 'the number is the contact half, the sheet link the secret half');
+  assert.match(String(yes.json.pin), /^[0-9]{6}$/, 'the number is the contact half, the renew link the secret half');
   assert.match(yes.json.note, /other devices are signed out/i, 'and it says plainly what just happened');
+  assert.match(yes.json.note, /24 hours/, 'and that money changes now wait a day');
+  const after = JSON.parse(env.STORES._map.get('store:tinotuck').value);
+  assert.ok(after.reset_hold_until > Date.now() + 23 * 3600e3, 'the hold is on the store');
+  assert.notEqual(after.renew_url, st.renew_url, 'and the renew link that was just used is rotated');
   const s = await loginWithPin('tinotuck', yes.json.pin);
   assert.equal(s.r.status, 200, 'and the new PIN opens the dashboard');
-  const admin = await call('/api/admin?handle=tinotuck', { cookie: s.cookie });
-  assert.equal(admin.status, 200, 'with an ordinary session, no link involved');
-  const wrongNum = await call('/api/pin/reset', { method: 'POST', body: { key: 'tinotuck', whatsapp: '26371009999', feed_url: 'https://stub/menu.csv' } });
-  assert.equal(wrongNum.status, 403, 'a neighbour with the same sheet link pattern still fails');
-  assert.match(wrongNum.json.error, /do not match/, 'with words that do not say which half was wrong');
+  const chg = await call('/api/settings', { method: 'POST', cookie: s.cookie, confirm: true, body: { handle: 'tinotuck', whatsapp: '263710003333' } });
+  assert.equal(chg.status, 200, chg.text);
+  assert.ok(chg.json.held.includes('whatsapp'), 'a contact change is held: ' + chg.text);
+  assert.ok(chg.json.hold_until - Date.now() > 23 * 3600e3, 'for a day, not fifteen minutes, right after a no-email reset');
+  const reuse = await call('/api/pin/reset', { method: 'POST', body: { key: 'tinotuck', whatsapp: '263710002222', renew: r.json.renew_url } });
+  assert.equal(reuse.status, 403, 'the old renew link is spent');
+  assert.match(reuse.json.error, /do not match/, 'with words that do not say which half was wrong');
   await env.STORES.delete('store:tinotuck');
   await env.STORES.delete('lock:tinotuck');
   await env.STORES.delete('pinl:tinotuck');
+});
+
+test('v2.0.0 merchant mail: the welcome confirms the address, a held money change mails a cancel link', async () => {
+  const sent = armMail();
+  try {
+    const r = await call('/api/register', { method: 'POST',
+      body: { shop_name: 'Mail Test Shop', handle: 'mailtest', whatsapp: '263710004444', owner_email: 'boss@mailtest.co.zw', currency: 'USD', rail: 'cash' } });
+    assert.equal(r.status, 201, r.text);
+    assert.equal(r.json.verify_sent, true);
+    const w = sent.find((m) => m.to === 'boss@mailtest.co.zw');
+    assert.ok(w, 'a welcome went out');
+    const body = mailBody(w);
+    assert.ok(!body.includes(String(r.json.pin)), 'the PIN is never put in a mailbox');
+    const v = body.match(/\/api\/email\/verify\?cap=(\S+)/);
+    assert.ok(v, body);
+    const page = await call('/api/email/verify?cap=' + v[1]);
+    assert.equal(page.status, 200);
+    assert.match(page.text, /confirmed/);
+    assert.equal(JSON.parse(env.STORES._map.get('store:mailtest').value).email_verified, 'boss@mailtest.co.zw');
+    assert.match(w.mime, /^From: Tapstall <box@inbox\.test>/m, 'sent from the lane, under the brand');
+    assert.match(w.mime, /^Auto-Submitted: auto-generated/m);
+
+    const s = await loginWithPin('mailtest', r.json.pin);
+    const chg = await call('/api/settings', { method: 'POST', cookie: s.cookie, confirm: true, body: { handle: 'mailtest', whatsapp: '263710005555' } });
+    assert.equal(chg.status, 200, chg.text);
+    const alert = sent.filter((m) => m.to === 'boss@mailtest.co.zw').pop();
+    const c = mailBody(alert).match(/\/api\/settings\/cancel\?cap=(\S+)/);
+    assert.ok(c, 'the owner is mailed a cancel link inside the hold: ' + mailBody(alert));
+    const view = await call('/api/settings/cancel?cap=' + c[1]);
+    assert.match(view.text, /<form method=post>/, 'GET only shows a button: a mail scanner cannot cancel anything');
+    assert.ok(JSON.parse(env.STORES._map.get('store:mailtest').value).pending, 'still pending after the GET');
+    const go = await call('/api/settings/cancel', { method: 'POST', body: { cap: decodeURIComponent(c[1]) } });
+    assert.match(go.text, /Cancelled/);
+    const after = JSON.parse(env.STORES._map.get('store:mailtest').value);
+    assert.ok(!after.pending, 'the held change is gone');
+    assert.equal((await call('/api/admin?handle=mailtest', { cookie: s.cookie })).status, 403, 'and every device is signed out');
+  } finally {
+    disarmMail();
+    for (const k of ['store:mailtest', 'lock:mailtest', 'pinl:mailtest']) await env.STORES.delete(k);
+  }
 });
 
 test('renew links are path-safe: a token can never contain a character the route rejects', async () => {
@@ -4529,9 +4602,6 @@ test('1.0.0 sellers, leads, recognised sales, and a press the clock runs by itse
   const claim = await call('/api/leads/act', { method: 'POST',
     body: { code: mine, key: keys[mine], id: lead.id, action: 'claim' } });
   assert.equal(claim.status, 200, claim.text);
-  const feed = await call('/api/leads/sheets-feed?code=' + mine + '&key=' + encodeURIComponent(keys[mine]));
-  assert.match(feed.text, /Kota Queen/, 'the sheets feed carries the seller’s queue as TSV');
-  assert.match(feed.text.split('\n')[0], /seller_code/, 'with the CRM columns in row one');
   const weakLead = all.json.leads.find((l) => l.business === 'Maybe A Shop');
   const dncAct = await call('/api/leads/act', { method: 'POST',
     body: { code: 'owner', key: SECRET, id: weakLead.id, action: 'dnc' } });
@@ -4647,6 +4717,33 @@ test('1.1.0 Whop: signed payment activates, forgery/replay/companion/failure do 
     assert.equal(stray.json.unmatched, true, 'money that matches no shop is filed, never guessed: ' + stray.text);
     assert.ok([...env.ORDERS._map.keys()].some((k) => k.startsWith('whop:unmatched:')), 'and the digest will name it');
 
+    // v2.0.0: an email match needs a confirmed email. The buyer of an unmatched payment is mailed a
+    // claim link; signed in to their shop, the claim applies the term once.
+    const sent = armMail();
+    try {
+      const byMail = await post('msg_5', { action: 'payment.succeeded', data: { id: 'pay_2000', total: 6000, currency: 'usd', user: { email: 'whop-buyer@example.com' } } });
+      assert.equal(byMail.json.unmatched, true, 'an unconfirmed owner_email is not proof the payer owns this shop: ' + byMail.text);
+      assert.equal(byMail.json.mailed, true);
+      const m = sent.find((x) => x.to === 'whop-buyer@example.com');
+      const claim = mailBody(m).match(/\/a\?claim=([a-z0-9]+)/);
+      assert.ok(claim, mailBody(m));
+      const anon = await call('/api/whop/claim', { method: 'POST', confirm: true, body: { claim: claim[1] } });
+      assert.equal(anon.status, 401, 'a claim needs a signed-in shop');
+      const sess = await loginWithPin('whop-shop', reg.json.pin);
+      const before2 = (await env.STORES.get('store:whop-shop', 'json')).paid_until;
+      const got = await call('/api/whop/claim', { method: 'POST', cookie: sess.cookie, confirm: true, body: { handle: 'whop-shop', claim: claim[1] } });
+      assert.equal(got.status, 200, got.text);
+      assert.equal(got.json.days, 365);
+      const after2 = await env.STORES.get('store:whop-shop', 'json');
+      assert.ok(after2.paid_until > before2 + 300 * 864e5, 'the claimed year landed');
+      assert.equal(after2.email_verified, 'whop-buyer@example.com', 'and the claim link proved the inbox');
+      const twice = await call('/api/whop/claim', { method: 'POST', cookie: sess.cookie, confirm: true, body: { handle: 'whop-shop', claim: claim[1] } });
+      assert.equal(twice.status, 410, 'a claim works once');
+      // now confirmed, the next email-only payment matches by itself
+      const next = await post('msg_6', { action: 'payment.succeeded', data: { id: 'pay_3000', total: 6000, currency: 'usd', user: { email: 'whop-buyer@example.com' } } });
+      assert.ok(next.json.activated === 'whop-shop' || next.json.companion, next.text);
+    } finally { disarmMail(); }
+
     // the outreach runner's doors: mailboxes only behind the admin gate, and an owner may
     // act AS the allocated seller (never for a different one)
     env.GMAIL_OWNER_USER = 'Tapstall@gmail.com'; env.GMAIL_OWNER_APP_PASSWORD = 'aaaa bbbb cccc dddd';
@@ -4658,6 +4755,89 @@ test('1.1.0 Whop: signed payment activates, forgery/replay/companion/failure do 
   } finally {
     delete env.WHOP_WEBHOOK_SECRET; delete env.WHOP_CHECKOUT_URL;
     delete env.GMAIL_OWNER_USER; delete env.GMAIL_OWNER_APP_PASSWORD;
+  }
+});
+
+test('v2.0.0 outreach: the 20-minute tick sends one gated first touch from inbox.lv, with a working one-click unsubscribe', async () => {
+  const sent = armMail();
+  env.OUTREACH_WINDOW = 'always';
+  env.MAIL_TEST_FETCH = async () => new Response(JSON.stringify({ Status: 0, Answer: [{ type: 15, data: '10 mx.hararekota.co.zw.' }] }));
+  try {
+    const ing = await call('/api/leads/ingest', { method: 'POST', confirm: true, headers: { 'x-tapstall-admin': SECRET }, body: { leads: [
+      { business: 'Harare Kota House', email: 'orders@hararekota.co.zw', phone: '263771239876', source_url: 'https://hararekota.co.zw/menu',
+        note: 'WhatsApp to order, EcoCash accepted', country: 'ZW', segment: 'social_merchants', seller_code: '' },
+      { business: 'Meta', email: 'support@meta.com', source_url: 'https://faq.whatsapp.com/123', note: 'order on whatsapp', country: 'ZW' },
+    ] } });
+    assert.equal(ing.status, 200, ing.text);
+    assert.equal(ing.json.counts.junk, 1, 'the WhatsApp FAQ is dropped at the door: ' + JSON.stringify(ing.json));
+    // this suite registered sellers, so the hash allocated the lead to one; make it a house lead
+    // (production has none) — the Worker's own voice only works the house queue
+    for (const [k, v] of env.ORDERS._map) {
+      if (!k.startsWith('lead:')) continue;
+      const l = JSON.parse(v.value || v);
+      if (l.business === 'Harare Kota House') { l.seller_code = ''; await env.ORDERS.put(k, JSON.stringify(l)); }
+    }
+    const w = await load();
+    const jobs = [];
+    await w.scheduled({ cron: '5,25,45 * * * *', scheduledTime: Date.now() }, env, { waitUntil: (p) => jobs.push(p) });
+    const out = await jobs[0];
+    assert.equal(out.outreach.sent, 1, 'one first touch per tick: ' + JSON.stringify(out));
+    assert.equal(sent.length, 1);
+    const m = sent[0];
+    assert.match(m.mime, /^List-Unsubscribe: <https:\/\/[^>]+\/u\/[a-z0-9-]+\/[A-Za-z0-9]+>/m, 'RFC 8058 header');
+    assert.match(m.mime, /^List-Unsubscribe-Post: List-Unsubscribe=One-Click/m);
+    assert.doesNotMatch(m.mime, /^Auto-Submitted/m, 'a first touch is a person writing, not an auto-reply');
+    const lead = await env.ORDERS.get('lead:' + out.outreach.to_lead, 'json');
+    assert.equal(lead.status, 'contacted');
+    assert.equal(lead.last_sender, 'box@inbox.test', 'the follow-up will come from the same box');
+    const u = mailBody(m).match(/(\/u\/[a-z0-9-]+\/[A-Za-z0-9]+)/)[1];
+    const view = await call(u);
+    assert.match(view.text, /<form method=post>/, 'GET only offers the button');
+    assert.equal((await env.ORDERS.get('lead:' + lead.id, 'json')).status, 'contacted');
+    const bad = await call(u.replace(/\/[A-Za-z0-9]+$/, '/AAAAAAAAAAAAAAAAAAAAAA'), { method: 'POST' });
+    assert.match(bad.text, /not valid/, 'a forged token unsubscribes nobody');
+    const done = await call(u, { method: 'POST' });
+    assert.match(done.text, /Done/);
+    assert.equal((await env.ORDERS.get('lead:' + lead.id, 'json')).status, 'dnc');
+    assert.ok(await env.STORES.get('Lead:' + lead.email), 'and the do-not-contact ledger has the address');
+    const lanes = await call('/api/outreach/mailboxes', { confirm: true, headers: { 'x-tapstall-admin': SECRET } });
+    const lv = lanes.json.mailboxes.find((x) => x.tag === 'LVLV1');
+    assert.ok(lv && lv.smtp === false && lv.readonly === true && lv.imap_host === 'mail.test', 'the runner polls the shared box read-only and never sends on it');
+  } finally { disarmMail(); delete env.OUTREACH_WINDOW; delete env.MAIL_TEST_FETCH; }
+});
+
+test('v2.0.0 dispatch: a failed workflow is retried on the next sweep, a dispatched one is not re-fired', async () => {
+  const saved = globalThis.fetch;
+  const fired = [];
+  let fail = true;
+  globalThis.fetch = async (u, init) => {
+    if (String(u).includes('api.github.com')) {
+      const wf = String(u).match(/workflows\/([^/]+)\//)[1];
+      fired.push(wf);
+      if (fail && wf === 'outreach.yml') throw new Error('Too many subrequests.');
+      return new Response(null, { status: 204 });
+    }
+    return saved(u, init);
+  };
+  env.GH_DISPATCH_TOKEN = 't'; env.GH_REPO = 'o/r';
+  const realDay = Date.prototype.getUTCDay;
+  Date.prototype.getUTCDay = function () { return 3; };
+  try {
+    await env.ORDERS.delete('dispatch:last');
+    const w = await load();
+    const run = async () => { const jobs = []; await w.scheduled({ scheduledTime: Date.now() }, env, { waitUntil: (p) => jobs.push(p) }); await Promise.all(jobs); };
+    await run();
+    const first = await env.ORDERS.get('dispatch:last', 'json');
+    assert.equal(first.leads_hunt, 'dispatched');
+    assert.equal(first.outreach, 'error', JSON.stringify(first));
+    fail = false; fired.length = 0;
+    await run();
+    assert.deepEqual(fired, ['outreach.yml'], 'only the one that failed is fired again');
+    const second = await env.ORDERS.get('dispatch:last', 'json');
+    assert.equal(second.outreach, 'dispatched');
+  } finally {
+    globalThis.fetch = saved; delete env.GH_DISPATCH_TOKEN; delete env.GH_REPO; Date.prototype.getUTCDay = realDay;
+    await env.ORDERS.delete('dispatch:last');
   }
 });
 
@@ -5016,36 +5196,13 @@ test('1.7.1 the three tiers are on a live page, priced flat, with no custody in 
   assert.match(page.text, /\/api\/partners\/apply/, 'and the form does not promise to phone home somewhere else');
 });
 
-test('the Google Sheet gets its own key: it can read leads and move a stage, and nothing else', async () => {
-  env.SHEET_KEY = 'sheetkey_' + 'z'.repeat(24);          // 33 chars, the length the Worker insists on
-  const feed = (q) => call('/api/leads/sheets-feed?' + q);
-  assert.equal((await feed('code=sheet&key=wrong')).status, 401, 'a wrong key is not a key');
-  assert.equal((await feed('code=sheet')).status, 401, 'nor is a missing one');
-
-  const ok = await feed('code=sheet&key=' + env.SHEET_KEY + '&fmt=json');
-  assert.equal(ok.status, 200, ok.text);
-  assert.equal(ok.json.via, 'sheet', 'the feed says which credential opened it');
-  assert.ok(Array.isArray(ok.json.leads), 'and returns the queue as data');
-  assert.equal(ok.json.count, ok.json.leads.length);
-  assert.ok(!JSON.stringify(ok.json).includes(env.SHEET_KEY), 'the key is never echoed back');
-
-  // it is a lead key, not an admin key: the discovery console stays shut
-  assert.equal((await call('/api/discover', { headers: { 'x-tapstall-admin': env.SHEET_KEY } })).status, 401,
-    'a leaked sheet key cannot open the platform console');
-  assert.equal((await call('/api/discover/run', { method: 'POST', headers: { 'x-tapstall-admin': env.SHEET_KEY } })).status, 401);
-
-  // and it can do the one write a CRM needs: move a lead's stage, as the owner, without touching money
+test('v2.0.0: the Google Sheet CRM door is gone — no feed, and SHEET_KEY opens nothing', async () => {
+  env.SHEET_KEY = 'sheetkey_' + 'z'.repeat(24);
+  const feed = await call('/api/leads/sheets-feed?code=sheet&key=' + env.SHEET_KEY + '&fmt=json');
+  assert.notEqual(feed.status, 200, 'the feed route no longer exists: ' + feed.status);
   const lead = discLeads()[0];
-  assert.ok(lead, 'there is a lead to move');
-  const moved = await call('/api/leads/act', {
-    method: 'POST', body: { code: 'sheet', key: env.SHEET_KEY, id: lead.id, action: 'contacted', note: 'called from the sheet' },
-  });
-  assert.equal(moved.status, 200, moved.text);
-  assert.equal(moved.json.lead.status, 'contacted');
-  assert.ok(moved.json.lead.next_follow_at, 'and the follow-up clock starts, because that is what contacted means');
-  const dnc = await call('/api/leads/act', { method: 'POST', body: { code: 'sheet', key: env.SHEET_KEY, id: lead.id, action: 'dnc' } });
-  assert.equal(dnc.status, 200);
-  assert.equal(dnc.json.lead.status, 'dnc', 'a do-not-contact from the sheet reaches the ledger the discovery pass reads');
+  const moved = await call('/api/leads/act', { method: 'POST', body: { code: 'sheet', key: env.SHEET_KEY, id: (lead && lead.id) || 'x', action: 'contacted' } });
+  assert.equal(moved.status, 401, 'a leftover sheet key is not a lead credential any more');
   delete env.SHEET_KEY;
 });
 

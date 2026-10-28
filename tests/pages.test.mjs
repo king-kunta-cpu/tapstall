@@ -994,7 +994,7 @@ test('every door a renew token opens checks the token against the generation', (
   assert.equal(opens.length, 3, 'the plan page, the checkout intent and the reference write, no more and no fewer: ' + opens.length);
   for (const o of opens)
     assert.match(o, /renewOk\(/, 'a renew read that never consults the rule is a link Revoke cannot close');
-  assert.equal((worker.match(/await rotateRenewLink\(env, st\)/g) || []).length, 4,   // 4 call sites, not counting the definition
+  assert.equal((worker.match(/await rotateRenewLink\(env, st\)/g) || []).length, 5,   // 5 call sites (v2.0.0: + the email cancel link), not counting the definition
     'and every site that moves the generation reissues the link, so "the current one is in your dashboard" is a fact and not a hope');
 });
 

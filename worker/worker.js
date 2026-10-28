@@ -24,6 +24,9 @@ import {
   collectInvoiceDraft, collectSettlement, verifyWebhook, payDocKey, PAY_EVENTS, COLLECT_PROVIDERS,
 } from './rail.js';
 import {
+  mailSend, mailDeliver, mailDrain, mailArmed, mailLanes, mailStatus, mailResume, mailRoom, mxOk,
+} from './mail.js';
+import {
   RAILS, round2, clamp, slug, digits, isEmail, validHandle, parseCSV, normalizeFeedUrl,
   parseProducts, priceOrder, payInstructions, riskFlags, waSummary, publicStore, hash,
   applyMenu, sanitizeMenu, menuPrice, openNow, cleanWeek, cleanRailAccts, hoursText,
@@ -46,7 +49,7 @@ import {
   meshRegister, meshCompanyIdentities, meshCompanyBeats, meshPressLedger, MESH_ID_CLASSES, MESH_ID_RAIL_DEFAULTS,
   meshIdentityPlan, contentPostedPrune, contentFingerprint, contentPosted, contentPostKey,
   contentSlotDue, contentSlotMissed, meshQueueExpire,
-  cleanSellerCode, allocateSeller, cleanLead, leadTransition, sellerBoard, commissionFor, SELLER_DEFAULT_PCT,
+  cleanSellerCode, allocateSeller, cleanLead, leadJunkReason, leadEmailFor, leadPhoneOk, leadTransition, sellerBoard, commissionFor, SELLER_DEFAULT_PCT,
   whopEventKind, whopBuyer, whopMoney, whopTerm, SUBSCRIPTION_PLANS,
   MESH_PUBLISH, MESH_BUFFER_FREE, MESH_DRIP, meshRailsTotal, meshRailHealth, meshDrip,
   MESH_RAILS, MESH_BUDGET,
@@ -226,7 +229,7 @@ export default {
     // time (a direct rail sends when a tick sees it due, unlike Buffer,
     // which schedules the draft itself). Press-only costs a handful of
     // reads an hour and no store list at all.
-    if (event && event.cron === PRESS_CRON) { ctx.waitUntil(pressTick(env)); return; }
+    if (event && event.cron === PRESS_CRON) { ctx.waitUntil(tick(env)); return; }
     ctx.waitUntil(runCron(env));
   },
 };
@@ -388,6 +391,10 @@ async function route(req, url, env, ctx) {
   if (p === '/api/admin') return adminView(req, url, env);
   if (p === '/api/settings' && req.method === 'POST') return settingsEdit(req, url, env);
   if (p === '/api/settings/revert' && req.method === 'POST') return revertPending(req, url, env);
+  if (p === '/api/email/verify' && req.method === 'GET') return emailVerify(req, url, env);
+  if (p === '/api/whop/claim' && req.method === 'POST') return whopClaim(req, url, env);
+  if (p.startsWith('/u/') && (req.method === 'GET' || req.method === 'POST')) return unsubRoute(req, url, env);
+  if (p === '/api/settings/cancel' && (req.method === 'GET' || req.method === 'POST')) return cancelByMail(req, url, env);
   if (p === '/api/menu' && req.method === 'POST') return menuEdit(req, env);
   if (p === '/api/crypto/check' && req.method === 'POST') return cryptoCheck(req, env);
   if (p === '/api/image' && req.method === 'POST') return imageUpload(req, env);
@@ -427,7 +434,6 @@ async function route(req, url, env, ctx) {
   if (p === '/api/partners/apply' && req.method === 'POST') return partnerApply(req, url, env);
   if (p === '/api/leads' && req.method === 'GET') return leadsListSeller(url, env);
   if (p === '/api/leads/act' && req.method === 'POST') return leadsAct(req, env);
-  if (p === '/api/leads/sheets-feed') return sheetsFeed(url, env);
   if (p === '/api/outreach/mailboxes') return outreachMailboxes(req, env);
 
   // The one-tap confirm link: GET renders an inert page, the browser posts.
@@ -731,7 +737,7 @@ async function placeOrder(req, url, env, ctx) {
   const prefix = (st.order_prefix || st.handle.slice(0, 3).toUpperCase()).replace(/[^A-Za-z0-9-]/g, '');
   const code = seq ? prefix + '-' + String(seq).padStart(4, '0')
     : prefix + '-' + id.slice(-6).toUpperCase();
-  const buyerHash = await hash(st.handle + '|' + buyer.phone + '|' + (env.ADMIN_SECRET || 'dev-secret'));
+  const buyerHash = await hash(st.handle + '|' + buyer.phone + '|' + (capKey(env)));
   const hist = await buyerTouch(env, st.handle, buyerHash);
 
   const order = {
@@ -765,7 +771,7 @@ async function placeOrder(req, url, env, ctx) {
   /* One-tap confirm, without a bearer credential in the URL: each link is a
    * signed, 72-hour capability for THIS order and THIS action. Stored on the
    * order so the merchant can also reach it from the dashboard later. */
-  const secret = env.ADMIN_SECRET || 'dev-secret';
+  const secret = capKey(env);
   // Both links carry the store's auth generation, so a Revoke ends them the way it ends
   // sessions and code links. A confirm link is a write, and it was the last credential in the
   // product that did not know who it belonged to.
@@ -968,7 +974,7 @@ async function notify(env, st, order) {
         // Integrity proof for the merchant's own tooling. Never send a
         // credential in a header here: their webhook target is third-party
         // software that logs what it receives.
-        'x-tapstall-body': await sign(env.ADMIN_SECRET || 'dev-secret', body),
+        'x-tapstall-body': await sign(capKey(env), body),
         // workers.dev bot rules reject requests without a browser-ish UA, which
         // would silently swallow a merchant's order notification
         'user-agent': 'tapstall/1 (order notification)',
@@ -976,16 +982,13 @@ async function notify(env, st, order) {
       body,
     }).catch(() => {}));
   }
-  if (env.EMAIL && st.notify_email) {
-    try {
-      await env.EMAIL.send(new EmailMessage(
-        `${st.handle}@notify.tapstall`, st.notify_email,
-        `New order ${order.code} — ${order.pricing.pay_now} ${st.currency || 'USD'}`,
-        notifyText(st, order)
-        + `Open this to confirm (it needs your browser, nothing else): ${order.confirm_url || ''}\n`
-        + `Dashboard: ${env.PUBLIC_ORIGIN || ''}/a with your store name and PIN`
-      ));
-    } catch (e) { /* email optional */ }
+  if (st.notify_email && mailArmed(env)) {
+    // Opt-in new-order alerts; a busy hour on the shared box parks them for the next tick.
+    tasks.push(sendMail(env, st.notify_email,
+      `New order ${order.code} — ${order.pricing.pay_now} ${st.currency || 'USD'}`,
+      notifyText(st, order)
+      + `Open this to confirm (it needs your browser, nothing else): ${order.confirm_url || ''}\n`
+      + `Dashboard: ${env.PUBLIC_ORIGIN || ''}/a with your store name and PIN\n`).catch(() => false));
   }
   await Promise.all(tasks);
 }
@@ -1016,7 +1019,7 @@ async function markPaid(req, url, env) {
     return json({ ok: false, error: 'method_not_allowed', why: 'Confirm links are opened, not fetched. Open the link in a browser and it posts itself, and the page shows you the money first.' }, 405, { Allow: 'POST' });
   }
   const b = await readBody(req);
-  const secret = env.ADMIN_SECRET || 'dev-secret';
+  const secret = capKey(env);
   const p = b.cap ? await verifyCap(secret, String(b.cap)) : null;
   const viaCap = !!(p && p.a === 'mark');
   // A `cap` that is present but not valid is the interesting case: say so, and
@@ -1095,7 +1098,7 @@ async function markPaid(req, url, env) {
 
 /** The page behind a buyer's link: the order as the shop sees it, the field, one button. */
 async function proofPage(env, cap) {
-  const p = await verifyCap(env.ADMIN_SECRET || "dev-secret", cap);
+  const p = await verifyCap(capKey(env), cap);
   const card = (title, lines, code, tail) => html(shell(title, `<h2 style="margin:.1rem 0 .5rem">${esc(title)}</h2>`
     + lines.map((t) => `<p class=t>${t}</p>`).join("") + (tail || "")), code, NOINDEX);
   if (!p || p.a !== "proof") {
@@ -1294,7 +1297,7 @@ async function proofAdd(req, url, env) {
       : json({ ok: false, error: msg, why: why || "refused", final: !!final,
         used: dead, ...(dead ? { superseded: why === "superseded" } : {}) }, code);
   };
-  const p = b.cap ? await verifyCap(env.ADMIN_SECRET || "dev-secret", String(b.cap)) : null;
+  const p = b.cap ? await verifyCap(capKey(env), String(b.cap)) : null;
   if (!p || p.a !== "proof") return no("that link does not open this field any more", 401, "", false, "cap");
   const st = await getStore(env, p.h);
   if (!st) return no("no such shop", 404, "", false, "shop");
@@ -1351,7 +1354,7 @@ async function proofAdd(req, url, env) {
   // file once can correct twice more, and does not need a second link to anybody else
   let freshUrl = "";
   if (r.changed) {
-    const fresh = await issueCap(env.ADMIN_SECRET || "dev-secret",
+    const fresh = await issueCap(capKey(env),
       { a: "proof", h: st.handle, id: o.id, g: String(st.auth_gen || "0"), n: o.pcap }, PROOF_WINDOW_SEC);
     freshUrl = "/p/" + fresh;
   }
@@ -1492,18 +1495,27 @@ async function register(req, url, env) {
     JSON.stringify({ handle, made: Date.now(), g: String(st.auth_gen || '0') }));
   const products = await loadProducts(st, env);          // cache honoured; a menu edit is applied after it, so it shows at once
   const err = st.feed_cache && st.feed_cache.error;
+  let verify_sent = false;
   if (st.owner_email) {
-    try {
-      await sendMail(env, st.owner_email, `Your ${st.shop_name} store is live`,
-        `Store: ${url.origin}/s/${handle}\nSign in at ${url.origin}/a with key ${handle} and PIN ${pin} — that is the whole method.\nManage orders there. ${st.feed_url ? `Edit your menu any time (it updates itself within ~2 min): ${st.feed_url}` : 'Add your items in the dashboard under Shop → Edit items here — no spreadsheet needed.'}\n\n${products.length} products loaded. ${err ? 'FEED WARNING: ' + err : ''}\nFree until ${new Date(st.paid_until).toDateString()}. Renew (no monthly billing): ${st.renew_url}`);
-    } catch (e) {}
+    // v2.0.0: the welcome now carries a confirm link (the confirmed address is what a Whop
+    // payment may be matched to) and no longer carries the PIN: a PIN in a mailbox outlives
+    // the screen it was shown on.
+    const vcap = await issueCap(capKey(env), { a: 'everify', h: handle, e: String(st.owner_email).toLowerCase(), g: String(st.auth_gen || '0') }, 14 * 86400);
+    verify_sent = await sendMail(env, st.owner_email, `Your ${st.shop_name} store is live — confirm your email`,
+      `Store: ${url.origin}/s/${handle}\n`
+      + `Sign in at ${url.origin}/a with your store name (${handle}) and the PIN shown when you signed up.\n\n`
+      + `Confirm this email address (one tap; it lets us match your payments and send you a reset link if you lose the PIN):\n`
+      + `${url.origin}/api/email/verify?cap=${encodeURIComponent(vcap)}\n\n`
+      + `${products.length} products loaded. ${err ? 'FEED WARNING: ' + err : ''}\n`
+      + `Free until ${new Date(st.paid_until).toDateString()}. Renew (no monthly billing): ${st.renew_url}\n`
+      + `Keep that renew link private: with your WhatsApp number it can reset your PIN.\n`);
   }
   return json({
     ok: true, handle,
     ...(st.seller_code ? { seller_code: st.seller_code } : {}),
     store_url: `${url.origin}/s/${handle}`,
-    key: handle, pin, renew_url: st.renew_url,
-    pin_note: 'Show this PIN to nobody. Change it inside the dashboard any time; if it is lost, “I lost my PIN” on the sign-in screen resets it from the store’s own details — no operator, no waiting.',
+    key: handle, pin, renew_url: st.renew_url, verify_sent,
+    pin_note: 'Show this PIN to nobody. Change it inside the dashboard any time; if it is lost, “I lost my PIN” on the sign-in screen emails a reset link to your address (or, with no email, takes your WhatsApp number and this renew link) — no operator, no waiting. Keep the renew link private.',
     products_loaded: products.length, feed_error: err || null,
     free_until: new Date(st.paid_until).toISOString(),
     note: products.length
@@ -2071,12 +2083,13 @@ async function runCron(env) {
     try { if (await governedPut(env.STORES, 'cron:last', JSON.stringify({ at: new Date().toISOString(), unix: Date.now() }), null, 'telemetry')) out.heartbeat = true; } catch (e) {}
   }
   try { out.buyer_flushed = await flushBuyerBuf(env, 25); } catch (e) { out.buyer_flushed = 0; }
-  // v1.7.1: the list builds itself. One bounded pass a day, quota-gated, and never the reason an
-  // order fails — discovery is the lowest-priority writer in the house.
-  try {
-    const d = await discoveryPass(env, {});
-    out.discovery = { added: d.added || 0, candidates: d.candidates || 0, skipped: d.skipped || null };
-  } catch (e) { out.discovery = { error: String(e && e.message || e).slice(0, 80) }; }
+  // v2.0.0: discovery moved to the 02:xx/03:xx 20-minute tick (its own subrequest budget);
+  // the press flushes on that tick too, so the 6-hourly sweep no longer runs it twice.
+  // v2.0.0: the dispatch runs first, before the store walk and the chain readers spend fetches.
+  try { out.dispatch = await dispatchTick(env); }
+  catch (e) { out.dispatch = { error: String(e && e.message || e).slice(0, 160) }; }
+  try { out.press = await pressTick(env); }        // also on the 20-minute tick; press:last dedupes a minute
+  catch (e) { out.press = { error: String(e && e.message || e).slice(0, 160) }; }
   const watch = [];                                  // shops that asked for the chain reader
   const summary = { total: 0, live: 0, suspended: 0, expiring: [] };
   out.read_docs = 0; out.legacy_docs = 0; out.backfilled = 0;
@@ -2125,14 +2138,14 @@ async function runCron(env) {
         summary.suspended = Math.max(0, summary.suspended - 1); summary.live++;
         out.reinstated++;
       } else if (leftDays > 0 && leftDays <= 7 && !st.warned_at) {
-        st.warned_at = new Date().toISOString();
-        await writeStore(env, st);
-        if (env.EMAIL && st.owner_email) {
-          try {
-            await sendMail(env, st.owner_email, `Your store renews in ${Math.ceil(leftDays)} days`,
-              `${st.shop_name} runs until ${new Date(st.paid_until).toDateString()}.\nRenew here and it switches over automatically: ${renewLink(st, env.PUBLIC_ORIGIN || '')}\n${PRICE_USD} USD / 365 days. No monthly billing, no foreign-card subscription.`);
-          } catch (e) {}
+        // v2.0.0: stamped only once the notice actually left (or there is nobody to tell);
+        // before, the stamp came first and the mail was a no-op, so no shop was ever warned.
+        let told = !st.owner_email;
+        if (st.owner_email && mailArmed(env)) {
+          told = await sendMail(env, st.owner_email, `Your store renews in ${Math.ceil(leftDays)} days`,
+            `${st.shop_name} runs until ${new Date(st.paid_until).toDateString()}.\nRenew here and it switches over automatically: ${renewLink(st, env.PUBLIC_ORIGIN || '')}\n${PRICE_USD} USD / 365 days. No monthly billing, no foreign-card subscription.`);
         }
+        if (told) { st.warned_at = new Date().toISOString(); await writeStore(env, st); }
         out.warned++;
       }
     }
@@ -2160,10 +2173,6 @@ async function runCron(env) {
    * when a scoped token is bound, and the nightly digest records the exceptions — expiries,
    * unrecognised payment references, dead rails — which are the only lines a human is for.
    * A slot that fails says so in the return value and never takes the expiry sweep down with it. */
-  try { out.press = await pressTick(env); }
-  catch (e) { out.press = { error: String(e && e.message || e).slice(0, 160) }; }
-  try { out.dispatch = await dispatchTick(env); }
-  catch (e) { out.dispatch = { error: String(e && e.message || e).slice(0, 160) }; }
   if (nightly) {
     try { out.digest = await writeDigest(env, summary); }
     catch (e) { out.digest = { error: String(e && e.message || e).slice(0, 160) }; }
@@ -2420,7 +2429,7 @@ async function flushBuyerBuf(env, cap = 100) {
 }
 
 async function selftest(env) {
-  const t = { version: VERSION, kv_stores: !!env.STORES, kv_orders: !!env.ORDERS, email: !!env.EMAIL,
+  const t = { version: VERSION, kv_stores: !!env.STORES, kv_orders: !!env.ORDERS, email: mailArmed(env),
     // whose cron is this? an alias answers redirects and skips the sweep, and the
     // deploy check reads this instead of trusting that the schedule was deleted
     cron_owner: true,
@@ -2737,10 +2746,23 @@ async function tpl(env, name) {
     + name + '&rdquo; missing</h1><p>Neither the bundle nor KV carries it. <code>./scripts/deploy.sh</code> puts git\'s'
     + ' pages into the bundle; <code>./scripts/deploy.sh --pages-override ' + name + '</code> publishes one into KV as a stopgap.</p>';
 }
-async function sendMail(env, to, subject, text) {
-  if (!env.EMAIL) return false;
-  await env.EMAIL.send(new EmailMessage('no-reply@zlnew.workers.dev', to, subject, text));
-  return true;
+/** The signing key for every capability, session and webhook signature. There used to be a
+ *  `|| 'dev-secret'` fallback, so a deploy that lost the secret would mint sessions anyone could
+ *  forge. Missing is now an error (the router answers 500) instead of a public key. */
+function capKey(env) {
+  const k = env && env.ADMIN_SECRET;
+  if (!k || String(k).length < 8) throw new Error('ADMIN_SECRET is not set (or shorter than 8 characters)');
+  return k;
+}
+
+/** v2.0.0: merchant mail goes out over the inbox.lv lane (worker/mail.js). Before this the
+ *  function called `new EmailMessage(...)` with no import and no EMAIL binding: every merchant
+ *  mail since launch was a silent no-op. Returns true when the message left or was parked for the
+ *  20-minute retry; false when no lane is armed or the address is unusable. Never throws. */
+async function sendMail(env, to, subject, text, extra) {
+  if (!to) return false;
+  const r = await mailDeliver(env, { to, subject, text, ...(extra || {}) });
+  return !!(r.sent || r.queued);
 }
 
 const nowId = () => Date.now().toString(36) + rand(4);
@@ -2942,7 +2964,7 @@ async function identify(req, env, handle) {
   const raws = cookieVals(req, 'tp_sess');
   if (raws.length) {
     for (const raw of raws) {
-    const p = await verifyCap(env.ADMIN_SECRET || 'dev-secret', raw);
+    const p = await verifyCap(capKey(env), raw);
     // gen-rule: strict — deliberately not `capGenOk`. A cookie has a self-service replacement one
     // tap away (sign in again), so there is no buyer to strand and no cliff to soften; the time
     // branch exists to keep a *stranger* holding a dead link from being punished for a release
@@ -3078,7 +3100,7 @@ async function pinLogin(req, env) {
     }
     return json({ ok: false, need_login: true, error: 'Store name or PIN is wrong.' }, 401);
   }
-  const sess = await issueCap(env.ADMIN_SECRET || 'dev-secret',
+  const sess = await issueCap(capKey(env),
     { a: 'sess', h: st.handle, g: String(st.auth_gen || '0') }, SESS_TTL);
   await authClear(env, handle);
   await pinClear(env, handle);
@@ -4020,48 +4042,102 @@ async function pinChange(req, env) {
 }
 
 /**
- * The forgotten-PIN path, which needs nobody: prove the two things only the owner
- * holds — the contact on the store and the payout account (the menu link for a
- * cash shop) — and a new PIN is set on the spot. Every other session dies with it,
- * because this is the door you use when somebody else might know your PIN.
+ * The forgotten-PIN path, v2.0.0. The old one accepted the owner email (or the public WhatsApp
+ * number) plus a "second detail" that, for a shop with no pay account and no menu link, was the
+ * owner email again: one guessable fact took over a store and its payout account. Now:
+ *   1. {key} alone -> a one-hour, single-use link goes to the email on file (bound to the PIN
+ *      and the session generation, so it dies the moment the PIN changes). The response shows
+ *      only a masked address.
+ *   2. {cap, new_pin} -> the link's page sets the PIN.
+ *   3. Shops with no email: the store WhatsApp number AND the renew link (which only the owner
+ *      was given). Payment changes are then held for 24 hours, and the email on file, if any,
+ *      is told.
+ * Every success signs out every other device and rotates the renew link.
  */
+const RESET_LINK_TTL = 3600;
+const RESET_HOLD_MS = 24 * 3600e3;
+const RESET_MAIL_GAP_MS = 10 * 60e3;
 async function pinReset(req, env) {
   const b = await readBody(req);
+  if (b.cap) return pinResetByLink(req, env, b);
   const handle = slug(String(b.key || b.handle || ''));
   const st = await getStore(env, handle);
   if (!st) return json({ ok: false, need_login: true, error: 'No store with that name.' }, 404);
   const frozen = await pinLockedOut(env, handle);
   if (frozen) return json({ ok: false, need_login: true, error: 'Too many attempts — wait ' + Math.ceil(frozen / 60) + ' minutes.', retry_in_sec: frozen }, 429);
+  const origin = new URL(req.url).origin;
+  const details = !!(b.whatsapp || b.renew || b.owner_email);
+  if (!details) {
+    if (!st.owner_email || !mailArmed(env)) {
+      return json({ ok: false, no_email: true, error: st.owner_email
+        ? 'Email is not switched on for this service right now. Use your store WhatsApp number and your renew link instead.'
+        : 'This store has no email on file. Use your store WhatsApp number and your renew link instead.' }, 409);
+    }
+    const to = maskField('notify_email', st.owner_email);
+    if (Date.now() - (Date.parse(st.reset_mail_at || '') || 0) < RESET_MAIL_GAP_MS) {
+      return json({ ok: true, sent_to: to, note: 'A link was sent a few minutes ago. Check that inbox and its spam folder; it works for one hour.' });
+    }
+    const cap = await issueCap(capKey(env), { a: 'pinreset', h: handle, g: String(st.auth_gen || '0'),
+      ps: String((st.pin && st.pin.set_at) || '0') }, RESET_LINK_TTL);
+    const link = `${origin}/a?reset=${encodeURIComponent(cap)}`;
+    const sent = await sendMail(env, st.owner_email, `Reset the PIN for ${st.shop_name || handle}`,
+      `Someone (hopefully you) asked to reset the PIN for your Tapstall store "${st.shop_name || handle}".\n\n`
+      + `Open this link within one hour to choose a new PIN:\n${link}\n\n`
+      + `It works once. If you did not ask for this, ignore this email: nothing changes and your PIN still works.\n`);
+    if (!sent) return json({ ok: false, error: 'The email could not be sent just now. Try again in a few minutes, or use your store WhatsApp number and renew link.' }, 503);
+    st.reset_mail_at = new Date().toISOString();
+    await writeStore(env, st);
+    await pushAudit(env, st, { act: 'pin_reset_link', via: 'owner', fields: [], ip: ipOf(req) });
+    return json({ ok: true, sent_to: to, note: 'We emailed a reset link to ' + to + '. It works once, for one hour. Check spam if it is not there in a few minutes.' });
+  }
   const email = String(b.owner_email || '').toLowerCase().trim();
   const wa = digits(String(b.whatsapp || '')).replace(/\D/g, '');
   const okWho = (st.owner_email && isEmail(email) && timingSafeEq(String(st.owner_email).toLowerCase(), email))
              || (st.whatsapp && wa && timingSafeEq(String(st.whatsapp).replace(/\D/g, ''), wa));
-  // Second detail, in order of how well it is kept: the pay account (on slips, not
-  // on the page), then the sheet link, then — for a store that has set neither yet,
-  // which is every store in its first hour if it came here without a sheet — the
-  // owner address it signed up with. Weaker than the other two and honest about it:
-  // an address is not secret, and a stranger still has to know this store's key.
-  const field = st.pay_account ? 'pay_account' : (st.feed_url ? 'feed_url' : 'owner_email');
-  const proof = String(b[field] || b.pay_account || b.feed_url || '').trim();
-  const want = String(field === 'owner_email' ? st.owner_email : st[field]).trim();
-  const okProof = !!want && !!proof && timingSafeEq(field === 'owner_email' ? want.toLowerCase() : want,
-                                                 field === 'owner_email' ? proof.toLowerCase() : proof);
+  const renewTok = String(b.renew || '').trim().split('/renew/').pop().replace(/[^a-z0-9]/g, '');
+  const wantTok = String(st.renew_url || '').split('/renew/')[1] || '';
+  const okProof = !!wantTok && !!renewTok && timingSafeEq(wantTok, renewTok);
   if (!okWho || !okProof) {
     await pinFail(env, handle);            // one counter, in memory; see pinLogin
-    return json({ ok: false, need_login: true, error: 'Those details do not match this store.' }, 403);
+    return json({ ok: false, need_login: true, error: 'Those details do not match this store. You need the store WhatsApp number (or email) and the renew link you were given at sign-up.' }, 403);
   }
+  return finishPinReset(req, env, st, b, 'details');
+}
+async function pinResetByLink(req, env, b) {
+  const p = await verifyCap(capKey(env), String(b.cap || ''));
+  const dead = json({ ok: false, error: 'This reset link has expired or was already used. Ask for a new one from the sign-in screen.' }, 403);
+  if (!p || p.a !== 'pinreset') return dead;
+  const st = await getStore(env, p.h);
+  if (!st) return dead;
+  if (!capGenOk(p, st) || String((st.pin && st.pin.set_at) || '0') !== String(p.ps)) return dead;
+  return finishPinReset(req, env, st, b, 'link');
+}
+async function finishPinReset(req, env, st, b, how) {
   let next = PIN_NORMALIZE(b.new_pin || b.pin);
   if (!next) next = genPin();
   else if (!validPin(next)) return json({ ok: false, error: 'A PIN is 6 to 8 digits.' }, 422);
+  const handle = st.handle;
   st.pin = await pinRecord(next);
   st.auth_gen = Date.now().toString(36);
   delete st.pending;
+  delete st.reset_mail_at;
+  if (how === 'details') st.reset_hold_until = Date.now() + RESET_HOLD_MS;
+  if (how === 'link' && st.owner_email) st.email_verified = String(st.owner_email).toLowerCase();   // they read that inbox
   await rotateRenewLink(env, st);          // the same lever moves the same set of credentials
   await writeStore(env, st);
   await pinClear(env, handle); await authClear(env, handle);
-  await pushAudit(env, st, { act: 'pin_reset', via: 'owner', fields: ['pin', 'auth_gen'], ip: ipOf(req) });
+  await pushAudit(env, st, { act: 'pin_reset', via: how === 'link' ? 'email_link' : 'details', fields: ['pin', 'auth_gen'], ip: ipOf(req) });
+  if (st.owner_email) {
+    const origin = new URL(req.url).origin;
+    await sendMail(env, st.owner_email, `Your Tapstall PIN was reset`,
+      `The PIN for "${st.shop_name || handle}" was reset just now `
+      + (how === 'link' ? 'from the reset email' : 'using the store WhatsApp number and renew link') + '. Every other device was signed out.\n\n'
+      + `If this was not you, open ${origin}/a, choose "I lost my PIN", and a link to this inbox takes the store back.`
+      + (how === 'details' ? ' Payment changes are on hold for 24 hours, so nothing can be rerouted meanwhile.' : '') + '\n');
+  }
   return json({ ok: true, handle, pin: next,
-    note: 'That is your PIN now, everywhere. Sign in with your store name and it — other devices are signed out.' });
+    note: 'That is your PIN now, everywhere. Sign in with your store name and it — other devices are signed out.'
+      + (how === 'details' ? ' Payment changes made in the next 24 hours wait the full day before they apply.' : '') });
 }
 
 function urlHandle(req) {
@@ -4117,7 +4193,9 @@ async function settingsEdit(req, url, env) {
   const before = {};
   for (const k of keys) before[k] = maskField(k, st[k]);
   const refsBefore = referencedImages(st);       // the logo/cover about to be replaced, if any
-  const { changed, staged } = stageSettings(st, v.soft, v.money, HOLD_MS, Date.now());
+  // after a WhatsApp+renew-link reset, money changes wait a full day (the owner's inbox gets a say)
+  const holdMs = Math.max(HOLD_MS, (Number(st.reset_hold_until) || 0) - Date.now());
+  const { changed, staged } = stageSettings(st, v.soft, v.money, holdMs, Date.now());
   const after = {};
   for (const k of keys) {
     const held = st.pending && st.pending.fields && k in st.pending.fields;
@@ -4129,6 +4207,22 @@ async function settingsEdit(req, url, env) {
   if (changed && (v.soft.logo !== undefined || v.soft.cover_image !== undefined)) await pruneImages(env, st, refsBefore);
   const logged = (changed || staged) ? await pushAudit(env, st, { act: 'settings', via: who.via, changed, staged, before, after, ip: ipOf(req) }) : true;
   const held = Object.keys(v.money);
+  // v2.0.0: a held change is only a defence if the owner hears about it inside the hold.
+  if (staged && st.pending && st.owner_email) {
+    const origin = new URL(req.url).origin;
+    const cap = await issueCap(capKey(env), { a: 'cancelchg', h: st.handle, at: String(st.pending.set_at), g: String(st.auth_gen || '0') }, 2 * 86400);
+    await sendMail(env, st.owner_email, `A payment or contact change on ${st.shop_name || st.handle}`,
+      `These settings on your Tapstall store were changed and apply at ${new Date(st.pending.apply_at).toUTCString()}:\n`
+      + held.map((k) => `  ${k}: ${before[k] || '(empty)'} -> ${after[k] || '(empty)'}`).join('\n') + '\n\n'
+      + `If that was you, do nothing. If it was not, open this link before then to cancel it and sign every device out:\n`
+      + `${origin}/api/settings/cancel?cap=${encodeURIComponent(cap)}\n`);
+  }
+  const newMail = String((v.money && v.money.owner_email) || (v.soft && v.soft.owner_email) || '').toLowerCase();
+  if (newMail && newMail !== st.email_verified && (changed || staged)) {
+    const vcap = await issueCap(capKey(env), { a: 'everify', h: st.handle, e: newMail, g: String(st.auth_gen || '0') }, 14 * 86400);
+    await sendMail(env, newMail, `Confirm your email for ${st.shop_name || st.handle}`,
+      `Tap to confirm this address for your Tapstall store "${st.shop_name || st.handle}":\n${new URL(req.url).origin}/api/email/verify?cap=${encodeURIComponent(vcap)}\n\nIf you did not add this address, ignore this email.\n`);
+  }
   return json({
     ok: true, applied_now: changed ? Object.keys(v.soft) : [],
     logged,                                    // false = a gap in the change log,
@@ -4142,6 +4236,49 @@ async function settingsEdit(req, url, env) {
         ? 'Payment, menu and contact changes take effect after 15 minutes and you can cancel them in that window. Anyone already ordering pays the account printed on their slip, so a stolen link cannot quietly reroute today’s takings.'
         : 'Saved.',
   });
+}
+
+/** The email's cancel link. GET only renders a button (mail scanners prefetch links); the POST
+ *  cancels the held change, signs every device out and rotates the renew link. */
+/** The welcome mail's confirm link. GET is fine here: confirming is idempotent and grants nothing
+ *  but "this address reads its mail" (a prefetching scanner can only confirm the true owner's box). */
+async function emailVerify(req, url, env) {
+  const p = await verifyCap(capKey(env), String(url.searchParams.get('cap') || ''));
+  const page = (msg) => html('<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><meta name=robots content=noindex>'
+    + '<title>Tapstall</title><body style="font:17px system-ui;max-width:34rem;margin:3rem auto;padding:0 1rem;line-height:1.5"><h1 style="font-size:1.3rem">Tapstall</h1><p>' + msg + '</p><p><a href="/a">Open your dashboard</a></p></body>', 200, NOINDEX);
+  if (!p || p.a !== 'everify') return page('This confirm link has expired. Your store works as before; sign in and save your email again to get a fresh one.');
+  const st = await getStore(env, p.h);
+  const pend = st && st.pending && st.pending.fields && String(st.pending.fields.owner_email || '').toLowerCase();
+  if (!st || !capGenOk(p, st) || (String(st.owner_email || '').toLowerCase() !== p.e && pend !== p.e)) return page('That address is no longer the one on this store, so there is nothing to confirm.');
+  if (st.email_verified !== p.e) {
+    st.email_verified = p.e;
+    await writeStore(env, st);
+    await pushAudit(env, st, { act: 'email_verified', via: 'email_link', fields: ['owner_email'], ip: ipOf(req) });
+  }
+  return page('Thanks — <b>' + p.e.replace(/[&<>"]/g, '') + '</b> is confirmed for this store.');
+}
+
+async function cancelByMail(req, url, env) {
+  const raw = req.method === 'POST' ? String((await readBody(req).catch(() => ({}))).cap || '') : String(url.searchParams.get('cap') || '');
+  const p = await verifyCap(capKey(env), raw);
+  const page = (msg, form) => html('<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><meta name=robots content=noindex>'
+    + '<title>Tapstall</title><body style="font:17px system-ui;max-width:34rem;margin:3rem auto;padding:0 1rem;line-height:1.5"><h1 style="font-size:1.3rem">Tapstall</h1><p>' + msg + '</p>' + (form || '') + '</body>', 200, NOINDEX);
+  if (!p || p.a !== 'cancelchg') return page('This link has expired. Sign in at <a href="/a">/a</a> to see your settings.');
+  const st = await getStore(env, p.h);
+  if (!st || !capGenOk(p, st) || !st.pending || String(st.pending.set_at) !== String(p.at)) return page('There is nothing waiting to cancel: the change was already cancelled or has applied. Sign in at <a href="/a">/a</a> to check your settings.');
+  if (req.method !== 'POST') {
+    const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    return page('Cancel the change waiting on <b>' + esc(st.shop_name || st.handle) + '</b> (' + esc(Object.keys(st.pending.fields).join(', ')) + ') and sign out every device?',
+      '<form method=post><input type=hidden name=cap value="' + esc(raw) + '"><button style="font:inherit;padding:.7rem 1.2rem">Cancel the change</button></form>');
+  }
+  const was = Object.keys(st.pending.fields);
+  delete st.pending;
+  st.auth_gen = Date.now().toString(36);
+  await rotateRenewLink(env, st);
+  await writeStore(env, st);
+  await authClear(env, st.handle);
+  await pushAudit(env, st, { act: 'revert', via: 'email_link', fields: was, ip: ipOf(req) });
+  return page('Cancelled. Every device is signed out. If someone else knows your PIN, open <a href="/a">/a</a>, choose "I lost my PIN", and we will email you a link to set a new one.');
 }
 
 async function revertPending(req, url, env) {
@@ -4269,7 +4406,7 @@ function linkClosed(o) {
 }
 
 async function confirmPage(env, cap) {
-  const p = await verifyCap(env.ADMIN_SECRET || 'dev-secret', cap);
+  const p = await verifyCap(capKey(env), cap);
   let custom = (await tplPage(env, 'confirm')).html || null;      // the same one reader, for the same reason
   if (custom && custom.length > 200) {
     // same state machine, markup from KV so the page can be re-skinned without
@@ -4391,7 +4528,7 @@ async function opsGen(env) {
 }
 
 async function opsIssue(env) {
-  return issueCap(env.ADMIN_SECRET || 'dev-secret', { a: 'ops', g: VERSION, n: await opsGen(env) }, SESS_TTL);
+  return issueCap(capKey(env), { a: 'ops', g: VERSION, n: await opsGen(env) }, SESS_TTL);
 }
 
 async function opsAuthed(req, env) {
@@ -4402,7 +4539,7 @@ async function opsAuthed(req, env) {
   if (!raws.length) return { anon: true };
   const gen = String(await opsGen(env));
   for (const raw of raws) {
-    const p = await verifyCap(env.ADMIN_SECRET || 'dev-secret', raw);
+    const p = await verifyCap(capKey(env), raw);
     if (p && p.a === 'ops' && String(p.n) === gen) return { ok: true };
   }
   return { bad: true };
@@ -4663,7 +4800,7 @@ async function opsHealth(env) {
       direct_bound: Object.keys(directCredsFor(env, e, id)) }));
     pipeline.armed = {
       whop: !!env.WHOP_WEBHOOK_SECRET, whop_checkout: !!(env.WHOP_CHECKOUT_URL || env.WHOP_CHECKOUT_URL_ANNUAL),
-      flutterwave: !!env.FW_SECRET, payfast: !!env.PAYFAST_PASSPHRASE, email: !!env.EMAIL,
+      flutterwave: !!env.FW_SECRET, payfast: !!env.PAYFAST_PASSPHRASE, email: mailArmed(env),
       gh_dispatch: !!env.GH_DISPATCH_TOKEN, trongrid_key: !!env.TRONGRID_KEY,
     };
     pipeline.sellers_active = (await listSellers(env)).filter((s) => s.active !== false).length;
@@ -4746,11 +4883,9 @@ async function opsStoreAction(req, env) {
         sent.push('webhook');
       } catch (e) { failed.push('webhook'); }
     }
-    if (env.EMAIL && (st.owner_email || st.notify_email)) {
-      try {
-        await sendMail(env, st.owner_email || st.notify_email, 'A note about your Tapstall store', String(b.message || 'Your store is running normally. No action needed.'));
-        sent.push('email');
-      } catch (e) { failed.push('email'); }
+    if (mailArmed(env) && (st.owner_email || st.notify_email)) {
+      const ok = await sendMail(env, st.owner_email || st.notify_email, 'A note about your Tapstall store', String(b.message || 'Your store is running normally. No action needed.'));
+      (ok ? sent : failed).push('email');
     }
     // a channel that threw is not a delivery: saying "Sent." when the POST
     // failed would leave the operator believing the merchant had been told
@@ -5011,7 +5146,7 @@ async function withAsk(o, st, origin, env) {
   }
   // `n` only when the reader has a nonce to offer: an unbound cap is honoured (it is how
   // orders placed before this release keep working), but a bound one is worth one write
-  const cap = await issueCap(env.ADMIN_SECRET || 'dev-secret',
+  const cap = await issueCap(capKey(env),
     { a: 'proof', h: st.handle, id: o.id, g: String(st.auth_gen || '0'), ...(o.pcap ? { n: o.pcap } : {}) },
     PROOF_WINDOW_SEC);
   const here = origin + '/p/' + cap;
@@ -5224,24 +5359,13 @@ async function sellerAuth(env, codeIn, keyIn) {
   const h = await hash(code + ':' + key);
   return timingSafeEq(h, String(doc.key_hash)) ? doc : null;
 }
-/** Owner-as-seller for the sheets feed and lead doors: code `owner` with the platform secret.
- *  Returns a sentinel doc so callers can tell "sees everything" from "sees their own book". */
-/* Two credentials open the lead surface, and only the lead surface:
- *   owner + ADMIN_SECRET   — the platform's own key, for the ops console and press;
- *   sheet + SHEET_KEY      — a key minted for one Google Sheet, so the person running the CRM
- *                            never has to be handed the platform secret. It resolves to the same
- *                            actor (an owner may act across seller allocations), and nothing else
- *                            in the Worker accepts it: it cannot deploy, cannot read a merchant's
- *                            store, cannot touch money. If the sheet leaks, rotate one secret.
- */
+/** Owner-as-seller for the lead doors: code `owner` with the platform secret. Returns a sentinel
+ *  doc so callers can tell "sees everything" from "sees their own book". (v2.0.0: the Google Sheet
+ *  CRM key and its feed are gone — one less credential, one less breaking point.) */
 async function leadActor(env, codeIn, keyIn) {
   const code = String(codeIn || '');
   if (code === 'owner' && env.ADMIN_SECRET && keyIn && timingSafeEq(String(keyIn), String(env.ADMIN_SECRET))) {
     return { code: 'owner', owner: true, active: true, via: 'admin' };
-  }
-  if (code === 'sheet' && env.SHEET_KEY && String(env.SHEET_KEY).length >= 24
-      && keyIn && timingSafeEq(String(keyIn), String(env.SHEET_KEY))) {
-    return { code: 'owner', owner: true, active: true, via: 'sheet' };
   }
   return sellerAuth(env, codeIn, keyIn);
 }
@@ -5420,11 +5544,15 @@ async function leadsIngest(req, env) {
 async function ingestLeads(env, rawList) {
   const raw = (rawList || []).slice(0, 100);
   const activeCodes = (await listSellers(env)).filter((s) => s.active !== false).map((s) => s.code);
-  const counts = { received: raw.length, added: 0, updated: 0, duplicate: 0, dnc_skipped: 0, invalid: 0, research_hold: 0 };
+  const counts = { received: raw.length, added: 0, updated: 0, duplicate: 0, dnc_skipped: 0, invalid: 0, junk: 0, research_hold: 0 };
+  const junkWhy = {};
   const added = [];
   for (const item of raw) {
     const lead = cleanLead(item, { now: Date.now() });
     if (!lead.id) { counts.invalid++; continue; }
+    // v2.0.0: a search result about WhatsApp is not a WhatsApp seller. Junk is counted and dropped
+    // before any write, so a bad source costs reads, never the day's write budget or a stranger's inbox.
+    if (lead.junk) { counts.junk++; const k = String(lead.junk).split(' (')[0]; junkWhy[k] = (junkWhy[k] || 0) + 1; continue; }
     const dncHit = (lead.email && await env.STORES.get('Lead:' + lead.email).catch(() => null))
       || (lead.phone && await env.STORES.get('Lead:' + lead.phone).catch(() => null));
     if (dncHit) { counts.dnc_skipped++; continue; }
@@ -5435,7 +5563,7 @@ async function ingestLeads(env, rawList) {
       const before = JSON.stringify([existing.signals || [], existing.status, existing.score]);
       existing.signals = merged;
       existing.score = Math.max(Number(existing.score) || 0, lead.score);
-      if (existing.status === 'research_hold' && merged.length >= 2) existing.status = 'queued';
+      if (existing.status === 'research_hold' && merged.length >= 2 && !leadJunkReason(existing) && (existing.email || existing.phone)) existing.status = 'queued';
       if (!existing.source_url && lead.source_url) existing.source_url = lead.source_url;
       if (JSON.stringify([existing.signals, existing.status, existing.score]) !== before) {
         await env.ORDERS.put('lead:' + lead.id, JSON.stringify(existing)); quotaNote('writes', 'automation'); memDel('leads:all'); counts.updated++;
@@ -5448,7 +5576,7 @@ async function ingestLeads(env, rawList) {
     counts.added++; if (lead.status === 'research_hold') counts.research_hold++;
     if (added.length < 100) added.push(lead.id);
   }
-  return { ok: true, counts, added_ids: added,
+  return { ok: true, counts, junk_why: junkWhy, added_ids: added,
     note: 'Two signals is the door out of research_hold; allocation is by hash across active sellers; dnc is checked before anything is stored. No outreach is sent here — this fills the queue sellers work.' };
 }
 async function leadsListSeller(url, env) {
@@ -5641,20 +5769,6 @@ async function partnerApply(req, url, env) {
     200, { 'Cache-Control': 'no-store' });
 }
 
-async function sheetsFeed(url, env) {
-  const doc = await leadActor(env, url.searchParams.get('code') || '', url.searchParams.get('key') || '');
-  if (!doc) return json({ ok: false, error: 'seller code + key required' }, 401);
-  const leads = await listLeads(env, { ...(doc.owner ? {} : { seller: doc.code }), limit: 1000 });
-  if ((url.searchParams.get('fmt') || 'tsv') === 'json') {
-    return json({ ok: true, seller: doc.code, via: doc.via || 'seller', count: leads.length, at: new Date().toISOString(), leads },
-      200, { 'Cache-Control': 'no-store' });
-  }
-  const cols = ['id', 'business', 'name', 'email', 'phone', 'country', 'segment', 'score', 'signals', 'seller_code', 'status', 'source', 'source_url', 'next_follow_at', 'shop', 'note', 'updated_at'];
-  const cell = (v) => String(Array.isArray(v) ? v.join(',') : (v ?? '')).replace(/[\t\r\n]/g, ' ');
-  const lines = [cols.join('\t')].concat(leads.map((l) => cols.map((c) => cell(c === 'updated_at' ? (l.updated_at || l.created_at) : l[c])).join('\t')));
-  return new Response(lines.join('\n') + '\n', { headers: { 'content-type': 'text/tab-separated-values; charset=utf-8', 'cache-control': 'no-store' } });
-}
-
 /* ---- scheduler slots ---- */
 const PRESS_ORIGIN_FALLBACK = 'https://tapstall.zlnew.workers.dev';
 async function pressTick(env) {
@@ -5682,31 +5796,170 @@ async function dispatchTick(env) {
   if (day === 0 || day === 6) return { skipped: 'weekend' };
   if (!env.ORDERS) return { ran: 0 };
   const stamp = new Date().toISOString().slice(0, 10);
-  const last = await env.ORDERS.get('dispatch:last', 'json').catch(() => null);
-  if (last && last.day === stamp) return { skipped: 'today already dispatched', day: stamp };
-  const out = { day: stamp, at: new Date().toISOString(), leads_hunt: 'skipped_no_token', outreach: 'skipped_no_token' };
-  if (env.GH_DISPATCH_TOKEN && env.GH_REPO) {
-    const fire = async (wf, inputs) => {
-      const r = await fetch('https://api.github.com/repos/' + env.GH_REPO + '/actions/workflows/' + wf + '/dispatches', {
-        method: 'POST', headers: { authorization: 'Bearer ' + env.GH_DISPATCH_TOKEN, accept: 'application/vnd.github+json',
-          'content-type': 'application/json', 'user-agent': 'tapstall/1 (scheduler)' },
-        body: JSON.stringify({ ref: env.GH_REF || 'main', inputs }) });
-      return r.status === 204 ? 'dispatched' : 'http ' + r.status;
-    };
+  const last0 = await env.ORDERS.get('dispatch:last', 'json').catch(() => null);
+  const last = (last0 && last0.day === stamp) ? last0 : null;
+  const done = (k) => !!(last && last[k] === 'dispatched');
+  if (done('leads_hunt') && done('outreach')) return { skipped: 'today already dispatched', day: stamp };
+  const out = { day: stamp, at: new Date().toISOString(),
+    leads_hunt: done('leads_hunt') ? 'dispatched' : 'skipped_no_token', outreach: done('outreach') ? 'dispatched' : 'skipped_no_token' };
+  if (!(env.GH_DISPATCH_TOKEN && env.GH_REPO)) return out;   // nothing attempted, nothing worth a write
+  const fire = async (wf, inputs) => {
+    const r = await fetch('https://api.github.com/repos/' + env.GH_REPO + '/actions/workflows/' + wf + '/dispatches', {
+      method: 'POST', headers: { authorization: 'Bearer ' + env.GH_DISPATCH_TOKEN, accept: 'application/vnd.github+json',
+        'content-type': 'application/json', 'user-agent': 'tapstall/1 (scheduler)' },
+      body: JSON.stringify({ ref: env.GH_REF || 'main', inputs }) });
+    return r.status === 204 ? 'dispatched' : 'http ' + r.status;
+  };
+  // v2.0.0: each workflow is stamped on its own and only when GitHub said 204. The old code stamped
+  // the day after an exception ("Too many subrequests"), so a failed morning was never retried.
+  if (!done('leads_hunt')) {
     try { out.leads_hunt = await fire('leads-hunt.yml', { post: 'true' }); }
     catch (e) { out.leads_hunt = 'error'; out.error = String(e && e.message || e).slice(0, 120); }
+  }
+  if (!done('outreach')) {
     try { out.outreach = await fire('outreach.yml', { mode: 'send_and_poll' }); }
     catch (e) { out.outreach = 'error'; out.outreach_error = String(e && e.message || e).slice(0, 120); }
   }
-  // No token bound means nothing was dispatched and nothing needs remembering:
-  // writing "skipped" four times a day would spend the budget to record an
-  // absence. The stamp lands only when a dispatch was actually attempted, so
-  // binding the token later the same day still fires that day's work.
-  if (env.GH_DISPATCH_TOKEN && env.GH_REPO) {
-    try { await governedPut(env.ORDERS, 'dispatch:last', JSON.stringify(out), null, 'automation'); } catch (e) { void e; }
+  try { await governedPut(env.ORDERS, 'dispatch:last', JSON.stringify(out), null, 'automation'); } catch (e) { void e; }
+  return out;
+}
+/* ------------------------------------------------------------ outreach over inbox.lv (v2.0.0)
+ * The Gmail runner (Actions, once a weekday) stays; this is the second voice: the Worker itself
+ * sends a first touch or a due follow-up from the inbox.lv box, at most one per 20-minute tick
+ * and only while the lane has room after a slot is held back for merchant mail. Weekdays,
+ * 07:00–16:59 UTC (09:00–18:59 in Harare/Johannesburg). House leads only (a seller's lead is
+ * that seller's voice). Every lead is re-judged by the v2 gate before a byte is sent, the
+ * domain must publish a mail server, and every message carries a one-click unsubscribe.
+ * A follow-up goes out from the box the first touch came from, so a thread stays one voice. */
+const OUT_FOLLOW_DAYS = [3, 5, 7];
+const OUT_MAX_TOUCHES = OUT_FOLLOW_DAYS.length;
+
+async function unsubLink(env, lead) {
+  const tok = (await sign(capKey(env), 'unsub:' + lead.id)).replace(/[^A-Za-z0-9]/g, '').slice(0, 22);
+  return `${String(env.PUBLIC_ORIGIN || PRESS_ORIGIN_FALLBACK).replace(/\/+$/, '')}/u/${lead.id}/${tok}`;
+}
+function outreachCompose(lead, origin, fromName, unsub, postal) {
+  const biz = String(lead.business || '').trim() || 'there';
+  const link = String(origin).replace(/\/+$/, '') + '/onboard';
+  const touch = Math.min(Number(lead.touches) || 0, OUT_MAX_TOUCHES - 1);
+  const sig = new Set(lead.signals || []);
+  const ev = sig.has('whatsapp_selling') ? `I came across ${biz} taking orders on WhatsApp.`
+    : sig.has('payment_friction') ? `I came across ${biz} while looking at how shops here match payments to orders.`
+    : `I came across ${biz} online.`;
+  const foot = `\n\n—\nNot for you? One click and we never write again: ${unsub}` + (postal ? `\n${postal}` : '');
+  const subjects = [`${biz} — orders that identify their own payment`, `Following up — ${biz} on Tapstall`, `Last note from me — ${biz}`];
+  const bodies = [
+    `Hi ${biz} team,\n\n${ev} Tapstall gives a shop like yours one link: customers pick from your menu, pay your own `
+      + `EcoCash/PayShap/bank account, and every order carries a unique amount down to the cent — so the money that lands `
+      + `identifies the order, no screenshots to argue about.\n\nIt is free for 60 days, then USD 60/year (or USD 7/month). `
+      + `No commission on your sales, no order cap.\n\nStart here: ${link}\n\n— ${fromName}, Tapstall\nA reply to this email reaches a person.`,
+    `Hi again,\n\nShort version: your menu on one link, payment straight to your own account, and an exact amount per `
+      + `order so fake proof-of-payment stops working. Free for 60 days:\n${link}\n\n— ${fromName}`,
+    `Hi — last note from me. If order-taking on WhatsApp ever starts costing you sales or disputes, your shop link can be `
+      + `live in about two minutes:\n${link}\n\n— ${fromName}`,
+  ];
+  return { subject: subjects[touch], text: bodies[touch] + foot };
+}
+async function leadPut(env, lead) {
+  await env.ORDERS.put('lead:' + lead.id, JSON.stringify(lead)); quotaNote('writes', 'automation'); memDel('leads:all');
+}
+async function leadDnc(env, lead, why, by) {
+  const t = leadTransition(lead, 'dnc', 'owner', { now: Date.now() });
+  const next = t.ok ? t.lead : { ...lead, status: 'dnc' };
+  next.note = String(why || 'do not contact').slice(0, 300);
+  await leadPut(env, next);
+  const rec = JSON.stringify({ at: new Date().toISOString(), by: by || 'owner', why: String(why || '').slice(0, 80) });
+  try {
+    if (next.email) await env.STORES.put('Lead:' + next.email, rec);
+    if (next.phone && by !== 'mx') await env.STORES.put('Lead:' + next.phone, rec);
+  } catch (e) { void e; }
+  return next;
+}
+
+async function outreachTick(env, nowMs) {
+  const now = nowMs || Date.now();
+  const d = new Date(now), h = d.getUTCHours(), wd = d.getUTCDay();
+  if (String(env.OUTREACH_LV || 'on') === 'off') return { skipped: 'off' };
+  if (String(env.OUTREACH_WINDOW || '') !== 'always' && (wd === 0 || wd === 6 || h < 7 || h > 16)) return { skipped: 'outside the send window' };
+  const lanes = mailLanes(env).filter((l) => l.outreach);
+  if (!lanes.length) return { skipped: 'no outreach lane' };
+  if (!await mailRoom(env, 'outreach')) return { skipped: 'lane has no outreach room this hour' };   // before the lead list: a full hour costs no reads
+  const boxes = new Set(lanes.map((l) => l.user.toLowerCase()));
+  const nowIso = d.toISOString();
+  const rows = await listLeads(env, { limit: 2000 });
+  const follow = rows.filter((l) => l.status === 'contacted' && !l.seller_code && l.email && (Number(l.touches) || 0) < OUT_MAX_TOUCHES
+    && l.next_follow_at && l.next_follow_at <= nowIso && boxes.has(String(l.last_sender || '').toLowerCase()));
+  const first = rows.filter((l) => l.status === 'queued' && !l.seller_code && l.email);
+  const out = { considered: follow.length + first.length, sent: 0, held: 0, dnc: 0 };
+  let checks = 0;
+  for (const lead0 of [...follow, ...first]) {
+    if (checks++ >= 4) break;                         // each check may cost a DNS fetch + a write
+    const lead = (await env.ORDERS.get('lead:' + lead0.id, 'json').catch(() => null)) || lead0;   // fresh: the runner may have moved it
+    if (!['queued', 'contacted'].includes(lead.status)) continue;
+    const junk = leadJunkReason(lead);
+    const email = leadEmailFor(lead.email, lead.source_url, lead.website);
+    if (junk || !email) {
+      await leadPut(env, { ...lead, status: 'research_hold', junk: junk || 'address does not belong to the business', updated_at: nowIso });
+      out.held++; continue;
+    }
+    if (await env.STORES.get('Lead:' + email).catch(() => null)) { await leadDnc(env, lead, 'on the do-not-contact ledger', 'ledger'); out.dnc++; continue; }
+    if (!await mxOk(email.split('@')[1], env.MAIL_TEST_FETCH)) { await leadDnc(env, lead, 'domain publishes no mail server', 'mx'); out.dnc++; continue; }
+    const origin = env.PUBLIC_ORIGIN || PRESS_ORIGIN_FALLBACK;
+    const unsub = await unsubLink(env, lead);
+    const m = outreachCompose(lead, origin, String(env.OUTREACH_FROM_NAME || 'Courage'), unsub, String(env.POSTAL_ADDRESS || ''));
+    const r = await mailSend(env, { to: email, subject: m.subject, text: m.text, kind: 'outreach', unsubscribe: { url: unsub } }, { now });
+    if (r.sent) {
+      const lane = lanes.find((l) => l.id === r.lane);
+      const t = leadTransition(lead, 'contacted', 'owner', { follow_days: OUT_FOLLOW_DAYS[Math.min(Number(lead.touches) || 0, OUT_MAX_TOUCHES - 1)], now });
+      if (t.ok) { t.lead.last_sender = lane ? lane.user.toLowerCase() : ''; await leadPut(env, t.lead); }
+      out.sent++; out.to_lead = lead.id;
+      break;                                           // one per tick, always
+    }
+    if (r.permanent) { await leadDnc(env, lead, 'refused at send: ' + String(r.why).slice(0, 60), 'bounce'); out.dnc++; continue; }
+    out.why = r.why; break;                            // lane full or down: try next tick
   }
   return out;
 }
+
+/** /u/<lead>/<tok>: GET shows one button (scanners prefetch); POST (the button, or a mail client's
+ *  RFC 8058 one-click) writes the do-not-contact ledger. */
+async function unsubRoute(req, url, env) {
+  const m = url.pathname.match(/^\/u\/([a-z0-9-]{1,40})\/([A-Za-z0-9]{10,40})$/);
+  const page = (msg, form) => html('<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><meta name=robots content=noindex>'
+    + '<title>Tapstall</title><body style="font:17px system-ui;max-width:34rem;margin:3rem auto;padding:0 1rem;line-height:1.5"><h1 style="font-size:1.3rem">Tapstall</h1><p>' + msg + '</p>' + (form || '') + '</body>', 200, NOINDEX);
+  if (!m) return page('That link is not complete. Reply to the email with the word STOP and a person will remove you.');
+  const want = (await sign(capKey(env), 'unsub:' + m[1])).replace(/[^A-Za-z0-9]/g, '').slice(0, 22);
+  if (!timingSafeEq(want, m[2])) return page('That link is not valid. Reply to the email with the word STOP and a person will remove you.');
+  const lead = await env.ORDERS.get('lead:' + m[1], 'json').catch(() => null);
+  if (req.method !== 'POST') {
+    if (lead && lead.status === 'dnc') return page('You are already unsubscribed. We will not write again.');
+    return page('Stop all emails from Tapstall to this business?', '<form method=post><button style="font:inherit;padding:.7rem 1.2rem">Unsubscribe</button></form>');
+  }
+  if (lead && lead.status !== 'dnc') await leadDnc(env, lead, 'unsubscribed by link', 'unsubscribe');
+  return page('Done. You will not hear from us again.');
+}
+
+/** The 20-minute clock (PRESS_CRON). Each job is small, and discovery — the only one that fans out
+ *  to dozens of fetches — gets its own invocation in the quiet hour, so it can never again starve
+ *  the dispatch of its 50-subrequest allowance (the 2026-10-28 "Too many subrequests"). */
+async function tick(env) {
+  const out = {};
+  const h = new Date().getUTCHours();
+  if (h === 2 || h === 3) {
+    const st = await discoverState(env).catch(() => ({}));
+    if (st.day !== new Date().toISOString().slice(0, 10)) {
+      try { const d = await discoveryPass(env, {}); out.discovery = { added: d.added || 0, candidates: d.candidates || 0, skipped: d.skipped || null }; }
+      catch (e) { out.discovery = { error: String(e && e.message || e).slice(0, 80) }; }
+      if (!(out.discovery && out.discovery.skipped)) return out;   // it really ran: this invocation's fetches are spent
+
+    }
+  }
+  try { out.press = await pressTick(env); } catch (e) { out.press = { error: String(e && e.message || e).slice(0, 120) }; }
+  try { out.mailq = await mailDrain(env, 3); } catch (e) { out.mailq = { error: String(e && e.message || e).slice(0, 120) }; }
+  try { out.outreach = await outreachTick(env); } catch (e) { out.outreach = { error: String(e && e.message || e).slice(0, 120) }; }
+  return out;
+}
+
 /** The nightly exception digest: derived from the same rows everything else reads, stored once,
  *  and surfaced by /ops/api/health. It exists so the owner's morning question — "what needs a
  *  person?" — has one answer with numbers, instead of an approval queue with opinions. */
@@ -5813,6 +6066,54 @@ function whopCatalog(env) {
   try { const c = JSON.parse(String(env.WHOP_PLANS_JSON || '{}')); return (c && typeof c === 'object') ? c : {}; }
   catch (e) { return {}; }
 }
+/** Apply a paid Whop term to a shop: the one place it happens (webhook match or buyer claim). */
+async function whopGrant(env, st, term, buyer, ref) {
+  const amount = term.amount || (term.days >= 300
+    ? (term.currency === 'ZAR' ? SUBSCRIPTION_PLANS.annual.zar : SUBSCRIPTION_PLANS.annual.usd)
+    : (term.currency === 'ZAR' ? SUBSCRIPTION_PLANS.monthly.zar : SUBSCRIPTION_PLANS.monthly.usd));
+  st.paid_until = Math.max(Date.now(), st.paid_until || 0) + term.days * 864e5;
+  st.plan = term.days >= 300 ? 'annual' : 'term';
+  st.suspended = false; st.warned_at = null;
+  if (buyer.membership_id) st.whop_membership_id = buyer.membership_id;
+  st.whop_status = 'valid';
+  st.whop_last_grant = { at: new Date().toISOString(), ref, days: term.days, from: term.from };
+  await writeStore(env, st);
+  if (buyer.membership_id) { try { await env.STORES.put('whopmem:' + buyer.membership_id, JSON.stringify({ handle: st.handle, at: new Date().toISOString() })); } catch (e) { void e; } }
+  if (buyer.payment_id) { try { await env.STORES.put('paid:whop:pay:' + buyer.payment_id, JSON.stringify({ handle: st.handle, at: new Date().toISOString() }), { expirationTtl: 40 * 86400 }); } catch (e) { void e; } }
+  const code = cleanSellerCode(st.seller_code || '');
+  const sd = code ? await sellerDoc(env, code).catch(() => null) : null;
+  const sale = await recordSale(env, st, { amount, currency: term.currency, days: term.days, provider: 'whop',
+    ref: buyer.payment_id || buyer.membership_id || ref,
+    commission_via: (buyer.affiliate || (sd && sd.whop)) ? 'whop' : 'internal' });
+  return sale;
+}
+
+/** POST /api/whop/claim {claim} — signed in as the shop the buyer wants credited. */
+async function whopClaim(req, url, env) {
+  const b = await readBody(req);
+  const who = await identify(req, env, b.handle || url.searchParams.get('handle'));
+  if (!who || !who.st) return json({ ok: false, need_login: true, error: 'Sign in to the shop this payment is for, then open the link again.' }, 401);
+  const lr = lockRes(who); if (lr) return lr;
+  if (who.anonymous || who.bad) return json({ ok: false, need_login: true, error: 'Sign in to the shop this payment is for, then open the link again.' }, 401);
+  if (who.via === 'sess' && (reqHeader(req, 'x-tapstall-confirm') || '') !== '1') return json({ ok: false, error: 'missing x-tapstall-confirm header' }, 403);
+  const tok = String(b.claim || '').replace(/[^a-z0-9]/g, '').slice(0, 40);
+  const c = tok ? await env.ORDERS.get('whop:claim:' + tok, 'json').catch(() => null) : null;
+  const u = c && c.key ? await env.ORDERS.get(c.key, 'json').catch(() => null) : null;
+  if (!u || !u.term) return json({ ok: false, error: 'This payment link was already used or has expired. Reply to the payment email and we will sort it out by hand.' }, 410);
+  const st = who.st;
+  if (u.payment_id && await env.STORES.get('paid:whop:pay:' + u.payment_id, 'json').catch(() => null)) {
+    try { await env.ORDERS.delete('whop:claim:' + tok); await env.ORDERS.delete(c.key); } catch (e) { void e; }
+    return json({ ok: false, error: 'This payment was already applied to a shop.' }, 409);
+  }
+  const buyer = { email: u.email || '', name: u.name || '', membership_id: u.membership_id || '', payment_id: u.payment_id || '', affiliate: u.affiliate || '' };
+  if (buyer.email && String(st.owner_email || '').toLowerCase() === buyer.email) st.email_verified = buyer.email;   // the claim link reached that inbox
+  const sale = await whopGrant(env, st, u.term, buyer, u.ref || tok);
+  try { await env.ORDERS.delete('whop:claim:' + tok); await env.ORDERS.delete(c.key); } catch (e) { void e; }
+  await pushAudit(env, st, { act: 'whop_claim', via: who.via, fields: ['paid_until'], ip: ipOf(req) });
+  return json({ ok: true, handle: st.handle, days: u.term.days, paid_until: new Date(st.paid_until).toISOString(),
+    commission: sale ? { seller: sale.seller_code, amount: sale.commission, via: sale.commission_via } : null });
+}
+
 async function hookWhop(req, url, env, ctx) {
   const say = (obj, code = 200) => {
     const kind = code === 200 ? (obj.already ? 'already' : obj.activated ? 'activated' : 'ignored') : 'refused';
@@ -5855,7 +6156,7 @@ async function hookWhop(req, url, env, ctx) {
           if (!hashes) { legacy.push(handle); continue; }
           if (hashes.includes(wanted)) {
             const cand = await getStore(env, handle, { fresh: true });
-            if (cand && [cand.owner_email, cand.notify_email].some((e) => String(e || '').toLowerCase() === buyer.email)) { st = cand; break; }
+            if (cand && String(cand.email_verified || '') === buyer.email && String(cand.owner_email || '').toLowerCase() === buyer.email) { st = cand; break; }
           }
         }
         cursor = l.list_complete ? undefined : l.cursor;
@@ -5865,7 +6166,7 @@ async function hookWhop(req, url, env, ctx) {
       if (st) break;
       try {
         const cand = await getStore(env, handle, { fresh: true });
-        if (cand && [cand.owner_email, cand.notify_email].some((e) => String(e || '').toLowerCase() === buyer.email)) st = cand;
+        if (cand && String(cand.email_verified || '') === buyer.email && String(cand.owner_email || '').toLowerCase() === buyer.email) st = cand;
       } catch (e) { void e; }
     }
   }
@@ -5885,12 +6186,32 @@ async function hookWhop(req, url, env, ctx) {
   }
 
   if (!st) {
-    try { await env.ORDERS.put('whop:unmatched:' + (webhookId || buyer.payment_id || String(Date.now())),
+    // v2.0.0: a payment nobody can match used to sit in a KV key the buyer never heard about.
+    // Now the buyer gets a claim link; opening it while signed in to their shop applies the term.
+    // Matching is still never a guess: a confirmed email, a membership seen before, or the
+    // handle the checkout carried — otherwise the buyer chooses, not the Worker.
+    const uKey = 'whop:unmatched:' + (webhookId || buyer.payment_id || String(Date.now()));
+    const term = whopTerm(b, whopCatalog(env));
+    const claim = alnumToken(20);
+    try { await env.ORDERS.put(uKey,
       JSON.stringify({ at: new Date().toISOString(), action, email: buyer.email, name: buyer.name,
-        membership_id: buyer.membership_id, payment_id: buyer.payment_id, handle_said: buyer.handle,
-        money: whopMoney(b), note: 'Whop was paid; no shop matched. Match by hand (ops → extend), then delete this key.' })); } catch (e) { void e; }
-    await markSeen({ kind, unmatched: true });
-    return say({ ok: true, unmatched: true, note: 'filed for the owner digest — never credited to a guessed shop' });
+        membership_id: buyer.membership_id, payment_id: buyer.payment_id, handle_said: buyer.handle, affiliate: buyer.affiliate || '',
+        money: whopMoney(b), term, claim, ref: buyer.payment_id || webhookId,
+        note: 'Whop was paid; no shop matched. The buyer was emailed a claim link; or match by hand (ops → extend), then delete this key.' }),
+      { expirationTtl: 90 * 86400 });
+      await env.ORDERS.put('whop:claim:' + claim, JSON.stringify({ key: uKey }), { expirationTtl: 90 * 86400 });
+    } catch (e) { void e; }
+    let mailed = false;
+    if (buyer.email) {
+      mailed = await sendMail(env, buyer.email, 'Your Tapstall payment — one step to attach it to your shop',
+        `Thanks${buyer.name ? ' ' + String(buyer.name).split(' ')[0] : ''} — your Whop payment for Tapstall arrived (${term.days} days).\n\n`
+        + `We could not tell which shop it is for, so nothing has been applied yet. Open this link, sign in to your shop with its name and PIN, and the time is added at once:\n`
+        + `${env.PUBLIC_ORIGIN || url.origin}/a?claim=${claim}\n\n`
+        + `No shop yet? Make one first at ${env.PUBLIC_ORIGIN || url.origin}/onboard (free), then open the link above.\n`
+        + `The link works for 90 days. Reply to this email if anything looks wrong.\n`);
+    }
+    await markSeen({ kind, unmatched: true, mailed });
+    return say({ ok: true, unmatched: true, mailed, note: 'filed with a claim link for the buyer — never credited to a guessed shop' });
   }
 
   if (buyer.payment_id && await env.STORES.get('paid:whop:pay:' + buyer.payment_id, 'json').catch(() => null)) {
@@ -5903,23 +6224,7 @@ async function hookWhop(req, url, env, ctx) {
   }
 
   const term = whopTerm(b, whopCatalog(env));
-  const amount = term.amount || (term.days >= 300
-    ? (term.currency === 'ZAR' ? SUBSCRIPTION_PLANS.annual.zar : SUBSCRIPTION_PLANS.annual.usd)
-    : (term.currency === 'ZAR' ? SUBSCRIPTION_PLANS.monthly.zar : SUBSCRIPTION_PLANS.monthly.usd));
-  st.paid_until = Math.max(Date.now(), st.paid_until || 0) + term.days * 864e5;
-  st.plan = term.days >= 300 ? 'annual' : 'term';
-  st.suspended = false; st.warned_at = null;
-  if (buyer.membership_id) st.whop_membership_id = buyer.membership_id;
-  st.whop_status = 'valid';
-  st.whop_last_grant = { at: new Date().toISOString(), ref: buyer.payment_id || webhookId, days: term.days, from: term.from };
-  await writeStore(env, st);
-  if (buyer.membership_id) { try { await env.STORES.put('whopmem:' + buyer.membership_id, JSON.stringify({ handle: st.handle, at: new Date().toISOString() })); } catch (e) { void e; } }
-  if (buyer.payment_id) { try { await env.STORES.put('paid:whop:pay:' + buyer.payment_id, JSON.stringify({ handle: st.handle, at: new Date().toISOString() }), { expirationTtl: 40 * 86400 }); } catch (e) { void e; } }
-  const code = cleanSellerCode(st.seller_code || '');
-  const sd = code ? await sellerDoc(env, code).catch(() => null) : null;
-  const sale = await recordSale(env, st, { amount, currency: term.currency, days: term.days, provider: 'whop',
-    ref: buyer.payment_id || buyer.membership_id || webhookId,
-    commission_via: (buyer.affiliate || (sd && sd.whop)) ? 'whop' : 'internal' });
+  const sale = await whopGrant(env, st, term, buyer, buyer.payment_id || webhookId);
   await markSeen({ kind, handle: st.handle });
   return say({ ok: true, activated: st.handle, days: term.days, term_from: term.from,
     paid_until: new Date(st.paid_until).toISOString(), commission: sale ? { seller: sale.seller_code, amount: sale.commission, via: sale.commission_via } : null });
@@ -5935,7 +6240,11 @@ async function outreachMailboxes(req, env) {
   const out = [];
   for (const k of Object.keys(env || {})) {
     const m = k.match(/^GMAIL_([A-Z0-9]+)_USER$/);
-    if (m && env['GMAIL_' + m[1] + '_APP_PASSWORD']) out.push({ tag: m[1], user: String(env[k]), app_password: String(env['GMAIL_' + m[1] + '_APP_PASSWORD']) });
+    if (m && env['GMAIL_' + m[1] + '_APP_PASSWORD']) out.push({ tag: m[1], user: String(env[k]), app_password: String(env['GMAIL_' + m[1] + '_APP_PASSWORD']),
+      smtp: true, imap_host: 'imap.gmail.com' });
   }
+  // v2.0.0: the inbox.lv lanes too, poll-only for the runner (the Worker sends on them, under its
+  // own hourly counter). The runner reads them read-only: the box is shared with other products.
+  for (const l of mailLanes(env)) out.push({ tag: 'LV' + l.id.toUpperCase(), user: l.user, app_password: l.pass, smtp: false, imap_host: l.host, readonly: true });
   return json({ ok: true, mailboxes: out }, 200, { 'Cache-Control': 'no-store' });
 }

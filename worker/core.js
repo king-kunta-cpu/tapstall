@@ -4343,24 +4343,104 @@ export function allocateSeller(key, codes) {
 }
 
 const LEAD_PAY_WORDS = /(ecocash|innbucks|one ?money|mukuru|m-?pesa|payshap|payfast|ozow|price list|catalog|catalogue|proof of payment|school fees|membership fee|registration fee)/i;
-const LEAD_SELL_WORDS = /(wa\.me|whatsapp|dm to order|dm for|order on|chat to order|inbox to order)/i;
+const LEAD_SELL_WORDS = /(wa\.me\/\d|whatsapp (us|me|to order|for orders|orders)|order (on|via|through) whatsapp|dm to order|dm for|chat to order|inbox to order)/i;
+
+/* v2.0.0 (audit 2026-10-28): the gate that let support@meta.com through. A lead is a business in
+ * the market it was filed under, reachable at an address that belongs to it. Three facts decide
+ * that, all checkable from the row: where the page lives, whose address the email is, and which
+ * country the number dials. Search results about WhatsApp, EcoCash or a stock ticker fail all
+ * three and never reach a queue. */
+export const LEAD_DIRECTORY_HOSTS = ['classifieds.co.zw', 'businesslist.co.ke', 'businesslist.com.ng', 'openstreetmap.org',
+  'webdev.co.zw', 'zimbabweyp.com', 'yellosa.co.za', 'brabys.com', 'cylex.co.za', 'yep.co.za', 'snupit.co.za'];
+const LEAD_PLATFORM_HOSTS = /(^|\.)(whatsapp\.(com|net)|wa\.me|meta\.com|facebook\.com|fb\.com|instagram\.com|microsoft\.com|live\.com|xbox\.com|apple\.com|google\.[a-z.]+|bing\.com|youtube\.com|x\.com|twitter\.com|linkedin\.com|tiktok\.com|wikipedia\.org|britannica\.com|thesaurus\.com|dictionary\.com|weather\.(com|gov)|roblox\.com|reddit\.com|quora\.com|medium\.com|amazon\.[a-z.]+|ebay\.[a-z.]+|morningstar\.com|zacks\.com|marketbeat\.com|stockanalysis\.com|stockmarketwatch\.com|pcmag\.com|cnet\.com|ecocash\.co\.zw|escrowagm\.com|echarges\.co\.zw|whatsappbusiness\.com|order\.co|zoho\.com|shopify\.com|wix\.com|github\.com)$/i;
+const LEAD_FREE_MAIL = /^(gmail|googlemail|yahoo|ymail|outlook|hotmail|live|icloud|me|aol|proton|protonmail|zoho|mail|gmx|yandex|webmail\.co|mweb|telkomsa|vodamail|zol|yahoo\.co)\.[a-z.]+$/i;
+const LEAD_PLACEHOLDER_MAIL = /(@|\.)(domain\.com|example\.[a-z.]+|email\.com|yourdomain\.[a-z.]+|test\.com|sentry[a-z.-]*|wixpress\.com|sentry\.io)$/i;
+const LEAD_ROLE_JUNK = /^(privacy|abuse|webmaster|postmaster|hostmaster|noreply|no-reply|donotreply|reprints|press|media|legal|security|dmca|copyright|careers|jobs|investor|ir|support-noreply|mailer-daemon|user|name|email|you|yourname)@/i;
+// nat = the country's own mobile shape in national format (0 + operator prefix), so a social
+// profile with "082 555 0100" counts as local without a +27 in front
+const LEAD_CC = { ZA: { tld: /\.za$/i, dial: '27', nat: /^0[678]\d{8}$/ }, ZW: { tld: /\.zw$/i, dial: '263', nat: /^07[1378]\d{7}$/ },
+  KE: { tld: /\.ke$/i, dial: '254', nat: /^0[17]\d{8}$/ }, NG: { tld: /\.ng$/i, dial: '234', nat: /^0[789][01]\d{8}$/ } };
+const LEAD_TRUSTED_SIGNALS = new Set(['whatsapp_selling', 'payment_friction', 'order_page', 'directory_listed', 'osm_listed', 'page_checked', 'applied']);
+
+export function leadHostOf(u) {
+  try { return new URL(String(u || '')).hostname.toLowerCase().replace(/^www\./, ''); } catch (e) { return ''; }
+}
+/** The registrable part: shop.co.za -> shop.co.za, mail.shop.co.za -> shop.co.za, a.b.com -> b.com */
+export function leadSiteOf(host) {
+  const h = String(host || '').toLowerCase().replace(/^www\./, '').split('.').filter(Boolean);
+  if (h.length <= 2) return h.join('.');
+  const sl = h[h.length - 2];
+  const n = (/^(co|com|org|net|ac|gov|edu|or|ne|biz|nom)$/.test(sl) && h[h.length - 1].length === 2) ? 3 : 2;
+  return h.slice(-n).join('.');
+}
+const LEAD_SOCIAL_HOSTS = /(^|\.)(instagram\.com|facebook\.com|tiktok\.com|x\.com|twitter\.com)$/i;
+const LEAD_SOCIAL_RESERVED = /^\/(help|business|about|legal|privacy|policies|policy|support|login|share|sharer|terms|ads|careers|watch|groups|events|pages\/category|hashtag|explore|reel|p|search|settings|whatsapp|marketplace)(\/|$)/i;
+/** A platform page that is not anybody's shop: WhatsApp's FAQ, Meta's support page, a stock
+ *  ticker. A social *profile* (instagram.com/kotaqueen) is a shop and is not this. */
+export function leadPlatformPage(u) {
+  const host = leadHostOf(u);
+  if (!host || !LEAD_PLATFORM_HOSTS.test(host)) return false;
+  if (LEAD_SOCIAL_HOSTS.test(host)) {
+    let path = '';
+    try { path = new URL(String(u)).pathname; } catch (e) { return true; }
+    return !(/^\/@?[A-Za-z0-9._-]{2,50}\/?$/.test(path) && !LEAD_SOCIAL_RESERVED.test(path));
+  }
+  return true;
+}
+const leadIsDirectory = (host) => LEAD_DIRECTORY_HOSTS.some((d) => host === d || host.endsWith('.' + d));
+/** A number a seller could actually dial: 9-15 digits and not a run of one digit (270000000). */
+export function leadPhoneOk(p) {
+  const d = String(p || '').replace(/\D/g, '');
+  return d.length >= 9 && d.length <= 15 && !/(\d)\1{5,}/.test(d) && !/^(\d{2})\1{3,}/.test(d) && !/0123456|1234567|2728293031/.test(d);
+}
+/** Keep an address only if it belongs to the business behind the page. */
+export function leadEmailFor(email, sourceUrl, website) {
+  const e = String(email || '').toLowerCase().trim();
+  if (!isEmail(e) || LEAD_PLACEHOLDER_MAIL.test(e) || LEAD_ROLE_JUNK.test(e)) return '';
+  const dom = e.split('@')[1] || '';
+  const src = leadHostOf(sourceUrl), web = leadHostOf(website);
+  if (LEAD_FREE_MAIL.test(dom)) return leadPlatformPage(sourceUrl) ? '' : e;
+  const site = leadSiteOf(dom);
+  if (web && leadSiteOf(web) === site) return e;
+  if (src && leadSiteOf(src) === site) return e;
+  if (!src && !web) return e;          // self-submitted (partner form, a person typing their own address)
+  return '';
+}
+/** '' = a plausible business lead; otherwise why it is not one. */
+export function leadJunkReason(o) {
+  const x = o || {};
+  const src = leadHostOf(x.source_url || x.url || ''), web = leadHostOf(x.website || '');
+  if (leadPlatformPage(x.source_url || x.url || '') && !(web && !LEAD_PLATFORM_HOSTS.test(web))) return 'platform page, not a business (' + src + ')';
+  const cc = LEAD_CC[String(x.country || '').toUpperCase()];
+  if (cc) {
+    const phone = String(x.phone || x.whatsapp || '').replace(/\D/g, '');
+    const local = (src && (cc.tld.test(src) || leadIsDirectory(src))) || (web && cc.tld.test(web))
+      || (leadPhoneOk(phone) && (phone.startsWith(cc.dial) || cc.nat.test(phone)));
+    if (!local) return 'not in ' + String(x.country).toUpperCase() + ' (page ' + (src || '?') + ', no local number)';
+  }
+  return '';
+}
 
 /** What a lead can prove about itself before a person spends a conversation on it. A signal is a
- *  fact in the row (a number exists, a source exists, the source itself shows WhatsApp selling or
- *  payment friction) — never a model's opinion. Two signals is the door out of research_hold. */
+ *  fact in the row (a reachable number, an address that belongs to the business, the page itself
+ *  shows WhatsApp selling or payment friction) — never a model's opinion, and never the mere
+ *  existence of a URL. Two signals is the door out of research_hold. */
 export function leadSignalsOf(input) {
   const o = input || {};
   const out = new Set();
-  const phone = digits(o.phone || o.whatsapp || '');
-  if (phone) out.add('phone');
+  if (leadPhoneOk(o.phone || o.whatsapp || '')) out.add('phone');
   if (isEmail(o.email || '')) out.add('email');
-  if (/^https?:\/\//.test(String(o.source_url || o.url || ''))) out.add('source_url');
-  const words = String((o.note || '') + ' ' + (o.source || '') + ' ' + (o.source_url || o.url || ''));
+  const words = String((o.note || '') + ' ' + (o.hook || ''));
   if (LEAD_SELL_WORDS.test(words)) out.add('whatsapp_selling');
   if (LEAD_PAY_WORDS.test(words)) out.add('payment_friction');
+  const ev = (o.evidence && typeof o.evidence === 'object') ? o.evidence : {};
+  if (ev.has_whatsapp === true) out.add('whatsapp_selling');
+  if (ev.has_order_button === true || ev.has_price_page === true) out.add('order_page');
+  const src = leadHostOf(o.source_url || o.url || '');
+  if (src && leadIsDirectory(src)) out.add(src === 'openstreetmap.org' ? 'osm_listed' : 'directory_listed');
   for (const s of (Array.isArray(o.signals) ? o.signals : [])) {
     const k = String(s).toLowerCase().replace(/[^a-z_]/g, '').slice(0, 24);
-    if (k) out.add(k);
+    if (LEAD_TRUSTED_SIGNALS.has(k)) out.add(k);
   }
   return [...out].sort();
 }
@@ -4387,14 +4467,16 @@ export function cleanLeadEvidence(e) {
 export function cleanLead(input, opt) {
   const o = input || {}, k = opt || {};
   const business = meshClip(o.business || o.company || o.shop || '', 80);
-  const email = isEmail(o.email || '') ? String(o.email).toLowerCase().slice(0, 120) : '';
-  const phone = digits(o.phone || o.whatsapp || '').replace(/^\+/, '').slice(0, 15);
+  const email = leadEmailFor(o.email || '', o.source_url || o.url || '', o.website || '').slice(0, 120);
+  const phone0 = digits(o.phone || o.whatsapp || '').replace(/^\+/, '').slice(0, 15);
+  const phone = leadPhoneOk(phone0) ? phone0 : '';
   const segment = LEAD_SEGMENTS.includes(String(o.segment || '')) ? String(o.segment) : 'other';
   const lead = {
     business, name: meshClip(o.name || o.contact || '', 60), email, phone,
     whatsapp: phone, country: meshClip(o.country || '', 40), segment,
     source: meshClip(o.source || '', 80),
     source_url: /^https?:\/\//.test(String(o.source_url || o.url || '')) ? String(o.source_url || o.url).slice(0, 300) : '',
+    website: /^https?:\/\//.test(String(o.website || '')) ? String(o.website).slice(0, 200) : '',
     note: meshClip(o.note || '', 300),
     // What the page said when discovery read it, so a lead's hook stays checkable after the run:
     // four booleans, never a scraped body. `source_url` is where a person verifies them.
@@ -4405,7 +4487,10 @@ export function cleanLead(input, opt) {
   };
   lead.signals = leadSignalsOf({ ...o, ...lead });
   lead.score = leadScoreOf(lead);
-  lead.status = lead.signals.length >= 2 ? 'queued' : 'research_hold';
+  lead.junk = leadJunkReason({ ...o, ...lead });
+  // queued = two facts AND a way in AND a real business in the right market
+  lead.status = (!lead.junk && lead.signals.length >= 2 && (lead.email || lead.phone)) ? 'queued' : 'research_hold';
+  if (!lead.junk) delete lead.junk;
   const dedupe = email || phone || slug(business);
   lead.id = dedupe ? 'ld-' + fnv1a(dedupe).toString(36) + fnv1a(dedupe + '#tapstall').toString(36) : '';
   lead.dedupe = dedupe;

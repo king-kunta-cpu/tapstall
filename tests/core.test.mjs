@@ -1733,20 +1733,50 @@ test('commissionFor: standing rate arithmetic, clamped', () => {
 });
 
 test('cleanLead: two signals open the queue, one holds for research, the id dedupes a person', () => {
-  const strong = C.cleanLead({ business: 'Kota Queen', email: 'Hi@Example.com', phone: '+27 82 555 0100',
-    source_url: 'https://instagram.com/kotaqueen', note: 'WhatsApp to order, PayShap accepted', segment: 'social_merchants', country: 'ZA' });
-  assert.equal(strong.status, 'queued');
+  const strong = C.cleanLead({ business: 'Kota Queen', email: 'Hi@KotaQueen.co.za', phone: '+27 82 555 0100',
+    source_url: 'https://kotaqueen.co.za/order', note: 'WhatsApp to order, PayShap accepted', segment: 'social_merchants', country: 'ZA' });
+  assert.equal(strong.status, 'queued', JSON.stringify(strong));
   assert.ok(strong.signals.includes('whatsapp_selling') && strong.signals.includes('payment_friction'), strong.signals.join(','));
   assert.ok(strong.score >= 80, 'a WhatsApp seller with payment friction and a number is the top of the queue: ' + strong.score);
-  const again = C.cleanLead({ email: 'hi@example.com', business: 'Kota Queen (Pty) Ltd' });
+  const again = C.cleanLead({ email: 'hi@kotaqueen.co.za', source_url: 'https://kotaqueen.co.za', business: 'Kota Queen (Pty) Ltd' });
   assert.equal(again.id, strong.id, 'the same email is the same lead, whatever the hunt called the business');
   const weak = C.cleanLead({ business: 'Maybe A Shop' });
   assert.equal(weak.status, 'research_hold', 'a name alone is research, not a conversation a seller should spend');
   assert.ok(weak.id, 'even a weak lead has a stable id from its name');
+  // a social profile is a shop: free-mail and a local number are the normal kit
+  const ig = C.cleanLead({ business: 'Kota Queen', email: 'kotaqueen@gmail.com', phone: '0825550100', country: 'ZA',
+    source_url: 'https://instagram.com/kotaqueen', note: 'DM to order, EcoCash and PayShap' });
+  assert.equal(ig.junk, undefined, JSON.stringify(ig));
+  assert.equal(ig.email, 'kotaqueen@gmail.com');
+});
+
+test('v2.0.0 lead gate: the 2026-10-28 junk never reaches a queue', () => {
+  const junk = [
+    { business: 'WhatsApp Help Center', email: 'support@meta.com', source_url: 'https://faq.whatsapp.com/1234', note: 'order on whatsapp', country: 'ZW' },
+    { business: 'Zacks', email: 'support@zacks.com', source_url: 'https://www.zacks.com/stock/quote/ECO', note: 'EcoCash price list', country: 'ZW' },
+    { business: 'PCMag', email: 'kim_key@pcmag.com', source_url: 'https://www.pcmag.com/reviews/whatsapp', note: 'whatsapp us', country: 'ZA' },
+    { business: 'NOAA', email: 'w-sew.webmaster@noaa.gov', source_url: 'https://www.weather.gov/sew/', note: 'payfast', country: 'ZA' },
+    { business: 'Placeholder', email: 'user@domain.com', source_url: 'https://some-template.com/', note: 'whatsapp to order ecocash', country: 'ZW' },
+    { business: 'Libero', email: 'albatr0s@libero.it', source_url: 'https://forum.example.it/t/ecocash', note: 'ecocash price list whatsapp us', country: 'ZW' },
+  ];
+  for (const j of junk) {
+    const l = C.cleanLead(j);
+    assert.notEqual(l.status, 'queued', 'queued junk: ' + JSON.stringify(l));
+  }
+  // an address on someone else's domain is dropped, not trusted
+  assert.equal(C.leadEmailFor('privacy@stockmarketwatch.com', 'https://shop.co.zw/'), '');
+  assert.equal(C.leadEmailFor('sales@fluency.co.zw', 'https://www.fluency.co.zw/contact'), 'sales@fluency.co.zw');
+  assert.equal(C.leadEmailFor('upicomputers.sales@gmail.com', 'https://classifieds.co.zw/x/1'), 'upicomputers.sales@gmail.com');
+  assert.equal(C.leadPhoneOk('270000000'), false, 'a run of zeros is not a number');
+  assert.equal(C.leadPhoneOk('263772123456'), true);
+  assert.equal(C.leadSiteOf('mail.shop.co.za'), 'shop.co.za');
+  // the url alone is provenance, not evidence
+  assert.ok(!C.leadSignalsOf({ source_url: 'https://wa.me/263771234567' }).includes('whatsapp_selling'));
+  assert.deepEqual(C.leadSignalsOf({ signals: ['vip', 'whatsapp_selling', 'hot'] }), ['whatsapp_selling'], 'client labels are allowlisted');
 });
 
 test('leadTransition: one prospect, one voice — and the owner can unstick a book', () => {
-  const lead = C.cleanLead({ business: 'Kota Queen', phone: '27825550100', source_url: 'https://example.com' });
+  const lead = C.cleanLead({ business: 'Kota Queen', phone: '27825550100', source_url: 'https://example.com', note: 'WhatsApp to order' });
   lead.seller_code = 'tino-sells';
   const claimed = C.leadTransition(lead, 'claim', 'tino-sells');
   assert.equal(claimed.ok, true, JSON.stringify(claimed));

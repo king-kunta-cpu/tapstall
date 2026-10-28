@@ -16,6 +16,7 @@ worker = open('worker/worker.js', encoding='utf-8').read()
 core = open('worker/core.js', encoding='utf-8').read()
 rail = open('worker/rail.js', encoding='utf-8').read()
 discover = open('worker/discover.js', encoding='utf-8').read()
+mail = open('worker/mail.js', encoding='utf-8').read()
 
 def inline(src, name, needs, target):
     """Replace `import { ... } from './<name>.js';` with the module body, exports stripped.
@@ -49,6 +50,11 @@ worker = inline(rail, 'rail',
 worker = inline(discover, 'discover',
     ("const TARGET_SEGMENTS", "function discoveryPlan", "async function runDiscovery",
      "function candidateLead", "function hookFor", "function readPageEvidence"),
+    worker)
+# v2.0.0: the inbox.lv mail lane (merchant mail + first touches), same reason again.
+worker = inline(mail, 'mail',
+    ("async function mailSend", "async function mailDeliver", "async function mailDrain", "function mailLanes",
+     "async function smtpSession", "function buildMail", "async function mxOk"),
     worker)
 worker = inline(core, 'core',
     ("function priceOrder", "function parseProducts", "const RAILS", "function publicStore",

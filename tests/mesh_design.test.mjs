@@ -560,7 +560,7 @@ test('0.9.12 the login form asks once — a second time has a reason, and the sh
 /* v1.0.0 — the tap is gone: the clock is the trigger, credentials are env-only, and the direct
    rails send from the Worker instead of "a script on the owner's box". */
 test('1.0.0 the press runs on the cron, and no design surface asks the owner to tap send', async () => {
-  assert.match(worker, /out\.press = await pressTick\(env\)/, 'runCron runs the press window itself');
+  assert.match(worker, /out\.press = await pressTick\(env\)/, 'the clock runs the press window itself (v2.0.0: on the 20-minute tick)');
   assert.match(worker, /async function runPress\(env, origin, opt\)/, 'compose+send exists as a clock-callable function, not only behind an HTTP door');
   assert.match(worker, /press:last/, 'the slot is claimed in KV so a retried tick cannot double-send a window');
   assert.doesNotMatch(doc, /single owner tap sends|one owner tap sends/, 'the owner-tap sentence is gone from the design doc');

@@ -726,13 +726,15 @@ payment reference — writes a `sale:` row, and `sellerBoard` (core) reconciles 
 trials → paying → revenue → commission (30% default) from documents at read time. The seller reads
 their own book at `GET /api/seller?code=&key=`. See `docs/SELLER-GUIDE.md`.
 
-**Leads.** `scripts/lead_hunt.py` (stdlib; Bing RSS + DuckDuckGo + OSM Overpass with `out center;`)
-gathers facts only and files them at `POST /api/leads/ingest`. The Worker derives five signals from
+**Leads.** `scripts/lead_hunt.py` (stdlib; OSM Overpass per city + local directories; the Bing/DDG
+web-search leg was removed in v2.0.0 after it filed support@meta.com as a lead) gathers facts only and files them at `POST /api/leads/ingest`. The Worker derives five signals from
 the facts and demands **two** before outreach (`research_hold` below that), dedupes on
 email→phone→business, allocates each prospect to exactly one seller by hash, and refuses anything on
 the `Lead:` do-not-contact ledger. Claims are anti-collision: a second seller gets a 409, not a
-double pitch. Sellers work the queue through `/api/leads/act` or the Google Sheets surface in
-`leads/apps-script/Code.gs`, fed by `/api/leads/sheets-feed`.
+double pitch. Sellers work the queue through `/api/leads/act` (v2.0.0: the Google Sheets CRM and
+its `SHEET_KEY` were removed — no Sheets in the pipeline). v2.0.0 also adds a junk gate in
+`cleanLead` (address must belong to the business, lead must sit in its market) and an inbox.lv
+mail lane (`worker/mail.js`) for merchant mail and ~1 first touch an hour; see `docs/MAIL.md`.
 
 **One clock.** The Worker's cron slots now run the press windows (`pressTick` → `runPress`, once per
 hour claimed in `press:last`), the weekday lead-hunt dispatch (when `GH_DISPATCH_TOKEN` is set), and
