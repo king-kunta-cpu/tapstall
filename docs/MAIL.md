@@ -51,6 +51,8 @@ no longer has its own schedule, so it runs once a day.
 
 - `/ops/api/health` → `pipeline.mail` (lane state, sent this hour, park), `pipeline.mail_queue`,
   `pipeline.dispatch_last`, `pipeline.whop_unmatched`.
+- `POST /ops/api/mail` (ops cookie + `x-tapstall-confirm: 1`): `{"action":"test","to":"you@…"}`
+  sends one message now; `{"action":"resume"}` clears a park after fixing the password.
 - `/leads`: the leads desk where sellers and the owner work prospects by WhatsApp, phone or mail.
 
 ## What is not here, on purpose

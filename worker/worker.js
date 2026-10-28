@@ -471,6 +471,10 @@ async function route(req, url, env, ctx) {
   // auth check so an anonymous probe learns nothing.
   if (p === '/ops/api/state') return opsGate(req, env, async () => (await misroutedLever(req, p)) || opsState(env));
   if (p === '/ops/api/health') return opsGate(req, env, async () => (await misroutedLever(req, p)) || opsHealth(env));
+  // v2.0.0: the mail lane's two levers. `test` sends one transactional message now (it uses a slot
+  // of the hourly cap like any other) so the owner can prove the box works; `resume` clears a 6h
+  // auth park after the password has been fixed.
+  if (p === '/ops/api/mail' && req.method === 'POST') return opsGate(req, env, () => opsMail(req, env));
   if (p === '/ops/api/audit') return opsGate(req, env, async () => (await misroutedLever(req, p)) || opsAudit(req, url, env));
   if (p === '/ops/api/store') {
     if (req.method === 'POST') return opsGate(req, env, () => opsStoreAction(req, env));
@@ -4655,6 +4659,19 @@ async function opsPage(req, env) {
   const page = await tpl(env, 'ops');
   const signed = who.ok ? 'true' : 'false';
   return html(fillPage(page, [['TAPSTALL_OPS', { signed_in: who.ok === true, version: VERSION }]]), 200, NOINDEX);
+}
+
+async function opsMail(req, env) {
+  if ((reqHeader(req, 'x-tapstall-confirm') || '') !== '1') return json({ ok: false, error: 'missing x-tapstall-confirm header' }, 403);
+  const b = await readBody(req).catch(() => ({}));
+  if (b.action === 'resume') return json({ ok: true, mail: await mailResume(env) });
+  if (b.action === 'test') {
+    const to = String(b.to || '').trim().slice(0, 120);
+    const r = await mailSend(env, { to, kind: 'transactional', subject: 'Tapstall mail check',
+      text: 'This is a test from the Tapstall operator console (' + new Date().toISOString() + ').\n\nIf you can read it, the mail lane works: password resets, email checks and payment claim links will reach people.\n' });
+    return json({ ok: !!r.sent, result: r, mail: await mailStatus(env) }, r.sent ? 200 : 502);
+  }
+  return json({ ok: false, error: 'action must be test or resume' }, 422);
 }
 
 function opsSummarise(st, rows) {

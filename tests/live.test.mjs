@@ -660,6 +660,26 @@ function armMail() {
 function disarmMail() { for (const k of ['MAILBOXES', 'MAILBOX_LV1_USER', 'MAILBOX_LV1_PASS', 'MAIL_TEST_OPEN']) delete env[k]; }
 const mailBody = (m) => Buffer.from(m.mime.split('\r\n\r\n').slice(1).join('').replace(/\s+/g, ''), 'base64').toString('utf8');
 
+test('ops mail levers: a test send proves the lane, behind the cookie and the confirm header', async () => {
+  const sent = armMail();
+  try {
+    const anon = await call('/ops/api/mail', { method: 'POST', confirm: true, body: { action: 'test', to: 'me@example.org' } });
+    assert.notEqual(anon.status, 200, 'no cookie, no mail');
+    const good = await call('/ops/login', { method: 'POST', body: { secret: SECRET } });
+    const ck = 'tp_ops=' + (good.cookies || []).find((c) => c.startsWith('tp_ops=')).match(/tp_ops=([^;]+)/)[1];
+    const noConfirm = await call('/ops/api/mail', { method: 'POST', cookie: ck, body: { action: 'test', to: 'me@example.org' } });
+    assert.equal(noConfirm.status, 403);
+    const t = await call('/ops/api/mail', { method: 'POST', cookie: ck, confirm: true, body: { action: 'test', to: 'me@example.org' } });
+    assert.equal(t.status, 200, t.text);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].to, 'me@example.org');
+    assert.match(mailBody(sent[0]), /mail lane works/);
+    const r = await call('/ops/api/mail', { method: 'POST', cookie: ck, confirm: true, body: { action: 'resume' } });
+    assert.equal(r.status, 200, r.text);
+    assert.equal(r.json.mail.lanes[0].state.status, 'active');
+  } finally { disarmMail(); }
+});
+
 test('losing the PIN: a one-hour link goes to the email on file, works once, and every other device dies', async () => {
   const sent = armMail();
   try {
