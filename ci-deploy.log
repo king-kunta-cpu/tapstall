@@ -1,31 +1,33 @@
   CI workflow YAML validates
 [36m*[0m KV namespaces
 [36m*[0m stores=a9016473abef4a66bcba6f200d7d4af3  orders=7dd531983a814ff5bb693598b93714d6
-ui kit: 5 page(s) in sync with pages/kit.css
+ui kit: 6 page(s) in sync with pages/kit.css
 [36m*[0m building bundle
-pages inlined: 11 files, 323061 bytes
-bundle: worker.js + core.js inlined (8886 lines, 892356 bytes)
-bundle gzipped: 276918 of 3145728 bytes
-assets: _headers admin.html confirm.html data onboard.html ops.html renew.html store.html 
-bundle size: 1.2M
-  = store is in the bundle, all 41710 bytes of it
-  = onboard is in the bundle, all 40207 bytes of it
-  = admin is in the bundle, all 117369 bytes of it
-  = fees is in the bundle, all 11105 bytes of it
-  = index is in the bundle, all 5303 bytes of it
-  = confirm is in the bundle, all 18309 bytes of it
-  = renew is in the bundle, all 19199 bytes of it
-  = ops is in the bundle, all 49587 bytes of it
-  = guide-payment-reference-matching is in the bundle, all 9302 bytes of it
-  = guide-whatsapp-shop-payments is in the bundle, all 10598 bytes of it
-[32m+[0m bundle carries 11 pages, byte-checked against git
+pages inlined: 13 files, 467077 bytes
+bundle: worker.js + discover.js + core.js + rail.js inlined (12730 lines, 1277739 bytes)
+bundle gzipped: 389721 of 3145728 bytes
+assets: _headers admin.html confirm.html data leads.html onboard.html ops.html renew.html store.html 
+bundle size: 1.7M
+  = store is in the bundle, all 106554 bytes of it
+  = onboard is in the bundle, all 44398 bytes of it
+  = admin is in the bundle, all 134215 bytes of it
+  = fees is in the bundle, all 14428 bytes of it
+  = index is in the bundle, all 12177 bytes of it
+  = partners is in the bundle, all 15754 bytes of it
+  = confirm is in the bundle, all 20968 bytes of it
+  = renew is in the bundle, all 22555 bytes of it
+  = ops is in the bundle, all 49196 bytes of it
+  = leads is in the bundle, all 20572 bytes of it
+  = guide-payment-reference-matching is in the bundle, all 12296 bytes of it
+  = guide-whatsapp-shop-payments is in the bundle, all 13592 bytes of it
+[32m+[0m bundle carries 13 pages, byte-checked against git
 wrangler.toml regenerated for tapstall
 [36m*[0m publishing worker to Cloudflare
-Uploaded tapstall (2.02 sec)
-Deployed tapstall triggers (0.40 sec)
+Deployed tapstall triggers (0.60 sec)
   https://tapstall.zlnew.workers.dev
   schedule: 15 6,12,18,0 * * *
-Current Version ID: 6b50b5b6-5428-4f86-8ede-79fa27b82508
+  schedule: 5,25,45 * * * *
+Current Version ID: 3f6814a5-6aee-457a-b212-d75fc6d7739f
 Cloudflare collects anonymous telemetry about your usage of Wrangler. Learn more at https://github.com/cloudflare/workers-sdk/tree/main/packages/wrangler/telemetry.md
 [32m+[0m wrangler deploy
 [36m*[0m writing bindings/ids so nothing else has to be guessed
@@ -36,42 +38,13 @@ Cloudflare collects anonymous telemetry about your usage of Wrangler. Learn more
   secret WHOP_CHECKOUT_URL_ANNUAL set
   secret WHOP_CHECKOUT_URL_MONTHLY set
   secret WHOP_PLANS_JSON set
-  cron ok: 15 6,12,18,0 * * *
+  secret MAILBOX_LV1_PASS set
+  secret MAILBOX_LV1_USER set
+  cron ok: 15 6,12,18,0 * * * 5,25,45 * * * *
   workers_dev: on
-[32m+[0m version confirmed live: 1.1.0
-[32m+[0m worker live: https://tapstall.zlnew.workers.dev (version 1.1.0)
---- /__selftest ---
-{
-  "version": "1.1.0",
-  "kv_stores": true,
-  "kv_roundtrip": true,
-  "templates": {
-    "store": true,
-    "onboard": true,
-    "admin": true,
-    "fees": true,
-    "index": true,
-    "confirm": true,
-    "renew": true,
-    "ops": true
-  },
-  "pricing_absorb": 1.53,
-  "products": 1,
-  "feed_url_ok": true,
-  "secret_leak_check": true
-}
---- routes ---
-  /         200
-  /onboard  200
-  /fees     200
-  /rails    200
-  /ops      200
-  /data/sample-menu.csv 200
-
-[32m+[0m done. Give merchants this one link: https://tapstall.zlnew.workers.dev/onboard
-    stores appear with no action from you; each edits its own Google Sheet.
-==== exit=0 2026-10-20T10:27:41Z ====
+[31mx[0m deployed worker still reports 2.1.0 while git says 2.0.0: a stale bundle was served, so this deploy is not done
+==== exit=1 2026-10-28T16:58:05Z ====
 ==== tools ====
 node=/opt/hostedtoolcache/node/20.20.2/x64/bin/node npm=/opt/hostedtoolcache/node/20.20.2/x64/bin/npm jq=/usr/bin/jq curl=/usr/bin/curl openssl=/usr/bin/openssl python3=/usr/bin/python3 
 ==== inputs visible to this step ====
-CF_TOKEN=set(len 53) CF_ACCOUNT=set(len 32) ADMIN_SECRET=set(len 48) WORKER_NAME=set(len 8) 
+CF_TOKEN=set(len 53) CF_ACCOUNT=set(len 32) ADMIN_SECRET=set(len 44) WORKER_NAME=set(len 8) 
