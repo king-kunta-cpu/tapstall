@@ -74,7 +74,7 @@ def osm_city(cc, city, bbox, limit=40):
     # public mirror. A shop with a website is enriched from that site; one with a phone is
     # reachable already.
     ql = (f'[out:json][timeout:25];(nwr["shop"]["phone"]{b};nwr["shop"]["website"]{b};'
-          f'nwr["amenity"~"^(fast_food|restaurant|cafe)$"]["phone"]{b};);out center tags {limit};')
+          f'nwr["amenity"~"^(fast_food|restaurant|cafe)$"]["phone"]{b};);out center tags {limit * 3};')
     # The public instance 406s browser UAs and 502s under load — identify honestly and let the
     # caller skip the city that day rather than fail the hunt.
     body, last = None, None
@@ -92,7 +92,7 @@ def osm_city(cc, city, bbox, limit=40):
     for el in (json.loads(body).get("elements") or []):
         t = el.get("tags") or {}
         name = t.get("name")
-        if not name:
+        if not name or is_chain(name, t):
             continue
         out.append({
             "business": name[:80], "phone": t.get("contact:phone") or t.get("phone") or t.get("contact:whatsapp") or "",
@@ -102,6 +102,21 @@ def osm_city(cc, city, bbox, limit=40):
             "note": ("OSM " + (t.get("shop") or t.get("amenity") or t.get("craft") or "") + " in " + city).strip(),
         })
     return out
+
+
+# Tapstall sells to the independent seller. A branch of a chain has a head office, a POS system and
+# a marketing department, and its OSM email is the chain's (benmore@pnp.co.za, info@wimpy.co.za).
+CHAIN_TAGS = ("brand", "brand:wikidata", "operator:wikidata", "network")
+# Distinctive names only: generic words (total, shell, game, pep, clicks) would catch "Total Fashion
+# Boutique". Fuel stations and most branches carry a brand tag, which CHAIN_TAGS already catches.
+CHAIN_RE = re.compile(r"\b(pick ?n ?pay|spar|shoprite|checkers|woolworths|makro|ackermans|mr ?price|dis-?chem|"
+                      r"kfc|mcdonald'?s|wimpy|steers|debonairs|nando'?s|chicken inn|pizza inn|creamy inn|bakers inn|"
+                      r"ok mart|ok zimbabwe|tm pick ?n ?pay|food lover'?s|choppies|usave|"
+                      r"cbz|steward bank|fbc bank|nmb bank|absa|fnb|standard bank|nedbank|capitec|econet|netone|vodacom|telkom)\b", re.I)
+
+
+def is_chain(name, tags):
+    return any(tags.get(k) for k in CHAIN_TAGS) or bool(CHAIN_RE.search(name or ""))
 
 
 def cities_for(cc, day=None, per_run=2):
@@ -212,6 +227,8 @@ def selftest():
     assert len(cities_for("ZW", datetime.date(2026, 10, 28))) == 2
     assert cities_for("ZW", datetime.date(2026, 10, 28)) != cities_for("ZW", datetime.date(2026, 10, 29))
     assert ROLE_JUNK.search("privacy@x.com") and not ROLE_JUNK.search("sales@x.com")
+    assert is_chain("Pick n Pay Benmore", {}) and is_chain("Mama's Kitchen", {"brand": "X"}) and is_chain("KFC Avondale", {})
+    assert not is_chain("Upi Computers", {"shop": "computer"}) and not is_chain("Gameplan Tailors", {}) and not is_chain("Total Fashion Boutique", {})
     print("offline checks OK")
     try:
         city, bbox = CITY_BBOX["ZW"][0]
