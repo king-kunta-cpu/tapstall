@@ -152,6 +152,11 @@ input[type=search] { max-width: 16rem }
         <p class="muted tiny" id="cronNote"></p>
       </div>
       <div class="card flat">
+        <h3>Distribution rails</h3>
+        <p class="muted tiny" style="margin-top:0">A rail posts by itself once its account secret is bound on the Worker; until then it waits. Steps: <span class="mono">docs/MESH-SIGNUP.md</span>.</p>
+        <div id="railList" class="small">loading…</div>
+      </div>
+      <div class="card flat">
         <h3>Last deploy (CI writes this)</h3>
         <pre class="out" id="ciOut">loading…</pre>
         <p class="muted tiny"><a href="https://github.com/king-kunta-cpu/tapstall/actions" target="_blank">Actions runs</a> · push to <span class="mono">main</span> is the only deploy path · <a href="#" id="dlCheck">run prod_check locally</a></p>
@@ -253,6 +258,19 @@ function health() {
     }).join('');
     q('#cronNote').textContent = hb.at ? ('cron last ran ' + hb.at + ' (' + Math.round(mins) + ' min ago; scheduled every 6 h, so anything under ~370 min is on time)') : 'cron has not reported yet — expiry also runs whenever a merchant renews.';
     q('#ciOut').textContent = (r.j.ci || []).join('\n') || 'no ci-deploy.log readable yet';
+    var pr = (r.j.pipeline && r.j.pipeline.press) || {}, ml = (r.j.pipeline && r.j.pipeline.mail) || {};
+    var rows = Object.keys(pr).map(function (id) {
+      var rails = pr[id].rails || {};
+      return '<div style="margin:.25rem 0"><b>' + esc(id) + '</b> ' + (Object.keys(rails).map(function (k) {
+        var st = rails[k].status;
+        return '<span class="badge ' + (st === 'active' ? 'ok' : 'warn') + '" title="' + esc((rails[k].secrets || []).join(', ')) + '">' + esc(k) + ': ' + esc(st) + '</span>';
+      }).join(' ') || '<span class="muted">no rails registered</span>') + '</div>';
+    });
+    (ml.lanes || []).forEach(function (l) {
+      var s2 = l.state || {};
+      rows.push('<div style="margin:.25rem 0"><b>mail ' + esc(l.id) + '</b> <span class="badge ' + (s2.auth_failed ? 'bad' : 'ok') + '">' + esc(l.user) + ' · ' + (s2.auth_failed ? 'parked: login refused' : 'active') + ' · ' + l.used_this_hour + '/' + l.hourly + ' this hour</span></div>');
+    });
+    q('#railList').innerHTML = rows.join('') || '<span class="muted">nothing registered</span>';
   });
   api('/ops/api/templates').then(function (r) {
     if (!r.j || !r.j.ok) return;

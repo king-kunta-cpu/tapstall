@@ -3582,7 +3582,7 @@ async function pressAccounts(req, env) {
   const act = String(b.action || 'list');
   if (act === 'list') {
     const masked = {};
-    for (const [id, e] of Object.entries(reg)) masked[id] = { class: e.class, token_env: e.token_env, rails: Object.keys(e.rails || {}),
+    for (const [id, e] of Object.entries(reg)) masked[id] = { class: e.class, token_env: e.token_env, rails: Object.keys(e.rails || {}), rail_state: pressRailState(env, e, id),
       channel_ids: Object.fromEntries(Object.entries(e.rails || {}).map(([k, v]) => [k, String(v.channel_id || '').slice(0, 6) + (v.channel_id ? '…' : '')])), source: e.source || {} };
     return json({ ok: true, action: 'list', classes: MESH_ID_CLASSES, identities: masked, defaults: MESH_ID_RAIL_DEFAULTS,
       note: 'tokens are never stored here: they are the named env secret, so a departed seller is one secret change, not an edit to a document' });
@@ -3618,6 +3618,36 @@ function directCredsFor(env, e, id) {
   return out;
 }
 
+/** v2.0.0 armed mesh. A registered rail is `active` only when the credential it sends with is bound;
+ *  until then it reads "on (waiting for account)" and names the secrets that switch it on. The press
+ *  composes and queues only for active rails, so an identity with no accounts yet costs no KV write
+ *  and no queue that fills and expires. Rails with no sender in this Worker (nostr, mastodon, devto)
+ *  say so instead of pretending to be waiting. */
+const PRESS_SENDERS = { bluesky: 'direct', telegram: 'direct', x: 'buffer', linkedin: 'buffer', pinterest: 'buffer' };
+function pressRailState(env, e, id) {
+  const tag = String(id || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const rails = (e && e.rails) || {};
+  const d = directCredsFor(env, e, id);
+  const out = {};
+  for (const [rail, r] of Object.entries(rails)) {
+    const via = PRESS_SENDERS[rail];
+    let armed = false, secrets = [];
+    if (!via) { out[rail] = { status: 'no sender', needs: 'this Worker has no sender for ' + rail }; continue; }
+    if (rail === 'bluesky') {
+      armed = !!(d.bluesky && d.bluesky.handle && d.bluesky.app_password);
+      secrets = ['PRESS_' + tag + '_BLUESKY_HANDLE', 'PRESS_' + tag + '_BLUESKY_APP_PASSWORD'];
+    } else if (rail === 'telegram') {
+      armed = !!(d.telegram && d.telegram.bot_token && d.telegram.chat_id);
+      secrets = ['PRESS_' + tag + '_TELEGRAM_BOT_TOKEN', 'PRESS_' + tag + '_TELEGRAM_CHAT_ID'];
+    } else {
+      armed = !!(env[e.token_env] && r && r.channel_id);
+      secrets = [e.token_env, '(and the Buffer channel id, registered on the identity)'];
+    }
+    out[rail] = armed ? { status: 'active' } : { status: 'on (waiting for account)', needs: (r && r.needs) || '', secrets };
+  }
+  return out;
+}
+
 /** One press window, callable by the clock as readily as by a person: compose for each identity,
  *  queue in the pipeline's own format, send what is due, write the outcome where rail health is
  *  judged from. This is the function the cron runs (v1.0.0) — the HTTP door below is an override
@@ -3632,6 +3662,9 @@ async function runPress(env, origin, opt) {
   for (const id of (only || Object.keys(reg))) {
     const e = reg[id];
     if (!e) { out.push({ id, ok: false, error: 'not registered' }); continue; }
+    const railState = pressRailState(env, e, id);
+    const armedRails = Object.keys(railState).filter((r) => railState[r].status === 'active');
+    if (!armedRails.length) { out.push({ id, class: e.class, ok: true, skipped: true, why: 'no rail has an account yet', rails: railState }); continue; }
     const press = { channels: Object.fromEntries(Object.entries(e.rails || {}).map(([k, v]) => [v.channel || k, v.channel_id || ''])),
       handles: Object.fromEntries(Object.entries(e.rails || {}).map(([k, v]) => [v.channel || k, String(v.handle || '')])),
       buffer_token: env[e.token_env] || '', board: (e.rails && e.rails.pinterest && e.rails.pinterest.board) || '',
@@ -3646,7 +3679,7 @@ async function runPress(env, origin, opt) {
     } else {
       plan = meshCompanyBeats(e, { price_usd: PRICE_USD, free_days: FREE_DAYS, feed_ok: true, price_ok: true }, { origin: origin, now: Date.now() });
     }
-    const idRails = Object.keys(e.rails || {});
+    const idRails = armedRails;
     // v1.5.3: a day's beats belong to fixed clock slots, so the same beat is the same item at every
     // tick of the day — and a slot missed by more than the grace window is skipped, not dumped late.
     const items = (plan.beats || []).filter((beat, i) => !contentSlotMissed(Date.now(), i)).map((beat, i) => meshQueueItem(Object.assign({}, beat, { seq: i, to: idRails.length ? idRails : (beat.to || []) }), { landing: origin + '/fees', store: id, now: Date.now(),
@@ -3696,7 +3729,7 @@ async function runPress(env, origin, opt) {
       sent: flush.sent, waiting: flush.waiting, duplicates: (flush.duplicates || 0) + settledEarlier,
       expired_slots: expiredQ.expired.length, token_env: e.token_env, token_present: !!press.buffer_token,
       results: flush.results.map((r) => ({ channel: r.channel, status: r.status, due: r.due, err: r.err || r.note || '' })),
-      material: plan.source, fallback_from: plan.fallback_from || '', rail_health: meshRailHealth(ledger) });
+      material: plan.source, fallback_from: plan.fallback_from || '', rail_health: meshRailHealth(ledger), rails: railState });
   }
   return out;
 }
@@ -4827,6 +4860,7 @@ async function opsHealth(env) {
     // v2.0.0: the mail lane (who sends merchant mail and first touches), what is parked for retry,
     // and whether this morning's dispatch actually reached GitHub
     pipeline.mail = await mailStatus(env);
+    try { const reg = await pressRegistry(env); pipeline.press = Object.fromEntries(Object.entries(reg).map(([id, e]) => [id, { class: e.class, rails: pressRailState(env, e, id) }])); } catch (e) { pipeline.press = { error: String(e && e.message || e).slice(0, 120) }; }
     pipeline.mail_queue = ((await env.ORDERS.list({ prefix: 'mailq:', limit: 50 }).catch(() => ({ keys: [] }))).keys || []).length;
     pipeline.dispatch_last = await env.ORDERS.get('dispatch:last', 'json').catch(() => null);
     pipeline.whop_unmatched = ((await env.ORDERS.list({ prefix: 'whop:unmatched:', limit: 50 }).catch(() => ({ keys: [] }))).keys || []).length;
@@ -5819,7 +5853,8 @@ async function pressTick(env) {
     duplicates: ran.reduce((a, r) => a + (r.duplicates || 0), 0), statuses,
     ran: ran.map((r) => ({ id: r.id, ok: r.ok, composed: r.composed || 0, in_slot: r.in_slot || 0, skipped_slots: r.skipped_slots || 0,
       sent: r.sent || 0, waiting: r.waiting || 0, duplicates: r.duplicates || 0, expired_slots: r.expired_slots || 0,
-      token_present: !!r.token_present, error: r.error || '' })) };
+      token_present: !!r.token_present, error: r.error || '',
+      ...(r.skipped ? { skipped: true, why: r.why || '' } : {}), ...(r.rails ? { rails: r.rails } : {}) })) };
   try { await env.ORDERS.put('press:last', JSON.stringify(sum)); } catch (e) { void e; }
   return sum;
 }

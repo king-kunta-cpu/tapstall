@@ -4672,6 +4672,25 @@ test('1.0.0 sellers, leads, recognised sales, and a press the clock runs by itse
       rails: { bluesky: { handle: 'house.bsky.social' } } } });
   assert.equal(preg.status, 200, preg.text);
   env.ORDERS._map.delete('press:last');   // a fresh slot, whatever earlier sweeps claimed this hour
+  // v2.0.0 armed mesh: a handle with no app password is a rail waiting for its account. The window
+  // runs, skips the identity, and writes no queue for it.
+  const tick0 = await call('/__selftest?scheduled=1');
+  const p0 = (tick0.json.scheduled.press.ran || []).find((r) => r.id === 'owner');
+  assert.ok(p0 && p0.skipped, 'no account, no compose: ' + JSON.stringify(tick0.json.scheduled.press));
+  assert.equal(p0.rails.bluesky.status, 'on (waiting for account)');
+  assert.ok(p0.rails.bluesky.secrets.includes('PRESS_OWNER_BLUESKY_APP_PASSWORD'), 'and it names the secret that switches it on');
+  assert.ok(!env.ORDERS._map.has('press:queue:owner'), 'a waiting rail costs no queue write');
+  const h0 = await call('/ops/api/health', { cookie: ck });
+  assert.equal(h0.json.pipeline.press.owner.rails.bluesky.status, 'on (waiting for account)');
+  // binding the secret is the whole switch
+  env.PRESS_OWNER_BLUESKY_APP_PASSWORD = 'app-pw-test';
+  const fetchBefore = globalThis.fetch;
+  globalThis.fetch = async (u, init) => (String(u).includes('bsky.social/xrpc/com.atproto.server.createSession')
+    ? new Response(JSON.stringify({ accessJwt: 'jwt', did: 'did:plc:test' }), { headers: { 'content-type': 'application/json' } })
+    : String(u).includes('bsky.social/xrpc/')
+      ? new Response(JSON.stringify({ uri: 'at://did:plc:test/app.bsky.feed.post/1', cid: 'c1' }), { headers: { 'content-type': 'application/json' } })
+      : fetchBefore(u, init));
+  env.ORDERS._map.delete('press:last');
   const tick1 = await call('/__selftest?scheduled=1');
   const press = tick1.json.scheduled.press;
   assert.ok(press && press.identities >= 1, 'the cron ran the press window itself: ' + JSON.stringify(tick1.json.scheduled));
@@ -4686,6 +4705,8 @@ test('1.0.0 sellers, leads, recognised sales, and a press the clock runs by itse
   const health = await call('/ops/api/health', { cookie: ck });
   assert.ok(health.json.pipeline && typeof health.json.pipeline.armed.flutterwave === 'boolean',
     'health says what is armed and what merely exists');
+  assert.equal(health.json.pipeline.press.owner.rails.bluesky.status, 'active', 'and the rail reads active once its account is bound');
+  globalThis.fetch = fetchBefore; delete env.PRESS_OWNER_BLUESKY_APP_PASSWORD;
 });
 
 /* v1.1.0 — a card payment on Whop switches the shop on by itself: checkout carries the
