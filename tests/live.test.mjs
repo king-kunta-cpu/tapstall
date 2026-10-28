@@ -4606,6 +4606,17 @@ test('1.0.0 sellers, leads, recognised sales, and a press the clock runs by itse
   const dncAct = await call('/api/leads/act', { method: 'POST',
     body: { code: 'owner', key: SECRET, id: weakLead.id, action: 'dnc' } });
   assert.equal(dncAct.status, 200, dncAct.text);
+  // v2.0.0: a row filed before the gate existed is refused at the door, not emailed —
+  // support@meta.com on a news article was exactly this shape
+  await env.ORDERS.put('lead:legacy-junk-1', JSON.stringify({ id: 'legacy-junk-1', business: 'Meta support',
+    email: 'support@meta.com', source_url: 'https://www.bulawayo24.com/news/article-1', status: 'queued', history: [] }));
+  const junkAct = await call('/api/leads/act', { method: 'POST',
+    body: { code: 'owner', key: SECRET, id: 'legacy-junk-1', action: 'claim' } });
+  assert.equal(junkAct.status, 422, junkAct.text);
+  assert.ok(junkAct.json.junk, 'the refusal names why: ' + junkAct.text);
+  const junkDnc = await call('/api/leads/act', { method: 'POST',
+    body: { code: 'owner', key: SECRET, id: 'legacy-junk-1', action: 'dnc' } });
+  assert.equal(junkDnc.status, 200, 'retiring junk is still allowed: ' + junkDnc.text);
   const reing = await ingest([weak]);
   assert.ok(reing.json.counts.dnc_skipped >= 1, 'a dnc prospect is never resurrected by a re-hunt');
 

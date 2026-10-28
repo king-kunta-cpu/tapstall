@@ -41,6 +41,7 @@ jobs:
           cache: npm
       - run: npm ci          # devDependency: wrangler (owns the upload format + schedule)
       - run: node --test tests/
+      - run: python3 scripts/mail_outreach.py --selftest   # v2.0.0: quotes, one voice, unsubscribe, bounces
 
       - name: deploy worker to Cloudflare
         if: github.ref == 'refs/heads/main'

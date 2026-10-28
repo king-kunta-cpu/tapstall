@@ -2,14 +2,14 @@
 """TapStall lead hunter — finds operators already selling the hard way, and files them
 into the Worker's lead pipeline.
 
-Sources that cost nothing and need no keys:
-  1. Bing RSS search (`format=rss`) for WhatsApp sellers by segment. Google strips its
-     result pages; Bing's RSS feed does not — never scrape Google SERPs (IP ban).
-  2. DuckDuckGo HTML as a fallback, with a browser user agent.
-  3. OpenStreetMap Overpass directory queries (formal SMB dossiers, POPIA-respectable
-     business contacts). Every Overpass query carries `out center;`.
-  4. Each candidate's own page, fetched once, for contact facts: phone, email, and
-     WhatsApp/payment language. Those FACTS are what the Worker's 2-signal rule judges —
+Sources that cost nothing and need no keys (v2.0.0):
+  1. OpenStreetMap Overpass, one city bounding box at a time (rotating daily), asking only for
+     places that carry a phone, an email or a website. Every query uses `out center`. The old
+     whole-country `area["name"=…]` query timed out (502) and the old Bing RSS / DuckDuckGo leg
+     filed search results ABOUT WhatsApp and EcoCash — support@meta.com, stock-ticker sites —
+     as leads. Both are gone.
+  2. Each candidate's own website, fetched once, for contact facts: phone, an email ON THAT
+     DOMAIN, and WhatsApp/payment language. Those FACTS are what the Worker's gate judges —
      this script never claims a signal, it only gathers evidence.
 
 It never sends anything to anyone. Output is POST /api/leads/ingest, where the Worker
@@ -30,27 +30,35 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-import xml.etree.ElementTree as ET
+import datetime
+import time
 
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
 PHONE_RE = re.compile(r"(\+?(?:27|263)[\s().-]*\d[\d\s().-]{7,12}\d|0\d{2}[\s().-]*\d{3}[\s().-]*\d{4})")
 WA_LINK_RE = re.compile(r"wa\.me/(\+?\d{9,15})")
-SKIP_HOSTS = ("google.", "bing.com", "duckduckgo.com", "facebook.com/pages",
-              "tripadvisor", "hellopeter", "wikipedia.", "youtube.com/watch")
-
-QUERIES = {
-    "ZA": ["WhatsApp to order kota takeaway South Africa",
-           "PayShap WhatsApp orders shop",
-           "order on WhatsApp food South Africa",
-           "WhatsApp shop order online South Africa small business"],
-    "ZW": ["EcoCash WhatsApp orders Zimbabwe shop",
-           "WhatsApp to order Harare food delivery",
-           "Zimbabwe online shop WhatsApp order",
-           "order via WhatsApp Bulawayo shop"],
+# (south, west, north, east). Rotated by day so a week covers every city and no day hammers one.
+CITY_BBOX = {
+    "ZW": [("Harare", (-17.93, 30.95, -17.73, 31.15)), ("Bulawayo", (-20.20, 28.50, -20.10, 28.65)),
+           ("Mutare", (-19.00, 32.62, -18.94, 32.70)), ("Gweru", (-19.48, 29.78, -19.42, 29.85))],
+    "ZA": [("Johannesburg", (-26.28, 27.93, -26.08, 28.13)), ("Cape Town", (-34.00, 18.38, -33.88, 18.55)),
+           ("Durban", (-29.90, 30.95, -29.80, 31.08)), ("Pretoria", (-25.80, 28.15, -25.70, 28.28)),
+           ("Soweto", (-26.30, 27.82, -26.20, 27.95)), ("Gqeberha", (-34.00, 25.55, -33.90, 25.65))],
 }
-OSM_TAGS = ["shop", "amenity=fast_food", "amenity=restaurant", "amenity=marketplace", "craft"]
-OSM_AREAS = {"ZA": "South Africa", "ZW": "Zimbabwe"}
+OVERPASS_ENDPOINTS = ["https://overpass-api.de/api/interpreter", "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+                      "https://overpass.kumi.systems/api/interpreter", "https://overpass.private.coffee/api/interpreter"]
+FREE_MAIL = re.compile(r"@(gmail|googlemail|yahoo|ymail|outlook|hotmail|live|icloud|aol|proton|protonmail|zoho|gmx|mweb|telkomsa|vodamail|zol)\.", re.I)
+ROLE_JUNK = re.compile(r"^(privacy|abuse|webmaster|postmaster|hostmaster|noreply|no-reply|donotreply|press|media|legal|security|careers|jobs|user|name|email|you|yourname)@", re.I)
+
+
+def site_of(host):
+    h = (host or "").lower().split(":")[0]
+    h = h[4:] if h.startswith("www.") else h
+    parts = [p for p in h.split(".") if p]
+    if len(parts) <= 2:
+        return ".".join(parts)
+    n = 3 if (parts[-2] in ("co", "com", "org", "net", "ac", "gov", "edu", "biz") and len(parts[-1]) == 2) else 2
+    return ".".join(parts[-n:])
 
 
 def fetch(url, timeout=15, data=None, headers=None):
@@ -59,49 +67,27 @@ def fetch(url, timeout=15, data=None, headers=None):
         return r.status, r.read().decode("utf-8", "replace")
 
 
-def bing_rss(query, count=10):
-    url = "https://www.bing.com/search?format=rss&q=" + urllib.parse.quote(query)
-    _, body = fetch(url)
-    root = ET.fromstring(body)
-    out = []
-    for item in root.iter("item"):
-        link = item.findtext("link") or ""
-        title = item.findtext("title") or ""
-        desc = item.findtext("description") or ""
-        out.append({"title": title.strip(), "url": link.strip(),
-                    "note": re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", desc))).strip()[:240]})
-    return out[:count]
-
-
-def ddg_html(query, count=8):
-    url = "https://html.duckduckgo.com/html/?q=" + urllib.parse.quote(query)
-    _, body = fetch(url)
-    out = []
-    for m in re.finditer(r'class="result__a" href="([^"]+)"[^>]*>(.*?)</a>', body):
-        href = html.unescape(m.group(1))
-        if "uddg=" in href:
-            href = urllib.parse.unquote(urllib.parse.parse_qs(urllib.parse.urlparse(href).query).get("uddg", [href])[0])
-        out.append({"title": re.sub(r"<[^>]+>", "", html.unescape(m.group(2))).strip(), "url": href, "note": ""})
-    return out[:count]
-
-
-def osm_overpass(country, limit=40):
-    area = OSM_AREAS.get(country)
-    if not area:
-        return []
-    filters = ""
-    for tag in OSM_TAGS:
-        if "=" in tag:
-            k, v = tag.split("=", 1)
-            filters += f'node["{k}"="{v}"](area.a);'
-        else:
-            filters += f'node["{tag}"](area.a);'
-    ql = f'[out:json][timeout:50];area["name"="{area}"]->.a;({filters});out center {limit};'
-    # `out center;` is mandatory on every Overpass query (ways/relations carry no coordinates
-    # otherwise). The public instance 406s browser UAs and 502s under load — identify honestly
-    # and let the caller's tolerance skip the source that day rather than fail the hunt.
-    _, body = fetch("https://overpass-api.de/api/interpreter?" + urllib.parse.urlencode({"data": ql}),
-                    timeout=60, headers={"User-Agent": "tapstall-lead-hunt/1.0"})
+def osm_city(cc, city, bbox, limit=40):
+    s_, w_, n_, e_ = bbox
+    b = f"({s_},{w_},{n_},{e_})"
+    # Three cheap parts, not a union of every tag pair: the 18-part version timed out on every
+    # public mirror. A shop with a website is enriched from that site; one with a phone is
+    # reachable already.
+    ql = (f'[out:json][timeout:25];(nwr["shop"]["phone"]{b};nwr["shop"]["website"]{b};'
+          f'nwr["amenity"~"^(fast_food|restaurant|cafe)$"]["phone"]{b};);out center tags {limit};')
+    # The public instance 406s browser UAs and 502s under load — identify honestly and let the
+    # caller skip the city that day rather than fail the hunt.
+    body, last = None, None
+    for attempt, ep in enumerate(OVERPASS_ENDPOINTS):
+        try:
+            _, body = fetch(ep, data=urllib.parse.urlencode({"data": ql}).encode(), timeout=35,
+                            headers={"User-Agent": "tapstall-lead-hunt/2.0 (+https://tapstall.zlnew.workers.dev)"})
+            break
+        except Exception as e:          # 429/502/504 at capacity: next mirror after a short backoff
+            last = e
+            time.sleep(min(8, 2 ** attempt))
+    if body is None:
+        raise last
     out = []
     for el in (json.loads(body).get("elements") or []):
         t = el.get("tags") or {}
@@ -109,13 +95,21 @@ def osm_overpass(country, limit=40):
         if not name:
             continue
         out.append({
-            "business": name, "phone": t.get("contact:phone") or t.get("phone") or "",
+            "business": name[:80], "phone": t.get("contact:phone") or t.get("phone") or t.get("contact:whatsapp") or "",
             "email": t.get("contact:email") or t.get("email") or "",
             "website": t.get("contact:website") or t.get("website") or "",
-            "url": "https://www.openstreetmap.org/node/%s" % el.get("id"),
-            "note": ("OSM " + (t.get("shop") or t.get("amenity") or t.get("craft") or "")).strip(),
+            "url": "https://www.openstreetmap.org/%s/%s" % (el.get("type", "node"), el.get("id")),
+            "note": ("OSM " + (t.get("shop") or t.get("amenity") or t.get("craft") or "") + " in " + city).strip(),
         })
     return out
+
+
+def cities_for(cc, day=None, per_run=2):
+    rows = CITY_BBOX.get(cc, [])
+    if not rows:
+        return []
+    d = (day or datetime.date.today()).toordinal()
+    return [rows[(d * per_run + i) % len(rows)] for i in range(min(per_run, len(rows)))]
 
 
 def page_facts(url):
@@ -127,9 +121,14 @@ def page_facts(url):
     text = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", body, flags=re.I | re.S)
     text = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", text)))
     email = ""
+    site = site_of(urllib.parse.urlparse(url).netloc)
     for e in EMAIL_RE.findall(text + " " + body):
-        if not re.search(r"\.(png|jpg|svg|webp|css|js)$|example\.|sentry|wixpress", e, re.I):
-            email = e
+        if re.search(r"\.(png|jpg|svg|webp|css|js)$|example\.|sentry|wixpress|domain\.com", e, re.I) or ROLE_JUNK.search(e):
+            continue
+        # an address on the business's own domain, or a free-mail box printed on its own page;
+        # never a third party's address that happens to appear (a theme vendor, a news site)
+        if site_of(e.split("@")[1]) == site or FREE_MAIL.search(e):
+            email = e.lower()
             break
     phone = ""
     wa = WA_LINK_RE.search(body)
@@ -161,51 +160,33 @@ def clean_title(title):
     return t.strip(" -|•")[:80]
 
 
-def hunt(countries, limit, enrich=True):
+def hunt(countries, limit, enrich=True, day=None):
     seen, leads = set(), []
     for cc in countries:
-        for q in QUERIES.get(cc, []):
-            results = []
+        for city, bbox in cities_for(cc, day):
             try:
-                results = bing_rss(q)
+                rows = osm_city(cc, city, bbox)
             except Exception as e:
-                print(f"  bing failed for '{q}': {e}", file=sys.stderr)
-            if not results:
-                try:
-                    results = ddg_html(q)
-                except Exception as e:
-                    print(f"  ddg failed for '{q}': {e}", file=sys.stderr)
-            for r in results:
-                url = r["url"].split("#")[0]
-                host = urllib.parse.urlparse(url).netloc.lower()
-                if not url or url in seen or any(h in host for h in SKIP_HOSTS):
-                    continue
-                seen.add(url)
-                lead = {"business": clean_title(r["title"]), "source_url": url,
-                        "note": r.get("note", ""), "country": cc,
-                        "segment": segment_for(r["title"] + " " + r.get("note", ""))}
-                if enrich:
-                    facts = page_facts(url)
-                    lead["email"] = facts.get("email", "")
-                    lead["phone"] = facts.get("phone", "")
-                    if facts.get("cues"):
-                        lead["note"] = (lead["note"] + " | " + ", ".join(facts["cues"]))[:300]
-                leads.append(lead)
-                if len(leads) >= limit:
-                    return leads
-        try:
-            for r in osm_overpass(cc):
+                print(f"  overpass failed for {city}: {type(e).__name__}", file=sys.stderr)
+                continue
+            for r in rows:
                 if r["url"] in seen:
                     continue
                 seen.add(r["url"])
                 lead = {"business": r["business"], "phone": r["phone"], "email": r["email"],
                         "website": r["website"], "source_url": r["url"], "note": r["note"],
-                        "country": cc, "segment": "directories"}
+                        "country": cc, "segment": segment_for(r["business"] + " " + r["note"])}
+                if enrich and r["website"].startswith("http"):
+                    facts = page_facts(r["website"])
+                    lead["email"] = lead["email"] or facts.get("email", "")
+                    lead["phone"] = lead["phone"] or facts.get("phone", "")
+                    if facts.get("cues"):
+                        lead["note"] = (lead["note"] + " | " + ", ".join(facts["cues"]))[:300]
+                if not (lead["email"] or lead["phone"]):
+                    continue
                 leads.append(lead)
                 if len(leads) >= limit:
                     return leads
-        except Exception as e:
-            print(f"  overpass failed for {cc}: {e}", file=sys.stderr)
     return leads
 
 
@@ -226,32 +207,27 @@ def post_leads(origin, secret, leads):
 
 
 def selftest():
-    got = []
-    for cc in ("ZA", "ZW"):
-        try:
-            rows = bing_rss(QUERIES[cc][0], 3)
-            print(f"[{cc}] bing rss: {len(rows)} rows" + (f" — {rows[0]['title'][:50]}" if rows else ""))
-            got += rows
-        except Exception as e:
-            print(f"[{cc}] bing rss failed: {e}")
+    # offline checks first (a public runner must not fail on Overpass weather)
+    assert site_of("mail.shop.co.za") == "shop.co.za" and site_of("www.fluency.co.zw") == "fluency.co.zw"
+    assert len(cities_for("ZW", datetime.date(2026, 10, 28))) == 2
+    assert cities_for("ZW", datetime.date(2026, 10, 28)) != cities_for("ZW", datetime.date(2026, 10, 29))
+    assert ROLE_JUNK.search("privacy@x.com") and not ROLE_JUNK.search("sales@x.com")
+    print("offline checks OK")
     try:
-        rows = osm_overpass("ZA", 5)
-        print(f"[ZA] overpass: {len(rows)} dossiers" + (f" — {rows[0]['business']}" if rows else ""))
-        got += rows
+        city, bbox = CITY_BBOX["ZW"][0]
+        rows = osm_city("ZW", city, bbox, 5)
+        print(f"[ZW] overpass {city}: {len(rows)} places" + (f" — {rows[0]['business']}" if rows else ""))
     except Exception as e:
-        print(f"[ZA] overpass failed: {e}")
-    f = page_facts("https://example.com")
-    print(f"page_facts(example.com) -> email={f.get('email')!r} cues={f.get('cues')}")
-    ok = len(got) >= 3
-    print("SELFTEST", "OK" if ok else "FAILED (no source answered)")
-    return 0 if ok else 1
+        print(f"[ZW] overpass failed (not fatal): {type(e).__name__}")
+    print("SELFTEST OK")
+    return 0
 
 
 def main():
     ap = argparse.ArgumentParser(description="TapStall lead hunter")
     ap.add_argument("--origin", default=os.environ.get("TAPSTALL_ORIGIN", "https://tapstall.zlnew.workers.dev"))
     ap.add_argument("--limit", type=int, default=60)
-    ap.add_argument("--countries", default="ZA,ZW")
+    ap.add_argument("--countries", default="ZW,ZA")
     ap.add_argument("--post", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--selftest", action="store_true")

@@ -28,7 +28,10 @@ Usage:
   ... --poll-only
 """
 import argparse
+import base64
 import email
+import hashlib
+import hmac
 import email.policy
 import email.utils
 import imaplib
@@ -40,6 +43,7 @@ import ssl
 import sys
 import urllib.parse
 import urllib.request
+from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 
 ORIGIN_DEFAULT = "https://tapstall.zlnew.workers.dev"
@@ -47,6 +51,24 @@ TOUCH_FOLLOW_DAYS = [3, 5, 7]
 MAX_TOUCHES = len(TOUCH_FOLLOW_DAYS)
 STOP_RE = re.compile(r"\b(stop|unsubscribe|remove me|opt ?out|leave me alone|do not contact)\b", re.I)
 SYSTEM_FROM_RE = re.compile(r"(mailer-daemon|postmaster|no-?reply|donotreply|notifications?)@", re.I)
+BOUNCE_FROM_RE = re.compile(r"(mailer-daemon|postmaster)@", re.I)
+# v2.0.0: where the person's own words end. Everything below is the quoted original, which says
+# "reply STOP" — reading it as their answer marked every polite reply do-not-contact.
+QUOTE_START_RE = re.compile(r"^(>|On .{0,200}wrote:\s*$|-{2,} ?Original Message|From: .+|Sent from my |_{5,})", re.I | re.M)
+ADDR_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+
+
+def unsub_url(origin, secret, lead_id):
+    """The Worker's /u/<lead>/<tok> link, derived with the same HMAC (core.js hmacSig) so the
+    runner's Gmail touches carry the same one-click unsubscribe as the Worker's own."""
+    mac = hmac.new(secret.encode(), ("unsub:" + str(lead_id)).encode(), hashlib.sha256).digest()
+    tok = re.sub(r"[^A-Za-z0-9]", "", base64.urlsafe_b64encode(mac).decode().rstrip("=")[:43])[:22]
+    return origin.rstrip("/") + "/u/" + str(lead_id) + "/" + tok
+
+
+def own_words(text):
+    m = QUOTE_START_RE.search(text or "")
+    return (text or "")[: m.start()] if m else (text or "")
 
 
 def api(origin, secret, path, payload=None):
@@ -102,13 +124,17 @@ def act(origin, secret, lead_id, action, seller_code="", sender="", follow_days=
     return api(origin, secret, "/api/leads/act", payload)
 
 
-def eligible(lead, now_iso):
+def eligible(lead, now_iso, box_user=""):
     if not lead.get("email"):
         return False
     if lead.get("status") == "queued":
         return len(lead.get("signals") or []) >= 2
     if lead.get("status") == "contacted":
         if int(lead.get("touches") or 0) >= MAX_TOUCHES:
+            return False
+        # one voice per thread: a follow-up comes from the box the first touch came from
+        last = str(lead.get("last_sender") or "").lower()
+        if last and box_user and last != box_user.lower():
             return False
         due = lead.get("next_follow_at") or ""
         return bool(due) and due <= now_iso
@@ -125,7 +151,7 @@ def evidence_line(lead):
     return f"I came across {biz} online."
 
 
-def compose(lead, origin, from_name):
+def compose(lead, origin, from_name, unsub=""):
     biz = lead.get("business") or "there"
     code = lead.get("seller_code") or ""
     link = origin.rstrip("/") + (("/r/" + code) if code else "/onboard")
@@ -142,22 +168,30 @@ def compose(lead, origin, from_name):
          "order, no screenshots to argue about.\n\nIt is free for 60 days, then USD 60/year "
          "(or USD 7/month). No commission on your sales, no order cap.\n\n"
          f"Start here: {link}\n\n— {from_name}, Tapstall\n"
-         "If this is not for you, reply STOP and we will not contact you again."),
+         "A reply to this email reaches a person."),
         (f"Hi again,\n\nShort version: your menu on one link, payment straight to your own "
          "account, and an exact amount per order so fake proof-of-payment stops working. "
-         f"Free for 60 days:\n{link}\n\n— {from_name}\nReply STOP to opt out."),
+         f"Free for 60 days:\n{link}\n\n— {from_name}"),
         (f"Hi — last note from me. If order-taking on WhatsApp ever starts costing you sales "
          f"or disputes, your shop link can be live in about two minutes:\n{link}\n\n— {from_name}"),
     ]
-    return subjects[touch], bodies[touch]
+    foot = ("\n\n—\nNot for you? One click and we never write again: " + unsub) if unsub else "\n\nReply STOP and we will not write again."
+    postal = os.environ.get("POSTAL_ADDRESS", "").strip()
+    return subjects[touch], bodies[touch] + foot + (("\n" + postal) if postal else "")
 
 
-def send_smtp(mailbox, to_addr, subject, body, from_name):
+def send_smtp(mailbox, to_addr, subject, body, from_name, unsub=""):
+    if mailbox.get("smtp") is False:
+        raise RuntimeError("poll-only mailbox")     # the inbox.lv lane is the Worker's to send on
     msg = EmailMessage()
     msg["From"] = f"{from_name} <{mailbox['user']}>"
     msg["To"] = to_addr
     msg["Reply-To"] = mailbox["user"]
     msg["Subject"] = subject
+    msg["Message-ID"] = email.utils.make_msgid(domain=mailbox["user"].split("@")[-1])
+    if unsub:
+        msg["List-Unsubscribe"] = f"<{unsub}>"
+        msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
     msg.set_content(body)
     password = str(mailbox["app_password"]).replace(" ", "")
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30, context=ssl.create_default_context()) as s:
@@ -168,7 +202,7 @@ def send_smtp(mailbox, to_addr, subject, body, from_name):
 def classify_reply(from_addr, text):
     if SYSTEM_FROM_RE.search(from_addr or ""):
         return "ignore"
-    if STOP_RE.search(text or ""):
+    if STOP_RE.search(own_words(text)):
         return "dnc"
     return "replied"   # any human answer stops the machine; a person takes it from here
 
@@ -184,31 +218,69 @@ def body_text(msg_bytes):
     return ""
 
 
+def bounced_addresses(msg, text):
+    """Recipients a delivery-failure report names: the header if the server sets one, else
+    every address in the report (matched against our leads by the caller)."""
+    out = set()
+    for h in ("X-Failed-Recipients", "Final-Recipient", "Original-Recipient"):
+        for v in msg.get_all(h) or []:
+            out.update(a.lower() for a in ADDR_RE.findall(str(v)))
+    if not out:
+        out.update(a.lower() for a in ADDR_RE.findall(text or ""))
+    return out
+
+
 def poll_mailbox(origin, secret, mailbox, leads_by_email, seller_code, counts, dry=False):
+    """Read-only, always. Both boxes are shared: the Gmail one is also a support inbox for another
+    business and the inbox.lv one serves other products, so this never marks anything read and
+    never moves a message. Re-reading is harmless: a lead that already replied or was marked dnc
+    is no longer in leads_by_email, so the same message cannot act twice."""
     password = str(mailbox["app_password"]).replace(" ", "")
-    imap = imaplib.IMAP4_SSL("imap.gmail.com", 993, timeout=30)
+    imap = imaplib.IMAP4_SSL(mailbox.get("imap_host") or "imap.gmail.com", 993, timeout=30)
     try:
         imap.login(mailbox["user"], password)
-        imap.select("INBOX")
-        typ, data = imap.search(None, "UNSEEN")
-        ids = (data[0].split() if typ == "OK" and data and data[0] else [])[-50:]
+        imap.select("INBOX", readonly=True)
+        since = (datetime.now(timezone.utc) - timedelta(days=4)).strftime("%d-%b-%Y")
+        typ, data = imap.search(None, "SINCE", since)
+        ids = (data[0].split() if typ == "OK" and data and data[0] else [])[-200:]
         for mid in ids:
+            typ, hdr = imap.fetch(mid, "(BODY.PEEK[HEADER.FIELDS (FROM)])")
+            if typ != "OK" or not hdr or not hdr[0]:
+                continue
+            from_addr = email.utils.parseaddr(email.message_from_bytes(hdr[0][1]).get("From") or "")[1].lower()
+            is_bounce = bool(BOUNCE_FROM_RE.search(from_addr))
+            if not is_bounce and from_addr not in leads_by_email:
+                continue                     # not ours: a support ticket, another product's mail
             typ, parts = imap.fetch(mid, "(BODY.PEEK[])")
             if typ != "OK" or not parts or not parts[0]:
                 continue
-            msg = email.message_from_bytes(parts[0][1], policy=email.policy.default)
-            from_addr = email.utils.parseaddr(str(msg.get("From") or ""))[1].lower()
+            raw = parts[0][1]
+            msg = email.message_from_bytes(raw, policy=email.policy.default)
+            text = body_text(raw)
+            if is_bounce:
+                hit = [leads_by_email[a] for a in bounced_addresses(msg, text) if a in leads_by_email]
+                for lead in hit:
+                    if not dry:
+                        try:
+                            act(origin, secret, lead["id"], "dnc", seller_code=lead.get("seller_code") or seller_code, sender=mailbox["user"])
+                        except Exception:
+                            counts["act_errors"] = counts.get("act_errors", 0) + 1
+                            continue
+                    leads_by_email.pop(str(lead.get("email") or "").lower(), None)
+                    counts["bounced_dnc"] = counts.get("bounced_dnc", 0) + 1
+                continue
             lead = leads_by_email.get(from_addr)
-            kind = classify_reply(from_addr, body_text(parts[0][1]))
+            kind = classify_reply(from_addr, text)
             if lead and kind in ("dnc", "replied"):
                 if not dry:
-                    act(origin, secret, lead["id"], kind,
-                        seller_code=lead.get("seller_code") or seller_code, sender=mailbox["user"])
+                    try:
+                        act(origin, secret, lead["id"], kind,
+                            seller_code=lead.get("seller_code") or seller_code, sender=mailbox["user"])
+                    except Exception:
+                        counts["act_errors"] = counts.get("act_errors", 0) + 1
+                        continue
+                leads_by_email.pop(from_addr, None)
                 counts["replies_" + kind] = counts.get("replies_" + kind, 0) + 1
-            else:
-                counts["replies_unmatched"] = counts.get("replies_unmatched", 0) + 1
-            if not dry:
-                imap.store(mid, "+FLAGS", "\\Seen")
     finally:
         try:
             imap.logout()
@@ -234,7 +306,6 @@ def main():
         print("ADMIN_SECRET env required", file=sys.stderr)
         return 2
     dry = a.dry_run or not a.send
-    from datetime import datetime, timezone
     now_iso = datetime.now(timezone.utc).isoformat()
     counts = {"dry_run": dry, "sent": 0, "skipped_no_mailbox": 0, "whatsapp_only_waiting": 0}
     mailboxes = fetch_mailboxes(a.origin, secret)
@@ -242,7 +313,7 @@ def main():
     codes = sorted({l.get("seller_code") for l in leads if l.get("seller_code")})
     by_tag = {m["tag"]: m for m in mailboxes}
     mailbox_for = {}
-    for m in mailboxes:
+    for m in [x for x in mailboxes if x.get("smtp") is not False]:
         code = code_for_tag(m["tag"], codes)
         if code is not None:
             mailbox_for[code] = m
@@ -254,22 +325,45 @@ def main():
         for lead in leads:
             if lead.get("status") in ("queued", "contacted") and not lead.get("email") and lead.get("phone"):
                 counts["whatsapp_only_waiting"] += 1
-            if not eligible(lead, now_iso):
-                continue
             code = lead.get("seller_code") or ""
             box = mailbox_for.get(code) or (owner_box if (not code or fallback) else None)
+            if not eligible(lead, now_iso, box["user"] if box else ""):
+                continue
             if not box:
                 counts["skipped_no_mailbox"] += 1
                 continue
             if sent_per_box.get(box["user"], 0) >= a.per_mailbox_cap:
                 counts["skipped_cap"] = counts.get("skipped_cap", 0) + 1
                 continue
-            subject, body = compose(lead, a.origin, a.from_name)
+            unsub = unsub_url(a.origin, secret, lead["id"])
+            subject, body = compose(lead, a.origin, a.from_name, unsub)
             touches = int(lead.get("touches") or 0)
             if not dry:
-                if lead["status"] == "queued":
-                    act(a.origin, secret, lead["id"], "claim", seller_code=code)
-                send_smtp(box, lead["email"], subject, body, a.from_name)
+                # one lead never sinks the run: the Worker refuses junk at claim (422), a mailbox
+                # can refuse one address — count it and move on
+                try:
+                    if lead["status"] == "queued":
+                        act(a.origin, secret, lead["id"], "claim", seller_code=code)
+                except Exception:
+                    counts["refused_at_claim"] = counts.get("refused_at_claim", 0) + 1
+                    continue
+                try:
+                    send_smtp(box, lead["email"], subject, body, a.from_name, unsub)
+                except smtplib.SMTPRecipientsRefused:
+                    try:
+                        act(a.origin, secret, lead["id"], "dnc", seller_code=code, sender=box["user"])
+                    except Exception:
+                        pass
+                    counts["refused_by_server"] = counts.get("refused_by_server", 0) + 1
+                    continue
+                except Exception as e:
+                    counts["send_errors"] = counts.get("send_errors", 0) + 1
+                    print(f"send failed ({box['tag']}): {type(e).__name__}", file=sys.stderr)
+                    try:
+                        act(a.origin, secret, lead["id"], "release", seller_code=code)
+                    except Exception:
+                        pass
+                    continue
                 act(a.origin, secret, lead["id"], "contacted", seller_code=code,
                     sender=box["user"], follow_days=TOUCH_FOLLOW_DAYS[min(touches, MAX_TOUCHES - 1)])
             counts["sent"] += 1
@@ -277,7 +371,7 @@ def main():
 
     if not a.send_only:
         by_email = {str(l["email"]).lower(): l for l in leads if l.get("email")
-                    and l.get("status") in ("claimed", "contacted", "replied", "queued")}
+                    and l.get("status") in ("claimed", "contacted")}
         for m in mailboxes:
             code = code_for_tag(m["tag"], codes)
             try:
@@ -315,7 +409,24 @@ def selftest(a):
     assert classify_reply("mailer-daemon@googlemail.com", "Delivery Status Notification") == "ignore"
     assert tag_of("tino-sells") == "TINOSELLS"
     assert code_for_tag("TINOSELLS", ["tino-sells"]) == "tino-sells"
-    print("SELFTEST OK — compose, eligibility, reply classes, mailbox tags")
+    # v2.0.0: a polite reply that quotes our footer is a reply, not an opt-out
+    quoted = "Yes please, send details.\n\nOn Mon, 27 Oct 2026, Tapstall <x@gmail.com> wrote:\n> Reply STOP and we will not write again."
+    assert classify_reply("a@b.com", quoted) == "replied", own_words(quoted)
+    assert classify_reply("a@b.com", "STOP\n\n> earlier text") == "dnc"
+    # follow-ups stay in one voice
+    c = {**sample, "status": "contacted", "touches": 1, "next_follow_at": "2000-01-01", "last_sender": "lv@inbox.lv"}
+    assert not eligible(c, "2999-01-01T00:00:00+00:00", "me@gmail.com")
+    assert eligible(c, "2999-01-01T00:00:00+00:00", "lv@inbox.lv")
+    # the unsubscribe link matches the Worker's HMAC shape and is on every touch
+    u = unsub_url("https://t.example", "test-secret", "ld-test")
+    assert re.match(r"^https://t\.example/u/ld-test/[A-Za-z0-9]{22}$", u), u
+    for t in range(3):
+        _, b = compose({**sample, "touches": t}, a.origin, "Tino", u)
+        assert u in b
+    import email as _e
+    rep = _e.message_from_string("From: mailer-daemon@googlemail.com\nX-Failed-Recipients: Gone@Shop.co.zw\n\nfailed")
+    assert bounced_addresses(rep, "failed") == {"gone@shop.co.zw"}
+    print("SELFTEST OK — compose, eligibility, reply classes, mailbox tags, quotes, one voice, unsubscribe, bounces")
     return 0
 
 

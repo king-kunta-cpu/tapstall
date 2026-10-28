@@ -303,22 +303,32 @@ details.box .in{padding:.5rem 0 .7rem}
   </div>
   <div style="display:flex;gap:.5rem;margin-top:.6rem"><button id="go">Open my dashboard</button><button class="sm" id="lostBtn">I lost my PIN</button></div>
   <div id="lost" class="hide" style="margin-top:.7rem;border-top:1px solid #eef2f6;padding-top:.6rem">
-    <p class="hint" style="margin:0 0 .4rem">Two things only the owner has: the contact on the store and the account buyers pay into. Type them and a new PIN is set right here — no email to wait for, nobody to ask. Every <i>other</i> device is signed out when you do this, so a PIN somebody else learned stops working.</p>
-    <div class="two">
+    <!-- v2.0.0: step one emails a one-hour link to the address on the store; step two (no email on
+         file) takes the store WhatsApp number and the renew link only the owner was given. -->
+    <div id="lStep1">
+      <p class="hint" style="margin:0 0 .4rem">We email a link to the address on your store. It works once, for one hour, and signs every <i>other</i> device out — so a PIN somebody else learned stops working.</p>
       <div class="f"><label>store name</label><input id="rH" placeholder="mamatoe" autocapitalize="off" spellcheck="false"></div>
+      <button class="sm" id="rMail">Email me a reset link</button>
+      <button class="sm" id="rNoMail" style="margin-left:.3rem">No email on my store</button>
+    </div>
+    <div id="lStep2" class="hide">
+      <p class="hint" style="margin:0 0 .4rem">Type the store WhatsApp number and paste the renew link you were given at sign-up (it starts with <span class="mono">…/renew/</span>). Payment changes wait 24 hours after this kind of reset.</p>
+      <div class="two">
+        <div class="f"><label>store WhatsApp number (or owner email)</label><input id="rE" placeholder="26377000000"></div>
+        <div class="f"><label>your renew link</label><input id="rP" placeholder="https://…/renew/…" autocapitalize="off" spellcheck="false"></div>
+      </div>
+    </div>
+    <div id="lPin" class="hide">
       <div class="f"><label>new PIN (leave empty to be given one)</label><input id="rN" type="password" inputmode="numeric" maxlength="8" placeholder="6 to 8 digits"></div>
+      <button class="sm" id="rGo">Set my new PIN</button>
     </div>
-    <div class="two">
-      <div class="f"><label>owner email or WhatsApp</label><input id="rE" placeholder="you@example.com, or 26377000000"></div>
-      <div class="f"><label>payout account, or the menu link</label><input id="rP"></div>
-    </div>
-    <button class="sm" id="rGo">Set my new PIN</button>
     <div id="rOut"></div>
   </div>
 </div>
 
 <div id="app" class="hide">
   <div class="hold hide" id="pend"></div>
+  <div class="hold hide" id="claimOut"></div>
 
   <!-- ─────────────────────────── today ─────────────────────────── -->
   <div class="card" id="today">
@@ -509,10 +519,26 @@ function showWhy(t) {
   // Somebody arriving from a saved link must not be left at a form they have to
   // guess at. That is the only time this screen says anything about itself.
   if (u.searchParams.get('code') || u.searchParams.get('token')) {
-    showWhy('Signing in by link has been retired. Your store name is your key now — type it with your PIN above. Forgot the PIN? “I lost my PIN” sets a new one from your own store details.');
+    showWhy('Signing in by link has been retired. Your store name is your key now — type it with your PIN above. Forgot the PIN? “I lost my PIN” emails a reset link to the address on your store.');
   }
-  q('#lostBtn').onclick = function () { q('#lost').classList.toggle('hide'); };
+  q('#lostBtn').onclick = function () { q('#lost').classList.toggle('hide'); if (!q('#rH').value) q('#rH').value = q('#fK').value; };
   q('#rGo').onclick = recover;
+  q('#rMail').onclick = askLink;
+  q('#rNoMail').onclick = function () { q('#lStep2').classList.remove('hide'); q('#lPin').classList.remove('hide'); };
+  // the emailed reset link lands here: only the new PIN is asked for
+  S.reset = u.searchParams.get('reset') || '';
+  if (S.reset) {
+    q('#lost').classList.remove('hide'); q('#lStep1').classList.add('hide'); q('#lPin').classList.remove('hide');
+    showWhy('Choose a new PIN below. Every other device will be signed out.');
+    history.replaceState(null, '', '/a');
+  }
+  // a Whop payment that matched no shop: remembered until the merchant signs in, then claimed once
+  var claim = u.searchParams.get('claim');
+  if (claim) {
+    try { sessionStorage.setItem('tp_claim', claim); } catch (e) {}
+    showWhy('Sign in to the shop this payment is for. The paid time is added as soon as you are in.');
+    history.replaceState(null, '', '/a');
+  }
   q('#outLn').onclick = q('#sgnOut').onclick = signOut;
   q('#go').onclick = signIn;
   q('#fK').onkeydown = q('#fP').onkeydown = function (e) { if (e.key === 'Enter') signIn(); };
@@ -559,20 +585,47 @@ function changePin() {
     q('#pinState').textContent = 'set today';
   });
 }
+function askLink() {
+  var key = q('#rH').value.trim().toLowerCase(), o = q('#rOut');
+  if (!key) { o.innerHTML = '<div class="flags" style="margin-top:.4rem">Type your store name first.</div>'; return; }
+  q('#rMail').disabled = true;
+  api('/api/pin/reset', { key: key }).then(function (r) {
+    q('#rMail').disabled = false;
+    if (r.j && r.j.ok) { o.innerHTML = '<div class="hint" style="margin-top:.4rem">' + esc(r.j.note || ('Sent to ' + r.j.sent_to)) + '</div>'; return; }
+    if (r.j && r.j.no_email) { q('#lStep2').classList.remove('hide'); q('#lPin').classList.remove('hide'); }
+    o.innerHTML = '<div class="flags" style="margin-top:.4rem">' + esc((r.j && r.j.error) || 'Did not work') + '</div>';
+  });
+}
 function recover() {
-  var who = q('#rE').value.trim(), proof = q('#rP').value.trim();
-  var body = { key: q('#rH').value.trim().toLowerCase(), pay_account: proof, feed_url: proof };
-  // one box, because asking which kind of contact it is adds a decision for no
-  // safety: the store already holds exactly one of the two, and the Worker checks
-  // the value it has
-  if (who.indexOf('@') > 0) body.owner_email = who; else body.whatsapp = who.replace(/\D/g, '');
+  var body;
+  if (S.reset) body = { cap: S.reset };
+  else {
+    var who = q('#rE').value.trim();
+    body = { key: q('#rH').value.trim().toLowerCase(), renew: q('#rP').value.trim() };
+    // one box, because the store holds one of the two and the Worker checks the value it has
+    if (who.indexOf('@') > 0) body.owner_email = who; else body.whatsapp = who.replace(/\D/g, '');
+  }
   if (q('#rN').value.trim()) body.new_pin = digitsOnly(q('#rN').value);
   q('#rGo').disabled = true;
   api('/api/pin/reset', body).then(function (r) {
     q('#rGo').disabled = false;
     var o = q('#rOut');
     if (!r.j || !r.j.ok) { o.innerHTML = '<div class="flags" style="margin-top:.4rem">' + esc((r.j && r.j.error) || 'Did not work') + '</div>'; return; }
+    S.reset = '';
+    if (r.j.handle) q('#rH').value = r.j.handle;
     showPin(o, r.j.pin, r.j.note || 'That is your PIN now.');
+  });
+}
+function claimPayment() {
+  var c = null;
+  try { c = sessionStorage.getItem('tp_claim'); } catch (e) {}
+  if (!c || !S.handle) return;
+  try { sessionStorage.removeItem('tp_claim'); } catch (e) {}
+  api('/api/whop/claim', { handle: S.handle, claim: c }).then(function (r) {
+    var d = q('#claimOut');
+    d.textContent = (r.j && r.j.ok) ? ('Payment added: ' + r.j.days + ' days. Your shop now runs until ' + new Date(r.j.paid_until).toDateString() + '.')
+      : ((r.j && r.j.error) || 'That payment could not be added. Reply to the payment email and we will sort it out.');
+    d.classList.remove('hide');
   });
 }
 function signOut(e) { if (e) e.preventDefault(); api('/api/logout', {}).then(function () { location.href = '/a'; }); }
@@ -612,6 +665,7 @@ function load() {
     }
     opened = true;
     q('#login').classList.add('hide'); q('#app').classList.remove('hide');
+    claimPayment();
     S.justIn = 0; S.loadRetry = 0;
     S.store = j.store || {}; S.store.pending = j.pending || null;
     S.orders = j.orders || []; S.audit = j.audit || [];

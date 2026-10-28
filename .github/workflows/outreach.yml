@@ -18,8 +18,8 @@ on:
   # bounce and complaint rates stay flat. The Worker remains the judge: this only
   # sends to leads it calls eligible (two signals, under the touch cap, follow-up
   # due), and every STOP still lands in the do-not-contact ledger.
-  schedule:
-    - cron: '40 6 * * 1-5'
+  # v2.0.0: no schedule. The Worker's 06:15 UTC sweep dispatches this on weekdays and, since
+  # v2.0.0, retries a failed dispatch at the next sweep; a schedule here as well ran it twice a day.
   workflow_dispatch:
     inputs:
       mode:

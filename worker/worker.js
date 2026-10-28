@@ -61,7 +61,7 @@ import {
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '1.9.1';
+const VERSION = '2.0.0';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
@@ -2998,7 +2998,7 @@ async function identify(req, env, handle) {
 /** 429 for a store whose key is being guessed; null everywhere else. */
 function lockRes(who) {
   return who && who.locked
-    ? json({ ok: false, error: 'too many failed attempts with that key — wait for the freeze to pass, or reset the PIN with the store’s own details' }, 429)
+    ? json({ ok: false, error: 'too many failed attempts with that key — wait for the freeze to pass, or use “I lost my PIN” to get a reset link by email' }, 429)
     : null;
 }
 
@@ -4804,6 +4804,12 @@ async function opsHealth(env) {
       gh_dispatch: !!env.GH_DISPATCH_TOKEN, trongrid_key: !!env.TRONGRID_KEY,
     };
     pipeline.sellers_active = (await listSellers(env)).filter((s) => s.active !== false).length;
+    // v2.0.0: the mail lane (who sends merchant mail and first touches), what is parked for retry,
+    // and whether this morning's dispatch actually reached GitHub
+    pipeline.mail = await mailStatus(env);
+    pipeline.mail_queue = ((await env.ORDERS.list({ prefix: 'mailq:', limit: 50 }).catch(() => ({ keys: [] }))).keys || []).length;
+    pipeline.dispatch_last = await env.ORDERS.get('dispatch:last', 'json').catch(() => null);
+    pipeline.whop_unmatched = ((await env.ORDERS.list({ prefix: 'whop:unmatched:', limit: 50 }).catch(() => ({ keys: [] }))).keys || []).length;
   } catch (e) { pipeline.error = String((e && e.message) || e).slice(0, 120); }
   return json({ ok: true, selftest: t, pages, ci, cron: t.cron_heartbeat || null, version: VERSION, templates: OPS_TPL_NAMES, hooks, pipeline },
     200, { 'Cache-Control': 'no-store' });
@@ -5605,6 +5611,12 @@ async function leadsAct(req, env) {
       return json({ ok: false, conflict: true, error: 'allocated to ' + lead.seller_code + ' — one prospect, one voice' }, 409);
     }
     if (as) actor = as;
+  }
+  // v2.0.0: the runner cannot run the gate itself, so the door does. A row filed before the gate
+  // existed (support@meta.com was one) is refused here instead of being emailed.
+  if ((b.action === 'claim' || b.action === 'contacted') && (lead.status === 'queued' || lead.status === 'research_hold')) {
+    const junk = leadJunkReason(lead) || (lead.email && !leadEmailFor(lead.email, lead.source_url, lead.website) ? 'address does not belong to the business' : '');
+    if (junk) return json({ ok: false, junk, error: 'not a lead: ' + junk }, 422);
   }
   const t = leadTransition(lead, b.action, actor, { shop: b.shop, follow_days: b.follow_days, now: Date.now() });
   if (!t.ok) return json({ ok: false, conflict: !!t.conflict, error: t.error, ...(t.actions ? { actions: t.actions } : {}) }, t.conflict ? 409 : 422);

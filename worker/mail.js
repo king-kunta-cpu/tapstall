@@ -248,7 +248,9 @@ export async function mailSend(env, msg, opts) {
     await laneBump(env, lane.id, now);
     return { sent: true, lane: lane.id };
   } catch (e) {
-    if (e && e.authFail) await laneSetState(env, lane.id, { status: 'paused', why: String(e.message).slice(0, 160), at: new Date(now).toISOString() });
+    // a refused password parks the lane for six hours instead of hammering the box (which is how an
+    // inbox.lv account gets locked); it comes back by itself, so nobody has to press resume
+    if (e && e.authFail) await laneSetState(env, lane.id, { status: 'active', auth_failed: true, cooldown_until: new Date(now + 6 * 3600e3).toISOString(), why: String(e.message).slice(0, 160), at: new Date(now).toISOString() });
     else if (e && !e.permanent) await laneSetState(env, lane.id, { status: 'active', cooldown_until: new Date(now + 10 * 60e3).toISOString(), why: String(e && e.message || e).slice(0, 160) });
     return { sent: false, why: String(e && e.message || e).slice(0, 160), permanent: !!(e && e.permanent) };
   } finally {

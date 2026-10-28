@@ -423,7 +423,7 @@ function detail(h) {
         + 'Order desk (sign in there): ' + location.origin + '/a\n'
         + 'Key — your store name: ' + h + '\n'
         + 'PIN: ' + pin + '\n'
-        + 'Change the PIN any time inside the dashboard. Lose it and there is nobody to wait for: tap “I lost my PIN” on the sign-in screen and a new one is set from your own store details.';
+        + 'Change the PIN any time inside the dashboard. Lose it and there is nobody to wait for: tap “I lost my PIN” on the sign-in screen and a reset link is emailed to the address on your store (no email? the store WhatsApp number plus your renew link).';
       q('#leverOut').innerHTML = '<div class="notice ok" style="margin-top:.5rem">'
         + '<div class="small muted">new sign-in for ' + esc(h) + ' — shown once, here, and then nowhere</div>'
         + '<div class="mono" style="font-size:1.6rem;letter-spacing:.22rem;text-align:center;margin:.25rem 0">' + esc(pin) + '</div>'
@@ -438,7 +438,7 @@ function detail(h) {
       var b = e.target.closest('[data-act]'); if (!b) return;
       var act = b.getAttribute('data-act');
       if (act === 'revoke' && !confirm('Revoke ' + h + '’s API key and sign out every device they have open? Their PIN still works — revoking a key is not meant to lock the owner out of their own shop. The store keeps taking orders either way.')) return;
-      if (act === 'reset_pin' && !confirm('Give ' + h + ' a new 6-digit PIN and sign out every device that has the old one? You will read the new PIN out once. It is not stored anywhere you can get it back afterwards — if they lose it, “I lost my PIN” on their sign-in screen resets it from their own store details, with nobody in the middle.')) return;
+      if (act === 'reset_pin' && !confirm('Give ' + h + ' a new 6-digit PIN and sign out every device that has the old one? You will read the new PIN out once. It is not stored anywhere you can get it back afterwards — if they lose it, “I lost my PIN” on their sign-in screen emails them a reset link (or takes their WhatsApp number and renew link), with nobody in the middle.')) return;
       var payload = { handle: h, action: act, message: (q('#noteBox') || {}).value || '' };
       b.disabled = true; var old = b.textContent; b.textContent = '…';
       api('/ops/api/store', payload).then(function (r2) {

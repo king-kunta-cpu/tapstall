@@ -9,9 +9,9 @@
     "build": "bash scripts/build_bundle.sh .build",
     "check": "bash scripts/deploy.sh --check",
     "deploy": "bash scripts/deploy.sh",
-    "test": "node --test tests/ leads/apps-script/test/",
+    "test": "node --test tests/ && python3 scripts/mail_outreach.py --selftest",
     "quota": "bash scripts/quota.sh"
   },
   "type": "module",
-  "version": "1.9.1"
+  "version": "2.0.0"
 }

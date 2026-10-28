@@ -11,8 +11,8 @@ on:
   # is the batch outreach then judges. The Worker still dispatches when it can;
   # a duplicate fire is harmless because the Worker is the judge of eligibility
   # and dedupes by URL, so a second run in the same hour finds nothing new.
-  schedule:
-    - cron: '20 5 * * 1-5'
+  # v2.0.0: no schedule. The Worker's 06:15 UTC sweep dispatches this on weekdays and, since
+  # v2.0.0, retries a failed dispatch at the next sweep; a schedule here as well ran it twice a day.
   workflow_dispatch:
     inputs:
       post:

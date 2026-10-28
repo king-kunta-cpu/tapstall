@@ -65,7 +65,7 @@ test('lanes: nothing armed is a quiet no-op; transactional keeps a slot outreach
   assert.equal((await M.mailSend(env, { to: 'not-an-address', subject: 's', text: 't' }, { now })).permanent, true);
 });
 
-test('lanes: a busy hour parks transactional mail, the drain sends it later; a 535 pauses the lane', async () => {
+test('lanes: a busy hour parks transactional mail, the drain sends it later; a 535 parks the lane', async () => {
   let fail = 'busy';
   const env = { STORES: kv(), ORDERS: kv(), MAILBOXES: JSON.stringify([{ id: 'yy8', hourly: 5 }]), MAILBOX_YY8_USER: 'x@inbox.lv', MAILBOX_YY8_PASS: 'p',
     MAIL_TEST_OPEN: async () => { if (fail === 'busy') { const e = new Error('greeting 421: busy'); throw e; }
@@ -80,10 +80,11 @@ test('lanes: a busy hour parks transactional mail, the drain sends it later; a 5
   assert.equal([...env.ORDERS._m.keys()].filter((k) => k.startsWith('mailq:')).length, 0);
   fail = 'auth';
   await M.mailSend(env, { to: 'a@b.co', subject: 's', text: 't' });
-  assert.equal((await M.mailStatus(env)).lanes[0].state.status, 'paused', 'a wrong password stops the lane instead of hammering it');
+  const stt = (await M.mailStatus(env)).lanes[0].state;
+  assert.ok(stt.auth_failed && Date.parse(stt.cooldown_until) > Date.now() + 5 * 3600e3, 'a wrong password parks the lane for hours instead of hammering it');
   assert.equal((await M.mailSend(env, { to: 'a@b.co', subject: 's', text: 't' })).why, 'lanes_full');
   await M.mailResume(env);
-  assert.equal((await M.mailStatus(env)).lanes[0].state.status, 'active');
+  assert.equal((await M.mailStatus(env)).lanes[0].state.cooldown_until, undefined);
 });
 
 test('mx: NXDOMAIN and null MX are undeliverable, a resolver failure is not a verdict', async () => {

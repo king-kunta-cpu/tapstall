@@ -33,10 +33,14 @@ crons = ["15 6,12,18,0 * * *", "5,25,45 * * * *"]
 # Quota-first: invocation logs are off; /__selftest + ops health are the witness.
 enabled = false
 '''
+# v2.0.0: the inbox.lv lane. The box and its app password are Worker secrets
+# (MAILBOX_LV1_USER / MAILBOX_LV1_PASS); this var only names the lane and its hourly share of
+# a box that other products use too (inbox.lv allows 15/h per box in total).
+mailboxes = os.environ.get("MAILBOXES", '[{"id":"lv1","host":"mail.inbox.lv","fromName":"Tapstall","hourly":2}]').strip()
+out += "\n[vars]\n"
 if origin:
-    out += f'''
-[vars]
-PUBLIC_ORIGIN = "{origin}"
-'''
+    out += f'PUBLIC_ORIGIN = "{origin}"\n'
+out += "MAILBOXES = '" + mailboxes.replace("'", "") + "'\n"
+
 open("wrangler.toml", "w").write(out)
 print("wrangler.toml regenerated for %s" % name)
