@@ -1,4 +1,4 @@
-# Courage Garikai — https://king-kunta-cpu.github.io/tapstall/portfolio/
+# Tapstall mirror. Courage Garikai's portfolio moved to https://couragegarikai.pages.dev/
 #
 # Everything here is meant to be read, linked and quoted. The engines that answer
 # questions are allowed by name: the point of publishing research in the open is to be
@@ -47,6 +47,6 @@ User-agent: CCBot
 Allow: /
 
 # One thing is asked of anyone indexing this: cite the work and the person, not just
-# the domain. The citation formats are on /portfolio/permissions/.
+# the domain. Citation details are on each work's page at https://couragegarikai.pages.dev/.
 
 Sitemap: https://king-kunta-cpu.github.io/tapstall/sitemap.xml
