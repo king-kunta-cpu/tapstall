@@ -51,7 +51,7 @@ worker = inline(discover, 'discover',
     ("const TARGET_SEGMENTS", "function discoveryPlan", "async function runDiscovery",
      "function candidateLead", "function hookFor", "function readPageEvidence"),
     worker)
-# v2.0.0: the inbox.lv mail lane (merchant mail + first touches), same reason again.
+# v2.2.0: the Gmail mail lane (merchant mail + first touches), same reason again.
 worker = inline(mail, 'mail',
     ("async function mailSend", "async function mailDeliver", "async function mailDrain", "function mailLanes",
      "async function smtpSession", "function buildMail", "async function mxOk"),

@@ -182,7 +182,7 @@ def compose(lead, origin, from_name, unsub=""):
 
 def send_smtp(mailbox, to_addr, subject, body, from_name, unsub=""):
     if mailbox.get("smtp") is False:
-        raise RuntimeError("poll-only mailbox")     # the inbox.lv lane is the Worker's to send on
+        raise RuntimeError("poll-only mailbox")     # a Worker-only lane is the Worker's to send on
     msg = EmailMessage()
     msg["From"] = f"{from_name} <{mailbox['user']}>"
     msg["To"] = to_addr
@@ -231,8 +231,8 @@ def bounced_addresses(msg, text):
 
 
 def poll_mailbox(origin, secret, mailbox, leads_by_email, seller_code, counts, dry=False):
-    """Read-only, always. Both boxes are shared: the Gmail one is also a support inbox for another
-    business and the inbox.lv one serves other products, so this never marks anything read and
+    """Read-only, always. The Gmail box is shared (the Worker's merchant mail and, while one test
+    Gmail serves several businesses, other products), so this never marks anything read and
     never moves a message. Re-reading is harmless: a lead that already replied or was marked dnc
     is no longer in leads_by_email, so the same message cannot act twice."""
     password = str(mailbox["app_password"]).replace(" ", "")
@@ -414,9 +414,9 @@ def selftest(a):
     assert classify_reply("a@b.com", quoted) == "replied", own_words(quoted)
     assert classify_reply("a@b.com", "STOP\n\n> earlier text") == "dnc"
     # follow-ups stay in one voice
-    c = {**sample, "status": "contacted", "touches": 1, "next_follow_at": "2000-01-01", "last_sender": "lv@inbox.lv"}
+    c = {**sample, "status": "contacted", "touches": 1, "next_follow_at": "2000-01-01", "last_sender": "second.box@gmail.com"}
     assert not eligible(c, "2999-01-01T00:00:00+00:00", "me@gmail.com")
-    assert eligible(c, "2999-01-01T00:00:00+00:00", "lv@inbox.lv")
+    assert eligible(c, "2999-01-01T00:00:00+00:00", "second.box@gmail.com")
     # the unsubscribe link matches the Worker's HMAC shape and is on every touch
     u = unsub_url("https://t.example", "test-secret", "ld-test")
     assert re.match(r"^https://t\.example/u/ld-test/[A-Za-z0-9]{22}$", u), u

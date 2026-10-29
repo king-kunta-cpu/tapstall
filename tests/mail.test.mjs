@@ -19,14 +19,14 @@ function kv() {
 }
 
 test('smtp: EHLO, AUTH PLAIN, MAIL/RCPT/DATA with dot-stuffing', async () => {
-  const { conn, wrote } = scripted(['220 hi\r\n', '250-mail.inbox.lv\r\n250-AUTH PLAIN LOGIN\r\n250 8BITMIME\r\n', '235 ok\r\n',
+  const { conn, wrote } = scripted(['220 hi\r\n', '250-smtp.gmail.com\r\n250-AUTH PLAIN LOGIN\r\n250 8BITMIME\r\n', '235 ok\r\n',
     '250 ok\r\n', '250 ok\r\n', '354 go\r\n', '250 queued\r\n', '221 bye\r\n']);
-  const s = await M.smtpSession(conn, { user: 'a@inbox.lv', pass: 'p' });
-  await s.send('a@inbox.lv', 'b@shop.co.zw', 'Subject: x\r\n\r\n.leading dot\r\nok');
+  const s = await M.smtpSession(conn, { user: 'a@gmail.com', pass: 'p' });
+  await s.send('a@gmail.com', 'b@shop.co.zw', 'Subject: x\r\n\r\n.leading dot\r\nok');
   await s.quit();
   const all = wrote.join('');
   assert.match(all, /AUTH PLAIN /);
-  assert.match(all, /MAIL FROM:<a@inbox\.lv> BODY=8BITMIME/);
+  assert.match(all, /MAIL FROM:<a@gmail\.com> BODY=8BITMIME/);
   assert.match(all, /RCPT TO:<b@shop\.co\.zw>/);
   assert.match(all, /\r\n\.\.leading dot\r\n/, 'a line starting with a dot is stuffed');
   assert.match(all, /\r\n\.\r\n/);
@@ -41,20 +41,20 @@ test('smtp: a 535 is an auth failure, a 550 at RCPT is permanent', async () => {
 });
 
 test('mime: headers cannot be injected, UTF-8 subjects are encoded, unsubscribe is RFC 8058', () => {
-  const m = M.buildMail({ from: 'a@inbox.lv', fromName: 'Tapstall', to: 'b@shop.co.zw', subject: 'Hi\r\nBcc: evil@x.com — café',
+  const m = M.buildMail({ from: 'a@gmail.com', fromName: 'Tapstall', to: 'b@shop.co.zw', subject: 'Hi\r\nBcc: evil@x.com — café',
     text: 'body', unsubscribe: { url: 'https://t.example/u/1/abc' }, messageId: '<1@t>' });
   assert.doesNotMatch(m, /^Bcc:/m, 'a newline in a subject is not a new header');
   assert.match(m, /^Subject: =\?UTF-8\?B\?/m);
   assert.match(m, /^List-Unsubscribe: <https:\/\/t\.example\/u\/1\/abc>/m);
   assert.match(m, /^List-Unsubscribe-Post: List-Unsubscribe=One-Click/m);
-  assert.throws(() => M.buildMail({ from: 'a@inbox.lv', to: 'not an address', subject: 's', text: 't' }));
+  assert.throws(() => M.buildMail({ from: 'a@gmail.com', to: 'not an address', subject: 's', text: 't' }));
 });
 
 test('lanes: nothing armed is a quiet no-op; transactional keeps a slot outreach cannot take', async () => {
   const env0 = { STORES: kv(), ORDERS: kv() };
   assert.deepEqual(await M.mailSend(env0, { to: 'a@b.co', subject: 's', text: 't' }), { sent: false, why: 'no_lane' });
   const sent = [];
-  const env = { STORES: kv(), ORDERS: kv(), MAILBOXES: JSON.stringify([{ id: 'zz9', hourly: 2 }]), MAILBOX_ZZ9_USER: 'x@inbox.lv', MAILBOX_ZZ9_PASS: 'p',
+  const env = { STORES: kv(), ORDERS: kv(), MAILBOXES: JSON.stringify([{ id: 'zz9', hourly: 2 }]), MAILBOX_ZZ9_USER: 'x@gmail.com', MAILBOX_ZZ9_PASS: 'p',
     MAIL_TEST_OPEN: async () => ({ async send(f, t, mime) { sent.push(t); return 'ok'; }, async quit() {} }) };
   const now = Date.UTC(2031, 0, 1, 10, 5);
   assert.equal((await M.mailSend(env, { to: 'a@b.co', subject: 's', text: 't', kind: 'outreach' }, { now })).sent, true);
@@ -66,7 +66,7 @@ test('lanes: nothing armed is a quiet no-op; transactional keeps a slot outreach
 });
 
 test('drain: an empty queue costs one read and no list; a queued message sets the flag the tick reads', async () => {
-  const env = { STORES: kv(), ORDERS: kv(), MAILBOXES: JSON.stringify([{ id: 'xx7', hourly: 5 }]), MAILBOX_XX7_USER: 'x@inbox.lv', MAILBOX_XX7_PASS: 'p',
+  const env = { STORES: kv(), ORDERS: kv(), MAILBOXES: JSON.stringify([{ id: 'xx7', hourly: 5 }]), MAILBOX_XX7_USER: 'x@gmail.com', MAILBOX_XX7_PASS: 'p',
     MAIL_TEST_OPEN: async () => { throw new Error('greeting 421: busy'); } };
   let lists = 0; const list0 = env.ORDERS.list; env.ORDERS.list = async (a) => { lists++; return list0(a); };
   const idle = await M.mailDrain(env, 3);
@@ -86,7 +86,7 @@ test('drain: an empty queue costs one read and no list; a queued message sets th
 
 test('lanes: a busy hour parks transactional mail, the drain sends it later; a 535 parks the lane', async () => {
   let fail = 'busy';
-  const env = { STORES: kv(), ORDERS: kv(), MAILBOXES: JSON.stringify([{ id: 'yy8', hourly: 5 }]), MAILBOX_YY8_USER: 'x@inbox.lv', MAILBOX_YY8_PASS: 'p',
+  const env = { STORES: kv(), ORDERS: kv(), MAILBOXES: JSON.stringify([{ id: 'yy8', hourly: 5 }]), MAILBOX_YY8_USER: 'x@gmail.com', MAILBOX_YY8_PASS: 'p',
     MAIL_TEST_OPEN: async () => { if (fail === 'busy') { const e = new Error('greeting 421: busy'); throw e; }
       if (fail === 'auth') { const e = new Error('auth 535'); e.authFail = true; throw e; }
       return { async send() { return 'ok'; }, async quit() {} }; } };
@@ -112,4 +112,19 @@ test('mx: NXDOMAIN and null MX are undeliverable, a resolver failure is not a ve
   assert.equal(await M.mxOk('nullmx-test.co.zw', ans({ Status: 0, Answer: [{ type: 15, data: '0 .' }] })), false);
   assert.equal(await M.mxOk('good-test.co.zw', ans({ Status: 0, Answer: [{ type: 15, data: '10 mx.good-test.co.zw.' }] })), true);
   assert.equal(await M.mxOk('flaky-test.co.zw', async () => { throw new Error('down'); }), true);
+});
+
+test('v2.2.0 gmail lane: provider preset, runner secret names, app-password spaces, rolling-day clamp', () => {
+  const [l] = M.mailLanes({ MAILBOXES: JSON.stringify([{ id: 'owner', provider: 'gmail', hourly: 60 }]),
+    GMAIL_OWNER_USER: 'Shop.Box@gmail.com', GMAIL_OWNER_APP_PASSWORD: 'abcd efgh ijkl mnop' });
+  assert.equal(l.host, 'smtp.gmail.com');
+  assert.equal(l.imapHost, 'imap.gmail.com');
+  assert.equal(l.port, 465);
+  assert.equal(l.pass, 'abcdefghijklmnop', 'the display spaces Google shows are stripped');
+  assert.equal(l.hourly, M.MAIL_PROVIDERS.gmail.hourlyMax, 'clamped');
+  assert.ok(l.hourly * 24 < 500, "no rolling 24 h can reach Google's ~500");
+  const [d] = M.mailLanes({ MAILBOXES: '[{"id":"gm1"}]', MAILBOX_GM1_USER: 'a@gmail.com', MAILBOX_GM1_PASS: 'p' });
+  assert.equal(d.host, 'smtp.gmail.com', 'no host = gmail; MAILBOX_<ID>_* names still work');
+  assert.equal(d.hourly, 6, 'default 6/hour leaves room for the runner');
+  assert.equal(M.mailLanes({ MAILBOXES: '[{"id":"owner","provider":"gmail"}]', GMAIL_OWNER_USER: 'a@gmail.com' }).length, 0, 'off until both secrets exist');
 });

@@ -33,10 +33,10 @@ crons = ["15 6,12,18,0 * * *", "5,25,45 * * * *"]
 # Quota-first: invocation logs are off; /__selftest + ops health are the witness.
 enabled = false
 '''
-# v2.0.0: the inbox.lv lane. The box and its app password are Worker secrets
-# (MAILBOX_LV1_USER / MAILBOX_LV1_PASS); this var only names the lane and its hourly share of
-# a box that other products use too (inbox.lv allows 15/h per box in total).
-mailboxes = os.environ.get("MAILBOXES", "").strip() or '[{"id":"lv1","host":"mail.inbox.lv","fromName":"Tapstall","hourly":2}]'
+# v2.2.0: the Gmail lane (docs/GMAIL.md). It reads the GMAIL_OWNER_USER / GMAIL_OWNER_APP_PASSWORD Worker
+# secrets, the same box the outreach runner sends from, so replies land in one inbox. 6/hour leaves the
+# rest of Gmail's ~500/day to the runner and to manual sending (a gmail lane is clamped to 18/hour).
+mailboxes = os.environ.get("MAILBOXES", "").strip() or '[{"id":"owner","provider":"gmail","fromName":"Tapstall","hourly":6}]'
 out += "\n[vars]\n"
 if origin:
     out += f'PUBLIC_ORIGIN = "{origin}"\n'

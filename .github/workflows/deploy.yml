@@ -55,8 +55,6 @@ jobs:
           WHOP_CHECKOUT_URL_MONTHLY: ${{ secrets.WHOP_CHECKOUT_URL_MONTHLY }}
           WHOP_PLANS_JSON: ${{ secrets.WHOP_PLANS_JSON }}
           PLATFORM_PAY_DETAILS: ${{ secrets.PLATFORM_PAY_DETAILS }}
-          MAILBOX_LV1_USER: ${{ secrets.MAILBOX_LV1_USER }}
-          MAILBOX_LV1_PASS: ${{ secrets.MAILBOX_LV1_PASS }}
           POSTAL_ADDRESS: ${{ secrets.POSTAL_ADDRESS }}
           MAILBOXES: ${{ vars.MAILBOXES }}
           WORKER_NAME: tapstall

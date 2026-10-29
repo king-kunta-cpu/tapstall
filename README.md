@@ -733,8 +733,8 @@ email→phone→business, allocates each prospect to exactly one seller by hash,
 the `Lead:` do-not-contact ledger. Claims are anti-collision: a second seller gets a 409, not a
 double pitch. Sellers work the queue on the leads desk at `/leads`, which calls `/api/leads/act` (v2.0.0: the Google Sheets CRM and
 its `SHEET_KEY` were removed — no Sheets in the pipeline). v2.0.0 also adds a junk gate in
-`cleanLead` (address must belong to the business, lead must sit in its market) and an inbox.lv
-mail lane (`worker/mail.js`) for merchant mail and ~1 first touch an hour; see `docs/MAIL.md`.
+`cleanLead` (address must belong to the business, lead must sit in its market) and a
+mail lane (`worker/mail.js`, personal Gmail over SMTP since v2.2.0) for merchant mail and ~1 first touch an hour; see `docs/MAIL.md`.
 
 **One clock.** The Worker's cron slots now run the press windows (`pressTick` → `runPress`, once per
 hour claimed in `press:last`), the weekday lead-hunt dispatch (when `GH_DISPATCH_TOKEN` is set), and

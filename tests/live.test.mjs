@@ -649,15 +649,15 @@ test('settings: a queued change lands on the next read, and old slips keep old d
   assert.ok(!JSON.stringify(o.pay).includes('0785551122'), 'yesterday’s buyer is never told to pay a new account');
 });
 
-/* v2.0.0 mail harness: an armed inbox.lv lane whose SMTP session is a recorder. */
+/* v2.2.0 mail harness: an armed Gmail lane (the owner box the runner also uses) whose SMTP session is a recorder. */
 function armMail() {
   const sent = [];
-  Object.assign(env, { MAILBOXES: JSON.stringify([{ id: 'lv1', host: 'mail.test', fromName: 'Tapstall', hourly: 15 }]),
-    MAILBOX_LV1_USER: 'box@inbox.test', MAILBOX_LV1_PASS: 'pw',
+  Object.assign(env, { MAILBOXES: JSON.stringify([{ id: 'owner', provider: 'gmail', fromName: 'Tapstall', hourly: 15 }]),
+    GMAIL_OWNER_USER: 'shop.box@gmail.com', GMAIL_OWNER_APP_PASSWORD: 'abcd efgh ijkl mnop',
     MAIL_TEST_OPEN: async () => ({ async send(from, to, mime) { sent.push({ from, to, mime }); return '250 ok'; }, async quit() {} }) });
   return sent;
 }
-function disarmMail() { for (const k of ['MAILBOXES', 'MAILBOX_LV1_USER', 'MAILBOX_LV1_PASS', 'MAIL_TEST_OPEN']) delete env[k]; }
+function disarmMail() { for (const k of ['MAILBOXES', 'GMAIL_OWNER_USER', 'GMAIL_OWNER_APP_PASSWORD', 'MAILBOX_GM2_USER', 'MAILBOX_GM2_PASS', 'MAIL_TEST_OPEN']) delete env[k]; }
 const mailBody = (m) => Buffer.from(m.mime.split('\r\n\r\n').slice(1).join('').replace(/\s+/g, ''), 'base64').toString('utf8');
 
 test('ops mail levers: a test send proves the lane, behind the cookie and the confirm header', async () => {
@@ -852,7 +852,7 @@ test('v2.0.0 merchant mail: the welcome confirms the address, a held money chang
     assert.equal(page.status, 200);
     assert.match(page.text, /confirmed/);
     assert.equal(JSON.parse(env.STORES._map.get('store:mailtest').value).email_verified, 'boss@mailtest.co.zw');
-    assert.match(w.mime, /^From: Tapstall <box@inbox\.test>/m, 'sent from the lane, under the brand');
+    assert.match(w.mime, /^From: Tapstall <shop\.box@gmail\.com>/m, 'sent from the lane, under the brand');
     assert.match(w.mime, /^Auto-Submitted: auto-generated/m);
 
     const s = await loginWithPin('mailtest', r.json.pin);
@@ -4816,7 +4816,7 @@ test('1.1.0 Whop: signed payment activates, forgery/replay/companion/failure do 
   }
 });
 
-test('v2.0.0 outreach: the 20-minute tick sends one gated first touch from inbox.lv, with a working one-click unsubscribe', async () => {
+test('v2.0.0 outreach: the 20-minute tick sends one gated first touch from the Gmail lane, with a working one-click unsubscribe', async () => {
   const sent = armMail();
   env.OUTREACH_WINDOW = 'always';
   env.MAIL_TEST_FETCH = async () => new Response(JSON.stringify({ Status: 0, Answer: [{ type: 15, data: '10 mx.hararekota.co.zw.' }] }));
@@ -4847,7 +4847,7 @@ test('v2.0.0 outreach: the 20-minute tick sends one gated first touch from inbox
     assert.doesNotMatch(m.mime, /^Auto-Submitted/m, 'a first touch is a person writing, not an auto-reply');
     const lead = await env.ORDERS.get('lead:' + out.outreach.to_lead, 'json');
     assert.equal(lead.status, 'contacted');
-    assert.equal(lead.last_sender, 'box@inbox.test', 'the follow-up will come from the same box');
+    assert.equal(lead.last_sender, 'shop.box@gmail.com', 'the follow-up will come from the same box');
     const u = mailBody(m).match(/(\/u\/[a-z0-9-]+\/[A-Za-z0-9]+)/)[1];
     const view = await call(u);
     assert.match(view.text, /<form method=post>/, 'GET only offers the button');
@@ -4859,8 +4859,14 @@ test('v2.0.0 outreach: the 20-minute tick sends one gated first touch from inbox
     assert.equal((await env.ORDERS.get('lead:' + lead.id, 'json')).status, 'dnc');
     assert.ok(await env.STORES.get('Lead:' + lead.email), 'and the do-not-contact ledger has the address');
     const lanes = await call('/api/outreach/mailboxes', { confirm: true, headers: { 'x-tapstall-admin': SECRET } });
-    const lv = lanes.json.mailboxes.find((x) => x.tag === 'LVLV1');
-    assert.ok(lv && lv.smtp === false && lv.readonly === true && lv.imap_host === 'mail.test', 'the runner polls the shared box read-only and never sends on it');
+    const owner = lanes.json.mailboxes.filter((x) => x.user === 'shop.box@gmail.com');
+    assert.equal(owner.length, 1, 'the Worker and the runner share one Gmail box: listed once');
+    assert.ok(owner[0].smtp === true && owner[0].imap_host === 'imap.gmail.com', 'the runner sends from it and reads its replies over Gmail IMAP');
+    env.MAILBOXES = JSON.stringify([{ id: 'owner', provider: 'gmail' }, { id: 'gm2', provider: 'gmail' }]);
+    Object.assign(env, { MAILBOX_GM2_USER: 'second.box@gmail.com', MAILBOX_GM2_PASS: 'pw' });
+    const lanes2 = await call('/api/outreach/mailboxes', { confirm: true, headers: { 'x-tapstall-admin': SECRET } });
+    const wl = lanes2.json.mailboxes.find((x) => x.tag === 'WGM2');
+    assert.ok(wl && wl.smtp === false && wl.readonly === true && wl.imap_host === 'imap.gmail.com', 'a Worker-only box is poll-only for the runner');
   } finally { disarmMail(); delete env.OUTREACH_WINDOW; delete env.MAIL_TEST_FETCH; }
 });
 

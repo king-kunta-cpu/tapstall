@@ -61,7 +61,7 @@ import {
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '2.1.0';
+const VERSION = '2.2.0';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
@@ -2768,7 +2768,7 @@ function capKey(env) {
   return k;
 }
 
-/** v2.0.0: merchant mail goes out over the inbox.lv lane (worker/mail.js). Before this the
+/** v2.0.0: merchant mail goes out over the mail lane (worker/mail.js; Gmail since v2.2.0). Before this the
  *  function called `new EmailMessage(...)` with no import and no EMAIL binding: every merchant
  *  mail since launch was a silent no-op. Returns true when the message left or was parked for the
  *  20-minute retry; false when no lane is armed or the address is unusable. Never throws. */
@@ -5958,9 +5958,9 @@ async function dispatchTick(env) {
   try { await governedPut(env.ORDERS, 'dispatch:last', JSON.stringify(out), null, 'automation'); } catch (e) { void e; }
   return out;
 }
-/* ------------------------------------------------------------ outreach over inbox.lv (v2.0.0)
+/* ------------------------------------------------------------ outreach over the Gmail lane (v2.0.0; Gmail since v2.2.0)
  * The Gmail runner (Actions, once a weekday) stays; this is the second voice: the Worker itself
- * sends a first touch or a due follow-up from the inbox.lv box, at most one per 20-minute tick
+ * sends a first touch or a due follow-up from its Gmail lane, at most one per 20-minute tick
  * and only while the lane has room after a slot is held back for merchant mail. Weekdays,
  * 07:00–16:59 UTC (09:00–18:59 in Harare/Johannesburg). House leads only (a seller's lead is
  * that seller's voice). Every lead is re-judged by the v2 gate before a byte is sent, the
@@ -6385,8 +6385,11 @@ async function outreachMailboxes(req, env) {
     if (m && env['GMAIL_' + m[1] + '_APP_PASSWORD']) out.push({ tag: m[1], user: String(env[k]), app_password: String(env['GMAIL_' + m[1] + '_APP_PASSWORD']),
       smtp: true, imap_host: 'imap.gmail.com' });
   }
-  // v2.0.0: the inbox.lv lanes too, poll-only for the runner (the Worker sends on them, under its
-  // own hourly counter). The runner reads them read-only: the box is shared with other products.
-  for (const l of mailLanes(env)) out.push({ tag: 'LV' + l.id.toUpperCase(), user: l.user, app_password: l.pass, smtp: false, imap_host: l.host, readonly: true });
+  // A Worker lane on a box the runner doesn't already know (MAILBOX_<ID>_* secrets) is poll-only for the
+  // runner: the Worker sends on it under its own hourly counter; the runner only reads replies.
+  for (const l of mailLanes(env)) {
+    if (out.some((o) => o.user.toLowerCase() === l.user.toLowerCase())) continue;
+    out.push({ tag: 'W' + l.id.toUpperCase(), user: l.user, app_password: l.pass, smtp: false, imap_host: l.imapHost, readonly: true });
+  }
   return json({ ok: true, mailboxes: out }, 200, { 'Cache-Control': 'no-store' });
 }

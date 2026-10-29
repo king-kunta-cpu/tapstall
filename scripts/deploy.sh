@@ -216,7 +216,8 @@ put_secret ADMIN_SECRET "$ADMIN_SECRET"
 [[ -n "${WHOP_CHECKOUT_URL_MONTHLY:-}" ]] && put_secret WHOP_CHECKOUT_URL_MONTHLY "$WHOP_CHECKOUT_URL_MONTHLY" || true
 [[ -n "${WHOP_PLANS_JSON:-}" ]] && put_secret WHOP_PLANS_JSON "$WHOP_PLANS_JSON" || true
 [[ -n "${PLATFORM_PAY_DETAILS:-}" ]] && put_secret PLATFORM_PAY_DETAILS "$PLATFORM_PAY_DETAILS" || true
-# v2.0.0 mail lane (docs/MAIL.md): every lane in MAILBOXES reads MAILBOX_<ID>_USER/_PASS. Unset in
+# Mail lane (docs/MAIL.md, Gmail since v2.2.0): a lane reads GMAIL_<ID>_USER/_APP_PASSWORD (set on the
+# Worker by hand, shared with the outreach runner) or MAILBOX_<ID>_USER/_PASS from CI. Unset in
 # CI never wipes a value set on the Worker by hand; POSTAL_ADDRESS is the sender address the
 # unsubscribe footer of every outreach mail prints.
 for V in $(env | sed -n 's/^\(MAILBOX_[A-Z0-9]*_\(USER\|PASS\)\)=.*/\1/p') POSTAL_ADDRESS; do

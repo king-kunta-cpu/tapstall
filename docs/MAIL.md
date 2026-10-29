@@ -1,31 +1,47 @@
-# Mail — how Tapstall sends, and what it refuses to do (v2.0.0)
+# Mail — how Tapstall sends, and what it refuses to do (v2.2.0)
 
-One mailbox, two jobs: account mail (PIN reset links, email verification, payment claim links,
-cancellation notices) and first-touch outreach to prospects. Both go out from the same inbox.lv
-box over SMTP from the Worker (`worker/mail.js`); replies land in that same inbox and a person
-reads them.
+One personal Gmail box, two jobs: account mail (PIN reset links, email verification, payment claim
+links, cancellation notices) and first-touch outreach to prospects. The Worker sends account mail
+and its own first touches over SMTP (`worker/mail.js`); the outreach runner (GitHub Actions) sends
+the daily batch from the same box. Replies land in that one inbox and a person reads them.
+Until v2.1 the Worker used an inbox.lv box; it was retired on 2026-10-29.
+
+## The Gmail route (no Google Cloud account)
+
+`smtp.gmail.com:465` (implicit TLS) and `imap.gmail.com:993`, signed in with a 16-character Google
+**app password**. There is no Google Cloud project, no OAuth client and no billing. You need:
+
+1. A Gmail account with **2-Step Verification** on (myaccount.google.com/security).
+2. An app password from **myaccount.google.com/apppasswords** (name it "Tapstall").
+3. Two Worker secrets: `GMAIL_OWNER_USER` (the address) and `GMAIL_OWNER_APP_PASSWORD` (the app
+   password; the spaces Google shows are fine, they are stripped).
+
+Full guide, error codes and limits: [GMAIL.md](GMAIL.md).
 
 ## Lanes
 
 `MAILBOXES` (a `[vars]` JSON array written by `scripts/gen_wrangler_toml.py`, overridable with the
-repo variable `MAILBOXES`) lists the lanes:
+repo variable `MAILBOXES`) lists the Worker's lanes:
 
 ```json
-[{"id":"lv1","host":"mail.inbox.lv","fromName":"Tapstall","hourly":2}]
+[{"id":"owner","provider":"gmail","fromName":"Tapstall","hourly":6}]
 ```
 
-Each lane reads its login from two Worker secrets, `MAILBOX_<ID>_USER` and `MAILBOX_<ID>_PASS`
-(for `lv1`: `MAILBOX_LV1_USER`, `MAILBOX_LV1_PASS`, an inbox.lv *app password*, not the web
-password). A lane with no secrets is simply off; nothing else breaks.
+`"provider":"gmail"` fills in the hosts. A lane reads `GMAIL_<ID>_USER` / `GMAIL_<ID>_APP_PASSWORD`
+(the names the runner reads too, so both share the box), or `MAILBOX_<ID>_USER` / `MAILBOX_<ID>_PASS`.
+A lane with no secrets is simply off; nothing else breaks.
 
-- **Hourly cap.** `hourly` is this pipeline's share of the box (inbox.lv allows ~15/h per box, and
-  the box is shared with other pipelines). Outreach may use `hourly − 1`; one slot an hour is
-  always kept for account mail, so a reset link is never queued behind a prospect.
+- **Hourly cap.** Personal Gmail allows about 500 recipients per rolling 24 hours across every client
+  (this Worker, the runner, the web inbox). A gmail lane is clamped to 18/hour (18 × 24 = 432), and
+  the Worker defaults to 6/hour so the runner and manual sending keep most of the day. Outreach may
+  use `hourly − 1`; one slot an hour is always kept for account mail, so a reset link is never queued
+  behind a prospect.
 - **Queue.** A message that cannot leave now (cap reached, SMTP hiccup) is parked as `mailq:<id>`
   and retried by the cron. It is never dropped silently.
-- **Auth failure park.** If the box rejects the login, the lane is parked for **6 hours**
-  (`auth_failed`, `cooldown_until`) instead of retrying every tick. Repeated bad logins can get an
-  inbox.lv account locked. It clears itself; fix the password in the meantime.
+- **Auth failure park.** If Google rejects the login (`535 5.7.8`), the lane is parked for **6 hours**
+  (`auth_failed`, `cooldown_until`) instead of retrying every tick; repeated bad logins get a Google
+  account challenged. It clears itself; make a new app password in the meantime.
+- **Quota.** `550 5.4.5 Daily sending quota exceeded` cools the lane down; Google lifts it within 24 h.
 
 ## Outreach (the runner)
 
@@ -39,7 +55,7 @@ no longer has its own schedule, so it runs once a day.
 - **At most 3 touches**, each with an unsubscribe footer, `List-Unsubscribe` and
   `List-Unsubscribe-Post` (RFC 8058) headers, and the sender's postal address (`POSTAL_ADDRESS`).
   The `/u/<token>` link is HMAC-signed; one click marks the lead `dnc`.
-- **Replies are read, not consumed.** IMAP is opened **read-only** (`BODY.PEEK`), last 4 days, and
+- **Replies are read, not consumed.** Gmail IMAP is opened **read-only** (`BODY.PEEK`), last 4 days, and
   only mail from lead addresses or bounce notices is looked at. Nothing is marked read, moved or
   deleted, so the person working the inbox sees everything as it arrived.
 - **STOP means stop, in their own words only.** Quoted text is stripped before looking for

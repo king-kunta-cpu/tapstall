@@ -1,16 +1,21 @@
-/* Tapstall mail over inbox.lv (v2.0.0, 2026-10-28), ported from STPi edge/src/mail.js
- * (itself AttestOS worker/src/mail/*). One free inbox.lv box carries both halves:
+/* Tapstall mail over personal Gmail (v2.2.0, 2026-10-29; was inbox.lv), ported from STPi edge/src/mail.js
+ * (itself AttestOS worker/src/mail/*). One Gmail box carries both halves:
  *   - the merchant's own mail: the welcome + email-confirm link, the PIN-reset link, the
  *     "your PIN was reset" and "a money setting changed" alerts, renewal notices, new-order
  *     alerts (opt-in), crypto reports, Whop payment claims;
  *   - cold first touches to merchants (the cron's outreach tick, a few an hour at most).
  *
- * Config  MAILBOXES = '[{"id":"lv1","host":"mail.inbox.lv","fromName":"Tapstall","hourly":2}]'  (var)
- *         MAILBOX_<ID>_USER / MAILBOX_<ID>_PASS  (secrets; an inbox.lv app password)
+ * Route (docs/GMAIL.md): SMTP 465 to smtp.gmail.com with a 16-character Google app password.
+ * No Google Cloud project, no OAuth, no billing: 2-Step Verification on, then
+ * myaccount.google.com/apppasswords.
+ *
+ * Config  MAILBOXES = '[{"id":"owner","provider":"gmail","fromName":"Tapstall","hourly":6}]'  (var)
+ *         secrets GMAIL_<ID>_USER / GMAIL_<ID>_APP_PASSWORD (the same names the outreach runner
+ *         reads, so the Worker and the runner share one inbox); MAILBOX_<ID>_USER / _PASS also work.
  * Nothing armed = every caller gets {sent:false, why:'no_lane'} and carries on (never a 500).
  *
- * Budget: inbox.lv allows 15 messages/hour per box and this box is shared with other products,
- * so `hourly` is small. Transactional mail always goes first; outreach only spends what is left
+ * Budget: personal Gmail allows ~500 recipients per rolling 24 h, shared with the outreach runner
+ * and anything sent by hand. A gmail lane is clamped to 18/hour (18 x 24 = 432) and defaults to 6. Transactional mail always goes first; outreach only spends what is left
  * after one slot per hour is held back for a merchant who is waiting for a link.
  * KV: one write per sent message (the lane's hour counter), one per queued retry. No outbox for
  * outreach — a skipped first touch is simply picked up by the next tick.
@@ -165,6 +170,8 @@ export function buildMail(m) {
 }
 
 /* ------------------------------------------------------------------ lanes */
+/** Provider presets: a lane names a provider instead of hosts. 18/hour keeps any rolling 24 h under 432. */
+export const MAIL_PROVIDERS = { gmail: { host: 'smtp.gmail.com', imapHost: 'imap.gmail.com', hourlyMax: 18 } };
 export function mailLanes(env) {
   let cfg = [];
   try { cfg = JSON.parse(String((env && env.MAILBOXES) || '[]')); } catch (e) { return []; }
@@ -173,11 +180,16 @@ export function mailLanes(env) {
   for (const c of cfg) {
     const id = String((c && c.id) || '').toLowerCase();
     if (!/^[a-z0-9]{1,12}$/.test(id)) continue;
-    const user = String(env['MAILBOX_' + id.toUpperCase() + '_USER'] || '').trim();
-    const pass = String(env['MAILBOX_' + id.toUpperCase() + '_PASS'] || '').trim();
-    if (!user.includes('@') || !pass) continue;
-    out.push({ id, user, pass, host: String(c.host || 'mail.inbox.lv'), port: Number(c.smtpPort) || 465,
-      fromName: String(c.fromName || 'Tapstall'), hourly: Math.max(1, Math.min(15, Number(c.hourly) || 2)),
+    const K = id.toUpperCase();
+    const provider = String(c.provider || (c.host && c.host !== MAIL_PROVIDERS.gmail.host ? 'custom' : 'gmail')).toLowerCase();
+    const preset = MAIL_PROVIDERS[provider] || null;
+    const user = String(env['GMAIL_' + K + '_USER'] || env['MAILBOX_' + K + '_USER'] || '').trim();
+    // Google shows app passwords as four groups of four; the spaces are display only.
+    const pass = String(env['GMAIL_' + K + '_APP_PASSWORD'] || env['MAILBOX_' + K + '_PASS'] || '').replace(/\s+/g, '');
+    const host = String(c.host || (preset && preset.host) || '');
+    if (!user.includes('@') || !pass || !host) continue;
+    out.push({ id, provider, user, pass, host, imapHost: String(c.imapHost || (preset && preset.imapHost) || host), port: Number(c.smtpPort) || 465,
+      fromName: String(c.fromName || 'Tapstall'), hourly: Math.max(1, Math.min(preset ? preset.hourlyMax : 60, Number(c.hourly) || 6)),
       outreach: c.outreach !== false });
   }
   return out;
@@ -248,8 +260,8 @@ export async function mailSend(env, msg, opts) {
     await laneBump(env, lane.id, now);
     return { sent: true, lane: lane.id };
   } catch (e) {
-    // a refused password parks the lane for six hours instead of hammering the box (which is how an
-    // inbox.lv account gets locked); it comes back by itself, so nobody has to press resume
+    // a refused password parks the lane for six hours instead of hammering the box (repeated bad logins
+    // get a Google account challenged); it comes back by itself, so nobody has to press resume
     if (e && e.authFail) await laneSetState(env, lane.id, { status: 'active', auth_failed: true, cooldown_until: new Date(now + 6 * 3600e3).toISOString(), why: String(e.message).slice(0, 160), at: new Date(now).toISOString() });
     else if (e && !e.permanent) await laneSetState(env, lane.id, { status: 'active', cooldown_until: new Date(now + 10 * 60e3).toISOString(), why: String(e && e.message || e).slice(0, 160) });
     return { sent: false, why: String(e && e.message || e).slice(0, 160), permanent: !!(e && e.permanent) };

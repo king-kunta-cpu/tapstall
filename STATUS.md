@@ -1,5 +1,17 @@
 # Tapstall — status
 
+## v2.2.0 (2026-10-29): Gmail replaces inbox.lv
+
+- The Worker's mail lane (`worker/mail.js`) now sends over personal Gmail (`smtp.gmail.com:465`) with a
+  Google app password: no Google Cloud project. Lane `owner` reads `GMAIL_OWNER_USER` /
+  `GMAIL_OWNER_APP_PASSWORD`, the same box the outreach runner uses, so replies land in one inbox.
+- `"provider":"gmail"` presets the SMTP/IMAP hosts; app-password spaces are stripped; a gmail lane is
+  clamped to 18/hour (≤432 in any 24 h, under Google's ~500) and defaults to 6.
+- `/api/outreach/mailboxes` no longer lists an inbox.lv poll-only box; a Worker lane on a box the runner
+  doesn't know is still listed poll-only (`W<ID>`).
+- Removed: `MAILBOX_LV1_*` (deploy env, Worker and repo secrets), the `mail.inbox.lv` default.
+- Docs: `docs/MAIL.md` rewritten; new `docs/GMAIL.md`.
+
 ## v2.1.0 (2026-10-28): the same pipeline on a fraction of the quota
 
 Measured, not estimated: a day of the 76 cron invocations replayed against a snapshot of live KV
