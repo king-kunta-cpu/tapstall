@@ -894,19 +894,29 @@ test('renew link resolves and mints a checkout even with no gateway configured',
   assert.equal(typeof co.json.ok, 'boolean', 'checkout answered with a JSON verdict');
 });
 
-test('cron suspends an expired store, blocks orders, then reinstates on payment', async () => {
+test('cron suspends an expired store only after its owner was told, blocks orders, then reinstates on payment', async () => {
   const w = await load();
   const key = 'store:mamatoe';
   const st = JSON.parse(env.STORES._map.get(key).value);
   st.free_until = undefined;
   st.paid_until = Date.now() - 864e5;              // yesterday
+  st.owner_email = st.owner_email || 'owner@example.com';
   delete st.warned_at;
   await env.STORES.put(key, JSON.stringify(st));
 
-  const suspended = await w.scheduled({ scheduledTime: Date.now() }, env, { waitUntil: () => {} });
+  // v2.2.1: the renewal notice never left, so the shop is held open (and told now), not closed.
+  await w.scheduled({ scheduledTime: Date.now() }, env, { waitUntil: () => {} });
+  await new Promise((r) => setImmediate(r));
+  const held = JSON.parse(env.STORES._map.get(key).value);
+  assert.notEqual(held.suspended, true, 'an expired shop that was never warned is held open');
+
+  // told four days ago (more than the three-day grace): now it closes
+  held.warned_at = new Date(Date.now() - 4 * 864e5).toISOString();
+  await env.STORES.put(key, JSON.stringify(held));
+  await w.scheduled({ scheduledTime: Date.now() }, env, { waitUntil: () => {} });
   await new Promise((r) => setImmediate(r));
   const after = JSON.parse(env.STORES._map.get(key).value);
-  assert.equal(after.suspended, true, 'cron suspended the expired store');
+  assert.equal(after.suspended, true, 'cron suspended the expired store once the grace after the notice ran out');
 
   const blocked = await call('/api/order', {
     method: 'POST',

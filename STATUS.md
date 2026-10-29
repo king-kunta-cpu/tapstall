@@ -1,5 +1,25 @@
 # Tapstall — status
 
+## v2.2.1 (2026-10-29): no shop closes unwarned; the hunter finds makers and market traders again
+
+- **Suspension waits for the notice (finding H1).** The sweep used to close an expired shop at expiry
+  whether or not its renewal notice had ever left. Now (`suspendDecision` in `worker/core.js`): if the
+  notice never left, the sweep sends an expiry notice and holds the shop open. It closes once
+  **3 days** have passed since a notice that actually left. A shop with no owner email still closes at expiry. A dead
+  mail lane can hold a shop at most **7 days** past expiry. A shop warned at the usual 7 days out still
+  closes on its expiry day, as before. The cron summary gains `held`.
+- **Dispatch check (finding H3), verified live, no change needed.** Since the workflow schedules were
+  removed (28 Oct 15:01 UTC) every `leads-hunt`/`outreach` run is the Worker's single weekday dispatch
+  (29 Oct 06:15 UTC, both 204 → both runs green; no repeat at the 12:15 retry slot).
+- **Three seller categories back in the OSM hunt.** The slim three-part query had dropped makers (`craft`:
+  tailor, dressmaker, caterer, shoemaker, jeweller, confectionery, bakery, photographer, beautician,
+  upholsterer, carpenter), market traders (`amenity=marketplace`) and food places that list only a
+  website. Folding them into the main query timed out on all four mirrors, so they are a second,
+  best-effort query per city (two mirrors, 15 results); a busy mirror skips only the extras. Live, Harare:
+  main query 14 places, extras 7 more (website-only food places; Harare's mapped crafts and markets carry
+  no phone tag yet).
+- Tests 426/426.
+
 ## v2.2.0 (2026-10-29): Gmail replaces inbox.lv
 
 - The Worker's mail lane (`worker/mail.js`) now sends over personal Gmail (`smtp.gmail.com:465`) with a

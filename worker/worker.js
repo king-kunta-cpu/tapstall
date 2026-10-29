@@ -57,11 +57,11 @@ import {
   isPlaceholderFeed, isTronAddr, cryptoMatch, toUnits, fromUnits, railAcctOf,
   EDITABLE_FIELDS, SOFT_FIELDS, sign, adminStore, normaliseRail, resolveRail,
   STOREFRONT_TEMPLATES, storefrontDesign,
-  QUOTA_LIMITS, quotaAllows, quotaPriorityForKey, storeMeta, storeMetaAction, emailHash,
+  QUOTA_LIMITS, quotaAllows, quotaPriorityForKey, storeMeta, storeMetaAction, suspendDecision, SUSPEND_GRACE_DAYS, emailHash,
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
 } from './core.js';
 
-const VERSION = '2.2.0';
+const VERSION = '2.2.1';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
@@ -2081,7 +2081,7 @@ async function cryptoCheck(req, env) {
 
 /* ------------------------------------------------------------------ cron */
 async function runCron(env) {
-  const out = { checked: 0, suspended: 0, reinstated: 0, warned: 0 };
+  const out = { checked: 0, suspended: 0, reinstated: 0, warned: 0, held: 0 };
   if (!env.STORES) return out;
   const nightly = new Date().getUTCHours() === 0;    // the 00:15 slot owns the report
   // Heartbeat once a day, not four times: it proves the schedule fires, and
@@ -2141,10 +2141,24 @@ async function runCron(env) {
       if (st.crypto_watch) watch.push(st);
       const leftDays = ((st.paid_until || 0) - Date.now()) / 864e5;
       if (leftDays <= 0 && !st.suspended) {
-        st.suspended = true; st.suspended_at = new Date().toISOString();
-        await writeStore(env, st);
-        summary.suspended++;
-        out.suspended++;
+        // v2.2.1: closed only once the owner was told and had SUSPEND_GRACE_DAYS (suspendDecision).
+        const decision = suspendDecision(st, Date.now());
+        if (decision === 'notify') {
+          let told = false;
+          if (mailArmed(env)) {
+            told = await sendMail(env, st.owner_email, `Your store has expired: renew within ${SUSPEND_GRACE_DAYS} days to keep it open`,
+              `${st.shop_name} reached the end of its paid year on ${new Date(st.paid_until).toDateString()}.\nIt stays open for ${SUSPEND_GRACE_DAYS} more days. Renew here and it carries on without a gap: ${renewLink(st, env.PUBLIC_ORIGIN || '')}\n${PRICE_USD} USD / 365 days. No monthly billing, no foreign-card subscription.`);
+          }
+          if (told) { st.warned_at = new Date().toISOString(); await writeStore(env, st); out.warned++; }
+          out.held++;
+        } else if (decision === 'hold') {
+          out.held++;
+        } else if (decision === 'suspend') {
+          st.suspended = true; st.suspended_at = new Date().toISOString();
+          await writeStore(env, st);
+          summary.suspended++;
+          out.suspended++;
+        }
       } else if (leftDays > 0 && st.suspended) {
         st.suspended = false;
         await writeStore(env, st);

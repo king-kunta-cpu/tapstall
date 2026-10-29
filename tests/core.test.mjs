@@ -1855,3 +1855,18 @@ test('1.1.0 sellerBoard: Whop-paid commission is earned, not owed twice', () => 
   assert.equal(tino.commission_whop, 18, 'Whop settles this half to the seller directly');
   assert.equal(tino.commission_due, 18, 'and only the internal half is still owed by the owner');
 });
+
+test('v2.2.1 suspendDecision: an expired shop closes only after its owner was told and had time to act', () => {
+  const now = Date.parse('2026-11-10T12:00:00Z'), day = 864e5;
+  const iso = (ms) => new Date(ms).toISOString();
+  const shop = (o) => ({ paid_until: now - day, owner_email: 'o@example.com', warned_at: null, suspended: false, ...o });
+  assert.equal(C.suspendDecision(shop({ paid_until: now + day }), now), 'none');              // still paid
+  assert.equal(C.suspendDecision(shop({ suspended: true }), now), 'none');                    // already closed
+  assert.equal(C.suspendDecision(shop({ owner_email: '' }), now), 'suspend');                // nobody to tell
+  assert.equal(C.suspendDecision(shop({}), now), 'notify');                                   // notice never left
+  assert.equal(C.suspendDecision(shop({ warned_at: iso(now - day) }), now), 'hold');          // told yesterday
+  assert.equal(C.suspendDecision(shop({ warned_at: iso(now - C.SUSPEND_GRACE_DAYS * day) }), now), 'suspend');
+  assert.equal(C.suspendDecision(shop({ warned_at: iso(now - 8 * day) }), now), 'suspend');   // usual 7-days-out warning
+  assert.equal(C.suspendDecision(shop({ paid_until: now - C.SUSPEND_HOLD_MAX_DAYS * day }), now), 'suspend'); // dead lane: hold has a ceiling
+  assert.equal(C.suspendDecision(shop({ warned_at: 'garbage' }), now), 'notify');
+});

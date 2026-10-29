@@ -93,6 +93,28 @@ export function storeMeta(st) {
     ...(emails.length ? { e: [...new Set(emails)] } : {}),
   };
 }
+/** v2.2.1: an expired shop is closed only after its owner was actually told and had time to act.
+ *  Before, the sweep suspended at expiry whether or not the renewal notice ever left (a dead mail
+ *  lane meant shops closed with no word). The rule:
+ *  - nobody to tell (no owner email): close at expiry, as before;
+ *  - the notice never left: send an expiry notice now and hold the shop open ('notify');
+ *  - the notice left: close once SUSPEND_GRACE_DAYS have passed since it did ('hold' until then)
+ *    — a shop warned at the usual 7 days out still closes on its expiry day;
+ *  - mail lane down for good: never hold past SUSPEND_HOLD_MAX_DAYS after expiry, so a broken
+ *    lane cannot keep shops open for free. */
+export const SUSPEND_GRACE_DAYS = 3;
+export const SUSPEND_HOLD_MAX_DAYS = 7;
+export function suspendDecision(st, nowMs) {
+  const s = st && typeof st === 'object' ? st : {};
+  const now = Number(nowMs == null ? Date.now() : nowMs) || 0;
+  const leftDays = ((Number(s.paid_until) || 0) - now) / 864e5;
+  if (leftDays > 0 || s.suspended) return 'none';
+  if (!s.owner_email) return 'suspend';
+  if (leftDays <= -SUSPEND_HOLD_MAX_DAYS) return 'suspend';
+  const warned = Date.parse(s.warned_at || '');
+  if (!Number.isFinite(warned)) return 'notify';
+  return (now - warned) / 864e5 >= SUSPEND_GRACE_DAYS ? 'suspend' : 'hold';
+}
 export function storeMetaAction(meta, nowMs) {
   if (!meta || typeof meta !== 'object' || !('p' in meta)) return 'legacy';
   const now = Number(nowMs == null ? Date.now() : nowMs) || 0;

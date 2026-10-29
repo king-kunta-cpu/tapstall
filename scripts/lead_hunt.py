@@ -67,18 +67,28 @@ def fetch(url, timeout=15, data=None, headers=None):
         return r.status, r.read().decode("utf-8", "replace")
 
 
-def osm_city(cc, city, bbox, limit=40):
+# Three cheap parts, not a union of every tag pair: the 18-part version timed out on every public
+# mirror. A shop with a website is enriched from that site; one with a phone is reachable already.
+OSM_MAIN_PARTS = ('nwr["shop"]["phone"]', 'nwr["shop"]["website"]',
+                  'nwr["amenity"~"^(fast_food|restaurant|cafe)$"]["phone"]')
+# v2.2.1: the three kinds of seller the slim query dropped: makers who sell what they make, market
+# traders, and food places that list only a website. Asked as a SECOND, best-effort query: folded
+# into the main one, it timed out on all four mirrors (29 Oct), and a busy mirror must never cost
+# the main batch.
+OSM_EXTRA_PARTS = ('nwr["craft"~"^(tailor|dressmaker|caterer|shoemaker|jeweller|confectionery|bakery|'
+                   'photographer|beautician|upholsterer|carpenter)$"]["phone"]',
+                   'nwr["amenity"="marketplace"]["phone"]',
+                   'nwr["amenity"~"^(fast_food|restaurant|cafe)$"]["website"]')
+
+
+def osm_city(cc, city, bbox, limit=40, parts=OSM_MAIN_PARTS, endpoints=None):
     s_, w_, n_, e_ = bbox
     b = f"({s_},{w_},{n_},{e_})"
-    # Three cheap parts, not a union of every tag pair: the 18-part version timed out on every
-    # public mirror. A shop with a website is enriched from that site; one with a phone is
-    # reachable already.
-    ql = (f'[out:json][timeout:25];(nwr["shop"]["phone"]{b};nwr["shop"]["website"]{b};'
-          f'nwr["amenity"~"^(fast_food|restaurant|cafe)$"]["phone"]{b};);out center tags {limit * 3};')
+    ql = "[out:json][timeout:25];(" + "".join(p + b + ";" for p in parts) + f");out center tags {limit * 3};"
     # The public instance 406s browser UAs and 502s under load — identify honestly and let the
     # caller skip the city that day rather than fail the hunt.
     body, last = None, None
-    for attempt, ep in enumerate(OVERPASS_ENDPOINTS):
+    for attempt, ep in enumerate(endpoints or OVERPASS_ENDPOINTS):
         try:
             _, body = fetch(ep, data=urllib.parse.urlencode({"data": ql}).encode(), timeout=35,
                             headers={"User-Agent": "tapstall-lead-hunt/2.0 (+https://tapstall.zlnew.workers.dev)"})
@@ -184,6 +194,10 @@ def hunt(countries, limit, enrich=True, day=None):
             except Exception as e:
                 print(f"  overpass failed for {city}: {type(e).__name__}", file=sys.stderr)
                 continue
+            try:   # makers, market traders, website-only food places: a bonus, never a blocker
+                rows += osm_city(cc, city, bbox, 15, OSM_EXTRA_PARTS, OVERPASS_ENDPOINTS[:2])
+            except Exception as e:
+                print(f"  extra categories skipped for {city}: {type(e).__name__}", file=sys.stderr)
             for r in rows:
                 if r["url"] in seen:
                     continue
@@ -229,6 +243,9 @@ def selftest():
     assert ROLE_JUNK.search("privacy@x.com") and not ROLE_JUNK.search("sales@x.com")
     assert is_chain("Pick n Pay Benmore", {}) and is_chain("Mama's Kitchen", {"brand": "X"}) and is_chain("KFC Avondale", {})
     assert not is_chain("Upi Computers", {"shop": "computer"}) and not is_chain("Gameplan Tailors", {}) and not is_chain("Total Fashion Boutique", {})
+    assert len(OSM_MAIN_PARTS) == 3 and len(OSM_EXTRA_PARTS) == 3
+    assert any('"craft"' in p for p in OSM_EXTRA_PARTS) and any("marketplace" in p for p in OSM_EXTRA_PARTS)
+    assert all(p.count("[") == p.count("]") and p.count('"') % 2 == 0 for p in OSM_MAIN_PARTS + OSM_EXTRA_PARTS)
     print("offline checks OK")
     try:
         city, bbox = CITY_BBOX["ZW"][0]
