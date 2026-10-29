@@ -13,6 +13,7 @@
  *   - a merchant's settings save still lands, and is told its log line is missing
  *   - the operator can still sign in, read everything, and pull a lever
  */
+import './fixtures/clock.mjs'; // first: a steady clock, see the file
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';

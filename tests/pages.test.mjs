@@ -14,7 +14,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, existsSync, readdirSync, writeFileSync, unlinkSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync, writeFileSync, unlinkSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -871,6 +871,7 @@ test('the button’s verb is a verb the route honours', () => {
    is to hand every block to bash and listen. */
 test('every shell block in every workflow parses as shell', () => {
   const dir = join(root, '.github', 'workflows');
+  const wfDir = mkdtempSync(join(tmpdir(), 'wf-check-'));
   const files = readdirSync(dir).filter((f) => /\.ya?ml$/.test(f));
   assert.ok(files.length, 'the workflow files are where they are supposed to be');
   let checked = 0;
@@ -889,7 +890,7 @@ test('every shell block in every workflow parses as shell', () => {
         if (dedent === null) dedent = indent;
         body.push(lines[j].slice(dedent));
       }
-      const path = join(tmpdir(), 'wf-' + f + '-' + i + '.sh');
+      const path = join(wfDir, 'wf-' + f + '-' + i + '.sh');   // private to this run: two runs at once cannot delete each other's file
       writeFileSync(path, '#!/bin/bash\nset -e\n' + body.join('\n') + '\n');
       try {
         execFileSync('bash', ['-n', path], { stdio: 'pipe' });
@@ -902,6 +903,7 @@ test('every shell block in every workflow parses as shell', () => {
       checked++;
     }
   }
+  rmSync(wfDir, { recursive: true, force: true });
   assert.ok(checked >= 4, 'there are run: blocks to check at all — found ' + checked);
 });
 

@@ -11,6 +11,7 @@
  * bugs only surface on the deployed Worker — after 4 of them reached
  * production during this build. This test catches them at `npm test`.
  */
+import './fixtures/clock.mjs'; // first: a steady clock, see the file
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';

@@ -1,4 +1,5 @@
 // v2.0.0 worker/mail.js: the SMTP dialogue over a scripted socket, MIME, lanes and budget.
+import './fixtures/clock.mjs'; // first: a steady clock, see the file
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as M from '../worker/mail.js';

@@ -1,3 +1,4 @@
+import './fixtures/clock.mjs'; // first: a steady clock, see the file
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as R from '../worker/rail.js';
