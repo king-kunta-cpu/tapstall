@@ -270,7 +270,7 @@ export async function mailSend(env, msg, opts) {
   }
 }
 
-/** Transactional with retry: sends now, or parks it in `mailq:` for the 20-minute tick. */
+/** Transactional with retry: sends now, or parks it in `mailq:` for the hourly tick. */
 export async function mailDeliver(env, msg, opts) {
   const r = await mailSend(env, { ...msg, kind: 'transactional' }, opts);
   if (r.sent || r.permanent || r.why === 'no_lane') return r;
@@ -278,7 +278,7 @@ export async function mailDeliver(env, msg, opts) {
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     await env.ORDERS.put('mailq:' + id, JSON.stringify({ to: msg.to, subject: msg.subject, text: msg.text, replyTo: msg.replyTo || '',
       tries: 1, first: new Date().toISOString(), why: r.why }), { expirationTtl: 3 * 86400 });
-    // The flag the 20-minute tick reads instead of listing: a read is 1/100,000 of the day, a list 1/1,000.
+    // The flag the hourly tick reads instead of listing: a read is 1/100,000 of the day, a list 1/1,000.
     try { await env.ORDERS.put(MAILQ_FLAG, String(Date.now()), { expirationTtl: 3 * 86400 }); } catch (e) { void e; }
     return { ...r, queued: true };
   } catch (e) { return r; }

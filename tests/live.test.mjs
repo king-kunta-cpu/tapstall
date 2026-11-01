@@ -4827,7 +4827,7 @@ test('1.1.0 Whop: signed payment activates, forgery/replay/companion/failure do 
   }
 });
 
-test('v2.0.0 outreach: the 20-minute tick sends one gated first touch from the Gmail lane, with a working one-click unsubscribe', async () => {
+test('v2.0.0 outreach: the hourly tick sends one gated first touch from the Gmail lane, with a working one-click unsubscribe', async () => {
   const sent = armMail();
   env.OUTREACH_WINDOW = 'always';
   env.MAIL_TEST_FETCH = async () => new Response(JSON.stringify({ Status: 0, Answer: [{ type: 15, data: '10 mx.hararekota.co.zw.' }] }));
@@ -4848,7 +4848,7 @@ test('v2.0.0 outreach: the 20-minute tick sends one gated first touch from the G
     }
     const w = await load();
     const jobs = [];
-    await w.scheduled({ cron: '5,25,45 * * * *', scheduledTime: Date.now() }, env, { waitUntil: (p) => jobs.push(p) });
+    await w.scheduled({ cron: '5 * * * *', scheduledTime: Date.now() }, env, { waitUntil: (p) => jobs.push(p) });
     const out = await jobs[0];
     assert.equal(out.outreach.sent, 1, 'one first touch per tick: ' + JSON.stringify(out));
     assert.equal(sent.length, 1);

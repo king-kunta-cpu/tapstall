@@ -67,7 +67,7 @@ const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
 const RL = { windowSec: 60, max: 8 };
-const PRESS_CRON = '5,25,45 * * * *';   // 20-minute press flush; the 6-hourly sweep is the other trigger
+const PRESS_CRON = '5 * * * *';   // hourly clock (CF budget, 2026-11-01: was every 20 minutes); the 6-hourly sweep is the other trigger
 
 /* ------------------------------------------------------ quota-first runtime
  * The cheapest KV operation is the one this isolate already knows the answer
@@ -2091,12 +2091,12 @@ async function runCron(env) {
     try { if (await governedPut(env.STORES, 'cron:last', JSON.stringify({ at: new Date().toISOString(), unix: Date.now() }), null, 'telemetry')) out.heartbeat = true; } catch (e) {}
   }
   try { out.buyer_flushed = await flushBuyerBuf(env, 25); } catch (e) { out.buyer_flushed = 0; }
-  // v2.0.0: discovery moved to the 02:xx/03:xx 20-minute tick (its own subrequest budget);
+  // v2.0.0: discovery moved to the 02:xx/03:xx clock tick (its own subrequest budget);
   // the press flushes on that tick too, so the 6-hourly sweep no longer runs it twice.
   // v2.0.0: the dispatch runs first, before the store walk and the chain readers spend fetches.
   try { out.dispatch = await dispatchTick(env); }
   catch (e) { out.dispatch = { error: String(e && e.message || e).slice(0, 160) }; }
-  try { out.press = await pressTick(env); }        // also on the 20-minute tick; press:last dedupes a minute
+  try { out.press = await pressTick(env); }        // also on the hourly tick; press:last dedupes a minute
   catch (e) { out.press = { error: String(e && e.message || e).slice(0, 160) }; }
   if (nightly) {
     // v2.1.0: the tick drains only when the queued-mail flag is set; once a day the queue is listed
@@ -2786,7 +2786,7 @@ function capKey(env) {
 /** v2.0.0: merchant mail goes out over the mail lane (worker/mail.js; Gmail since v2.2.0). Before this the
  *  function called `new EmailMessage(...)` with no import and no EMAIL binding: every merchant
  *  mail since launch was a silent no-op. Returns true when the message left or was parked for the
- *  20-minute retry; false when no lane is armed or the address is unusable. Never throws. */
+ *  hourly retry; false when no lane is armed or the address is unusable. Never throws. */
 async function sendMail(env, to, subject, text, extra) {
   if (!to) return false;
   const r = await mailDeliver(env, { to, subject, text, ...(extra || {}) });
@@ -5978,7 +5978,7 @@ async function dispatchTick(env) {
 }
 /* ------------------------------------------------------------ outreach over the Gmail lane (v2.0.0; Gmail since v2.2.0)
  * The Gmail runner (Actions, once a weekday) stays; this is the second voice: the Worker itself
- * sends a first touch or a due follow-up from its Gmail lane, at most one per 20-minute tick
+ * sends a first touch or a due follow-up from its Gmail lane, at most one per hourly tick
  * and only while the lane has room after a slot is held back for merchant mail. Weekdays,
  * 07:00–16:59 UTC (09:00–18:59 in Harare/Johannesburg). House leads only (a seller's lead is
  * that seller's voice). Every lead is re-judged by the v2 gate before a byte is sent, the
@@ -6099,7 +6099,7 @@ async function unsubRoute(req, url, env) {
   return page('Done. You will not hear from us again.');
 }
 
-/** The 20-minute clock (PRESS_CRON). Each job is small, and discovery — the only one that fans out
+/** The hourly clock (PRESS_CRON; every 20 minutes before the 2026-11-01 Cloudflare budget). Each job is small, and discovery — the only one that fans out
  *  to dozens of fetches — gets its own invocation in the quiet hour, so it can never again starve
  *  the dispatch of its 50-subrequest allowance (the 2026-10-28 "Too many subrequests"). */
 async function tick(env) {
