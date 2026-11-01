@@ -18,8 +18,10 @@ not a release. See *Markets are data, not code*.
 **Live:** `https://tapstall.zlnew.workers.dev/onboard`
 Storefront `…/s/<handle>` · dashboard `…/a` · rate calculator `…/fees`
 
-**New in v2.3.0, the WhatsApp shop bot.** A shop can also sell *inside* WhatsApp: the buyer sends
-`3` for item 3, checks out and pastes the payment SMS back, all in the chat. That matters where
+**New in v2.3, the WhatsApp shop bot.** A shop can also sell *inside* WhatsApp: the buyer reads
+the menu, types the whole order in one line (`1b, 2x2 pickup`), gets the payment slip and pastes
+the payment SMS back, all in the chat, for two billed bot messages per order (v2.3.1; every other
+acknowledgement is a free emoji reaction). That matters where
 people buy WhatsApp-only data bundles and a browser link costs extra. The merchant installs it with
 one button in the dashboard. See [docs/WHATSAPP-BOT.md](docs/WHATSAPP-BOT.md).
 

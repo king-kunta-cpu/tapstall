@@ -27,7 +27,7 @@ import {
   mailSend, mailDeliver, mailDrain, mailArmed, mailLanes, mailStatus, mailResume, mailRoom, mxOk,
 } from './mail.js';
 import {
-  waInbound, waSigOk, waStep, waTextBody, waBotLink, waMerchantNote, WA_HANDLE_RE,
+  waInbound, waSigOk, waStep, waTextBody, waReactBody, waBotLink, waMerchantNote, WA_HANDLE_RE,
 } from './wa.js';
 import {
   RAILS, round2, clamp, slug, digits, isEmail, validHandle, parseCSV, normalizeFeedUrl,
@@ -65,7 +65,7 @@ import {
   leadsHuntToday,
 } from './core.js';
 
-const VERSION = '2.3.0';
+const VERSION = '2.3.1';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
@@ -2697,7 +2697,8 @@ async function selftest(env) {
   // the WhatsApp bot's state, as facts rather than a verdict: unarmed is a normal state for a
   // platform whose number is not live yet, so none of this is a boolean the verdict would count
   t.wa_bot = { armed: waArmed(env), sessions: env.WA_BOT ? 'durable_object' : 'isolate_memory',
-    number: waNumber(env) ? '•••' + waNumber(env).slice(-4) : '', month_cap: waMonthCap(env), lines: waLines(env).size };
+    number: waNumber(env) ? '•••' + waNumber(env).slice(-4) : '', month_cap: waMonthCap(env), lines: waLines(env).size,
+    billed_replies_per_order: 2, buyer_day_cap: Math.floor(Number(env.WA_BUYER_DAY_CAP) || 0) || 8, shop_ping: env.WA_SHOP_PING === 'on' };
   if (t.wa_bot.armed && env.WA_PHONE_ID) {
     try { const mt = await waMeter(env, String(env.WA_PHONE_ID), 'read'); t.wa_bot.month_sent = mt.n; t.wa_bot.month_capped = mt.capped || 0; } catch (e) { /* facts, not a verdict */ }
   }
@@ -6460,7 +6461,11 @@ const PRIVACY_PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8"
  *   WA_VERIFY_TOKEN  any string; typed into the webhook form in the Meta app
  *   WA_PHONE_ID      the shared number's phone_number_id
  *   WA_NUMBER        the shared number in international digits, for the wa.me link
- * Optional: WA_LINES, WA_GRAPH_VERSION (v25.0), WA_MONTH_CAP, WA_BILLING=on.
+ * Optional: WA_LINES, WA_GRAPH_VERSION (v25.0), WA_MONTH_CAP, WA_BILLING=on, WA_BUYER_DAY_CAP (8),
+ * WA_SHOP_PING=on (the shop's WhatsApp ping per order: one billed message each, so off by default).
+ *
+ * v2.3.1: an order costs two billed replies, the menu and the slip; every other acknowledgement is
+ * a free reaction (see worker/wa.js).
  *
  * Money: since 1 October 2026 Meta charges service replies after 1,000 free a month per business
  * number (Zimbabwe is "Rest of Africa"), and without a payment method on file it simply stops
@@ -6569,12 +6574,16 @@ async function waProcess(env, m, sstore) {
   if (r.duplicate) return { duplicate: true };
   await sstore.put(r.sess);
   const sent = [];
-  // blue ticks are free (a read receipt is not a message) and tell the buyer someone is home
+  // blue ticks and reactions are free (neither is billed nor counted against the 1,000), so they
+  // carry every "got it"; a billed reply goes only where words are needed
   later.push(waRead(env, m).catch(() => {}));
+  if (r.react) later.push(waReact(env, m, r.react).catch(() => {}));
   for (const t of r.replies) sent.push(await waSend(env, m.phone_id, m.from, t));
-  if (r.placed) later.push(waPingMerchant(env, m, r.placed).catch(() => {}));
+  // the shop's WhatsApp ping costs one billed message per order, so it is opt-in: the order email
+  // and webhook (placeOrder's notify) already carry every order
+  if (r.placed && env.WA_SHOP_PING === 'on') later.push(waPingMerchant(env, m, r.placed).catch(() => {}));
   await Promise.all(later);
-  return { replies: r.replies.length, sent, step: r.sess.step };
+  return { replies: r.replies.length, sent, react: r.react || '' };
 }
 
 /** The bot's hands: every one of them is a path the storefront or dashboard already uses. */
@@ -6588,6 +6597,7 @@ function waDeps(env, m, ctx) {
     return Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate()) - 120 * 60000;
   };
   return {
+    dayCap: Math.floor(Number(env.WA_BUYER_DAY_CAP) || 0) || undefined,
     store: async (h) => { const k = slug(String(h || '')); return WA_HANDLE_RE.test(k) ? getStore(env, k, { cache: true }) : null; },
     menu: (st) => loadProducts(st, env),
     hours: async (st) => openNow(st),
@@ -6669,6 +6679,15 @@ async function waSend(env, phoneId, to, body) {
     body: JSON.stringify(waTextBody(to, body)),
   }).catch(() => null);
   return r && r.ok ? 'sent' : 'failed_' + (r ? r.status : 'net');
+}
+
+/** Unmetered on purpose: a reaction is not billed and does not draw on the free tier. */
+async function waReact(env, m, emoji) {
+  await fetch(`${WA_GRAPH}${env.WA_GRAPH_VERSION || 'v25.0'}/${m.phone_id}/messages`, {
+    method: 'POST',
+    headers: { authorization: 'Bearer ' + env.WA_TOKEN, 'content-type': 'application/json' },
+    body: JSON.stringify(waReactBody(m.from, m.id, emoji)),
+  });
 }
 
 async function waRead(env, m) {

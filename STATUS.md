@@ -1,5 +1,27 @@
 # Tapstall — status
 
+## v2.3.1 (2026-11-01): the WhatsApp bot takes an order in two billed replies
+
+- **Why.** Meta bills service replies after 1,000 free per number per month. v2.3.0 used about five
+  replies per order (menu, add, options, checkout, slip, code), roughly 150-200 orders a month free.
+- **Now: menu + slip, nothing else billed.** The menu carries the instructions and each item's choice
+  letters (`1bd` = item 1, choices b and d; `x2` = how many; a…z without x). The buyer types the order
+  in one or several messages and finishes with `pickup` or `deliver <address>` (bare `deliver`
+  reuses the last address). Each understood message gets a free 👍 reaction; anything not understood
+  gets ❓ and adds nothing (a message is read whole or not at all). The slip lists items, defaults
+  that were applied, the total and the payment steps. A pasted payment SMS is filed through `proofAdd`
+  and acknowledged with ✅; a screenshot is optional, via the shop link on the slip. About 475
+  orders a month inside the free tier.
+- **Reactions are free.** Meta neither bills them nor counts them against the 1,000 (Meta partners'
+  October 2026 pricing notes); they are sent unmetered (`waReactBody`).
+- **Guards.** `WA_BUYER_DAY_CAP` (8) billed replies per buyer per day, past which only ⏳; the slip
+  and shop commands are exempt. The shop's WhatsApp ping per order is now off unless
+  `WA_SHOP_PING=on` (it costs a billed message; email and webhook carry every order anyway).
+- **Long menus** are paged by section (`menu 2`), numbers unchanged, instructions on every page.
+- Session version 2: old in-flight v1 carts start clean. Tests: `tests/wa.test.mjs` (19), asserting
+  exactly 2 billed replies from first message to filed payment code. `docs/WHATSAPP-BOT.md` rewritten,
+  with a section on Meta vs BSPs vs unofficial pairing.
+
 ## v2.3.0 (2026-11-01): the WhatsApp shop bot, so a buyer can order without leaving WhatsApp
 
 - **Why.** Most buyers here buy WhatsApp-only data bundles; a storefront link opens a browser that

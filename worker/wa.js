@@ -15,15 +15,16 @@
  * rules stay exactly where they are, in one tested place, and this file only decides what to say.
  *
  * Every reply costs money after Meta's 1,000 free service messages a month per business number,
- * so the conversation is written to need few of them: a whole menu is one message, several
- * items can be added in one ("3x2, 5"), and checkout asks one question, not four.
+ * so an order is built to cost exactly two: the menu (with the instructions and every item's
+ * choice letters in it) and the order slip (with the total and how to pay). Everything between and
+ * after is acknowledged with an emoji reaction, which Meta does not bill and does not count
+ * against the free tier: 👍 added, ❓ not understood, ✅ payment code filed.
  */
 
-export const WA_VERSION = 1;
+export const WA_VERSION = 2;
 export const WA_SEEN_MAX = 24;                 // message ids remembered for webhook-retry dedupe
 export const WA_CART_MAX = 30;                 // lines in one cart (placeOrder takes 40)
 export const WA_TEXT_MAX = 3900;               // WhatsApp's text body limit is 4,096
-export const WA_MENU_INLINE_MAX = 3000;        // a longer menu is browsed by category
 export const WA_IDLE_MS = 3 * 24 * 3600e3;     // an abandoned cart is forgotten after 3 days
 export const WA_HANDLE_RE = /^[a-z0-9][a-z0-9-]{1,30}$/;
 
@@ -37,15 +38,15 @@ export function waSession(prev) {
   return {
     v: WA_VERSION,
     shop: p.shop || '',
-    step: p.step || 'menu',
     cart: Array.isArray(p.cart) ? p.cart : [],
+    notes: Array.isArray(p.notes) ? p.notes : [],
     ids: Array.isArray(p.ids) ? p.ids : [],
-    cats: Array.isArray(p.cats) ? p.cats : [],
-    pending: p.pending || null,
-    queue: Array.isArray(p.queue) ? p.queue : [],
+    menu_at: Number(p.menu_at) || 0,
     name: p.name || '',
     address: p.address || '',
     last: p.last || null,
+    day: p.day || '',
+    day_n: Number(p.day_n) || 0,
     seen: Array.isArray(p.seen) ? p.seen : [],
     at: Number(p.at) || 0,
     last_in: Number(p.last_in) || 0,
@@ -57,8 +58,8 @@ export function waSession(prev) {
 /**
  * Meta's webhook body, flattened to the messages a bot answers. Statuses (sent, delivered, read,
  * failed) are dropped: they are receipts about our own messages, and answering them would be a
- * loop that bills us. Every message type is kept so the bot can say "send text" to a sticker
- * rather than ignore a buyer who is trying.
+ * loop that bills us. Every message type is kept so a sticker or voice note gets a ❓ reaction
+ * rather than silence.
  */
 export function waInbound(payload) {
   const out = [];
@@ -116,6 +117,13 @@ export function waTextBody(to, text) {
     type: 'text', text: { preview_url: false, body: waClip(text, WA_TEXT_MAX) } };
 }
 
+/** A reaction on the buyer's own message: the bot's free "got it". Meta bills no reaction and
+ *  counts none against the 1,000 free service messages, so every acknowledgement is one of these. */
+export function waReactBody(to, messageId, emoji) {
+  return { messaging_product: 'whatsapp', recipient_type: 'individual', to: waDigits(to),
+    type: 'reaction', reaction: { message_id: String(messageId || ''), emoji: String(emoji || '') } };
+}
+
 /** The install link a merchant shares: opens the bot's chat inside WhatsApp with the shop code
  *  already typed, so the buyer's first tap is "send". `wa.me` is answered by the WhatsApp app
  *  itself on a phone, so it does not need a browser bundle. */
@@ -158,46 +166,197 @@ export function waProofFrom(text, orderCode) {
   return '';
 }
 
+/* ---------------------------------------------------------- order grammar */
+
+/*
+ * The whole order fits in one line a buyer can type on any phone:
+ *
+ *     1bd, 2x2 pickup
+ *     1bd deliver 14 Fife Ave, near the Spar
+ *
+ * A number picks the menu item; letters after it pick that item's choices and extras (each item's
+ * own letters, printed under it on the menu, a…z without x); "x2" is how many. "pickup" or
+ * "deliver <address>" at the end sends the order. Items can also come over several messages: each
+ * understood message gets a free 👍 reaction instead of a billed reply, and the order slip is the
+ * next message the bot writes. That is the point: menu + slip, two billed replies per order.
+ */
+export const WA_LETTERS = 'abcdefghijklmnopqrstuvwyz';        // no x: x is "how many"
+const WA_FILLER = new Set(['and', 'please', 'pls', 'plz', 'also', 'plus', 'then', 'add', 'thanks']);
+
+/**
+ * One message → { items:[{n, letters, qty}], service, address } when every word in it belongs to
+ * the grammar; { bad:true } when it tries to (starts with an item number) but something does not
+ * fit; null when it is not an order at all (a greeting, an SMS, a question). Nothing is half-read:
+ * a message with one word that does not fit adds nothing, so a buyer is never surprised by a cart.
+ */
+export function waParseOrder(text) {
+  const orig = String(text || '').replace(/[*_~`]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!orig || orig.length > 600) return null;
+  let low = orig.toLowerCase();
+  const same = low.length === orig.length;            // indices line up, so the address keeps its case
+  let service = '', address = '';
+  const dm = low.match(/(?:^|[\s,;.])(deliver(?:y|ed)?)(?:\s+(?:it\s+)?to)?(?=$|[\s,:;.\-])/);
+  if (dm) {
+    service = 'delivery';
+    address = (same ? orig : low).slice(dm.index + dm[0].length).replace(/^[\s,:;.\-]+/, '').trim().slice(0, 200);
+    low = low.slice(0, dm.index);
+  } else {
+    const pm = low.match(/(?:^|[\s,;.])(pick\s*-?\s*up|collect(?:ion)?|i'?ll\s+collect)(?:\s+(?:please|pls|plz|thanks))?[\s.!]*$/);
+    if (pm) { service = 'pickup'; low = low.slice(0, pm.index); }
+  }
+  const body = low.replace(/\s*[x×*]\s*(\d)/g, 'x$1').trim();
+  const toks = body ? body.split(/[\s,;&+.]+/).filter(Boolean) : [];
+  const items = [];
+  let stray = false;
+  for (const tk of toks) {
+    const m = tk.match(/^(\d{1,3})([a-wyz]{0,12})(?:x(\d{1,2}))?$/);
+    if (m) items.push({ n: Number(m[1]), letters: m[2] || '', qty: Math.max(1, Math.min(99, Number(m[3] || 1))) });
+    else if (!WA_FILLER.has(tk)) stray = true;
+  }
+  if (stray) return /^\d{1,3}([a-wyz]|x\d|[\s,]|$)/.test(body) ? { bad: true } : null;
+  if (!items.length && !service) return null;
+  return { items: items.slice(0, 20), service, address };
+}
+
+/** An item's letters: its option groups' choices in order, then its extras. */
+export function waCodes(p) {
+  const out = [];
+  let i = 0;
+  (Array.isArray(p.opts) ? p.opts : []).forEach((g, gi) => (g.choices || []).forEach((c) => {
+    if (i < WA_LETTERS.length) out.push({ l: WA_LETTERS[i++], g: gi, label: String(c.label || ''), up: Number(c.up) || 0 });
+  }));
+  (Array.isArray(p.addons) ? p.addons : []).forEach((a) => {
+    if (i < WA_LETTERS.length) out.push({ l: WA_LETTERS[i++], add: true, label: String(a.name || ''), up: Number(a.price) || 0 });
+  });
+  return out;
+}
+
+/** One parsed pick against the menu: the cart line, or why it cannot be one. Notes are what the
+ *  slip will say about it (a choice the buyer left out gets the first one, said out loud). */
+function waResolve(pk, ids, products) {
+  const id = ids[pk.n - 1];
+  const p = id != null ? products.find((x) => String(x.id) === String(id)) : null;
+  if (!p) return { err: 'no item ' + pk.n };
+  if (p.available === false) return { err: waClip(p.name, 30) + ' is sold out' };
+  const codes = waCodes(p);
+  const groups = Array.isArray(p.opts) ? p.opts : [];
+  const chosen = new Map();
+  const addons = [];
+  for (const l of pk.letters) {
+    const c = codes.find((x) => x.l === l);
+    if (!c) return { err: pk.n + l + ' is not a choice' };
+    if (c.add) { if (!addons.some((a) => a.name === c.label)) addons.push({ name: c.label, price: c.up }); continue; }
+    if (chosen.has(c.g)) return { err: 'two choices for one ' + String(groups[c.g].name || 'option').toLowerCase() };
+    chosen.set(c.g, c);
+  }
+  const options = [];
+  const notes = [];
+  groups.forEach((g, gi) => {
+    const ch = (g.choices || []);
+    if (!ch.length) return;
+    const pick = chosen.get(gi);
+    if (pick) { options.push({ label: pick.label, up: pick.up }); return; }
+    options.push({ label: String(ch[0].label || ''), up: Number(ch[0].up) || 0 });
+    if (ch.length > 1) notes.push(`${waClip(p.name, 30)}: no ${String(g.name || 'choice').toLowerCase()} sent, so ${waClip(ch[0].label, 20)}`);
+  });
+  return { p, qty: pk.qty, options, addons, notes };
+}
+
 /* ---------------------------------------------------------------- the menu */
 
-function waCatsOf(products) {
-  const cats = [];
-  for (const p of products) { const c = String(p.cat || 'Menu').trim() || 'Menu'; if (cats.indexOf(c) < 0) cats.push(c); }
-  return cats;
-}
-function waItemLine(n, p, cur) {
-  const sold = p.available === false ? ' _(sold out)_' : '';
-  const opt = (Array.isArray(p.opts) && p.opts.length) || (Array.isArray(p.addons) && p.addons.length) ? ' ▸' : '';
-  return `*${n}.* ${waClip(p.name, 48)} — ${waM2(p.price)} ${cur}${opt}${sold}`;
-}
-const WA_FOOT = 'Send the *number* of what you want (e.g. *2*, or *2x3* for three).\n*C* cart & checkout · *S* my order · *T* talk to the shop · *H* help';
+function waCatOf(p) { return String(p.cat || 'Menu').trim() || 'Menu'; }
 
-/** The menu as one message, or the category list when one message would be too long. */
-export function waMenu(st, products, hours, catIndex) {
+function waItemBlock(n, p, cur) {
+  if (p.available === false) return `*${n}* ~${waClip(p.name, 48)}~ _sold out_`;
+  const rows = [`*${n}* ${waClip(p.name, 48)} · ${waM2(p.price)}`];
+  const codes = waCodes(p);
+  (Array.isArray(p.opts) ? p.opts : []).forEach((g, gi) => {
+    const cs = codes.filter((c) => !c.add && c.g === gi);
+    if (cs.length) rows.push(`   ${waClip(g.name || 'Choose', 20)}: ${cs.map((c) => `*${c.l}* ${waClip(c.label, 24)}${c.up ? ' +' + waM2(c.up) : ''}`).join(' · ')}`);
+  });
+  const adds = codes.filter((c) => c.add);
+  if (adds.length) rows.push(`   Extras: ${adds.map((c) => `*${c.l}* ${waClip(c.label, 24)}${c.up ? ' +' + waM2(c.up) : ''}`).join(' · ')}`);
+  return rows.join('\n');
+}
+
+/** "How to order", written from this shop's own menu so the examples are real items. */
+function waHowTo(st, list) {
+  const cur = (st && st.currency) || 'USD';
+  const avail = list.map((p, i) => ({ p, n: i + 1 })).filter((x) => x.p.available !== false);
+  const withCodes = avail.find((x) => waCodes(x.p).length >= 2) || avail.find((x) => waCodes(x.p).length);
+  const plain = avail.find((x) => x !== withCodes) || avail[0];
+  const lines = ['*HOW TO ORDER*'];
+  if (plain) lines.push(`• Send the item number: *${plain.n}* · two of it: *${plain.n}x2*`);
+  let ex = plain ? `${plain.n}x2` : '1';
+  if (withCodes) {
+    const codes = waCodes(withCodes.p);
+    const groups = Array.isArray(withCodes.p.opts) ? withCodes.p.opts : [];
+    const pickEx = [];
+    groups.forEach((g, gi) => { const cs = codes.filter((c) => !c.add && c.g === gi); if (cs.length) pickEx.push(cs[Math.min(1, cs.length - 1)]); });
+    const add = codes.find((c) => c.add);
+    if (add) pickEx.push(add);
+    const lt = pickEx.map((c) => c.l).join('');
+    lines.push(`• Choices and extras: letters after the number. *${withCodes.n}${lt}* = ${waClip(withCodes.p.name, 30)}, ${pickEx.map((c) => (c.add ? '+' : '') + waClip(c.label, 16)).join(', ')}`);
+    if (groups.length) lines.push('   (no letter sent = the first choice)');
+    ex = `${withCodes.n}${lt}` + (plain && plain !== withCodes ? `, ${plain.n}x2` : '');
+  }
+  const fee = Number(st && st.delivery_fee) || 0;
+  const freeOver = Number(st && st.free_over) || 0;
+  lines.push('• Several at once, with commas: *' + ex + '*');
+  lines.push('• *Finish with* _pickup_ or _deliver_ and your address:');
+  lines.push(`   _${ex} pickup_`);
+  lines.push(`   _${ex} deliver 14 Fife Ave, near the Spar_`);
+  if (fee) lines.push(`   Delivery ${waM2(fee)} ${cur}${freeOver ? ', free over ' + waM2(freeOver) : ''}.`);
+  lines.push('', 'One message or a few, as you like. I react 👍 when I have added it and ❓ when I could not read it (then nothing was added: check the numbers and send it again). Your total and how to pay come in my next message.');
+  lines.push('I read typed text only, not voice notes or photos.');
+  lines.push('_x_ empty my cart · _cart_ · _help_ · _talk_ to the shop');
+  return lines.join('\n');
+}
+
+/**
+ * The menu: one message with every item, its letters and the instructions. A menu too long for one
+ * message is cut into pages by section (*menu 2*, *menu 3*), the numbers staying the menu's own, so
+ * a buyer who knows what they want orders from page 1 and never pays for page 2.
+ */
+export function waMenu(st, products, hours, page) {
   const cur = (st && st.currency) || 'USD';
   const list = Array.isArray(products) ? products : [];
   const ids = list.map((p) => String(p.id));
   const head = `*${waClip((st && (st.shop_name || st.handle)) || 'Shop', 60)}*`
-    + (hours && hours.known && hours.label ? `\n_${hours.label}${hours.open ? '' : ' — you can still order; they will reply when they open'}_` : '')
-    + ((st && st.welcome_message) ? `\n${waClip(st.welcome_message, 220)}` : '');
-  if (!list.length) {
-    return { ids, cats: [], step: 'menu',
-      text: `${head}\n\nThe menu is empty right now. Send *T* to message the shop directly.` };
+    + (hours && hours.known && hours.label ? `\n_${hours.label}${hours.open ? '' : ' (you can still order; they will see it when they open)'}_` : '')
+    + ((st && st.welcome_message) ? `\n${waClip(st.welcome_message, 200)}` : '');
+  if (!list.length) return { ids, pages: 1, text: `${head}\n\nThe menu is empty right now. Send *talk* to message the shop.` };
+  const how = waHowTo(st, list);
+  const cats = [];
+  list.forEach((p, i) => {
+    const c = waCatOf(p);
+    let sec = cats.find((x) => x.name === c);
+    if (!sec) { sec = { name: c, rows: [] }; cats.push(sec); }
+    sec.rows.push(waItemBlock(i + 1, p, cur));
+  });
+  const multi = cats.length > 1;
+  const blocks = [];
+  for (const c of cats) {
+    let cur2 = multi ? `_${waClip(c.name, 40)}_` : '';
+    for (const r of c.rows) {
+      if (cur2.length + r.length > 1800) { blocks.push({ name: c.name, text: cur2 }); cur2 = (multi ? `_${waClip(c.name, 40)} (more)_` : ''); }
+      cur2 += (cur2 ? '\n' : '') + r;
+    }
+    blocks.push({ name: c.name, text: cur2 });
   }
-  const cats = waCatsOf(list);
-  const block = (c) => {
-    const rows = [];
-    list.forEach((p, i) => { if ((String(p.cat || 'Menu').trim() || 'Menu') === c) rows.push(waItemLine(i + 1, p, cur)); });
-    return (cats.length > 1 ? `_${waClip(c, 40)}_\n` : '') + rows.join('\n');
-  };
-  if (catIndex != null && cats[catIndex]) {
-    return { ids, cats, step: 'menu', text: `${head}\n\n${block(cats[catIndex])}\n\n${WA_FOOT}\n*M* back to the sections` };
+  const budget = WA_TEXT_MAX - head.length - how.length - 160;
+  const pages = [];
+  for (const b of blocks) {
+    const last = pages[pages.length - 1];
+    if (last && last.len + b.text.length + 2 <= budget) { last.parts.push(b); last.len += b.text.length + 2; }
+    else pages.push({ parts: [b], len: b.text.length });
   }
-  const full = `${head}\n\n${cats.map(block).join('\n\n')}\n\n${WA_FOOT}`;
-  if (full.length <= WA_MENU_INLINE_MAX) return { ids, cats, step: 'menu', text: full };
-  const counts = cats.map((c) => list.filter((p) => (String(p.cat || 'Menu').trim() || 'Menu') === c).length);
-  return { ids, cats, step: 'cats',
-    text: `${head}\n\nWhat are you looking for?\n${cats.map((c, i) => `*${i + 1}.* ${waClip(c, 40)} (${counts[i]})`).join('\n')}\n\nSend a section number.\n*C* cart & checkout · *S* my order · *T* talk to the shop` };
+  const pi = Math.max(0, Math.min(pages.length - 1, (Number(page) || 1) - 1));
+  const more = pages.length > 1
+    ? '\n\n' + pages.map((pg, i) => (i === pi ? null : `*menu ${i + 1}*: ${[...new Set(pg.parts.map((x) => waClip(x.name, 20)))].join(', ')}`)).filter(Boolean).join(' · ')
+    : '';
+  const body = pages[pi].parts.map((x) => x.text).join('\n\n');
+  return { ids, pages: pages.length, text: `${head}\n\n${body}\n_Prices in ${cur}._${more}\n\n${how}` };
 }
 
 /* ---------------------------------------------------------------- the cart */
@@ -208,150 +367,72 @@ export function waUnit(line) {
   return (Number(line.price) || 0) + ups + adds;
 }
 export function waCartTotal(cart) { return (cart || []).reduce((s, l) => s + waUnit(l) * (Number(l.qty) || 1), 0); }
-function waLineText(l, cur) {
+function waLineText(l) {
   const extra = [...(l.options || []).map((o) => o.label), ...(l.addons || []).map((a) => '+' + a.name)].join(', ');
-  return `${l.qty}× ${waClip(l.name, 40)}${extra ? ' (' + waClip(extra, 60) + ')' : ''} — ${waM2(waUnit(l) * l.qty)} ${cur}`;
+  return `${l.qty}× ${waClip(l.name, 40)}${extra ? ' (' + waClip(extra, 60) + ')' : ''} · ${waM2(waUnit(l) * l.qty)}`;
 }
-function waCartText(cart, cur) { return cart.map((l) => waLineText(l, cur)).join('\n'); }
+function waCartText(cart) { return cart.map(waLineText).join('\n'); }
 
-/** "3", "3x2", "3 x 2, 5 7" → [{n:3,qty:2},{n:5,qty:1},{n:7,qty:1}]; anything else → null. */
-export function waPicks(text) {
-  const t = String(text || '').trim().toLowerCase();
-  if (!/^\d{1,3}(\s*[x×*]\s*\d{1,2})?(\s*[,;&\s]\s*\d{1,3}(\s*[x×*]\s*\d{1,2})?)*$/.test(t)) return null;
-  const out = [];
-  const re = /(\d{1,3})(?:\s*[x×*]\s*(\d{1,2}))?/g;
-  let m;
-  while ((m = re.exec(t))) out.push({ n: Number(m[1]), qty: Math.max(1, Math.min(99, Number(m[2] || 1))) });
-  return out.length ? out.slice(0, 12) : null;
-}
-
-function waAddLine(sess, p, qty, options, addons) {
+function waAddLine(cart, p, qty, options, addons) {
   const key = JSON.stringify([String(p.id), (options || []).map((o) => o.label), (addons || []).map((a) => a.name)]);
-  const same = sess.cart.find((l) => l.key === key);
+  const same = cart.find((l) => l.key === key);
   if (same) { same.qty = Math.min(99, same.qty + qty); return true; }
-  if (sess.cart.length >= WA_CART_MAX) return false;
-  sess.cart.push({ key, id: String(p.id), name: String(p.name || 'item').slice(0, 80), price: Number(p.price) || 0,
+  if (cart.length >= WA_CART_MAX) return false;
+  cart.push({ key, id: String(p.id), name: String(p.name || 'item').slice(0, 80), price: Number(p.price) || 0,
     qty, options: options || [], addons: addons || [] });
   return true;
 }
 
-/** The question for the item at the head of the queue (an option group, then its add-ons). */
-function waAskPending(sess, products, cur) {
-  const pd = sess.pending;
-  const p = products.find((x) => String(x.id) === pd.id);
-  if (!p) { sess.pending = null; return null; }
-  const groups = Array.isArray(p.opts) ? p.opts : [];
-  if (pd.gi < groups.length) {
-    const g = groups[pd.gi];
-    sess.step = 'opt';
-    return `*${waClip(p.name, 48)}* — choose ${waClip(String(g.name || 'one').toLowerCase(), 30)}:\n`
-      + (g.choices || []).slice(0, 20).map((c, i) => `*${i + 1}.* ${waClip(c.label, 40)}${Number(c.up) ? ' (+' + waM2(c.up) + ' ' + cur + ')' : ''}`).join('\n')
-      + '\n\nSend a number. *X* to skip this item.';
-  }
-  const adds = Array.isArray(p.addons) ? p.addons : [];
-  if (!pd.asked && adds.length) {
-    sess.step = 'addons';
-    return `Anything extra with *${waClip(p.name, 48)}*?\n`
-      + adds.slice(0, 20).map((a, i) => `*${i + 1}.* ${waClip(a.name, 40)}${Number(a.price) ? ' (+' + waM2(a.price) + ' ' + cur + ')' : ''}`).join('\n')
-      + '\n\nSend the numbers (e.g. *1,3*), or *0* for none.';
-  }
-  return null;
+/* ---------------------------------------------------------- the order slip */
+
+function waTalkLink(st, sess) {
+  const n = waDigits(st.whatsapp);
+  if (!n) return '';
+  const about = sess.last && sess.last.handle === st.handle && sess.last.code ? ` about order ${sess.last.code}` : '';
+  return `https://wa.me/${n}?text=${encodeURIComponent('Hi' + about)}`;
 }
 
-/** Add what was picked; returns the reply. Items with choices are queued and asked one by one. */
-function waAddPicks(sess, picks, products, cur) {
-  const added = [], bad = [], sold = [];
-  for (const pk of picks) {
-    const id = sess.ids[pk.n - 1];
-    const p = id != null ? products.find((x) => String(x.id) === String(id)) : null;
-    if (!p) { bad.push(pk.n); continue; }
-    if (p.available === false) { sold.push(p.name); continue; }
-    const needs = (Array.isArray(p.opts) && p.opts.length) || (Array.isArray(p.addons) && p.addons.length);
-    if (needs) sess.queue.push({ id: String(p.id), qty: pk.qty });
-    else if (waAddLine(sess, p, pk.qty, [], [])) added.push(`${pk.qty}× ${waClip(p.name, 40)}`);
-  }
-  return waNextQueued(sess, products, cur, added, bad, sold);
-}
-
-function waNextQueued(sess, products, cur, added, bad, sold) {
-  const notes = [];
-  if (added && added.length) notes.push('Added ' + added.join(', ') + '.');
-  if (sold && sold.length) notes.push('Sold out: ' + sold.map((s) => waClip(s, 30)).join(', ') + '.');
-  if (bad && bad.length) notes.push(`There is no item ${bad.join(', ')} on this menu. Send *M* to see it again.`);
-  while (sess.queue.length) {
-    const q = sess.queue.shift();
-    sess.pending = { id: q.id, qty: q.qty, gi: 0, options: [], asked: false };
-    const ask = waAskPending(sess, products, cur);
-    if (ask) return (notes.length ? notes.join(' ') + '\n\n' : '') + ask;
-  }
-  sess.pending = null;
-  sess.step = 'menu';
-  const n = sess.cart.reduce((s, l) => s + l.qty, 0);
-  if (!n) return (notes.join(' ') || 'Your cart is empty.') + '\nSend a number from the menu, or *M* to see it.';
-  return (notes.length ? notes.join(' ') + '\n' : '')
-    + `🛒 ${n} item${n === 1 ? '' : 's'} · ${waM2(waCartTotal(sess.cart))} ${cur}\nSend more numbers, or *C* to check out.`;
-}
-
-/* --------------------------------------------------------------- checkout */
-
-function waCheckoutText(st, sess) {
-  const cur = st.currency || 'USD';
-  const fee = Number(st.delivery_fee) || 0;
-  const freeOver = Number(st.free_over) || 0;
-  const feeTxt = fee ? ` (delivery ${waM2(fee)} ${cur}${freeOver ? ', free over ' + waM2(freeOver) : ''})` : '';
-  return `*Your order — ${waClip(st.shop_name || st.handle, 50)}*\n${waCartText(sess.cart, cur)}\n*Subtotal ${waM2(waCartTotal(sess.cart))} ${cur}*\n`
-    + `Name: ${sess.name || '—'}  _(send *N your name* to change)_\n\n`
-    + `*1* — I'll collect it (pickup)\n*2* — deliver to me${feeTxt}`
-    + (sess.address ? `\n*3* — deliver to: ${waClip(sess.address, 80)}` : '')
-    + '\n\nOr just type your delivery address.\n*M* add more · *X* empty the cart';
-}
-
-function waOrderReply(st, sess, r) {
+/** Reply 2 of 2: everything the buyer needs until the food is in their hands. */
+function waOrderReply(st, sess, cart, notes, r, service, address) {
   const cur = st.currency || 'USD';
   const pay = r.pay || {};
   const code = (r.order && r.order.code) || '';
   const cod = r.order && r.order.status === 'cod';
   const steps = Array.isArray(pay.steps) ? pay.steps : [];
-  const lines = [`✅ *Order ${code} is in.*`, waCartText(sess.cart, cur),
-    `*Total: ${waM2((r.pricing || {}).pay_now)} ${pay.currency || cur}*`];
-  if ((r.pricing || {}).delivery) lines.push(`(includes delivery ${waM2(r.pricing.delivery)})`);
+  const lines = [`✅ *Order ${code} is in* · ${waClip(st.shop_name || st.handle, 40)}`, waCartText(cart)];
+  lines.push(service === 'delivery' ? `Deliver to: ${waClip(address, 120)}` : 'Pickup (you collect)');
+  lines.push(`Name: ${waClip(sess.name, 40)}`);
+  if ((r.pricing || {}).delivery) lines.push(`Delivery ${waM2(r.pricing.delivery)}`);
+  lines.push(`*Total: ${waM2((r.pricing || {}).pay_now)} ${pay.currency || cur}*`);
+  if (notes && notes.length) lines.push('_Note: ' + notes.slice(0, 5).join('; ') + '. Wrong? Tell the shop (link below)._');
   if (pay.hours_note) lines.push(`_${pay.hours_note}: the shop will see it when they open._`);
   if (cod) lines.push('', 'Nothing to pay now: pay when you collect, or pay the runner.');
   else {
     lines.push('', '*How to pay*');
     steps.slice(0, 7).forEach((s, i) => lines.push(`${i + 1}. ${s}`));
     if (pay.note) lines.push(`_${pay.note}_`);
-    lines.push('', 'After paying, *paste the confirmation SMS here* (or type the code) and I will put it on your order.');
+    lines.push('', '*Then paste the payment SMS here.* The whole message is fine; I find the code in it. '
+      + 'I react ✅ when the code is on your order, without writing again, to keep this chat light. '
+      + '❓ means I found no code: type just the code.');
   }
-  lines.push('*S* order status · *T* talk to the shop · *M* order again');
+  const talk = waTalkLink(st, sess);
+  if (talk) lines.push('', `_Optional: to send a screenshot or ask the shop anything, message them: ${talk}_`);
+  lines.push('_status_ · _menu_ to order again');
   return lines.join('\n');
 }
 
 const WA_STATUS_WORDS = {
   awaiting_payment: 'waiting for your payment',
-  paid: 'paid ✅ — the shop has it',
-  cod: 'placed — pay on delivery or at pickup',
+  paid: 'paid ✅ (the shop has it)',
+  cod: 'placed (pay on delivery or at pickup)',
   cancelled: 'cancelled',
 };
-
-/* ------------------------------------------------------------------- talk */
-
-function waTalkText(st, sess) {
-  const n = waDigits(st.whatsapp);
-  if (!n) return 'This shop has not listed a WhatsApp number. Your order and code are with them; they will be in touch.';
-  const about = sess.last && sess.last.handle === st.handle && sess.last.code ? ` about order ${sess.last.code}` : '';
-  return `Message ${waClip(st.shop_name || st.handle, 50)} directly${about}:\nhttps://wa.me/${n}?text=${encodeURIComponent('Hi' + about)}`
-    + '\n(Opens a chat in WhatsApp. Send payment screenshots there too.)';
-}
-
-const WA_HELP = '*How this works*\nPick by number: *3* adds item 3, *3x2* adds two, *3, 5x2* adds both.\n'
-  + '*M* menu · *C* cart & checkout · *X* empty cart\n*S* my last order · *T* talk to the shop\n*N your name* sets your name\nPaste your payment SMS after paying.\nTo shop somewhere else, send its code, like *#shopname*.';
 
 /* ------------------------------------------------------------------ admin */
 
 const WA_ADMIN_HELP = '*Shop commands* (only from your shop’s number)\n'
-  + '*shop orders* — today’s orders\n*shop paid CODE* — mark an order paid\n*shop cancel CODE* — cancel one\n'
-  + '*shop close* / *shop open* — stop or start taking orders';
+  + '*shop orders* · today’s orders\n*shop paid CODE* · mark an order paid\n*shop cancel CODE* · cancel one\n'
+  + '*shop close* / *shop open* · stop or start taking orders';
 
 async function waAdminStep(st, sess, cmd, deps) {
   const [verb, arg] = cmd.split(/\s+/, 2);
@@ -381,28 +462,46 @@ async function waAdminStep(st, sess, cmd, deps) {
 /* ------------------------------------------------------------------- step */
 
 const WA_GREET = /^(hi+|hey|hello|helo|hie|hy|mhoro|mhoroi|makadini|sawubona|salibonani|good\s*(morning|afternoon|evening)|start|order|shop)\b[!. ]*$/i;
+const WA_THANKS = /^(thanks?|thank\s*you|thx|ok(ay)?|sure|cool|great|tatenda|ndatenda|ngiyabonga|siyabonga|👍|🙏)[!. ]*$/i;
+export const WA_MENU_FRESH_MS = 6 * 3600e3;      // a greeting soon after the menu gets 👋, not the menu again
+export const WA_BUYER_DAY_CAP = 8;              // replies to one buyer per day beyond which only reactions go
 
 /**
- * One inbound message in, the replies out.
+ * One inbound message in; at most one reply and/or one reaction out.
  *
  * `msg`  — one element of `waInbound`, plus `line` (a handle when this business number belongs to
- *          one shop) and `admin_ok` is decided by deps.isAdmin, never by the message.
+ *          one shop). Shop commands are decided by deps.isAdmin, never by the message.
  * `deps` — store(handle), menu(st), hours(st), order(st, body), proof(st, last, code),
  *          status(st, last), isAdmin(st, from), adminOrders(st), adminMark(st, code, status),
- *          setClosed(st, closed). All async; each one is the platform's own code path.
+ *          setClosed(st, closed); optional dayCap. Each one is the platform's own code path.
+ *
+ * Returns { sess, replies:[text], react:'' }. A reaction costs nothing (Meta bills no reaction and
+ * counts none against the free 1,000), so it is the bot's "got it"; a reply is written only where
+ * words are needed. Replies other than the order slip and shop commands count toward a per-buyer
+ * daily cap, so a confused or hostile chat cannot drain the shared month.
  */
 export async function waStep(sessIn, msg, deps, now) {
   const t0 = Number(now) || Date.now();
   const sess = waSession(sessIn);
   const replies = [];
-  const say = (s) => { if (s) replies.push(waClip(s, WA_TEXT_MAX)); };
-  const done = (extra) => ({ sess, replies, ...(extra || {}) });
+  let react = '';
+  const day = new Date(t0 + 2 * 3600e3).toISOString().slice(0, 10);      // the stores' day (CAT)
+  if (sess.day !== day) { sess.day = day; sess.day_n = 0; }
+  const cap = Number(deps.dayCap) > 0 ? Number(deps.dayCap) : WA_BUYER_DAY_CAP;
+  let capped = false;
+  const say = (s, essential) => {
+    if (!s) return;
+    if (!essential && sess.day_n >= cap) { capped = true; react = react || '⏳'; return; }
+    sess.day_n++;
+    replies.push(waClip(s, WA_TEXT_MAX));
+  };
+  const done = (extra) => ({ sess, replies, react, ...(capped ? { capped: true } : {}), ...(extra || {}) });
 
-  if (sess.seen.indexOf(msg.id) >= 0) return { sess, replies: [], duplicate: true };
+  if (sess.seen.indexOf(msg.id) >= 0) return { sess, replies: [], react: '', duplicate: true };
   sess.seen = sess.seen.concat(msg.id).slice(-WA_SEEN_MAX);
-  if (sess.at && t0 - sess.at > WA_IDLE_MS) { sess.cart = []; sess.step = 'menu'; sess.pending = null; sess.queue = []; }
+  if (sess.at && t0 - sess.at > WA_IDLE_MS) { sess.cart = []; sess.notes = []; }
   sess.at = t0; sess.last_in = t0;
-  if (!sess.name && msg.name) sess.name = String(msg.name).slice(0, 60);
+  if (!sess.name && msg.name) sess.name = String(msg.name).replace(/[*_~`]/g, '').trim().slice(0, 60);
 
   const raw = String(msg.text || '').trim();
   const low = raw.toLowerCase().replace(/\s+/g, ' ');
@@ -411,8 +510,14 @@ export async function waStep(sessIn, msg, deps, now) {
   // number the buyer names the shop with "#handle" (the install link types it for them)
   let st = null;
   const tag = (msg.line ? null : raw.match(/#([a-z0-9][a-z0-9-]{1,30})\b/i));
-  const bareHandle = !msg.line && !tag && !sess.shop && WA_HANDLE_RE.test(low) && !waPicks(low) && low.length > 2 ? low : '';
+  const bareHandle = !msg.line && !tag && !sess.shop && WA_HANDLE_RE.test(low) && !/^\d/.test(low) && low.length > 2 ? low : '';
   const wantShop = msg.line || (tag ? tag[1].toLowerCase() : '') || bareHandle;
+  const showMenu = async (page) => {
+    const products = await deps.menu(st);
+    const mv = waMenu(st, products, await deps.hours(st), page);
+    sess.ids = mv.ids; sess.menu_at = t0;
+    say(mv.text);
+  };
   if (wantShop && wantShop !== sess.shop) {
     const cand = await deps.store(wantShop);
     if (!cand && !bareHandle) {
@@ -425,15 +530,9 @@ export async function waStep(sessIn, msg, deps, now) {
           + (waDigits(cand.whatsapp) ? `\nYou can message them here: https://wa.me/${waDigits(cand.whatsapp)}` : ''));
         return done();
       }
-      sess.shop = cand.handle; sess.cart = []; sess.pending = null; sess.queue = []; sess.step = 'menu'; sess.ids = []; sess.cats = [];
+      sess.shop = cand.handle; sess.cart = []; sess.notes = []; sess.ids = []; sess.menu_at = 0;
       st = cand;
-      if (tag) {   // "#shop" alone, or the install link's greeting: show the menu
-        const products = await deps.menu(st);
-        const mv = waMenu(st, products, await deps.hours(st));
-        sess.ids = mv.ids; sess.cats = mv.cats; sess.step = mv.step;
-        say(mv.text);
-        return done();
-      }
+      if (tag) { await showMenu(1); return done(); }      // the install link's greeting: the menu
     }
   }
   if (!st && sess.shop) st = await deps.store(sess.shop);
@@ -448,177 +547,115 @@ export async function waStep(sessIn, msg, deps, now) {
     return done();
   }
   const cur = st.currency || 'USD';
+  const last = sess.last && sess.last.handle === st.handle ? sess.last : null;
 
-  // the shop's own number, with WhatsApp commands switched on in its dashboard
+  // the shop's own number, with WhatsApp commands switched on in its dashboard (not capped: it is
+  // the merchant working, and the merchant's own replies are few)
   if (/^shop\b/.test(low) && await deps.isAdmin(st, msg.from)) {
-    say(await waAdminStep(st, sess, low.replace(/^shop\s*/, ''), deps));
+    say(await waAdminStep(st, sess, low.replace(/^shop\s*/, ''), deps), true);
     return done();
   }
 
-  if (msg.type !== 'text' && msg.type !== 'interactive' && msg.type !== 'button') {
-    if (msg.type === 'image' || msg.type === 'document') {
-      say(sess.last && sess.last.handle === st.handle
-        ? 'Thanks. I can only read text, so please *paste the SMS* or *type the code* from it here.\nTo send the screenshot itself to the shop: send *T*.'
-        : 'I can only read text messages. Send *M* for the menu.');
-    } else say('I can only read text messages. Send *M* for the menu or *H* for help.');
-    return done();
-  }
+  // a photo, voice note or sticker: the slip and the menu already said "typed text only"
+  if (msg.type !== 'text' && msg.type !== 'interactive' && msg.type !== 'button') { react = '❓'; return done(); }
 
-  const showMenu = async (catIndex) => {
+  if (tag) { await showMenu(1); return done(); }
+  if (WA_GREET.test(low)) {
+    if (sess.menu_at && t0 - sess.menu_at < WA_MENU_FRESH_MS) { react = '👋'; return done(); }
+    await showMenu(1); return done();
+  }
+  const mp = low.match(/^(?:m|menu)(?:\s*(\d{1,2}))?$/);
+  if (mp) { await showMenu(mp[1] ? Number(mp[1]) : 1); return done(); }
+  if (low === 'h' || low === 'help' || low === '?') {
     const products = await deps.menu(st);
-    const mv = waMenu(st, products, await deps.hours(st), catIndex);
-    sess.ids = mv.ids; sess.cats = mv.cats; sess.step = mv.step; sess.pending = null; sess.queue = [];
-    say(mv.text);
-  };
-
-  // the install link's greeting (or "#shop" again) for the shop already open: the menu
-  if (tag) { await showMenu(null); return done(); }
-
-  // words that mean the same thing at every step
-  if (low === 'm' || low === 'menu' || WA_GREET.test(low) || (low === '0' && sess.step !== 'addons')) { await showMenu(null); return done(); }
-  if (low === 'h' || low === 'help' || low === '?') { say(WA_HELP); return done(); }
-  if (low === 't' || low === 'talk' || low === 'call' || low === 'chat') { say(waTalkText(st, sess)); return done(); }
-  if (low === 'x' || low === 'clear' || low === 'cancel') {
-    if (sess.step === 'opt' || sess.step === 'addons') {
-      sess.pending = null;
-      const products = await deps.menu(st);
-      say('Skipped.\n' + waNextQueued(sess, products, cur));
-      return done();
-    }
-    sess.cart = []; sess.queue = []; sess.pending = null; sess.step = 'menu';
-    say('Cart emptied. Send *M* for the menu.');
+    say(waHowTo(st, products) + '\n\nTo shop somewhere else, send its code, like *#shopname*.');
+    return done();
+  }
+  if (low === 't' || low === 'talk' || low === 'call' || low === 'chat') {
+    const link = waTalkLink(st, sess);
+    say(link ? `Message ${waClip(st.shop_name || st.handle, 50)} directly (opens a chat in WhatsApp; send screenshots there):\n${link}`
+      : 'This shop has not listed a WhatsApp number. Your order and code are with them; they will be in touch.');
+    return done();
+  }
+  if (low === 'x' || low === 'clear' || low === 'empty' || low === 'cancel') {
+    sess.cart = []; sess.notes = []; react = '👍'; return done();
+  }
+  if (low === 'c' || low === 'cart') {
+    if (!sess.cart.length) { say('Your cart is empty. Send item numbers from the menu (*menu* to see it again).'); return done(); }
+    const n = sess.cart.reduce((s, l) => s + l.qty, 0);
+    say(`🛒 *Your cart* (${n})\n${waCartText(sess.cart)}\n*Subtotal ${waM2(waCartTotal(sess.cart))} ${cur}*\n\n`
+      + 'Send more numbers, or finish with _pickup_ or _deliver_ and your address. _x_ empties the cart.');
     return done();
   }
   if (low === 's' || low === 'status') {
-    const last = sess.last && sess.last.handle === st.handle ? sess.last : null;
-    if (!last) { say('You have no order with this shop yet. Send *M* for the menu.'); return done(); }
+    if (!last) { say('You have no order with this shop yet. Send *menu* to see it.'); return done(); }
     const o = await deps.status(st, last);
-    if (!o) { say(`I cannot find order ${last.code} any more. Send *T* to ask the shop.`); return done(); }
+    if (!o) { say(`I cannot find order ${last.code} any more. Send *talk* to ask the shop.`); return done(); }
     const proof = o.buyer && o.buyer.proof ? `\nPayment code on file: ${o.buyer.proof}` : '';
     say(`Order *${o.code}*: ${WA_STATUS_WORDS[o.status] || o.status}.\nTotal ${waM2((o.pricing || {}).pay_now)} ${cur}${proof}`
       + (o.status === 'awaiting_payment' && !proof ? '\nPaid already? Paste the SMS here.' : ''));
     return done();
   }
-  if (low === 'c' || low === 'cart' || low === 'checkout' || low === 'check out') {
-    if (!sess.cart.length) { say('Your cart is empty. Send *M* for the menu.'); return done(); }
-    if (!sess.name) { sess.step = 'name'; say('What name should the order be under?'); return done(); }
-    sess.step = 'checkout';
-    say(waCheckoutText(st, sess));
-    return done();
-  }
   const nm = raw.match(/^(?:n|name)[\s:]+(.{2,60})$/i);
-  if (nm) {
-    sess.name = nm[1].replace(/[*_~`]/g, '').trim().slice(0, 60);
-    if (sess.step === 'checkout' || sess.step === 'name') { sess.step = 'checkout'; say(`Thanks, ${sess.name}.\n\n` + waCheckoutText(st, sess)); }
-    else say(`Thanks, ${sess.name}. Orders will be under this name.`);
-    return done();
-  }
+  if (nm) { sess.name = nm[1].replace(/[*_~`]/g, '').trim().slice(0, 60); react = '👍'; return done(); }
+  if (WA_THANKS.test(low)) { react = '🙏'; return done(); }
 
-  // the step's own question
-  if (sess.step === 'name') {
-    const name = raw.replace(/[*_~`]/g, '').trim().slice(0, 60);
-    if (name.length < 2) { say('Please send your name (at least two letters).'); return done(); }
-    sess.name = name; sess.step = 'checkout';
-    say(waCheckoutText(st, sess));
-    return done();
-  }
-
-  if (sess.step === 'opt' || sess.step === 'addons') {
+  // "p CODE" is always a payment code; so is anything unparseable while an order waits for one
+  const pm = raw.match(/^(?:p|paid|proof|code)[\s:]+(.+)$/i);
+  const order = pm ? null : waParseOrder(raw);
+  if (order && !order.bad) {
+    if (!sess.ids.length) sess.ids = (await deps.menu(st)).map((p) => String(p.id));
     const products = await deps.menu(st);
-    const pd = sess.pending;
-    const p = pd ? products.find((x) => String(x.id) === pd.id) : null;
-    if (!p) { sess.pending = null; say(waNextQueued(sess, products, cur)); return done(); }
-    if (sess.step === 'opt') {
-      const g = (p.opts || [])[pd.gi] || { choices: [] };
-      const n = Number(low);
-      const ch = Number.isInteger(n) && n >= 1 ? (g.choices || [])[n - 1] : null;
-      if (!ch) { say(`Send a number from 1 to ${(g.choices || []).length}, or *X* to skip this item.`); return done(); }
-      pd.options.push({ label: ch.label, up: Number(ch.up) || 0 });
-      pd.gi++;
-    } else {
-      const adds = p.addons || [];
-      const nums = low === '0' || low === 'no' || low === 'none' ? [] : (low.match(/\d{1,2}/g) || []).map(Number);
-      if (low !== '0' && low !== 'no' && low !== 'none' && (!nums.length || nums.some((n) => n < 1 || n > adds.length))) {
-        say(`Send the extras’ numbers (1 to ${adds.length}), like *1,2*, or *0* for none.`); return done();
-      }
-      pd.addons = [...new Set(nums)].map((n) => ({ name: adds[n - 1].name, price: Number(adds[n - 1].price) || 0 }));
-      pd.asked = true;
+    const cart = sess.cart.map((l) => Object.assign({}, l));
+    const notes = (sess.notes || []).slice();
+    for (const pk of order.items) {
+      const r = waResolve(pk, sess.ids, products);
+      if (r.err || !waAddLine(cart, r.p, r.qty, r.options, r.addons)) { react = '❓'; return done(); }
+      for (const n of r.notes) if (notes.indexOf(n) < 0) notes.push(n);
     }
-    const ask = waAskPending(sess, products, cur);
-    if (ask) { say(ask); return done(); }
-    const ok = waAddLine(sess, p, pd.qty, pd.options, pd.addons || []);
-    sess.pending = null;
-    say(waNextQueued(sess, products, cur, ok ? [`${pd.qty}× ${waClip(p.name, 40)}`] : [], [], []));
-    return done();
-  }
-
-  if (sess.step === 'cats') {
-    const n = Number(low);
-    if (Number.isInteger(n) && n >= 1 && n <= sess.cats.length) { await showMenu(n - 1); return done(); }
-    // item numbers mean nothing on this screen: the buyer has not seen any yet
-    say(`Send a section number from 1 to ${sess.cats.length}, or *H* for help.`); return done();
-  }
-
-  if (sess.step === 'checkout' || sess.step === 'address') {
-    let service = '', address = '';
-    if (sess.step === 'checkout' && low === '1') service = 'pickup';
-    else if (sess.step === 'checkout' && low === '2') { sess.step = 'address'; say('Send your delivery address (area, street and house number, and a landmark).'); return done(); }
-    else if (sess.step === 'checkout' && low === '3' && sess.address) { service = 'delivery'; address = sess.address; }
-    else if (raw.length >= 6 && !waPicks(low)) { service = 'delivery'; address = raw.replace(/[*_~`]/g, '').trim().slice(0, 200); }
-    else { say(sess.step === 'address' ? 'That address looks too short. Send the area, street and a landmark.' : 'Send *1* for pickup, *2* for delivery, or type your address.'); return done(); }
-    if (address) sess.address = address;
+    if (!order.service) { sess.cart = cart; sess.notes = notes.slice(0, 8); react = '👍'; return done(); }
+    if (!cart.length) { react = '❓'; return done(); }
+    let address = '';
+    if (order.service === 'delivery') {
+      address = order.address.length >= 6 ? order.address : (sess.address || '');
+      if (address.length < 6) { react = '❓'; return done(); }
+    }
+    const name = sess.name || ('WhatsApp ' + String(msg.from).slice(-4));
     const r = await deps.order(st, {
-      handle: st.handle, service, when: 'asap',
-      items: sess.cart.map((l) => ({ id: l.id, name: l.name, price: l.price, qty: l.qty,
+      handle: st.handle, service: order.service, when: 'asap',
+      items: cart.map((l) => ({ id: l.id, name: l.name, price: l.price, qty: l.qty,
         options: (l.options || []).map((o) => ({ label: o.label })), addons: (l.addons || []).map((a) => ({ name: a.name })) })),
-      buyer: { name: sess.name, phone: msg.from, address, note: 'Ordered in WhatsApp' },
+      buyer: { name, phone: msg.from, address, note: 'Ordered in WhatsApp' },
     });
     if (!r || !r.ok) {
-      sess.step = 'checkout';
-      say(`Sorry, the order did not go through: ${waClip((r && r.error) || 'the shop could not be reached', 200)}\nYour cart is kept. Send *C* to try again, or *T* to message the shop.`);
+      sess.cart = cart; sess.notes = notes;
+      say(`Sorry, the order did not go through: ${waClip((r && r.error) || 'the shop could not be reached', 200)}\nYour cart is kept; send _pickup_ or _deliver ..._ again to retry, or *talk* to message the shop.`, true);
       return done();
     }
-    say(waOrderReply(st, sess, r));
-    const cod = r.order && r.order.status === 'cod';
+    if (address) sess.address = address;
+    if (!sess.name) sess.name = name;
     sess.last = { handle: st.handle, id: r.order.id, code: r.order.code, cap: String(r.proof_url || '').replace(/^\/p\//, ''), at: t0 };
-    sess.cart = []; sess.pending = null; sess.queue = [];
-    sess.step = cod ? 'menu' : 'paid';
+    say(waOrderReply(st, sess, cart, notes, r, order.service, address), true);
+    sess.cart = []; sess.notes = [];
     return done({ placed: { handle: st.handle, id: r.order.id, code: r.order.code } });
   }
+  if (order && order.bad) { react = '❓'; return done(); }
 
-  const picks = waPicks(low);
-  if (picks) {
-    if (!sess.ids.length) {
-      const products = await deps.menu(st);
-      const mv = waMenu(st, products, await deps.hours(st));
-      sess.ids = mv.ids; sess.cats = mv.cats;
-    }
-    const products = await deps.menu(st);
-    say(waAddPicks(sess, picks, products, cur));
-    return done();
-  }
-
-  // a pasted payment confirmation, or "p CODE"
-  const last = sess.last && sess.last.handle === st.handle ? sess.last : null;
-  const pm = raw.match(/^(?:p|paid|proof|code)[\s:]+(.+)$/i);
-  if (last && (pm || sess.step === 'paid')) {
+  // a pasted payment confirmation: filed silently, acknowledged with ✅
+  if (last && (pm || last.status !== 'filed' || raw.length > 20)) {
     const code = waProofFrom(pm ? pm[1] : raw, last.code);
-    if (!code) {
-      say(pm || raw.length > 20 ? 'I could not find a payment code in that. Type just the code from the SMS (letters and numbers).'
-        : 'Send *M* for the menu, *S* for your order, or paste your payment SMS.');
-      return done();
-    }
+    if (!code) { react = '❓'; return done(); }
     const r = await deps.proof(st, last, code);
     if (r && r.ok) {
       if (r.proof_url) last.cap = String(r.proof_url).replace(/^\/p\//, '');
-      sess.step = 'menu';
-      say(`Got it: code *${r.proof || code}* is on order ${last.code}. The shop will confirm it.`
-        + (r.left > 0 ? ` If it is wrong, send *p* and the right code (${r.left} change${r.left === 1 ? '' : 's'} left).` : ''));
-    } else say(`That code was not added: ${waClip((r && r.error) || 'try again in a minute', 200)}`);
+      last.status = 'filed';
+      react = '✅';
+      return done();
+    }
+    say(`That code was not added: ${waClip((r && r.error) || 'try again in a minute', 200)}`);
     return done();
   }
-
-  say('Sorry, I did not get that.\nSend a *number* from the menu, *M* for the menu, *C* to check out, or *H* for help.');
+  react = '❓';
   return done();
 }
 

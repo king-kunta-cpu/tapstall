@@ -455,7 +455,7 @@ details.box .in{padding:.5rem 0 .7rem}
   <!-- ─────────────────────────── whatsapp shop bot ─────────────────────────── -->
   <div class="card" id="waCard">
     <h3>WhatsApp shop bot</h3>
-    <p class="hint" style="margin-top:0">Buyers order without leaving WhatsApp, so a WhatsApp-only bundle is enough. They send <b>3</b> for item 3, check out, get your payment details in the chat and paste the payment SMS back. Every order lands in this dashboard like any other.</p>
+    <p class="hint" style="margin-top:0">Buyers order without leaving WhatsApp, so a WhatsApp-only bundle is enough. They get your menu with simple order codes, type their whole order in one line (like <b>1b, 2x2 pickup</b>), get your payment details in the chat and paste the payment SMS back. Each order uses just two bot messages, so the free WhatsApp allowance stretches far. Every order lands in this dashboard like any other.</p>
     <div id="waBody"></div>
     <div class="notice ok hide" id="waOut" style="margin-top:.4rem"></div>
   </div>
@@ -1930,13 +1930,13 @@ function renderWa() {
   if (!(w.on && w.link)) return;
   q('#waCopy').onclick = function () { copyText(w.link); this.textContent = 'Copied ✓'; };
   q('#waStatus').onclick = function () {
-    copyText('Order from ' + (S.store.shop_name || S.handle) + ' right here in WhatsApp — no browser, no extra data: ' + w.link + '\nTap it, press send, then pick by number.');
+    copyText('Order from ' + (S.store.shop_name || S.handle) + ' right here in WhatsApp — no browser, no extra data: ' + w.link + '\nTap it, press send, and order by number.');
     this.textContent = 'Copied ✓';
   };
   q('#waPoster').onclick = function () {
     var win = window.open('', '_blank'); if (!win) { say('waOut', 'Allow pop-ups to print'); return; }
     win.document.write('<!doctype html><meta charset=utf-8><title>' + esc(S.store.shop_name || S.handle) + '</title><body style="font:16px system-ui;margin:0;padding:2rem;text-align:center">'
-      + '<h1 style="font-size:1.7rem;margin:.2rem 0">' + esc(S.store.shop_name || S.handle) + '</h1><p style="color:#555;margin:.2rem 0 1rem">Order on WhatsApp — scan, press send, pick by number</p>'
+      + '<h1 style="font-size:1.7rem;margin:.2rem 0">' + esc(S.store.shop_name || S.handle) + '</h1><p style="color:#555;margin:.2rem 0 1rem">Order on WhatsApp — scan, press send, order by number</p>'
       + '<img alt="QR" src="https://api.qrserver.com/v1/create-qr-code/?size=420x420&data=' + encodeURIComponent(w.link) + '" style="width:min(70vw,420px)">'
       + '<p style="font-size:1.25rem;margin:.8rem 0 .2rem">or send <b>' + esc(w.code || '') + '</b> to <b>+' + esc(w.number || '') + '</b> on WhatsApp</p>'
       + '<p style="color:#777;font-size:.85rem">Works on a WhatsApp-only bundle. Your menu updates here by itself.</p>'
