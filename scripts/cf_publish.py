@@ -16,7 +16,7 @@ import urllib.error
 import urllib.request
 
 API = "https://api.cloudflare.com/client/v4"
-CRONS = ["15 6,12,18,0 * * *", "5,25,45 * * * *"]
+CRONS = ["15 6,12,18,0 * * *", "5 * * * *"]
 COMPAT_DATE = os.environ.get("COMPAT_DATE", "2025-06-01")
 CT = {
     ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript",

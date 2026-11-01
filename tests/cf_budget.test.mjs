@@ -27,3 +27,15 @@ test('cron budget: at most 28 scheduled runs a day (hourly clock + four sweeps)'
   assert.ok(crons.includes(press), 'the clock the worker listens for is the one wrangler schedules');
   assert.ok(firesPerDay(press) <= 24, 'the KV-writing clock is at most hourly');
 });
+
+test('every deploy path schedules the same budgeted crons as wrangler.toml', () => {
+  // deploy.sh regenerates wrangler.toml (gen_wrangler_toml.py), re-asserts triggers (set_triggers.py args) and has a
+  // dependency-free fallback (cf_publish.py): a stale copy in any of them silently restores the old schedule.
+  const toml = readFileSync(new URL('../wrangler.toml', import.meta.url), 'utf8');
+  const want = JSON.parse(toml.match(/^crons\s*=\s*(\[[^\]]*\])/m)[1]);
+  for (const f of ['scripts/gen_wrangler_toml.py', 'scripts/cf_publish.py', 'scripts/deploy.sh']) {
+    const src = readFileSync(new URL('../' + f, import.meta.url), 'utf8');
+    for (const c of want) assert.ok(src.includes(`"${c}"`), `${f} schedules ${c}`);
+    assert.doesNotMatch(src, /"5,25,45 \* \* \* \*"/, `${f} still carries the 20-minute clock`);
+  }
+});

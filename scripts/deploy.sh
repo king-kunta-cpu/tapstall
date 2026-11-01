@@ -227,7 +227,7 @@ done
 rm -rf .build
 
 # verify the schedule and the workers.dev route over HTTP (writes are not trusted)
-CF_TOKEN="$CF_TOKEN" CF_ACCOUNT="$CF_ACCOUNT" python3 scripts/set_triggers.py "$WORKER_NAME" "15 6,12,18,0 * * *" "5,25,45 * * * *" || warn "trigger check failed"
+CF_TOKEN="$CF_TOKEN" CF_ACCOUNT="$CF_ACCOUNT" python3 scripts/set_triggers.py "$WORKER_NAME" "15 6,12,18,0 * * *" "5 * * * *" || warn "trigger check failed"
 
 # ---------------------------------------------------------------- self-check
 : "${BASE:?BASE is set above, before the publish that binds it}"
