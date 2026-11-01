@@ -4,7 +4,7 @@ name: leads-hunt
 # prospects into the Worker, which scores them by evidence (two signals before outreach),
 # allocates each to exactly one seller, and drops anything on the do-not-contact ledger.
 on:
-  # v2.0.0: no schedule. The Worker's 06:15 UTC sweep dispatches this on weekdays and, since
+  # v2.0.0: no schedule. The Worker's 06:15 UTC sweep dispatches this Mon/Wed/Fri (2026-11-01 budget; LEADS_HUNT_DAYS) and, since
   # v2.0.0, retries a failed dispatch at the next sweep; a schedule here as well ran it twice a day.
   workflow_dispatch:
     inputs:
@@ -33,6 +33,7 @@ concurrency:
 jobs:
   hunt:
     runs-on: ubuntu-latest
+    timeout-minutes: 10   # 2026-11-01 budget: Mon/Wed/Fri, ~5-7 min a run
     steps:
       - uses: actions/checkout@v4
       - name: hunt

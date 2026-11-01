@@ -4740,3 +4740,16 @@ export function whopTerm(b, catalog) {
   if (money.amount > monthlyAt * 1.6) return { days: Math.min(1460, Math.max(31, Math.round(money.amount / annualAt * 365))), amount: money.amount, currency: money.currency, from: 'amount-prorata', plan_id: buyer.plan_id };
   return { days: SUBSCRIPTION_PLANS.monthly.days, amount: money.amount || monthlyAt, currency: money.currency, from: 'default-monthly', plan_id: buyer.plan_id };
 }
+
+/* 2026-11-01 Actions budget (owner: no business above 10-15 GitHub minutes a day, operability over
+   speed). The lead hunt costs ~6 billed minutes a run, so it is dispatched on these UTC weekdays
+   only; outreach (~1-2 min) still goes every weekday. `setting` is env.LEADS_HUNT_DAYS ("1,3,5"),
+   so the owner can retune it without a deploy; an empty or unusable value falls back to Mon/Wed/Fri. */
+export const LEADS_HUNT_DEFAULT_DAYS = [1, 3, 5];
+export function leadsHuntDays(setting) {
+  const days = String(setting == null ? '' : setting).split(',').map((x) => x.trim()).filter((x) => /^[0-6]$/.test(x)).map(Number);
+  return days.length ? days : LEADS_HUNT_DEFAULT_DAYS.slice();
+}
+export function leadsHuntToday(utcDay, setting) {
+  return leadsHuntDays(setting).includes(Number(utcDay));
+}

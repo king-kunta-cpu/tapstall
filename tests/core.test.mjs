@@ -1871,3 +1871,13 @@ test('v2.2.1 suspendDecision: an expired shop closes only after its owner was to
   assert.equal(C.suspendDecision(shop({ paid_until: now - C.SUSPEND_HOLD_MAX_DAYS * day }), now), 'suspend'); // dead lane: hold has a ceiling
   assert.equal(C.suspendDecision(shop({ warned_at: 'garbage' }), now), 'notify');
 });
+
+test('2026-11-01 budget: the lead hunt is dispatched Mon/Wed/Fri by default; the owner can retune it', () => {
+  const week = [0, 1, 2, 3, 4, 5, 6].filter((d) => C.leadsHuntToday(d));
+  assert.deepEqual(week, [1, 3, 5]);
+  assert.equal(C.leadsHuntToday(2, '2,4'), true);
+  assert.equal(C.leadsHuntToday(1, '2,4'), false);
+  assert.deepEqual(C.leadsHuntDays(' 1, 4 '), [1, 4]);
+  assert.deepEqual(C.leadsHuntDays(''), [1, 3, 5], 'an empty setting is the default, never "no hunts"');
+  assert.deepEqual(C.leadsHuntDays('mon,9'), [1, 3, 5], 'unusable values fall back to the default');
+});

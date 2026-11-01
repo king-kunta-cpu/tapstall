@@ -16,6 +16,7 @@ concurrency:
 jobs:
   health:
     runs-on: ubuntu-latest
+    timeout-minutes: 8
     steps:
       - name: owner-console health (booleans only)
         env:

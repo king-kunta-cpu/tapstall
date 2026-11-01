@@ -59,6 +59,7 @@ import {
   STOREFRONT_TEMPLATES, storefrontDesign,
   QUOTA_LIMITS, quotaAllows, quotaPriorityForKey, storeMeta, storeMetaAction, suspendDecision, SUSPEND_GRACE_DAYS, emailHash,
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
+  leadsHuntToday,
 } from './core.js';
 
 const VERSION = '2.2.1';
@@ -5947,10 +5948,13 @@ async function dispatchTick(env) {
   const stamp = new Date().toISOString().slice(0, 10);
   const last0 = await env.ORDERS.get('dispatch:last', 'json').catch(() => null);
   const last = (last0 && last0.day === stamp) ? last0 : null;
-  const done = (k) => !!(last && last[k] === 'dispatched');
+  // 2026-11-01 Actions budget: the lead hunt goes out Mon/Wed/Fri (core.js leadsHuntToday,
+  // env.LEADS_HUNT_DAYS retunes it), outreach every weekday.
+  const huntToday = leadsHuntToday(day, env.LEADS_HUNT_DAYS);
+  const done = (k) => (k === 'leads_hunt' && !huntToday) || !!(last && last[k] === 'dispatched');
   if (done('leads_hunt') && done('outreach')) return { skipped: 'today already dispatched', day: stamp };
   const out = { day: stamp, at: new Date().toISOString(),
-    leads_hunt: done('leads_hunt') ? 'dispatched' : 'skipped_no_token', outreach: done('outreach') ? 'dispatched' : 'skipped_no_token' };
+    leads_hunt: !huntToday ? 'not_today' : (done('leads_hunt') ? 'dispatched' : 'skipped_no_token'), outreach: done('outreach') ? 'dispatched' : 'skipped_no_token' };
   if (!(env.GH_DISPATCH_TOKEN && env.GH_REPO)) return out;   // nothing attempted, nothing worth a write
   const fire = async (wf, inputs) => {
     const r = await fetch('https://api.github.com/repos/' + env.GH_REPO + '/actions/workflows/' + wf + '/dispatches', {

@@ -28,6 +28,7 @@ jobs:
 
   worker:
     runs-on: ubuntu-latest
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
 
@@ -104,6 +105,7 @@ jobs:
   # landing page and the fee calculator off the air.
   pages:
     runs-on: ubuntu-latest
+    timeout-minutes: 8
     environment:
       name: github-pages
       url: ${{ steps.out.outputs.page_url }}
