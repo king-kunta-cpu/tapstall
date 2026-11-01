@@ -1,5 +1,26 @@
 # Tapstall — status
 
+## v2.3.0 (2026-11-01): the WhatsApp shop bot, so a buyer can order without leaving WhatsApp
+
+- **Why.** Most buyers here buy WhatsApp-only data bundles; a storefront link opens a browser that
+  bundle does not cover. Now the whole order happens in the chat (`docs/WHATSAPP-BOT.md`).
+- **Conversation** in `worker/wa.js`, pure and inlined by the build: numbered menu (sections when long),
+  `3x2, 5` multi-add, option and add-on questions, checkout with the WhatsApp profile name, the
+  storefront's own payment slip, the payment code pulled out of a pasted SMS, `S` status, `T` talk to
+  the shop, and `shop orders/paid/cancel/close/open` from the shop's own number once `wa_admin` (held
+  15 minutes) is on.
+- **Same money paths.** Orders via `placeOrder`, codes via `proofAdd`, marks via `markPaid` with a
+  five-minute capability. Nothing is priced or filed by a second road.
+- **Storage.** Sessions live in the SQLite-backed Durable Object `WaBot` (binding `WA_BOT`, migration
+  `wa-v1`), one per chat, swept after 60 idle days. A chat writes no KV.
+- **Cost guard.** Meta charges service replies after 1,000 free per number per month (Zimbabwe: about
+  $0.004 each) and stops delivering without a card, so the bot meters replies per number per month
+  and goes quiet at `WA_MONTH_CAP` (950; 20,000 with `WA_BILLING=on`). `/__selftest` shows `wa_bot`.
+- **Dormant until armed.** Without `WA_TOKEN`/`WA_APP_SECRET`/`WA_VERIFY_TOKEN`/`WA_PHONE_ID`,
+  `/wa/hook` answers 503; the dashboard card says *On (waiting for the number)*. `/privacy` added
+  for Meta's Live-mode review.
+- Tests: `tests/wa.test.mjs` (17), the whole buyer journey through the real bundle with Graph stubbed.
+
 ## v2.2.1 (2026-10-29): no shop closes unwarned; the hunter finds makers and market traders again
 
 - **Suspension waits for the notice (finding H1).** The sweep used to close an expired shop at expiry

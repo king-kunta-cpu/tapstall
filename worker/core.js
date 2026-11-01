@@ -1636,7 +1636,11 @@ export async function pinMiss(pin) { await pinOk(pin, PIN_GHOST); return false; 
 /** Fields a merchant may change instantly: nothing here moves money or PII. */
 export const SOFT_FIELDS = ['tagline', 'logo', 'location', 'hours', 'closed', 'week',
   'business_type', 'cover_image', 'accent_color', 'store_layout', 'hero_style', 'welcome_message', 'about',
-  'cta_label', 'sort_mode', 'search_bar', 'category_bar', 'product_descriptions', 'whatsapp_button'];
+  'cta_label', 'sort_mode', 'search_bar', 'category_bar', 'product_descriptions', 'whatsapp_button',
+  // v2.3.0: the WhatsApp shop bot. Switching it on moves no money and reveals nothing a storefront
+  // link does not, so it lands at once; `wa_admin` (orders and mark-paid from a phone) is NOT here,
+  // which puts it behind the 15-minute hold and the owner's email like every other authority change.
+  'wa_bot'];
 
 /** Every editable field and its validator; null = rejected, undefined-safe. */
 const SET = {
@@ -1713,6 +1717,9 @@ const SET = {
   crypto_watch: (v) => v === true || v === 'true' || v === 1 || v === '1',
   reference_format: (v) => { const s = String(v || '{code}'); return /^[{ }A-Za-z0-9_-]{1,30}$/.test(s) ? s : null; },
   order_prefix: (v) => { const s = String(v || '').replace(/[^A-Za-z0-9-]/g, '').slice(0, 6); return s || null; },
+  wa_bot: (v) => (v === 'on' || v === true || v === 1 || v === '1' || v === 'true' ? 'on'
+    : v === 'off' || v === false || v === 0 || v === '0' || v === 'false' || v === '' || v == null ? 'off' : null),
+  wa_admin: (v) => v === true || v === 'true' || v === 1 || v === '1' || v === 'on',
 };
 
 export const EDITABLE_FIELDS = Object.keys(SET);

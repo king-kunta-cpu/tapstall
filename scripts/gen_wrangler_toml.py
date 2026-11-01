@@ -26,6 +26,18 @@ id = "{sid}"
 binding = "ORDERS"
 id = "{oid}"
 
+# v2.3.0: the WhatsApp shop bot's conversations. One SQLite-backed Durable Object per buyer chat
+# holds the cart and the step, so a chat costs no KV writes (the whole account has 1,000 a day and
+# the shops' orders need them). Free plan: SQLite-backed classes only. The binding exists even
+# before the WA_* secrets do; without them /wa/hook answers 503 and nothing runs.
+[[durable_objects.bindings]]
+name = "WA_BOT"
+class_name = "WaBot"
+
+[[migrations]]
+tag = "wa-v1"
+new_sqlite_classes = ["WaBot"]
+
 [triggers]
 crons = ["15 6,12,18,0 * * *", "5 * * * *"]
 

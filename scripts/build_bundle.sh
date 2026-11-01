@@ -56,6 +56,12 @@ worker = inline(mail, 'mail',
     ("async function mailSend", "async function mailDeliver", "async function mailDrain", "function mailLanes",
      "async function smtpSession", "function buildMail", "async function mxOk"),
     worker)
+# v2.3.0: the WhatsApp shop bot's conversation, same reason again.
+wa = open('worker/wa.js', encoding='utf-8').read()
+worker = inline(wa, 'wa',
+    ("async function waStep", "function waInbound", "async function waSigOk", "function waTextBody",
+     "function waBotLink", "function waMerchantNote", "const WA_HANDLE_RE"),
+    worker)
 worker = inline(core, 'core',
     ("function priceOrder", "function parseProducts", "const RAILS", "function publicStore",
      "function adminStore", "const PUBLIC_KEYS", "function issueCap", "function verifyCap", "async function sign"),

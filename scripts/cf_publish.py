@@ -90,6 +90,9 @@ def manifest_for(assets_dir):
     return ordered, files
 
 
+WA_MIGRATION_TAG = "wa-v1"
+
+
 def main():
     if len(sys.argv) < 4:
         sys.exit(__doc__)
@@ -112,6 +115,21 @@ def main():
     if origin:
         bindings.append({"type": "plain_text", "name": "PUBLIC_ORIGIN", "text": origin})
 
+    # v2.3.0: the WhatsApp bot's Durable Object. A publisher that dropped this binding would leave
+    # the class orphaned and every chat would fall back to an isolate's memory, so it ships with
+    # every upload; the migration ships only until Cloudflare reports the tag as applied.
+    bindings.append({"type": "durable_object_namespace", "name": "WA_BOT", "class_name": "WaBot"})
+    migration = None
+    try:
+        listed = api("GET", f"/accounts/{acct}/workers/scripts", None, None, token).get("result") or []
+        tag = next((s.get("migration_tag") for s in listed if s.get("id") == name), None)
+    except Exception:
+        tag = None
+    if tag != WA_MIGRATION_TAG:
+        migration = {"new_tag": WA_MIGRATION_TAG, "new_sqlite_classes": ["WaBot"]}
+        if tag:
+            migration["old_tag"] = tag
+
     assets_dir = os.path.join(bundle, "assets")
     metadata = {
         "workers_dev": True,                     # the *.workers.dev route
@@ -122,6 +140,8 @@ def main():
         "bindings": bindings,
         "observability": {"enabled": False, "head_sampling_rate": 0.01},
     }
+    if migration:
+        metadata["migrations"] = migration
 
     afiles = {}
     if os.path.isdir(assets_dir):

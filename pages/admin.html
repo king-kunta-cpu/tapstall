@@ -452,6 +452,14 @@ details.box .in{padding:.5rem 0 .7rem}
     <div class="notice ok hide" id="shareOut" style="margin-top:.4rem"></div>
   </div>
 
+  <!-- ─────────────────────────── whatsapp shop bot ─────────────────────────── -->
+  <div class="card" id="waCard">
+    <h3>WhatsApp shop bot</h3>
+    <p class="hint" style="margin-top:0">Buyers order without leaving WhatsApp, so a WhatsApp-only bundle is enough. They send <b>3</b> for item 3, check out, get your payment details in the chat and paste the payment SMS back. Every order lands in this dashboard like any other.</p>
+    <div id="waBody"></div>
+    <div class="notice ok hide" id="waOut" style="margin-top:.4rem"></div>
+  </div>
+
   <!-- ─────────────────────────── access ─────────────────────────── -->
   <div class="card" id="access">
     <h3>Sign-in</h3>
@@ -670,7 +678,7 @@ function load() {
     S.store = j.store || {}; S.store.pending = j.pending || null;
     S.orders = j.orders || []; S.audit = j.audit || [];
     S.editable = j.editable || []; S.soft = j.soft_fields || [];
-    S.design = j.design || {}; S.templates = j.templates || {};
+    S.design = j.design || {}; S.templates = j.templates || {}; S.wa = j.wa || {};
     S.handle = S.handle || (S.store.handle || '');
     var today = new Date().toDateString();
     S.todays = S.orders.filter(function (o) { return o && new Date(o.at).toDateString() === today; });
@@ -695,7 +703,7 @@ function load() {
     // the menu is the shop's own public feed endpoint; read it once so the Shop
     // card is not lying about an empty menu before the first re-read
     api('/s/' + S.handle + '/feed.json').then(function (r) { S.feed = (r.j && r.j.products) || []; renderShop(); });
-    renderFields(); renderPending(); renderOrders(); renderShop(); renderPlan(); renderShare(); renderAudit(); renderBooks();
+    renderFields(); renderPending(); renderOrders(); renderShop(); renderPlan(); renderShare(); renderWa(); renderAudit(); renderBooks();
   }).catch(function (e) {
     if (seq !== S.loadSeq) return;
     if (opened) {
@@ -1885,6 +1893,55 @@ function renderShare() {
       + '<p style="color:#777;font-size:.85rem">Tape it on the counter. When the menu changes you edit your sheet — this poster stays correct.</p>'
       + '<scr' + 'ipt>window.onload=function(){window.print()}<' + '/scr' + 'ipt></body>');
     w.document.close();
+  };
+}
+/* The bot card: install switch, the link and poster buyers use, and the phone commands. Every
+ * button is an ordinary settings field, so the hold, the audit log and the email all apply. */
+function renderWa() {
+  var w = S.wa || {}, box = q('#waBody'); if (!box) return;
+  var held = S.store.pending && S.store.pending.fields && ('wa_admin' in S.store.pending.fields);
+  var mine = String(S.store.whatsapp || '').replace(/\D/g, '');
+  var h = '';
+  if (w.own_line) h += '<p><b>On</b> — this shop has its own WhatsApp business number connected.</p>';
+  else if (w.on && !w.armed) h += '<p><b>On (waiting for the number)</b> — your shop is switched on. Tapstall’s WhatsApp number is not live yet; your link appears here the moment it is, and nothing else needs doing.</p>';
+  else if (w.on) h += '<p><b>On</b> — buyers who send <code>' + esc(w.code || '') + '</code> to the Tapstall shop number get your menu.</p>';
+  else h += '<p><b>Off</b> — switch it on and share the link or poster below.</p>';
+  if (!w.own_line) h += '<div class="chips"><button class="sm" id="waToggle">' + (w.on ? 'Turn the bot off' : 'Install the shop bot') + '</button></div>';
+  if (w.on && w.link) {
+    h += '<p style="margin:.6rem 0 .2rem">Your WhatsApp order link</p><a class="link" id="waLn" target="_blank" rel="noopener" href="' + esc(w.link) + '">' + esc(w.link) + '</a>'
+      + '<div class="chips" style="margin-top:.5rem"><button class="sm" id="waCopy">Copy link</button><button class="sm" id="waStatus">Status text</button><button class="sm" id="waPoster">QR poster</button></div>';
+  }
+  h += '<label class="hint" style="display:flex;gap:.35rem;align-items:center;margin-top:.7rem"><input type="checkbox" id="waAdmin"' + (S.store.wa_admin ? ' checked' : '') + (mine ? '' : ' disabled') + '>'
+    + 'Let my WhatsApp number' + (mine ? ' (…' + esc(mine.slice(-4)) + ')' : '') + ' run shop commands: <i>shop orders</i>, <i>shop paid CODE</i>, <i>shop close</i></label>'
+    + '<p class="hint" style="margin:.2rem 0 0">' + (held ? 'Change waiting out the 15-minute hold (you can cancel it under Settings).'
+      : mine ? 'An authority change, so it waits 15 minutes and your owner email hears about it.' : 'Add your WhatsApp number under Settings first.') + '</p>';
+  box.innerHTML = h;
+  var t = q('#waToggle');
+  if (t) t.onclick = function () {
+    t.disabled = true;
+    api('/api/settings', { handle: S.handle, wa_bot: w.on ? 'off' : 'on' }).then(function (r) {
+      say('waOut', (r.j && (r.j.ok ? (w.on ? 'Bot switched off.' : 'Bot installed.') : r.j.error)) || 'not saved'); load();
+    });
+  };
+  var a = q('#waAdmin');
+  if (a) a.onchange = function () {
+    api('/api/settings', { handle: S.handle, wa_admin: a.checked }).then(function (r) { say('waOut', (r.j && (r.j.note || r.j.error)) || 'not saved'); load(); });
+  };
+  if (!(w.on && w.link)) return;
+  q('#waCopy').onclick = function () { copyText(w.link); this.textContent = 'Copied ✓'; };
+  q('#waStatus').onclick = function () {
+    copyText('Order from ' + (S.store.shop_name || S.handle) + ' right here in WhatsApp — no browser, no extra data: ' + w.link + '\nTap it, press send, then pick by number.');
+    this.textContent = 'Copied ✓';
+  };
+  q('#waPoster').onclick = function () {
+    var win = window.open('', '_blank'); if (!win) { say('waOut', 'Allow pop-ups to print'); return; }
+    win.document.write('<!doctype html><meta charset=utf-8><title>' + esc(S.store.shop_name || S.handle) + '</title><body style="font:16px system-ui;margin:0;padding:2rem;text-align:center">'
+      + '<h1 style="font-size:1.7rem;margin:.2rem 0">' + esc(S.store.shop_name || S.handle) + '</h1><p style="color:#555;margin:.2rem 0 1rem">Order on WhatsApp — scan, press send, pick by number</p>'
+      + '<img alt="QR" src="https://api.qrserver.com/v1/create-qr-code/?size=420x420&data=' + encodeURIComponent(w.link) + '" style="width:min(70vw,420px)">'
+      + '<p style="font-size:1.25rem;margin:.8rem 0 .2rem">or send <b>' + esc(w.code || '') + '</b> to <b>+' + esc(w.number || '') + '</b> on WhatsApp</p>'
+      + '<p style="color:#777;font-size:.85rem">Works on a WhatsApp-only bundle. Your menu updates here by itself.</p>'
+      + '<scr' + 'ipt>window.onload=function(){window.print()}<' + '/scr' + 'ipt></body>');
+    win.document.close();
   };
 }
 function say(where, t) { var e = q('#' + where); if (!e) return; e.classList.remove('hide'); e.textContent = t; }

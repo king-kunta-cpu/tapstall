@@ -27,6 +27,9 @@ import {
   mailSend, mailDeliver, mailDrain, mailArmed, mailLanes, mailStatus, mailResume, mailRoom, mxOk,
 } from './mail.js';
 import {
+  waInbound, waSigOk, waStep, waTextBody, waBotLink, waMerchantNote, WA_HANDLE_RE,
+} from './wa.js';
+import {
   RAILS, round2, clamp, slug, digits, isEmail, validHandle, parseCSV, normalizeFeedUrl,
   parseProducts, priceOrder, payInstructions, riskFlags, waSummary, publicStore, hash,
   applyMenu, sanitizeMenu, menuPrice, openNow, cleanWeek, cleanRailAccts, hoursText,
@@ -62,7 +65,7 @@ import {
   leadsHuntToday,
 } from './core.js';
 
-const VERSION = '2.2.1';
+const VERSION = '2.3.0';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
@@ -247,6 +250,8 @@ async function route(req, url, env, ctx) {
   const NOSTORE = { 'Cache-Control': 'no-store' };
 
   if (p === '/__ping') return json({ ok: true, version: VERSION, ts: Date.now() });
+  // v2.3.0: the WhatsApp shop bot's webhook (Meta calls it; no browser ever does)
+  if (p === '/wa/hook') return waHook(req, url, env, ctx);
   if (p === '/__selftest') {
     const t = await selftest(env);
     // ?scheduled=1 also runs the cron body live, so term enforcement is verifiable
@@ -263,6 +268,7 @@ async function route(req, url, env, ctx) {
       200, { 'Cache-Control': 'public, max-age=60' });
   }
   if (p === '/fees.ics') return feesIcs();
+  if (p === '/privacy' || p === '/privacy.html') return html(PRIVACY_PAGE, 200, { 'Cache-Control': 'public, max-age=3600' });
   // robots.txt and sitemap.xml are answered by the Worker rather than by a file in
   // Pages, because the origin a crawler sees is the host that answered it, and because
   // the second file is a list of what we will *not* enumerate (see core.js).
@@ -1612,6 +1618,7 @@ async function adminView(req, url, env) {
     pending: st.pending ? { keys: Object.keys(st.pending.fields), apply_at: st.pending.apply_at, in_ms: Math.max(0, st.pending.apply_at - Date.now()), fields: st.pending.fields } : null,
     editable: EDITABLE_FIELDS,
     soft_fields: SOFT_FIELDS,
+    wa: waPanel(env, st),
     design: storefrontDesign(st),
     templates: STOREFRONT_TEMPLATES,
     audit: await getAudit(env, handle),
@@ -2687,6 +2694,13 @@ async function selftest(env) {
     && maskField('notify_email', 'secret@example.com') === 's***@example.com'
     && maskField('whatsapp', '263771234567') === '•••4567'
     && maskField('feed_url', 'https://docs.google.com/spreadsheets/d/abcdef/edit').indexOf('abcdef') === -1;
+  // the WhatsApp bot's state, as facts rather than a verdict: unarmed is a normal state for a
+  // platform whose number is not live yet, so none of this is a boolean the verdict would count
+  t.wa_bot = { armed: waArmed(env), sessions: env.WA_BOT ? 'durable_object' : 'isolate_memory',
+    number: waNumber(env) ? '•••' + waNumber(env).slice(-4) : '', month_cap: waMonthCap(env), lines: waLines(env).size };
+  if (t.wa_bot.armed && env.WA_PHONE_ID) {
+    try { const mt = await waMeter(env, String(env.WA_PHONE_ID), 'read'); t.wa_bot.month_sent = mt.n; t.wa_bot.month_capped = mt.capped || 0; } catch (e) { /* facts, not a verdict */ }
+  }
   // One verdict for the caller, computed on the last line: every assertion in
   // here is written so that true means healthy, so `ok` is "no boolean came
   // back false". Anything added below this line is silently outside the verdict,
@@ -6410,4 +6424,332 @@ async function outreachMailboxes(req, env) {
     out.push({ tag: 'W' + l.id.toUpperCase(), user: l.user, app_password: l.pass, smtp: false, imap_host: l.imapHost, readonly: true });
   }
   return json({ ok: true, mailboxes: out }, 200, { 'Cache-Control': 'no-store' });
+}
+
+/* The privacy notice: Meta asks for one before a WhatsApp app goes live, and buyers who order in
+ * a chat are owed the same plain account of what is kept as buyers on the storefront. */
+const PRIVACY_PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Privacy · Tapstall</title><style>body{font:16px/1.6 system-ui,sans-serif;max-width:44rem;margin:0 auto;padding:1.5rem;color:#1d1d1d}h1{font-size:1.6rem}h2{font-size:1.1rem;margin-top:1.6rem}</style></head><body>
+<h1>Privacy at Tapstall</h1>
+<p>Tapstall runs online shops for small businesses, on a web page and inside WhatsApp. This page says what we keep when you order, why, and for how long. Tapstall is a Jacaranda Labs venture.</p>
+<h2>What we keep when you order</h2>
+<p>Your name, your WhatsApp number, what you ordered, pickup or your delivery address, any note you add, and the payment code you send after paying. The shop you ordered from sees all of this, because it needs it to prepare, deliver and confirm your order.</p>
+<h2>Ordering in WhatsApp</h2>
+<p>When you message a Tapstall shop number, Meta (WhatsApp) delivers your messages to us and ours to you under WhatsApp’s own terms and privacy policy. We read the text you send so the shop bot can answer: your cart and where you are in the order are kept for the chat, and deleted after 60 days with no messages. We cannot read pictures you send; send those to the shop directly.</p>
+<h2>What we do not do</h2>
+<p>We do not sell your details, and we do not send you advertising. A shop that asks before saving your number does so on its own order page. We send you messages only in reply to yours.</p>
+<h2>How long orders are kept</h2>
+<p>An order stays in the shop’s order book so the shop can keep its accounts and answer questions about a sale later. If you want yours removed, see below.</p>
+<h2>Your choices</h2>
+<p>To see, correct or delete what a shop holds about you, ask the shop, or write to us at <a href="mailto:couragegarikai@atomicmail.io">couragegarikai@atomicmail.io</a> with the shop’s name and your number, and we will deal with it within 30 days.</p>
+<p style="color:#666;font-size:.9rem">Updated 1 November 2026.</p>
+</body></html>`;
+
+/* =====================================================================================
+ * v2.3.0 — the WhatsApp shop bot (worker/wa.js holds the conversation)
+ *
+ * One shared Tapstall business number on Meta's WhatsApp Cloud API. A merchant "installs" the bot
+ * by switching `wa_bot` on in the dashboard and sharing wa.me/<number>?text=#<handle>; the buyer
+ * then browses, orders, gets the payment slip and files the payment code without leaving the chat.
+ * A business number of the shop's own can be mapped to it in WA_LINES ({"<phone_number_id>":
+ * "<handle>"}), which is where Embedded Signup lands later without changing anything here.
+ *
+ * Secrets (none of them means the route answers 503 and spends nothing):
+ *   WA_TOKEN         system-user access token with whatsapp_business_messaging
+ *   WA_APP_SECRET    the Meta app secret, for X-Hub-Signature-256
+ *   WA_VERIFY_TOKEN  any string; typed into the webhook form in the Meta app
+ *   WA_PHONE_ID      the shared number's phone_number_id
+ *   WA_NUMBER        the shared number in international digits, for the wa.me link
+ * Optional: WA_LINES, WA_GRAPH_VERSION (v25.0), WA_MONTH_CAP, WA_BILLING=on.
+ *
+ * Money: since 1 October 2026 Meta charges service replies after 1,000 free a month per business
+ * number (Zimbabwe is "Rest of Africa"), and without a payment method on file it simply stops
+ * delivering after the 1,000th. So the bot meters its own replies per number per month and stops
+ * at WA_MONTH_CAP (950 by default, 20,000 with WA_BILLING=on) instead of talking into a void.
+ * ===================================================================================== */
+const WA_GRAPH = 'https://graph.facebook.com/';
+let waLinesMemo = null;
+function waLines(env) {
+  const raw = String(env.WA_LINES || '');
+  if (waLinesMemo && waLinesMemo.raw === raw) return waLinesMemo.map;
+  const map = new Map();
+  try {
+    const o = raw ? JSON.parse(raw) : {};
+    for (const k of Object.keys(o || {})) {
+      const h = slug(String(o[k] || ''));
+      if (/^\d{5,30}$/.test(k) && WA_HANDLE_RE.test(h)) map.set(k, h);
+    }
+  } catch (e) { /* a malformed map is no map: the shared number still works */ }
+  waLinesMemo = { raw, map };
+  return map;
+}
+function waNumber(env) { return String(env.WA_NUMBER || '').replace(/\D/g, ''); }
+function waArmed(env) {
+  return !!(env.WA_TOKEN && env.WA_APP_SECRET && env.WA_VERIFY_TOKEN && (env.WA_PHONE_ID || waLines(env).size));
+}
+function waMonthCap(env) {
+  const n = Math.floor(Number(env.WA_MONTH_CAP) || 0);
+  return n > 0 ? n : (env.WA_BILLING === 'on' ? 20000 : 950);
+}
+const waMonth = (now) => new Date(now || Date.now()).toISOString().slice(0, 7);
+
+/** What the dashboard's bot card needs: is the platform's number live, and this shop's link. */
+function waPanel(env, st) {
+  const number = waNumber(env);
+  let own = '';
+  for (const [, h] of waLines(env)) if (h === st.handle) own = h;
+  return {
+    armed: waArmed(env), number,
+    on: st.wa_bot === 'on' || !!own, own_line: !!own, admin: !!st.wa_admin,
+    link: number ? waBotLink(number, st.handle, st.shop_name) : '',
+    code: '#' + st.handle,
+  };
+}
+
+/** The webhook's plain answers: never cached, unlike `text`, which serves public pages. */
+const waText = (s, status = 200) => new Response(s, { status, headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' } });
+async function waHook(req, url, env, ctx) {
+  if (req.method === 'GET') {
+    // Meta's one-time subscription handshake: echo the challenge only to the holder of the token
+    const mode = url.searchParams.get('hub.mode');
+    const tok = String(url.searchParams.get('hub.verify_token') || '');
+    const ch = String(url.searchParams.get('hub.challenge') || '');
+    if (mode === 'subscribe' && env.WA_VERIFY_TOKEN && tok && timingSafeEq(tok, String(env.WA_VERIFY_TOKEN))) {
+      return waText(ch.replace(/[^\w.-]/g, '').slice(0, 200));
+    }
+    return waText('forbidden', 403);
+  }
+  if (req.method !== 'POST') return json({ ok: false, error: 'method_not_allowed' }, 405, { Allow: 'GET, POST' });
+  if (!waArmed(env)) return json({ ok: false, error: 'whatsapp bot not configured', armed: false }, 503);
+  const raw = await req.text();
+  if (raw.length > 256e3) return waText('too large', 413);
+  if (!(await waSigOk(raw, req.headers.get('x-hub-signature-256'), env.WA_APP_SECRET))) return waText('bad signature', 401);
+  let payload = null;
+  try { payload = JSON.parse(raw); } catch (e) { return waText('ok'); }
+  const lines = waLines(env);
+  const shared = String(env.WA_PHONE_ID || '');
+  const origin = String(env.PUBLIC_ORIGIN || url.origin).replace(/\/+$/, '');
+  let n = 0;
+  for (const m of waInbound(payload).slice(0, 20)) {
+    if (m.phone_id !== shared && !lines.has(m.phone_id)) continue;   // a number that is not ours
+    m.line = lines.get(m.phone_id) || '';
+    m.origin = origin;
+    n++;
+    // Answer Meta first: a webhook that waits on the conversation is a webhook Meta retries, and
+    // a retry is a second copy of the buyer's message. The session's `seen` list drops it anyway.
+    ctx.waitUntil(waDispatch(env, m).catch(() => {}));
+  }
+  return json({ ok: true, queued: n });
+}
+
+/** One chat, one Durable Object: its messages are handled in order and its cart lives there. */
+async function waDispatch(env, m) {
+  if (env.WA_BOT && env.WA_BOT.idFromName) {
+    const stub = env.WA_BOT.get(env.WA_BOT.idFromName('u:' + m.phone_id + ':' + m.from));
+    const r = await stub.fetch('https://wa.internal/msg', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(m) });
+    return r.json().catch(() => ({}));
+  }
+  // No binding (a local run, or a deploy path that lost it): an isolate's memory keeps the chat
+  // for as long as the isolate lives. Worse, never wrong — and the selftest says which it is.
+  return waProcess(env, m, waMemStore('u:' + m.phone_id + ':' + m.from));
+}
+const waMem = new Map();
+function waMemStore(key) {
+  return {
+    get: async () => cloneVal(waMem.get(key) || null),
+    put: async (v) => { if (waMem.size > 500) waMem.delete(waMem.keys().next().value); waMem.set(key, cloneVal(v)); },
+  };
+}
+
+async function waProcess(env, m, sstore) {
+  const later = [];
+  const ctx = { waitUntil: (p) => { later.push(Promise.resolve(p).catch(() => {})); } };
+  const prev = await sstore.get();
+  const r = await waStep(prev, m, waDeps(env, m, ctx));
+  if (r.duplicate) return { duplicate: true };
+  await sstore.put(r.sess);
+  const sent = [];
+  // blue ticks are free (a read receipt is not a message) and tell the buyer someone is home
+  later.push(waRead(env, m).catch(() => {}));
+  for (const t of r.replies) sent.push(await waSend(env, m.phone_id, m.from, t));
+  if (r.placed) later.push(waPingMerchant(env, m, r.placed).catch(() => {}));
+  await Promise.all(later);
+  return { replies: r.replies.length, sent, step: r.sess.step };
+}
+
+/** The bot's hands: every one of them is a path the storefront or dashboard already uses. */
+function waDeps(env, m, ctx) {
+  const origin = m.origin || env.PUBLIC_ORIGIN || 'https://tapstall.invalid';
+  const ip = 'wa:' + m.from;
+  const post = (path, body) => new Request(origin + path, {
+    method: 'POST', headers: { 'content-type': 'application/json', 'cf-connecting-ip': ip }, body: JSON.stringify(body) });
+  const today = () => {
+    const local = new Date(Date.now() + 120 * 60000);           // the stores' clock (CAT, UTC+2)
+    return Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate()) - 120 * 60000;
+  };
+  return {
+    store: async (h) => { const k = slug(String(h || '')); return WA_HANDLE_RE.test(k) ? getStore(env, k, { cache: true }) : null; },
+    menu: (st) => loadProducts(st, env),
+    hours: async (st) => openNow(st),
+    order: async (st, body) => {
+      const req = post('/api/order', body);
+      const res = await placeOrder(req, new URL(req.url), env, ctx);
+      const j = await res.json().catch(() => ({}));
+      return Object.assign({}, j, { ok: res.status === 201 && !!j.ok });
+    },
+    proof: async (st, last, code) => {
+      if (!last || !last.cap) return { ok: false, error: 'this order has no payment-code field' };
+      const req = post('/api/proof', { cap: last.cap, proof: code });
+      const res = await proofAdd(req, new URL(req.url), env);
+      return res.json().catch(() => ({ ok: false }));
+    },
+    status: (st, last) => env.ORDERS.get('order:' + st.handle + ':' + last.id, 'json'),
+    // the shop's own WhatsApp number, and only once the owner switched commands on (a held change)
+    isAdmin: async (st, from) => {
+      const own = String(st.whatsapp || '').replace(/\D/g, '');
+      return !!st.wa_admin && own.length >= 9 && own === String(from || '');
+    },
+    adminOrders: async (st) => {
+      const since = today();
+      const rows = await ledgerRows(env, st.handle, 200, { fresh: true });
+      return rows.filter((r) => Date.parse(r.at) >= since)
+        .map((r) => ({ code: r.code, status: r.status, total: r.pay_now != null ? r.pay_now : r.total, name: r.name }));
+    },
+    adminMark: async (st, code, status) => {
+      const rows = await ledgerRows(env, st.handle, MAX_ORDERS_KEPT, { fresh: true });
+      const row = rows.find((r) => String(r.code || '').toUpperCase() === String(code).toUpperCase());
+      if (!row) return { ok: false, error: 'no order ' + code + ' in this shop' };
+      // a five-minute capability for exactly this order and state, spent at once through the same
+      // handler the one-tap confirm link uses: no second way to mark an order exists
+      const cap = await issueCap(capKey(env), { a: 'mark', h: st.handle, id: row.id, s: status, g: String(st.auth_gen || '0') }, 300);
+      const req = post('/api/mark', { cap });
+      const res = await markPaid(req, new URL(req.url), env);
+      const j = await res.json().catch(() => ({}));
+      return Object.assign({ code: row.code }, j);
+    },
+    setClosed: async (st, closed) => {
+      try {
+        const fresh = await getStore(env, st.handle);
+        if (!fresh) return false;
+        const was = !!fresh.closed;
+        fresh.closed = !!closed;
+        if (was !== !!closed) {
+          await writeStore(env, fresh);
+          await pushAudit(env, fresh, { act: 'settings', via: 'whatsapp', changed: 1, before: { closed: was }, after: { closed: !!closed } });
+        }
+        return true;
+      } catch (e) { return false; }
+    },
+  };
+}
+
+/** The meter: one count per business number per month, kept where the chats are. */
+async function waMeter(env, phoneId, op) {
+  const month = waMonth();
+  const cap = waMonthCap(env);
+  if (env.WA_BOT && env.WA_BOT.idFromName) {
+    const stub = env.WA_BOT.get(env.WA_BOT.idFromName('meter:' + phoneId));
+    const r = await stub.fetch('https://wa.internal/meter', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ op, month, cap }) });
+    return r.json();
+  }
+  const k = 'wa-meter:' + phoneId + ':' + month;
+  const n = Number(waMem.get(k) || 0);
+  if (op !== 'take') return { n, cap, month };
+  if (n >= cap) return { ok: false, n, cap };
+  waMem.set(k, n + 1);
+  return { ok: true, n: n + 1, cap };
+}
+
+async function waSend(env, phoneId, to, body) {
+  const take = await waMeter(env, phoneId, 'take').catch(() => ({ ok: false }));
+  if (!take.ok) return 'capped';
+  const r = await fetch(`${WA_GRAPH}${env.WA_GRAPH_VERSION || 'v25.0'}/${phoneId}/messages`, {
+    method: 'POST',
+    headers: { authorization: 'Bearer ' + env.WA_TOKEN, 'content-type': 'application/json' },
+    body: JSON.stringify(waTextBody(to, body)),
+  }).catch(() => null);
+  return r && r.ok ? 'sent' : 'failed_' + (r ? r.status : 'net');
+}
+
+async function waRead(env, m) {
+  await fetch(`${WA_GRAPH}${env.WA_GRAPH_VERSION || 'v25.0'}/${m.phone_id}/messages`, {
+    method: 'POST',
+    headers: { authorization: 'Bearer ' + env.WA_TOKEN, 'content-type': 'application/json' },
+    body: JSON.stringify({ messaging_product: 'whatsapp', status: 'read', message_id: m.id }),
+  });
+}
+
+/**
+ * Tell the shop, in WhatsApp, that a bot order arrived — but only inside the 24-hour window the
+ * merchant opened by messaging the bot. Outside it Meta would need a paid template, and the shop's
+ * email and webhook alerts (placeOrder's `notify`) already carry every order either way.
+ */
+async function waPingMerchant(env, m, placed) {
+  const st = await getStore(env, placed.handle);
+  if (!st || !st.wa_admin) return;
+  const own = String(st.whatsapp || '').replace(/\D/g, '');
+  if (own.length < 9 || own === m.from) return;
+  let lastIn = 0;
+  if (env.WA_BOT && env.WA_BOT.idFromName) {
+    const stub = env.WA_BOT.get(env.WA_BOT.idFromName('u:' + m.phone_id + ':' + own));
+    const r = await stub.fetch('https://wa.internal/peek', { method: 'POST', body: '{}' });
+    lastIn = Number(((await r.json().catch(() => ({}))) || {}).last_in) || 0;
+  } else {
+    const s = waMem.get('u:' + m.phone_id + ':' + own);
+    lastIn = Number(s && s.last_in) || 0;
+  }
+  if (!lastIn || Date.now() - lastIn > 23.5 * 3600e3) return;
+  const o = await env.ORDERS.get('order:' + st.handle + ':' + placed.id, 'json');
+  if (o) await waSend(env, m.phone_id, own, waMerchantNote(st, o));
+}
+
+/**
+ * The Durable Object. One instance per buyer chat ("u:<phone_id>:<wa_id>") holds the session; one
+ * per business number ("meter:<phone_id>") holds the month's reply count. SQLite-backed (the free
+ * plan's kind), read and written through the key-value calls, and swept by an alarm after 60 quiet
+ * days so an abandoned cart does not live forever.
+ */
+export class WaBot {
+  constructor(state, env) {
+    this.state = state;
+    this.env = env;
+    this.chain = Promise.resolve();
+  }
+  async fetch(req) {
+    const path = new URL(req.url).pathname;
+    const body = await req.json().catch(() => ({}));
+    const storage = this.state.storage;
+    if (path === '/msg') {
+      // in order, one at a time: two quick messages must not both read the same cart
+      const run = this.chain.then(() => waProcess(this.env, body, {
+        get: () => storage.get('s'),
+        put: async (v) => {
+          await storage.put('s', v);
+          try { await storage.setAlarm(Date.now() + 60 * 864e5); } catch (e) { /* the sweep is a nicety */ }
+        },
+      }));
+      this.chain = run.catch(() => {});
+      return Response.json(await run.catch((e) => ({ ok: false, error: String((e && e.message) || e) })));
+    }
+    if (path === '/peek') {
+      const s = await storage.get('s');
+      return Response.json({ last_in: (s && s.last_in) || 0 });
+    }
+    if (path === '/meter') {
+      const month = String(body.month || waMonth());
+      const k = 'm:' + month;
+      const n = Number(await storage.get(k)) || 0;
+      if (body.op !== 'take') return Response.json({ n, cap: body.cap, month, capped: Number(await storage.get('c:' + month)) || 0 });
+      if (n >= Number(body.cap || 0)) {
+        await storage.put('c:' + month, (Number(await storage.get('c:' + month)) || 0) + 1);
+        return Response.json({ ok: false, n, cap: body.cap });
+      }
+      await storage.put(k, n + 1);
+      return Response.json({ ok: true, n: n + 1, cap: body.cap });
+    }
+    return new Response('not found', { status: 404 });
+  }
+  async alarm() {
+    await this.state.storage.deleteAll();
+  }
 }
