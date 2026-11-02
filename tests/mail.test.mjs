@@ -129,3 +129,13 @@ test('v2.2.0 gmail lane: provider preset, runner secret names, app-password spac
   assert.equal(d.hourly, 6, 'default 6/hour leaves room for the runner');
   assert.equal(M.mailLanes({ MAILBOXES: '[{"id":"owner","provider":"gmail"}]', GMAIL_OWNER_USER: 'a@gmail.com' }).length, 0, 'off until both secrets exist');
 });
+
+test('2026-11-02 outreach pause: the shipped lane takes merchant mail but no outreach', async () => {
+  const src = (await import('node:fs')).readFileSync(new URL('../scripts/gen_wrangler_toml.py', import.meta.url), 'utf8');
+  const mb = /os\.environ\.get\("MAILBOXES", ""\)\.strip\(\) or '([^']+)'/.exec(src)[1];
+  assert.match(src, /os\.environ\.get\("OUTREACH_LV", ""\)\.strip\(\) or "off"/);
+  const env = { MAILBOXES: mb, GMAIL_OWNER_USER: 'box@gmail.com', GMAIL_OWNER_APP_PASSWORD: 'abcdabcdabcdabcd', ORDERS: kv(), STORES: kv() };
+  assert.equal(M.mailLanes(env).length, 1);
+  assert.equal(await M.mailRoom(env, 'transactional'), true);
+  assert.equal(await M.mailRoom(env, 'outreach'), false);
+});

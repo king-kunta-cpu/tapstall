@@ -48,11 +48,16 @@ enabled = false
 # v2.2.0: the Gmail lane (docs/GMAIL.md). It reads the GMAIL_OWNER_USER / GMAIL_OWNER_APP_PASSWORD Worker
 # secrets, the same box the outreach runner sends from, so replies land in one inbox. 6/hour leaves the
 # rest of Gmail's ~500/day to the runner and to manual sending (a gmail lane is clamped to 18/hour).
-mailboxes = os.environ.get("MAILBOXES", "").strip() or '[{"id":"owner","provider":"gmail","fromName":"Tapstall","hourly":6}]'
+# 2026-11-02 owner: Gmail outreach paused in every business until the owner resumes it. The lane keeps
+# all merchant/transactional mail (PIN resets, receipts, order notices) but takes no outreach, and
+# OUTREACH_LV=off also stops the runner dispatch. To resume: drop "outreach":false and set OUTREACH_LV=on.
+mailboxes = os.environ.get("MAILBOXES", "").strip() or '[{"id":"owner","provider":"gmail","fromName":"Tapstall","hourly":6,"outreach":false}]'
+outreach_lv = os.environ.get("OUTREACH_LV", "").strip() or "off"
 out += "\n[vars]\n"
 if origin:
     out += f'PUBLIC_ORIGIN = "{origin}"\n'
 out += "MAILBOXES = '" + mailboxes.replace("'", "") + "'\n"
+out += 'OUTREACH_LV = "' + outreach_lv.replace('"', '') + '"\n'
 
 open("wrangler.toml", "w").write(out)
 print("wrangler.toml regenerated for %s" % name)

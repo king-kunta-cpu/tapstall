@@ -65,7 +65,7 @@ import {
   leadsHuntToday,
 } from './core.js';
 
-const VERSION = '2.3.1';
+const VERSION = '2.3.2';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
@@ -5966,10 +5966,13 @@ async function dispatchTick(env) {
   // 2026-11-01 Actions budget: the lead hunt goes out Mon/Wed/Fri (core.js leadsHuntToday,
   // env.LEADS_HUNT_DAYS retunes it), outreach every weekday.
   const huntToday = leadsHuntToday(day, env.LEADS_HUNT_DAYS);
-  const done = (k) => (k === 'leads_hunt' && !huntToday) || !!(last && last[k] === 'dispatched');
-  if (done('leads_hunt') && done('outreach')) return { skipped: 'today already dispatched', day: stamp };
+  // 2026-11-02 owner: Gmail outreach is paused in every business. OUTREACH_LV=off stops the Worker's own
+  // first touches AND the Actions runner dispatch; the lead hunt and all merchant mail carry on.
+  const outreachOff = String(env.OUTREACH_LV || 'on') === 'off';
+  const done = (k) => (k === 'leads_hunt' && !huntToday) || (k === 'outreach' && outreachOff) || !!(last && last[k] === 'dispatched');
+  if (done('leads_hunt') && done('outreach')) return { skipped: 'today already dispatched', day: stamp, ...(outreachOff ? { outreach: 'off' } : {}) };
   const out = { day: stamp, at: new Date().toISOString(),
-    leads_hunt: !huntToday ? 'not_today' : (done('leads_hunt') ? 'dispatched' : 'skipped_no_token'), outreach: done('outreach') ? 'dispatched' : 'skipped_no_token' };
+    leads_hunt: !huntToday ? 'not_today' : (done('leads_hunt') ? 'dispatched' : 'skipped_no_token'), outreach: outreachOff ? 'off' : (done('outreach') ? 'dispatched' : 'skipped_no_token') };
   if (!(env.GH_DISPATCH_TOKEN && env.GH_REPO)) return out;   // nothing attempted, nothing worth a write
   const fire = async (wf, inputs) => {
     const r = await fetch('https://api.github.com/repos/' + env.GH_REPO + '/actions/workflows/' + wf + '/dispatches', {
