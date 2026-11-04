@@ -130,12 +130,48 @@ test('v2.2.0 gmail lane: provider preset, runner secret names, app-password spac
   assert.equal(M.mailLanes({ MAILBOXES: '[{"id":"owner","provider":"gmail"}]', GMAIL_OWNER_USER: 'a@gmail.com' }).length, 0, 'off until both secrets exist');
 });
 
-test('2026-11-02 outreach pause: the shipped lane takes merchant mail but no outreach', async () => {
+test('2026-11-04 outreach v2: the owner lane keeps merchant mail only; gm1 + gm2 take outreach, pinned per lead, threaded', async () => {
   const src = (await import('node:fs')).readFileSync(new URL('../scripts/gen_wrangler_toml.py', import.meta.url), 'utf8');
-  const mb = /os\.environ\.get\("MAILBOXES", ""\)\.strip\(\) or '([^']+)'/.exec(src)[1];
-  assert.match(src, /os\.environ\.get\("OUTREACH_LV", ""\)\.strip\(\) or "off"/);
-  const env = { MAILBOXES: mb, GMAIL_OWNER_USER: 'box@gmail.com', GMAIL_OWNER_APP_PASSWORD: 'abcdabcdabcdabcd', ORDERS: kv(), STORES: kv() };
-  assert.equal(M.mailLanes(env).length, 1);
-  assert.equal(await M.mailRoom(env, 'transactional'), true);
-  assert.equal(await M.mailRoom(env, 'outreach'), false);
+  const mb = /os\.environ\.get\("MAILBOXES", ""\)\.strip\(\) or \('([^']+)'\s*'([^']+)'\)/.exec(src);
+  assert.ok(mb, 'default MAILBOXES');
+  assert.match(src, /os\.environ\.get\("OUTREACH_LV", ""\)\.strip\(\) or "on"/);
+  const env = { MAILBOXES: mb[1] + mb[2], GMAIL_OWNER_USER: 'box@gmail.com', GMAIL_OWNER_APP_PASSWORD: 'abcdabcdabcdabcd',
+    MAILBOX_GM1_USER: 'one@gmail.com', MAILBOX_GM1_PASS: 'p1', MAILBOX_GM2_USER: 'two@gmail.com', MAILBOX_GM2_PASS: 'p2', ORDERS: kv(), STORES: kv() };
+  const lanes = M.mailLanes(env);
+  assert.deepEqual(lanes.map((l) => [l.id, l.outreach]), [['owner', false], ['gm1', true], ['gm2', true]]);
+  const sent = [];
+  env.MAIL_TEST_OPEN = async (l) => ({ async send(from, to, mime) { sent.push({ from, to, mime }); }, async quit() {} });
+  const now = Date.parse('2026-11-05T09:00:00Z');
+  const r = await M.mailSend(env, { to: 'a@shop.co.zw', subject: 'Re: s', text: 't', kind: 'outreach', laneUser: 'two@gmail.com', inReplyTo: '<m1@tapstall.mail>' }, { now });
+  assert.equal(r.sent, true);
+  assert.equal(r.user, 'two@gmail.com', 'pinned to the lead\'s box');
+  assert.match(r.messageId, /^<.+@tapstall\.mail>$/);
+  assert.match(sent[0].mime, /In-Reply-To: <m1@tapstall\.mail>\r\nReferences: <m1@tapstall\.mail>/);
+  assert.equal((await M.mailSend(env, { to: 'b@shop.co.zw', subject: 's', text: 't', kind: 'outreach', laneUser: 'box@gmail.com' }, { now })).why, 'lanes_full', 'the owner lane never takes outreach');
+});
+
+test('outreach v2: T1 has no links, T2/T3/link carry it; ramp 10/25/50; brake; one box per address; spread over the day', async () => {
+  const O = M;
+  const lead = { business: 'Kota Queen', signals: ['whatsapp_selling'], touches: 0 };
+  const o = { origin: 'https://tapstall.example', fromName: 'Courage', postal: 'Jacaranda Labs, P.O. Box 900, Bulawayo, Zimbabwe' };
+  const t1 = O.v2Compose(lead, o);
+  assert.doesNotMatch(t1.text, /https?:\/\/|www\.|\/onboard/);
+  assert.match(t1.text, /reply "stop"/);
+  assert.match(t1.text, /P\.O\. Box 900, Bulawayo/);
+  assert.match(t1.text, /Just reply and I will/);
+  const t2 = O.v2Compose({ ...lead, touches: 1 }, o), t3 = O.v2Compose({ ...lead, touches: 2 }, o), lk = O.v2Compose({ ...lead, touches: 1 }, { ...o, kind: 'link' });
+  for (const m of [t2, t3, lk]) { assert.match(m.text, /https:\/\/tapstall\.example\/onboard/); assert.match(m.subject, /^Re: Kota Queen:/); }
+  assert.match(t3.text, /I will not write again/);
+  for (const m of [t1, t2, t3, lk]) assert.doesNotMatch(m.text + m.subject, /\u2014/);
+  assert.deepEqual([O.v2Ramp(Date.parse('2026-11-04T12:00Z')), O.v2Ramp(Date.parse('2026-11-05T12:00Z')), O.v2Ramp(Date.parse('2026-11-12T12:00Z')), O.v2Ramp(Date.parse('2026-11-19T12:00Z'))], [0, 10, 25, 50]);
+  assert.equal(O.v2Brake({ sent: 19, bounced: 5 }), '');
+  assert.match(O.v2Brake({ sent: 40, bounced: 3 }), /bounces/);
+  assert.match(O.v2Brake({ sent: 40, stops: 2 }), /stops/);
+  assert.equal(O.v2Brake({ sent: 40, bounced: 2, stops: 1 }), '');
+  assert.equal(O.v2BoxIndex('A@b.co', 2), O.v2BoxIndex('a@B.co', 2));
+  assert.equal(new Set(['a@x.zw', 'b@x.zw', 'c@x.zw', 'd@x.zw', 'e@x.zw', 'f@x.zw'].map((e) => O.v2BoxIndex(e, 2))).size, 2);
+  assert.equal(O.v2PerTick(50, 7, 16), 5, '50 over ten hourly ticks');
+  assert.equal(O.v2PerTick(10, 7, 16), 1);
+  assert.equal(O.v2PerTick(0, 9, 16), 0);
+  assert.ok(O.v2PerTick(50, 16, 16) <= 6, 'never a burst');
 });

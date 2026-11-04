@@ -155,6 +155,7 @@ export function buildMail(m) {
     'MIME-Version: 1.0',
   ];
   if (m.messageId) h.push(`Message-ID: ${mailClean(m.messageId)}`);
+  if (m.inReplyTo) h.push(`In-Reply-To: ${mailClean(m.inReplyTo)}`, `References: ${mailClean(m.inReplyTo)}`);   // v2: T2/T3/link stay in T1's thread
   if (m.replyTo) h.push(`Reply-To: ${mailAddress(m.replyTo)}`);
   if (m.unsubscribe && (m.unsubscribe.url || m.unsubscribe.mailto)) {
     const parts = [];
@@ -221,9 +222,10 @@ async function laneSetState(env, id, st) {
 }
 
 /** Which lane may send a message of this kind right now. Outreach leaves one slot an hour free. */
-async function pickLane(env, kind, now) {
+async function pickLane(env, kind, now, onlyUser) {
   for (const l of mailLanes(env)) {
     if (kind === 'outreach' && !l.outreach) continue;
+    if (onlyUser && l.user.toLowerCase() !== String(onlyUser).toLowerCase()) continue;   // v2: one box per lead
     const st = await laneState(env, l.id);
     if (st.status === 'paused') continue;
     if (st.cooldown_until && Date.parse(st.cooldown_until) > now) continue;
@@ -247,18 +249,18 @@ export async function mailSend(env, msg, opts) {
   const to = String(msg.to || '').trim().toLowerCase();
   if (!/^[^@\s<>"]+@[^@\s<>"]+\.[a-z]{2,}$/i.test(to)) return { sent: false, why: 'bad_address', permanent: true };
   if (!mailArmed(env)) return { sent: false, why: 'no_lane' };
-  const lane = await pickLane(env, kind, now);
+  const lane = await pickLane(env, kind, now, msg.laneUser);
   if (!lane) return { sent: false, why: 'lanes_full' };
-  const mime = buildMail({ from: lane.user, fromName: lane.fromName, to, subject: msg.subject, text: msg.text,
-    replyTo: msg.replyTo || lane.user, unsubscribe: msg.unsubscribe, auto: kind === 'transactional',
-    messageId: `<${now.toString(36)}.${Math.random().toString(36).slice(2, 10)}@tapstall.mail>` });
+  const messageId = `<${now.toString(36)}.${Math.random().toString(36).slice(2, 10)}@tapstall.mail>`;
+  const mime = buildMail({ from: lane.user, fromName: msg.fromName || lane.fromName, to, subject: msg.subject, text: msg.text,
+    replyTo: msg.replyTo || lane.user, unsubscribe: msg.unsubscribe, auto: kind === 'transactional', inReplyTo: msg.inReplyTo, messageId });
   let s = null;
   try {
     const open = env.MAIL_TEST_OPEN || (async (l) => smtpSession(await mailOpenTls(l.host, l.port, 15000), { user: l.user, pass: l.pass }));
     s = await open(lane);
     await s.send(lane.user, to, mime);
     await laneBump(env, lane.id, now);
-    return { sent: true, lane: lane.id };
+    return { sent: true, lane: lane.id, user: lane.user, messageId };
   } catch (e) {
     // a refused password parks the lane for six hours instead of hammering the box (repeated bad logins
     // get a Google account challenged); it comes back by itself, so nobody has to press resume
@@ -352,4 +354,81 @@ export async function mxOk(domain, fetcher) {
   } catch (e) { ok = true; }
   mxMem.set(d, ok);
   return ok;
+}
+
+/* ------------------------------------------------------------------ outreach v2 */
+// Outreach v2 (owner, 2026-11-04). Pure, so tests can hold it to the rules:
+//  T1 is plain text with NO links and no attachments ("reply stop" + postal; the one-click unsubscribe
+//  lives in the List-Unsubscribe header, not the body). The link goes out when the business replies
+//  (a short threaded answer), or on day 7 if they don't (T2). Day 14 is one short last note (T3), then stop.
+//  Two Gmail boxes; each lead stays on one box. Daily = ramp 10/25/50 from 5 Nov 2026; the brake stops
+//  new first touches when a week shows >5% bounces or >3% stops (from 20 sends).
+export const V2_FOLLOW_DAYS = [7, 7, 7];
+export const V2_MAX_TOUCHES = 3;
+
+export function v2Ramp(now, start) {
+  const days = Math.floor((now - Date.parse((start || '2026-11-05') + 'T00:00:00Z')) / 864e5);
+  return days < 0 ? 0 : days < 7 ? 10 : days < 14 ? 25 : 50;
+}
+export function v2Brake(w) {
+  const sent = Number(w && w.sent) || 0, b = Number(w && w.bounced) || 0, s = Number(w && w.stops) || 0;
+  if (sent < 20) return '';
+  if (b / sent > 0.05) return 'brake: ' + b + ' bounces in ' + sent + ' sends this week';
+  if (s / sent > 0.03) return 'brake: ' + s + ' stops in ' + sent + ' sends this week';
+  return '';
+}
+/** FNV-1a: the same address always lands on the same box. */
+export function v2BoxIndex(email, n) {
+  let h = 2166136261;
+  for (const ch of String(email || '').toLowerCase()) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619) >>> 0; }
+  return n > 0 ? h % n : 0;
+}
+/** How many this tick may send: spread what is left of the day over the ticks left in the window. */
+export function v2PerTick(dailyLeft, hourUtc, endHour) {
+  const ticksLeft = Math.max(1, (endHour || 16) - hourUtc + 1);
+  return Math.max(0, Math.min(6, Math.ceil(Math.max(0, dailyLeft) / ticksLeft)));
+}
+export const v2WeekKey = (now) => {
+  const d = new Date(now); const day = Math.floor(d.getTime() / 864e5); // ISO-ish week bucket: days since epoch / 7
+  return 'outreach:wk:' + Math.floor((day + 3) / 7);
+};
+
+function v2Evidence(lead) {
+  const biz = String(lead.business || '').trim() || 'your shop';
+  const sig = new Set(lead.signals || []);
+  return sig.has('whatsapp_selling') ? `I came across ${biz} taking orders on WhatsApp.`
+    : sig.has('payment_friction') ? `I came across ${biz} while looking at how shops here match payments to orders.`
+    : `I came across ${biz} online.`;
+}
+const V2_STOP = 'If you would rather not hear from me again, just reply "stop".';
+
+/** touch 0 = T1 (no link), 1 = T2 day 7 (the link), 2 = T3 day 14 (last note). kind 'link' = the answer to a reply. */
+export function v2Compose(lead, { origin, fromName, postal, kind }) {
+  const biz = String(lead.business || '').trim() || 'there';
+  const link = String(origin || '').replace(/\/+$/, '') + '/onboard';
+  const name = String(fromName || 'Courage');
+  const post = String(postal || '').trim();
+  const re = (s) => 'Re: ' + s;
+  const subj1 = `${biz}: orders that identify their own payment`;
+  if (kind === 'link') {
+    return { subject: re(subj1), text: `Thank you for writing back. Here is the link: ${link}\n\n`
+      + 'You set up your menu once, customers order from one link and pay your own EcoCash, PayShap or bank account, and every '
+      + 'order carries its own exact amount, so the payment that lands tells you which order it is. Free for 60 days, then USD 60 '
+      + 'a year (or USD 7 a month). No commission on your sales.\n\nAny question, just reply here.\n\n' + name + ', Tapstall' };
+  }
+  const touch = Math.max(0, Math.min(Number(lead.touches) || 0, V2_MAX_TOUCHES - 1));
+  if (touch === 0) {
+    return { subject: subj1, text: `Hi ${biz} team,\n\n${v2Evidence(lead)} I built Tapstall for shops like yours: customers pick from `
+      + 'your menu on one page, pay your own EcoCash, PayShap or bank account, and every order carries a unique amount down to the '
+      + 'cent, so the money that lands identifies the order. No screenshots to argue about.\n\nIt is free for 60 days, then USD 60 a '
+      + 'year. No commission on your sales and no order cap.\n\nWould it help if I sent you the link to try it? Just reply and I will.'
+      + `\n\n${name}, Tapstall\nJacaranda Labs${post ? '\n' + post : ''}\n\n${V2_STOP}` };
+  }
+  if (touch === 1) {
+    return { subject: re(subj1), text: `Hi again,\n\nIn case it is useful, here is the link: ${link}\n\nYour menu on one page, payment `
+      + 'straight to your own account, and an exact amount per order so fake proof of payment stops working. It takes about two '
+      + `minutes to set up and is free for 60 days.\n\n${name}, Tapstall${post ? '\n' + post : ''}\n\n${V2_STOP}` };
+  }
+  return { subject: re(subj1), text: `Last note from me, and thank you for reading. If taking orders on WhatsApp ever starts costing `
+    + `${biz} sales or disputes, your shop page can be live in a few minutes: ${link}\n\nI will not write again.\n\n${name}, Tapstall${post ? '\n' + post : ''}` };
 }

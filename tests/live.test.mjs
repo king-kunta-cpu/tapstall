@@ -4859,7 +4859,11 @@ test('v2.0.0 outreach: the hourly tick sends one gated first touch from the Gmai
     const lead = await env.ORDERS.get('lead:' + out.outreach.to_lead, 'json');
     assert.equal(lead.status, 'contacted');
     assert.equal(lead.last_sender, 'shop.box@gmail.com', 'the follow-up will come from the same box');
-    const u = mailBody(m).match(/(\/u\/[a-z0-9-]+\/[A-Za-z0-9]+)/)[1];
+    assert.match(lead.first_msgid || '', /^<.+@tapstall\.mail>$/, 'T2/T3 thread under it');
+    // outreach v2: the first touch carries no link at all; the one-click unsubscribe rides in the header
+    assert.doesNotMatch(mailBody(m), /https?:\/\/|www\.|\/onboard/);
+    assert.match(mailBody(m), /reply "stop"/);
+    const u = m.mime.match(/^List-Unsubscribe: <https:\/\/[^>\/]+(\/u\/[a-z0-9-]+\/[A-Za-z0-9]+)>/m)[1];
     const view = await call(u);
     assert.match(view.text, /<form method=post>/, 'GET only offers the button');
     assert.equal((await env.ORDERS.get('lead:' + lead.id, 'json')).status, 'contacted');
@@ -5339,4 +5343,46 @@ test('plain http is redirected to https before any route is reached, and HSTS is
   const secure = await w.fetch(new Request('https://tapstall.test/', { method: 'GET' }), env, ctx);
   assert.match(String(secure.headers.get('strict-transport-security') || ''), /max-age=\d{6,}/,
     'HSTS is present, so a browser stops trying http at all');
+});
+
+test('outreach v2: a real reply to the link-free first touch gets the link once, in-thread, from the same box', async () => {
+  const sent = armMail();
+  env.OUTREACH_WINDOW = 'always';
+  env.MAIL_TEST_FETCH = async () => new Response(JSON.stringify({ Status: 0, Answer: [{ type: 15, data: '10 mx.bulawayobakes.co.zw.' }] }));
+  try {
+    const ing = await call('/api/leads/ingest', { method: 'POST', confirm: true, headers: { 'x-tapstall-admin': SECRET }, body: { leads: [
+      { business: 'Bulawayo Bakes', email: 'hello@bulawayobakes.co.zw', phone: '263771230001', source_url: 'https://bulawayobakes.co.zw/order',
+        note: 'WhatsApp to order, EcoCash accepted', country: 'ZW', segment: 'social_merchants', seller_code: '' },
+    ] } });
+    assert.equal(ing.status, 200, ing.text);
+    let id = '';
+    for (const [k, v] of env.ORDERS._map) {
+      if (!k.startsWith('lead:')) continue;
+      const l = JSON.parse(v.value || v);
+      if (l.business === 'Bulawayo Bakes') { l.seller_code = ''; id = l.id; await env.ORDERS.put(k, JSON.stringify(l), { metadata: { s: l.status, e: 1, k: 0, t: 0, p: 9, f: '', ls: '' } }); }
+    }
+    const w = await load();
+    const tick = async () => { const jobs = []; await w.scheduled({ cron: '5 * * * *', scheduledTime: Date.now() }, env, { waitUntil: (p) => jobs.push(p) }); return (await jobs[0]).outreach; };
+    const o1 = await tick();
+    assert.ok(o1.sent >= 1, JSON.stringify(o1));
+    const t1 = sent.find((m) => m.to === 'hello@bulawayobakes.co.zw');
+    assert.ok(t1, 'T1 went to the bakery');
+    assert.doesNotMatch(mailBody(t1), /https?:\/\//);
+    const lead = await env.ORDERS.get('lead:' + id, 'json');
+    assert.equal(lead.touches, 1);
+    const r = await call('/api/leads/act', { method: 'POST', body: { code: 'owner', key: SECRET, id, action: 'replied', sender: lead.last_sender } });
+    assert.equal(r.status, 200, r.text);
+    assert.equal((await env.ORDERS.get('lead:' + id, 'json')).link_owed, true);
+    const before = sent.length;
+    await tick();
+    const lk = sent.slice(before).find((m) => m.to === 'hello@bulawayobakes.co.zw');
+    assert.ok(lk, 'the link answer went out');
+    assert.match(mailBody(lk), /\/onboard/);
+    assert.ok(lk.mime.includes('In-Reply-To: ' + lead.first_msgid), 'in the same thread');
+    assert.equal(lk.from, lead.last_sender, 'from the same box');
+    assert.doesNotMatch(lk.mime, /^List-Unsubscribe/m, 'an answer to their reply, not a cold message');
+    const after = await env.ORDERS.get('lead:' + id, 'json');
+    assert.equal(after.link_owed, false, 'once: nothing is owed any more');
+    assert.equal(after.status, 'replied', 'the conversation is the owner\'s now');
+  } finally { disarmMail(); delete env.OUTREACH_WINDOW; delete env.MAIL_TEST_FETCH; }
 });

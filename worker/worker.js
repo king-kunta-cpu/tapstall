@@ -25,7 +25,7 @@ import {
 } from './rail.js';
 import {
   mailSend, mailDeliver, mailDrain, mailArmed, mailLanes, mailStatus, mailResume, mailRoom, mxOk,
-} from './mail.js';
+  v2Compose, v2Ramp, v2Brake, v2BoxIndex, v2PerTick, v2WeekKey, V2_FOLLOW_DAYS, V2_MAX_TOUCHES } from './mail.js';
 import {
   waInbound, waSigOk, waStep, waTextBody, waReactBody, waBotLink, waMerchantNote, WA_HANDLE_RE,
 } from './wa.js';
@@ -5696,7 +5696,7 @@ async function sellerView(url, env) {
  *  pick falls back to reading documents until the nightly sweep has re-filed it. */
 function leadMeta(l) {
   return { s: String(l.status || ''), e: l.email ? 1 : 0, k: l.seller_code ? 1 : 0, t: Number(l.touches) || 0,
-    p: Number(l.score) || 0, f: String(l.next_follow_at || '').slice(0, 30), ls: String(l.last_sender || '').toLowerCase().slice(0, 80) };
+    p: Number(l.score) || 0, f: String(l.next_follow_at || '').slice(0, 30), ls: String(l.last_sender || '').toLowerCase().slice(0, 80), lo: l.link_owed ? 1 : 0 };
 }
 /** One list, no reads: { rows (id + the metadata fields, listLeads order), legacy: keys without metadata }. */
 async function leadIndex(env) {
@@ -5708,7 +5708,7 @@ async function leadIndex(env) {
       const m = k.metadata;
       if (!m || typeof m.s !== 'string') { legacy.push(k.name); continue; }
       rows.push({ id: String(k.name).slice(5), status: m.s, email: m.e ? 1 : '', seller_code: m.k ? 'x' : '', touches: m.t || 0,
-        score: m.p || 0, next_follow_at: m.f || '', last_sender: m.ls || '' });
+        score: m.p || 0, next_follow_at: m.f || '', last_sender: m.ls || '', link_owed: m.lo ? 1 : 0 });
     }
     cursor = l.list_complete ? null : l.cursor;
   } while (cursor && loops++ < 3);
@@ -5831,6 +5831,10 @@ async function leadsAct(req, env) {
   if (!t.ok) return json({ ok: false, conflict: !!t.conflict, error: t.error, ...(t.actions ? { actions: t.actions } : {}) }, t.conflict ? 409 : 422);
   if (b.note) t.lead.note = String(b.note).slice(0, 300);
   if (b.sender && isEmail(String(b.sender))) t.lead.last_sender = String(b.sender).toLowerCase().slice(0, 80);
+  // outreach v2: a real reply to a link-free first touch is owed the link (the Worker sends it in-thread)
+  if (b.action === 'contacted' && b.msgid && Number(t.lead.touches) === 1) t.lead.first_msgid = String(b.msgid).slice(0, 200);
+  if (b.action === 'replied' && !t.lead.seller_code && Number(t.lead.touches) === 1 && t.lead.first_msgid) t.lead.link_owed = true;
+  if (b.action === 'dnc' && lead.status === 'contacted') await v2Tally(env, b.why === 'bounce' ? 'bounced' : 'stops');
   await env.ORDERS.put('lead:' + id, JSON.stringify(t.lead), { metadata: leadMeta(t.lead) }); quotaNote('writes', 'automation'); memDel('leads:all');
   if (b.action === 'dnc') {
     try {
@@ -6075,42 +6079,15 @@ async function dispatchTick(env) {
   try { await governedPut(env.ORDERS, 'dispatch:last', JSON.stringify(out), null, 'automation'); } catch (e) { void e; }
   return out;
 }
-/* ------------------------------------------------------------ outreach over the Gmail lane (v2.0.0; Gmail since v2.2.0)
- * The Gmail runner (Actions, once a weekday) stays; this is the second voice: the Worker itself
- * sends a first touch or a due follow-up from its Gmail lane, at most one per hourly tick
- * and only while the lane has room after a slot is held back for merchant mail. Weekdays,
- * 07:00–16:59 UTC (09:00–18:59 in Harare/Johannesburg). House leads only (a seller's lead is
- * that seller's voice). Every lead is re-judged by the v2 gate before a byte is sent, the
- * domain must publish a mail server, and every message carries a one-click unsubscribe.
- * A follow-up goes out from the box the first touch came from, so a thread stays one voice. */
-const OUT_FOLLOW_DAYS = [3, 5, 7];
-const OUT_MAX_TOUCHES = OUT_FOLLOW_DAYS.length;
-
+/* ------------------------------------------------------------ outreach over the Gmail lanes (outreach v2, 2026-11-04)
+ * The Worker is the only sender for house leads: two outreach-only lanes (gm1, gm2), each lead pinned to one
+ * box, T1 with no links, the link on reply or at day 7, a last note at day 14, then silence. The Actions
+ * runner reads replies and sends only for sellers' own leads. Weekdays 07:00-16:59 UTC. Every lead is
+ * re-judged by the gate before a first touch, the domain must publish a mail server, and every cold
+ * message carries a one-click unsubscribe header and a "reply stop" line. */
 async function unsubLink(env, lead) {
   const tok = (await sign(capKey(env), 'unsub:' + lead.id)).replace(/[^A-Za-z0-9]/g, '').slice(0, 22);
   return `${String(env.PUBLIC_ORIGIN || PRESS_ORIGIN_FALLBACK).replace(/\/+$/, '')}/u/${lead.id}/${tok}`;
-}
-function outreachCompose(lead, origin, fromName, unsub, postal) {
-  const biz = String(lead.business || '').trim() || 'there';
-  const link = String(origin).replace(/\/+$/, '') + '/onboard';
-  const touch = Math.min(Number(lead.touches) || 0, OUT_MAX_TOUCHES - 1);
-  const sig = new Set(lead.signals || []);
-  const ev = sig.has('whatsapp_selling') ? `I came across ${biz} taking orders on WhatsApp.`
-    : sig.has('payment_friction') ? `I came across ${biz} while looking at how shops here match payments to orders.`
-    : `I came across ${biz} online.`;
-  const foot = `\n\n—\nNot for you? One click and we never write again: ${unsub}` + (postal ? `\n${postal}` : '');
-  const subjects = [`${biz} — orders that identify their own payment`, `Following up — ${biz} on Tapstall`, `Last note from me — ${biz}`];
-  const bodies = [
-    `Hi ${biz} team,\n\n${ev} Tapstall gives a shop like yours one link: customers pick from your menu, pay your own `
-      + `EcoCash/PayShap/bank account, and every order carries a unique amount down to the cent — so the money that lands `
-      + `identifies the order, no screenshots to argue about.\n\nIt is free for 60 days, then USD 60/year (or USD 7/month). `
-      + `No commission on your sales, no order cap.\n\nStart here: ${link}\n\n— ${fromName}, Tapstall\nA reply to this email reaches a person.`,
-    `Hi again,\n\nShort version: your menu on one link, payment straight to your own account, and an exact amount per `
-      + `order so fake proof-of-payment stops working. Free for 60 days:\n${link}\n\n— ${fromName}`,
-    `Hi — last note from me. If order-taking on WhatsApp ever starts costing you sales or disputes, your shop link can be `
-      + `live in about two minutes:\n${link}\n\n— ${fromName}`,
-  ];
-  return { subject: subjects[touch], text: bodies[touch] + foot };
 }
 async function leadPut(env, lead) {
   await env.ORDERS.put('lead:' + lead.id, JSON.stringify(lead), { metadata: leadMeta(lead) }); quotaNote('writes', 'automation'); memDel('leads:all');
@@ -6128,6 +6105,17 @@ async function leadDnc(env, lead, why, by) {
   return next;
 }
 
+async function v2Tally(env, field) {
+  try {
+    const k = v2WeekKey(Date.now());
+    const w = (await env.STORES.get(k, 'json')) || { sent: 0, bounced: 0, stops: 0 };
+    w[field] = (Number(w[field]) || 0) + 1;
+    await env.STORES.put(k, JSON.stringify(w), { expirationTtl: 21 * 86400 });
+  } catch (e) { void e; }
+}
+
+/** Outreach v2 (owner 2026-11-04): link answers first, then due T2/T3 from the lead's own box, then fresh
+ *  link-free T1s spread over the window. Daily = ramp (10/25/50 from 5 Nov) capped by OUTREACH_DAILY. */
 async function outreachTick(env, nowMs) {
   const now = nowMs || Date.now();
   const d = new Date(now), h = d.getUTCHours(), wd = d.getUTCDay();
@@ -6135,48 +6123,69 @@ async function outreachTick(env, nowMs) {
   if (String(env.OUTREACH_WINDOW || '') !== 'always' && (wd === 0 || wd === 6 || h < 7 || h > 16)) return { skipped: 'outside the send window' };
   const lanes = mailLanes(env).filter((l) => l.outreach);
   if (!lanes.length) return { skipped: 'no outreach lane' };
-  // The lane allows one outreach message an hour, so the hour is decided on its first tick; the :25 and
-  // :45 ticks would only re-list the same leads to find the same answer (31 lists a weekday became 10).
+  // decided on the first tick of the hour (one list an hour keeps the KV list budget)
   if (String(env.OUTREACH_WINDOW || '') !== 'always' && d.getUTCMinutes() >= 20) return { skipped: 'outreach is decided on the first tick of the hour' };
-  if (!await mailRoom(env, 'outreach')) return { skipped: 'lane has no outreach room this hour' };   // before the lead list: a full hour costs no reads
-  const boxes = new Set(lanes.map((l) => l.user.toLowerCase()));
+  if (!await mailRoom(env, 'outreach')) return { skipped: 'lane has no outreach room this hour' };
+  const users = lanes.map((l) => l.user.toLowerCase());
   const nowIso = d.toISOString();
-  // One list with metadata picks the candidates; only the (at most four) checked leads are read.
-  // Keys from before v2.1.0 carry no metadata, and while any exist the old full read is the honest path.
+  const dayKey = 'outreach:day:' + nowIso.slice(0, 10);
+  let sentToday = Number(await env.STORES.get(dayKey).catch(() => 0)) || 0;
+  const daily = Math.min(Number(env.OUTREACH_DAILY) || 50, v2Ramp(now, env.OUTREACH_START || ''));
+  const wkKey = v2WeekKey(now);
+  const wk = (await env.STORES.get(wkKey, 'json').catch(() => null)) || { sent: 0, bounced: 0, stops: 0 };
+  const brake = v2Brake(wk);
+  const budget = v2PerTick(daily - sentToday, h, 16);
   const idx = await leadIndex(env);
   const rows = idx.legacy.length ? await listLeads(env, { limit: 2000 }) : idx.rows;
-  const follow = rows.filter((l) => l.status === 'contacted' && !l.seller_code && l.email && (Number(l.touches) || 0) < OUT_MAX_TOUCHES
-    && l.next_follow_at && l.next_follow_at <= nowIso && boxes.has(String(l.last_sender || '').toLowerCase()));
-  const first = rows.filter((l) => l.status === 'queued' && !l.seller_code && l.email);
-  const out = { considered: follow.length + first.length, sent: 0, held: 0, dnc: 0 };
-  let checks = 0;
-  for (const lead0 of [...follow, ...first]) {
-    if (checks++ >= 4) break;                         // each check may cost a DNS fetch + a write
+  const house = rows.filter((l) => !l.seller_code && l.email);
+  const links = house.filter((l) => l.status === 'replied' && l.link_owed);
+  const follow = house.filter((l) => l.status === 'contacted' && (Number(l.touches) || 0) < V2_MAX_TOUCHES
+    && l.next_follow_at && l.next_follow_at <= nowIso && users.includes(String(l.last_sender || '').toLowerCase()));
+  const first = brake ? [] : house.filter((l) => l.status === 'queued');
+  const out = { considered: links.length + follow.length + first.length, sent: 0, held: 0, dnc: 0, daily, sent_today: sentToday, budget };
+  if (brake) out.brake = brake;
+  const origin = env.PUBLIC_ORIGIN || PRESS_ORIGIN_FALLBACK;
+  const fromName = String(env.OUTREACH_FROM_NAME || 'Courage');
+  const postal = String(env.POSTAL_ADDRESS || '');
+  let checks = 0, counted = 0, wkDirty = false;
+  for (const lead0 of [...links, ...follow, ...first]) {
+    const kind = links.includes(lead0) ? 'link' : follow.includes(lead0) ? 'follow' : 'first';
+    if (kind !== 'link' && counted >= budget) break;
+    if (checks++ >= budget + 6) break;                // each check may cost a DNS fetch + a write
     const lead = await env.ORDERS.get('lead:' + lead0.id, 'json').catch(() => null);   // fresh: the runner may have moved it
-    if (!lead || !lead.id) continue;                  // gone, or an index row without its document
-    if (!['queued', 'contacted'].includes(lead.status)) continue;
-    const junk = leadJunkReason(lead);
-    const email = leadEmailFor(lead.email, lead.source_url, lead.website);
-    if (junk || !email) {
-      await leadPut(env, { ...lead, status: 'research_hold', junk: junk || 'address does not belong to the business', updated_at: nowIso });
-      out.held++; continue;
+    if (!lead || !lead.id) continue;
+    if (kind === 'link' ? !(lead.status === 'replied' && lead.link_owed) : lead.status !== (kind === 'first' ? 'queued' : 'contacted')) continue;
+    const email = kind === 'first' ? leadEmailFor(lead.email, lead.source_url, lead.website) : String(lead.email || '').toLowerCase();
+    if (kind === 'first') {
+      const junk = leadJunkReason(lead);
+      if (junk || !email) { await leadPut(env, { ...lead, status: 'research_hold', junk: junk || 'address does not belong to the business', updated_at: nowIso }); out.held++; continue; }
     }
+    if (!email) continue;
     if (await env.STORES.get('Lead:' + email).catch(() => null)) { await leadDnc(env, lead, 'on the do-not-contact ledger', 'ledger'); out.dnc++; continue; }
-    if (!await mxOk(email.split('@')[1], env.MAIL_TEST_FETCH)) { await leadDnc(env, lead, 'domain publishes no mail server', 'mx'); out.dnc++; continue; }
-    const origin = env.PUBLIC_ORIGIN || PRESS_ORIGIN_FALLBACK;
-    const unsub = await unsubLink(env, lead);
-    const m = outreachCompose(lead, origin, String(env.OUTREACH_FROM_NAME || 'Courage'), unsub, String(env.POSTAL_ADDRESS || ''));
-    const r = await mailSend(env, { to: email, subject: m.subject, text: m.text, kind: 'outreach', unsubscribe: { url: unsub } }, { now });
+    if (kind === 'first' && !await mxOk(email.split('@')[1], env.MAIL_TEST_FETCH)) { await leadDnc(env, lead, 'domain publishes no mail server', 'mx'); out.dnc++; continue; }
+    const box = kind === 'first' ? lanes[v2BoxIndex(email, lanes.length)].user : String(lead.last_sender || '');
+    const m = v2Compose(lead, { origin, fromName, postal, kind: kind === 'link' ? 'link' : '' });
+    const unsub = kind === 'link' ? null : { url: await unsubLink(env, lead) };
+    const r = await mailSend(env, { to: email, subject: m.subject, text: m.text, kind: 'outreach', fromName: fromName + ', Tapstall',
+      laneUser: box, inReplyTo: kind === 'first' ? '' : (lead.first_msgid || ''), ...(unsub ? { unsubscribe: unsub } : {}) }, { now });
     if (r.sent) {
-      const lane = lanes.find((l) => l.id === r.lane);
-      const t = leadTransition(lead, 'contacted', 'owner', { follow_days: OUT_FOLLOW_DAYS[Math.min(Number(lead.touches) || 0, OUT_MAX_TOUCHES - 1)], now });
-      if (t.ok) { t.lead.last_sender = lane ? lane.user.toLowerCase() : ''; await leadPut(env, t.lead); }
-      out.sent++; out.to_lead = lead.id;
-      break;                                           // one per tick, always
+      if (kind === 'link') await leadPut(env, { ...lead, link_owed: false, updated_at: nowIso });
+      else {
+        const t = leadTransition(lead, 'contacted', 'owner', { follow_days: V2_FOLLOW_DAYS[Math.min(Number(lead.touches) || 0, V2_MAX_TOUCHES - 1)], now });
+        if (t.ok) { t.lead.last_sender = String(r.user || box).toLowerCase(); if (kind === 'first') t.lead.first_msgid = r.messageId; await leadPut(env, t.lead); }
+        counted++; sentToday++; wk.sent = (Number(wk.sent) || 0) + 1; wkDirty = true;
+        out.to_lead = lead.id;
+      }
+      out.sent++;
+      continue;
     }
-    if (r.permanent) { await leadDnc(env, lead, 'refused at send: ' + String(r.why).slice(0, 60), 'bounce'); out.dnc++; continue; }
-    out.why = r.why; break;                            // lane full or down: try next tick
+    if (r.permanent) { await leadDnc(env, lead, 'refused at send: ' + String(r.why).slice(0, 60), 'bounce'); out.dnc++; wk.bounced = (Number(wk.bounced) || 0) + 1; wkDirty = true; continue; }
+    if (r.why === 'lanes_full') continue;              // this lead's box is full this hour; the other box may not be
+    out.why = r.why; break;
   }
+  if (counted) { try { await env.STORES.put(dayKey, String(sentToday), { expirationTtl: 3 * 86400 }); } catch (e) { void e; } }
+  if (wkDirty) { try { await env.STORES.put(wkKey, JSON.stringify(wk), { expirationTtl: 21 * 86400 }); } catch (e) { void e; } }
+  out.sent_today = sentToday;
   return out;
 }
 
@@ -6194,7 +6203,7 @@ async function unsubRoute(req, url, env) {
     if (lead && lead.status === 'dnc') return page('You are already unsubscribed. We will not write again.');
     return page('Stop all emails from Tapstall to this business?', '<form method=post><button style="font:inherit;padding:.7rem 1.2rem">Unsubscribe</button></form>');
   }
-  if (lead && lead.status !== 'dnc') await leadDnc(env, lead, 'unsubscribed by link', 'unsubscribe');
+  if (lead && lead.status !== 'dnc') { if (lead.status === 'contacted') await v2Tally(env, 'stops'); await leadDnc(env, lead, 'unsubscribed by link', 'unsubscribe'); }
   return page('Done. You will not hear from us again.');
 }
 

@@ -48,16 +48,20 @@ enabled = false
 # v2.2.0: the Gmail lane (docs/GMAIL.md). It reads the GMAIL_OWNER_USER / GMAIL_OWNER_APP_PASSWORD Worker
 # secrets, the same box the outreach runner sends from, so replies land in one inbox. 6/hour leaves the
 # rest of Gmail's ~500/day to the runner and to manual sending (a gmail lane is clamped to 18/hour).
-# 2026-11-02 owner: Gmail outreach paused in every business until the owner resumes it. The lane keeps
-# all merchant/transactional mail (PIN resets, receipts, order notices) but takes no outreach, and
-# OUTREACH_LV=off also stops the runner dispatch. To resume: drop "outreach":false and set OUTREACH_LV=on.
-mailboxes = os.environ.get("MAILBOXES", "").strip() or '[{"id":"owner","provider":"gmail","fromName":"Tapstall","hourly":6,"outreach":false}]'
-outreach_lv = os.environ.get("OUTREACH_LV", "").strip() or "off"
+# 2026-11-04 owner: outreach v2 ON. The owner lane keeps merchant/transactional mail only; outreach goes
+# out on two outreach-only lanes, gm1 (MAILBOX_GM1_*) and gm2 (MAILBOX_GM2_*), the two personal Gmail boxes,
+# at most 6 an hour each (one slot kept back), the day capped by the ramp 10/25/50 (worker/mail.js, outreach v2).
+mailboxes = os.environ.get("MAILBOXES", "").strip() or ('[{"id":"owner","provider":"gmail","fromName":"Tapstall","hourly":6,"outreach":false},'
+    '{"id":"gm1","provider":"gmail","fromName":"Tapstall","hourly":6},{"id":"gm2","provider":"gmail","fromName":"Tapstall","hourly":6}]')
+outreach_lv = os.environ.get("OUTREACH_LV", "").strip() or "on"
+postal = os.environ.get("POSTAL_ADDRESS", "").strip() or "Jacaranda Labs, P.O. Box 900, Bulawayo, Zimbabwe"
 out += "\n[vars]\n"
 if origin:
     out += f'PUBLIC_ORIGIN = "{origin}"\n'
 out += "MAILBOXES = '" + mailboxes.replace("'", "") + "'\n"
 out += 'OUTREACH_LV = "' + outreach_lv.replace('"', '') + '"\n'
+out += 'OUTREACH_DAILY = "50"\n'
+out += 'POSTAL_ADDRESS = "' + postal.replace('"', '') + '"\n'
 
 open("wrangler.toml", "w").write(out)
 print("wrangler.toml regenerated for %s" % name)

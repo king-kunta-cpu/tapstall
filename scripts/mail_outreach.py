@@ -47,7 +47,7 @@ from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 
 ORIGIN_DEFAULT = "https://tapstall.zlnew.workers.dev"
-TOUCH_FOLLOW_DAYS = [3, 5, 7]
+TOUCH_FOLLOW_DAYS = [7, 7, 7]   # outreach v2 (2026-11-04): T1 no link, T2 day 7 (link), T3 day 14, then stop
 MAX_TOUCHES = len(TOUCH_FOLLOW_DAYS)
 STOP_RE = re.compile(r"\b(stop|unsubscribe|remove me|opt ?out|leave me alone|do not contact)\b", re.I)
 SYSTEM_FROM_RE = re.compile(r"(mailer-daemon|postmaster|no-?reply|donotreply|notifications?)@", re.I)
@@ -55,6 +55,7 @@ BOUNCE_FROM_RE = re.compile(r"(mailer-daemon|postmaster)@", re.I)
 # v2.0.0: where the person's own words end. Everything below is the quoted original, which says
 # "reply STOP" — reading it as their answer marked every polite reply do-not-contact.
 QUOTE_START_RE = re.compile(r"^(>|On .{0,200}wrote:\s*$|-{2,} ?Original Message|From: .+|Sent from my |_{5,})", re.I | re.M)
+AUTO_RE = re.compile(r"\b(out of (the )?office|automatic reply|auto-?reply|autoreply|away from (the |my )?(office|desk)|on (annual |parental |maternity )?leave|currently away)\b", re.I)
 ADDR_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 
 
@@ -113,12 +114,16 @@ def fetch_leads(origin, secret):
         return (json.loads(r.read()).get("leads") or [])
 
 
-def act(origin, secret, lead_id, action, seller_code="", sender="", follow_days=None):
+def act(origin, secret, lead_id, action, seller_code="", sender="", follow_days=None, why="", msgid=""):
     payload = {"code": "owner", "key": secret, "id": lead_id, "action": action}
     if seller_code:
         payload["as_seller"] = seller_code
     if sender:
         payload["sender"] = sender
+    if why:
+        payload["why"] = why
+    if msgid:
+        payload["msgid"] = msgid
     if follow_days:
         payload["follow_days"] = follow_days
     return api(origin, secret, "/api/leads/act", payload)
@@ -151,36 +156,36 @@ def evidence_line(lead):
     return f"I came across {biz} online."
 
 
-def compose(lead, origin, from_name, unsub=""):
+def compose(lead, origin, from_name, unsub="", kind=""):
+    """Outreach v2: T1 carries NO link (the one-click unsubscribe is only in the List-Unsubscribe header);
+    T2 (day 7) and T3 (day 14) carry the link; kind="link" is the answer to a real reply."""
     biz = lead.get("business") or "there"
     code = lead.get("seller_code") or ""
     link = origin.rstrip("/") + (("/r/" + code) if code else "/onboard")
-    touch = min(int(lead.get("touches") or 0), MAX_TOUCHES - 1)
-    subjects = [
-        f"{biz} — orders that identify their own payment",
-        f"Following up — {biz} on Tapstall",
-        f"Last note from me — {biz}",
-    ]
-    bodies = [
-        (f"Hi {biz} team,\n\n{evidence_line(lead)} Tapstall gives a shop like yours one "
-         "link: customers pick from your menu, pay your own EcoCash/PayShap/bank account, and every "
-         "order carries a unique amount down to the cent — so the money that lands identifies the "
-         "order, no screenshots to argue about.\n\nIt is free for 60 days, then USD 60/year "
-         "(or USD 7/month). No commission on your sales, no order cap.\n\n"
-         f"Start here: {link}\n\n— {from_name}, Tapstall\n"
-         "A reply to this email reaches a person."),
-        (f"Hi again,\n\nShort version: your menu on one link, payment straight to your own "
-         "account, and an exact amount per order so fake proof-of-payment stops working. "
-         f"Free for 60 days:\n{link}\n\n— {from_name}"),
-        (f"Hi — last note from me. If order-taking on WhatsApp ever starts costing you sales "
-         f"or disputes, your shop link can be live in about two minutes:\n{link}\n\n— {from_name}"),
-    ]
-    foot = ("\n\n—\nNot for you? One click and we never write again: " + unsub) if unsub else "\n\nReply STOP and we will not write again."
     postal = os.environ.get("POSTAL_ADDRESS", "").strip()
-    return subjects[touch], bodies[touch] + foot + (("\n" + postal) if postal else "")
+    post = ("\n" + postal) if postal else ""
+    stop = '\n\nIf you would rather not hear from me again, just reply "stop".'
+    subj = f"{biz}: orders that identify their own payment"
+    if kind == "link":
+        return "Re: " + subj, (f"Thank you for writing back. Here is the link: {link}\n\nYour menu on one page, payment straight "
+                               "to your own account, and an exact amount per order so the payment tells you which order it is. Free for "
+                               f"60 days, then USD 60 a year. No commission on your sales.\n\nAny question, just reply here.\n\n{from_name}")
+    touch = min(int(lead.get("touches") or 0), MAX_TOUCHES - 1)
+    if touch == 0:
+        return subj, (f"Hi {biz} team,\n\n{evidence_line(lead)} Tapstall gives a shop like yours one page: customers pick from "
+                      "your menu, pay your own EcoCash, PayShap or bank account, and every order carries a unique amount down to the "
+                      "cent, so the money that lands identifies the order. No screenshots to argue about.\n\nIt is free for 60 days, "
+                      "then USD 60 a year. No commission on your sales and no order cap.\n\nWould it help if I sent you the link to "
+                      f"try it? Just reply and I will.\n\n{from_name}{post}{stop}")
+    if touch == 1:
+        return "Re: " + subj, (f"Hi again,\n\nIn case it is useful, here is the link: {link}\n\nYour menu on one page, payment "
+                               "straight to your own account, and an exact amount per order so fake proof of payment stops working. "
+                               f"Free for 60 days.\n\n{from_name}{post}{stop}")
+    return "Re: " + subj, (f"Last note from me, and thank you for reading. If taking orders on WhatsApp ever starts costing {biz} "
+                           f"sales or disputes, your shop page can be live in a few minutes: {link}\n\nI will not write again.\n\n{from_name}{post}")
 
 
-def send_smtp(mailbox, to_addr, subject, body, from_name, unsub=""):
+def send_smtp(mailbox, to_addr, subject, body, from_name, unsub="", in_reply_to=""):
     if mailbox.get("smtp") is False:
         raise RuntimeError("poll-only mailbox")     # a Worker-only lane is the Worker's to send on
     msg = EmailMessage()
@@ -189,6 +194,9 @@ def send_smtp(mailbox, to_addr, subject, body, from_name, unsub=""):
     msg["Reply-To"] = mailbox["user"]
     msg["Subject"] = subject
     msg["Message-ID"] = email.utils.make_msgid(domain=mailbox["user"].split("@")[-1])
+    if in_reply_to:
+        msg["In-Reply-To"] = in_reply_to
+        msg["References"] = in_reply_to
     if unsub:
         msg["List-Unsubscribe"] = f"<{unsub}>"
         msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
@@ -197,13 +205,17 @@ def send_smtp(mailbox, to_addr, subject, body, from_name, unsub=""):
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30, context=ssl.create_default_context()) as s:
         s.login(mailbox["user"], password)
         s.send_message(msg)
+    return msg["Message-ID"]
 
 
 def classify_reply(from_addr, text):
     if SYSTEM_FROM_RE.search(from_addr or ""):
         return "ignore"
-    if STOP_RE.search(own_words(text)):
+    words = own_words(text)
+    if STOP_RE.search(words):
         return "dnc"
+    if AUTO_RE.search(words):
+        return "ignore"   # out-of-office: the sequence carries on
     return "replied"   # any human answer stops the machine; a person takes it from here
 
 
@@ -262,7 +274,7 @@ def poll_mailbox(origin, secret, mailbox, leads_by_email, seller_code, counts, d
                 for lead in hit:
                     if not dry:
                         try:
-                            act(origin, secret, lead["id"], "dnc", seller_code=lead.get("seller_code") or seller_code, sender=mailbox["user"])
+                            act(origin, secret, lead["id"], "dnc", seller_code=lead.get("seller_code") or seller_code, sender=mailbox["user"], why="bounce")
                         except Exception:
                             counts["act_errors"] = counts.get("act_errors", 0) + 1
                             continue
@@ -271,6 +283,8 @@ def poll_mailbox(origin, secret, mailbox, leads_by_email, seller_code, counts, d
                 continue
             lead = leads_by_email.get(from_addr)
             kind = classify_reply(from_addr, text)
+            if str(msg.get("Auto-Submitted") or "").lower().startswith("auto-replied"):
+                kind = "ignore"
             if lead and kind in ("dnc", "replied"):
                 if not dry:
                     try:
@@ -281,6 +295,17 @@ def poll_mailbox(origin, secret, mailbox, leads_by_email, seller_code, counts, d
                         continue
                 leads_by_email.pop(from_addr, None)
                 counts["replies_" + kind] = counts.get("replies_" + kind, 0) + 1
+                # v2: a seller's lead that replied to the link-free first touch gets the link, once, in-thread,
+                # from the seller's own box (house leads: the Worker sends it, flagged by the "replied" act)
+                if (kind == "replied" and not dry and lead.get("seller_code") and int(lead.get("touches") or 0) == 1
+                        and mailbox.get("smtp") is not False):
+                    try:
+                        subj, body = compose(lead, origin, os.environ.get("OUTREACH_FROM_NAME", "Tapstall"), kind="link")
+                        send_smtp(mailbox, from_addr, subj, body, os.environ.get("OUTREACH_FROM_NAME", "Tapstall"),
+                                  in_reply_to=lead.get("first_msgid") or "")
+                        counts["link_replies"] = counts.get("link_replies", 0) + 1
+                    except Exception:
+                        counts["link_reply_errors"] = counts.get("link_reply_errors", 0) + 1
     finally:
         try:
             imap.logout()
@@ -326,7 +351,9 @@ def main():
             if lead.get("status") in ("queued", "contacted") and not lead.get("email") and lead.get("phone"):
                 counts["whatsapp_only_waiting"] += 1
             code = lead.get("seller_code") or ""
-            box = mailbox_for.get(code) or (owner_box if (not code or fallback) else None)
+            if not code:
+                continue   # outreach v2: house leads are the Worker's (two boxes, drip, threaded); the runner only reads their replies
+            box = mailbox_for.get(code) or (owner_box if fallback else None)
             if not eligible(lead, now_iso, box["user"] if box else ""):
                 continue
             if not box:
@@ -348,7 +375,8 @@ def main():
                     counts["refused_at_claim"] = counts.get("refused_at_claim", 0) + 1
                     continue
                 try:
-                    send_smtp(box, lead["email"], subject, body, a.from_name, unsub)
+                    mid = send_smtp(box, lead["email"], subject, body, a.from_name, unsub,
+                                    in_reply_to=(lead.get("first_msgid") or "") if touches else "")
                 except smtplib.SMTPRecipientsRefused:
                     try:
                         act(a.origin, secret, lead["id"], "dnc", seller_code=code, sender=box["user"])
@@ -365,7 +393,8 @@ def main():
                         pass
                     continue
                 act(a.origin, secret, lead["id"], "contacted", seller_code=code,
-                    sender=box["user"], follow_days=TOUCH_FOLLOW_DAYS[min(touches, MAX_TOUCHES - 1)])
+                    sender=box["user"], follow_days=TOUCH_FOLLOW_DAYS[min(touches, MAX_TOUCHES - 1)],
+                    msgid=mid if not touches else "")
             counts["sent"] += 1
             sent_per_box[box["user"]] = sent_per_box.get(box["user"], 0) + 1
 
@@ -401,7 +430,13 @@ def selftest(a):
     sample = {"id": "ld-test", "business": "Kota Queen", "email": "hi@example.com", "status": "queued",
               "signals": ["email", "whatsapp_selling", "payment_friction"], "seller_code": "tino-sells", "touches": 0}
     subject, body = compose(sample, a.origin, "Tino (Tapstall)")
-    assert "Kota Queen" in subject and "/r/tino-sells" in body and "STOP" in body
+    assert "Kota Queen" in subject and 'reply "stop"' in body
+    assert "http" not in body and "/r/" not in body and "www." not in body, "v2: the first touch carries no link"
+    _, b2 = compose({**sample, "touches": 1}, a.origin, "Tino")
+    assert "/r/tino-sells" in b2
+    _, bl = compose({**sample, "touches": 1}, a.origin, "Tino", kind="link")
+    assert "/r/tino-sells" in bl
+    assert classify_reply("a@b.com", "Automatic reply: I am out of the office until Monday") == "ignore"
     assert eligible(sample, "2999-01-01T00:00:00+00:00")
     assert not eligible({**sample, "status": "dnc"}, "2999-01-01T00:00:00+00:00")
     assert classify_reply("a@b.com", "Please stop emailing us") == "dnc"
@@ -422,7 +457,7 @@ def selftest(a):
     assert re.match(r"^https://t\.example/u/ld-test/[A-Za-z0-9]{22}$", u), u
     for t in range(3):
         _, b = compose({**sample, "touches": t}, a.origin, "Tino", u)
-        assert u in b
+        assert u not in b, "v2: the unsubscribe URL rides in the List-Unsubscribe header, not the body"
     import email as _e
     rep = _e.message_from_string("From: mailer-daemon@googlemail.com\nX-Failed-Recipients: Gone@Shop.co.zw\n\nfailed")
     assert bounced_addresses(rep, "failed") == {"gone@shop.co.zw"}
