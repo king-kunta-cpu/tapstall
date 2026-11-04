@@ -15,7 +15,7 @@ SOFT = re.compile(r"(mailbox (is |was )?full|inbox (is |was )?full|over (its |th
 GONE = re.compile(r"(no longer (with|at|employed|working|part of)|(has|have) left (the |our )?(company|organi[sz]ation|firm|business|team)|(this |the |my )?(e-?mail|mail|address|mailbox|inbox|account)( address)? (is |has been |was )?(no longer|not) (in use|monitored|active|valid|available|checked|being (monitored|checked|used))|(account|mailbox|address|inbox|e-?mail) (is |has been |was )?(deactivated|disabled|closed|discontinued|retired|suspended)|\bnot (being )?monitored\b|\bunmonitored\b|no longer (monitored|in use|active|checked|in operation))", re.I)
 AUTO = re.compile(r"\b(out of (the )?office|automatic reply|auto-?reply|autoreply|auto-?response|away from (the |my )?(office|desk)|on (annual |parental |maternity |paternity |sick )?leave|currently (away|travel+ing|out)|limited access to (e-?mail|my e-?mail)|i am away|i'?m away|back in the office on|will (respond|reply|get back to you) (to your (e-?mail|message) )?(as soon as|when|on my return)|thank you for (your (e-?mail|message)|contacting)[^.]{0,60}(we|our team) will|this is an automated)\b", re.I)
 AUTO_SUBJECT = re.compile(r"^(auto(matic)?[ -]?(reply|response)|out of (the )?office|ooo\b|away:|abwesenheit|r[ée]ponse automatique|respuesta autom)", re.I)
-STOP_PHRASE = re.compile(r"\b(unsubscribe|remove me|take me off|opt(ed)? ?out|not interested|no,? thanks|no thank you|stop (emailing|writing|contacting|sending|messaging)|do not (email|contact|write|message)|don'?t (email|contact|write|message)|leave (me|us) alone|please stop|stop it)\b", re.I)
+STOP_PHRASE = re.compile(r"\b(unsubscribe|remove me|take me off|opt(ed)? ?out|not interested|no,? thanks|no thank you|stop (emailing|writing|contacting|sending|messaging)|do not (email|contact|write|message)|don'?t (email|contact|write|message)|leave (me|us) alone|please stop|stop it|remove (us|me|our (address|e-?mail|details))( from)?)\b", re.I)
 _QUOTE = [re.compile(p, re.I) for p in (r"^\s*>", r"^\s*On .{4,200}wrote:\s*$", r"^\s*On .{4,200}\d{4}.*<[^>]+@", r"^\s*-- ?$", r"^-{2,}\s*(original message|forwarded message)",
                                          r"^\s*(from|sent|von|de):\s", r"^\s*sent from my ", r"^_{5,}")]
 
@@ -29,6 +29,16 @@ def own_words(text: str) -> str:
     return "\n".join(out).strip()
 
 
+def _stop_phrase(w: str) -> bool:
+    """A stop phrase, unless negated: "don't stop emailing us" / "never stop sending" are compliments."""
+    for m in STOP_PHRASE.finditer(w):
+        before = w[max(0, m.start() - 16):m.start()]
+        if m.group(0).lower().startswith("stop") and re.search(r"(don'?t|do not|never|n't)\s+$", before, re.I):
+            continue
+        return True
+    return False
+
+
 def is_stop(words: str) -> bool:
     w = str(words or "").strip()
     if not w:
@@ -37,7 +47,7 @@ def is_stop(words: str) -> bool:
         return True
     if re.match(r"^\W*(no|nope|nah)\b", w, re.I) and len(w) <= 60 and not GONE.search(w) and not SOFT.search(w):
         return True
-    return bool(STOP_PHRASE.search(w[:600]))
+    return _stop_phrase(w[:600])
 
 
 def _h(headers, name: str) -> str:
@@ -80,6 +90,9 @@ def classify_inbound(from_addr: str = "", subject: str = "", text: str = "", hea
         return "soft", "mailbox full / unavailable"
     if auto_hdr or AUTO_SUBJECT.search(s):
         return "auto", "automatic reply"
+    bare = re.sub(r"^((re|fwd?|aw|sv)\s*:\s*)+", "", s, flags=re.I).strip()
+    if re.match(r"^\W*(stop|unsubscribe|remove me|opt ?out)\W*$", bare, re.I):
+        return "stop", "asked not to be contacted"
     if is_stop(words):
         return "stop", "asked not to be contacted"
     if AUTO.search(head):
