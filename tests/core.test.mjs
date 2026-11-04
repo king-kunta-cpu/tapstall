@@ -1881,3 +1881,36 @@ test('2026-11-01 budget: the lead hunt is dispatched Mon/Wed/Fri by default; the
   assert.deepEqual(C.leadsHuntDays(''), [1, 3, 5], 'an empty setting is the default, never "no hunts"');
   assert.deepEqual(C.leadsHuntDays('mon,9'), [1, 3, 5], 'unusable values fall back to the default');
 });
+
+/* ---------------------------------------------------------------- v2.4.0 per-post cards */
+import { cardKeyFor, cardSpecFor, cardApply, CARD_KEY_RE } from '../worker/core.js';
+{
+  const stock = { id: 'x1', channel: 'bluesky', media_kind: 'image', image: 'https://king-kunta-cpu.github.io/tapstall/brand/cards/shop-math.png',
+    text: 'Know the rail cost before you quote. Fees are a pricing decision, not a month-end surprise. https://tapstall.zlnew.workers.dev/fees #smallbusiness' };
+  test('cards: a stock topic card names a card drawn from the post itself', () => {
+    const s = cardSpecFor(stock);
+    assert.match(s.key, CARD_KEY_RE);
+    assert.equal(s.kicker, 'SHOP MATH');
+    assert.equal(s.headline, 'Know the rail cost before you quote.');
+    assert.equal(s.body, 'Fees are a pricing decision, not a month-end surprise.');   // no links, no hashtags on the picture
+    assert.equal(cardSpecFor({ ...stock }).key, s.key, 'stable: the same words are the same card');
+    assert.notEqual(cardSpecFor({ ...stock, text: stock.text + ' More.' }).key, s.key);
+    assert.equal(cardKeyFor('a', 'b').length, 17);
+  });
+  test('cards: a shop photo or the motion loop is never replaced', () => {
+    assert.equal(cardSpecFor({ ...stock, image: 'https://tapstall.zlnew.workers.dev/img/shop/abc.jpg' }), null);
+    assert.equal(cardSpecFor({ ...stock, media_kind: 'video' }), null);
+    assert.equal(cardSpecFor({ ...stock, text: 'tiny' }), null);
+  });
+  test('cards: swapped in only once drawn, otherwise the topic card stays and the card is wanted', () => {
+    const before = cardApply(stock, {}, 'https://t.test');
+    assert.equal(before.item, stock);
+    assert.ok(before.want && before.want.key);
+    const after = cardApply(stock, { [before.want.key]: 1 }, 'https://t.test/');
+    assert.equal(after.want, null);
+    assert.equal(after.item.image, 'https://t.test/m/' + before.want.key + '.png');
+    assert.equal(after.item.id, stock.id, 'same id, so the duplicate guard is unchanged');
+    assert.equal(after.item.media_w, 1200);
+    assert.match(after.item.alt, /^Know the rail cost/);
+  });
+}

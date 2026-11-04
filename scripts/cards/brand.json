@@ -1,0 +1,33 @@
+{
+  "name": "Tapstall",
+  "tagline": "WhatsApp orders, paid properly.",
+  "url": "tapstall.zlnew.workers.dev",
+  "footer_right": "No commission on your sales",
+  "footer_right_short": "No commission",
+  "logo": "logo.png",
+  "font": "DejaVuSans.ttf",
+  "font_bold": "DejaVuSans-Bold.ttf",
+  "palettes": [
+    {
+      "bg": "#0b1115",
+      "bg2": "#0d3b26",
+      "ink": "#ffffff",
+      "mut": "#b9c9c0",
+      "acc": "#fbb32a"
+    },
+    {
+      "bg": "#0b3a26",
+      "bg2": "#0f5134",
+      "ink": "#ffffff",
+      "mut": "#bfd6c9",
+      "acc": "#fbb32a"
+    },
+    {
+      "bg": "#10161c",
+      "bg2": "#1c2a24",
+      "ink": "#f7f7f2",
+      "mut": "#b4bfb8",
+      "acc": "#4ade80"
+    }
+  ]
+}

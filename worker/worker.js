@@ -63,9 +63,10 @@ import {
   QUOTA_LIMITS, quotaAllows, quotaPriorityForKey, storeMeta, storeMetaAction, suspendDecision, SUSPEND_GRACE_DAYS, emailHash,
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
   leadsHuntToday,
+  cardApply, CARD_KEY_RE,
 } from './core.js';
 
-const VERSION = '2.3.2';
+const VERSION = '2.4.0';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
@@ -426,6 +427,9 @@ async function route(req, url, env, ctx) {
   if (p === '/api/mesh/press' && req.method === 'POST') return meshPressSet(req, env);
   if (p === '/api/press/accounts' && req.method === 'POST') return pressAccounts(req, env);
   if (p === '/api/press/run' && req.method === 'POST') return pressRun(req, env);
+  if (p === '/api/press/cards/wanted' && req.method === 'GET') return cardsWantedView(req, env);
+  if (p.startsWith('/api/press/cards/') && req.method === 'PUT') return cardsPut(req, env, p.slice('/api/press/cards/'.length));
+  if (p.startsWith('/m/') && p.endsWith('.png') && (req.method === 'GET' || req.method === 'HEAD')) return cardServe(env, p.slice(3, -4));
   if (p === '/api/mesh/publish' && req.method === 'POST') return meshPublish(req, env);
   // v1.0.0: sellers — the people who sell Tapstall. A tracked link attributes a shop to the
   // seller whose link brought it, once, at birth; the seller's own view is read-only and carries
@@ -3695,6 +3699,9 @@ async function runPress(env, origin, opt) {
   const reg = await pressRegistry(env);
   const only = o.id ? [String(o.id).toLowerCase()] : null;
   const out = [];
+  // v2.4.0 per-post cards: one read of the drawn-card index per run, not per item
+  const cardIndex = await env.ORDERS.get('cards:index', 'json').catch(() => null) || {};
+  const cardWants = {};
   for (const id of (only || Object.keys(reg))) {
     const e = reg[id];
     if (!e) { out.push({ id, ok: false, error: 'not registered' }); continue; }
@@ -3741,7 +3748,10 @@ async function runPress(env, origin, opt) {
     // being refilled and drained every twenty minutes
     const fresh = merged.items.filter((it) => !contentPosted(seenLog, contentPostKey(it), { now: Date.now() }));
     const settledEarlier = merged.items.length - fresh.length;
-    const flush = await meshPressFlush(fresh, press, { dry: dry, now: Date.now(), posted: seenLog });
+    // the queue keeps the item as composed; only the copy being sent carries the drawn card (ids, and so the
+    // duplicate guard, are unchanged)
+    const toSend = fresh.map((it) => { const c = cardApply(it, cardIndex, origin); if (c.want) cardWants[c.want.key] = c.want; return c.item; });
+    const flush = await meshPressFlush(toSend, press, { dry: dry, now: Date.now(), posted: seenLog });
     const settled = new Set(flush.results.filter((r) => r.status === 'sent' || r.status === 'duplicate').map((r) => r.id));
     const keptItems = fresh.filter((i) => !settled.has(i.id));
     const hadQueueDoc = Array.isArray(prevQ.items);
@@ -3765,9 +3775,80 @@ async function runPress(env, origin, opt) {
       sent: flush.sent, waiting: flush.waiting, duplicates: (flush.duplicates || 0) + settledEarlier,
       expired_slots: expiredQ.expired.length, token_env: e.token_env, token_present: !!press.buffer_token,
       results: flush.results.map((r) => ({ channel: r.channel, status: r.status, due: r.due, err: r.err || r.note || '' })),
-      material: plan.source, fallback_from: plan.fallback_from || '', rail_health: meshRailHealth(ledger), rails: railState });
+      material: plan.source, fallback_from: plan.fallback_from || '', rail_health: meshRailHealth(ledger), rails: railState,
+      cards: { drawn: toSend.filter((it) => /\/m\/c[0-9a-f]{16}\.png$/.test(String(it.image || ''))).length } });
+  }
+  if (!dry && Object.keys(cardWants).length) {
+    try { const w = await cardsWant(env, cardWants); if (out.length) out[out.length - 1].cards_wanted = w; } catch (e2) { /* the topic card still goes out */ }
   }
   return out;
+}
+
+/* v2.4.0 per-post cards. KV: cards:wanted {items:{key:spec}, dispatched_at}, cards:index {key:1}, card:<key> (PNG,
+ * base64). The render job is dispatched at most every 6 hours and only when something new is wanted, so a live
+ * press costs about one short Actions run a day; a dormant press (no accounts) costs nothing. */
+const CARDS_DISPATCH_EVERY_MS = 6 * 3600 * 1000;
+const CARDS_MAX_WANTED = 40;
+const CARDS_MAX_INDEX = 400;
+const CARDS_TTL_S = 30 * 86400;
+async function cardsWant(env, wants) {
+  const doc = await env.ORDERS.get('cards:wanted', 'json').catch(() => null) || { items: {}, dispatched_at: '' };
+  doc.items = doc.items || {};
+  let added = 0;
+  for (const [k, spec] of Object.entries(wants)) {
+    if (!doc.items[k] && Object.keys(doc.items).length < CARDS_MAX_WANTED) { doc.items[k] = spec; added++; }
+  }
+  const due = !doc.dispatched_at || (Date.now() - Date.parse(doc.dispatched_at)) > CARDS_DISPATCH_EVERY_MS;
+  let dispatch = 'not_due';
+  if (Object.keys(doc.items).length && due) {
+    if (env.GH_DISPATCH_TOKEN && env.GH_REPO && env.CARDS_TOKEN) {
+      const r = await fetch('https://api.github.com/repos/' + env.GH_REPO + '/actions/workflows/cards.yml/dispatches', {
+        method: 'POST', headers: { authorization: 'Bearer ' + env.GH_DISPATCH_TOKEN, accept: 'application/vnd.github+json',
+          'content-type': 'application/json', 'user-agent': 'tapstall/1 (cards)' },
+        body: JSON.stringify({ ref: env.GH_REF || 'main' }) });
+      dispatch = r.status === 204 ? 'dispatched' : 'http ' + r.status;
+      if (r.status === 204) doc.dispatched_at = new Date().toISOString();
+    } else dispatch = 'no_token';
+  }
+  if (added || dispatch === 'dispatched') await governedPut(env.ORDERS, 'cards:wanted', JSON.stringify(doc), null, 'automation');
+  return { added, pending: Object.keys(doc.items).length, dispatch };
+}
+function cardsAuth(req, env) {
+  const want = String(env.CARDS_TOKEN || '');
+  const got = String(req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
+  if (!want || got.length !== want.length) return false;
+  let d = 0; for (let i = 0; i < want.length; i++) d |= want.charCodeAt(i) ^ got.charCodeAt(i);
+  return d === 0;
+}
+async function cardsWantedView(req, env) {
+  if (!cardsAuth(req, env)) return json({ ok: false, error: 'unauthorised' }, 401);
+  const doc = await env.ORDERS.get('cards:wanted', 'json').catch(() => null) || { items: {} };
+  return json({ ok: true, items: Object.values(doc.items || {}) });
+}
+async function cardsPut(req, env, key) {
+  if (!cardsAuth(req, env)) return json({ ok: false, error: 'unauthorised' }, 401);
+  if (!CARD_KEY_RE.test(key)) return json({ ok: false, error: 'bad key' }, 400);
+  const buf = new Uint8Array(await req.arrayBuffer());
+  const png = buf.length > 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+  if (!png) return json({ ok: false, error: 'a card is a PNG' }, 415);
+  if (buf.length > 600000) return json({ ok: false, error: 'a card is under 600 KB' }, 413);
+  let bin = ''; for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+  if (!await governedPut(env.ORDERS, 'card:' + key, btoa(bin), { expirationTtl: CARDS_TTL_S }, 'automation')) return json({ ok: false, error: 'KV write budget reached; try later' }, 503);
+  const idx = await env.ORDERS.get('cards:index', 'json').catch(() => null) || {};
+  idx[key] = Date.now();
+  const keys = Object.keys(idx).sort((a, b2) => idx[b2] - idx[a]).slice(0, CARDS_MAX_INDEX);
+  await governedPut(env.ORDERS, 'cards:index', JSON.stringify(Object.fromEntries(keys.map((k) => [k, idx[k]]))), null, 'automation');
+  const doc = await env.ORDERS.get('cards:wanted', 'json').catch(() => null);
+  if (doc && doc.items && doc.items[key]) { delete doc.items[key]; await governedPut(env.ORDERS, 'cards:wanted', JSON.stringify(doc), null, 'automation'); }
+  return json({ ok: true, key, bytes: buf.length, url: '/m/' + key + '.png' });
+}
+async function cardServe(env, key) {
+  if (!CARD_KEY_RE.test(key)) return new Response('not found', { status: 404 });
+  const b64 = await env.ORDERS.get('card:' + key).catch(() => null);
+  if (!b64) return new Response('not found', { status: 404 });
+  const bin = atob(b64); const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return new Response(out, { headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=31536000, immutable', 'x-content-type-options': 'nosniff' } });
 }
 
 async function pressRun(req, env) {

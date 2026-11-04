@@ -4187,6 +4187,47 @@ export function contentMediaFor(beat, opt) {
 }
 
 
+/* ------------------------------------------------------------ per-post cards (v2.4.0) */
+/** A post that would carry a stock topic card gets a card drawn from its own words instead. The Worker can't
+ *  draw a PNG inside its CPU budget (and the platforms refuse SVG), so it only *names* the card here; a short
+ *  Actions job (scripts/cards/render.py, the shared mediakit engine in Tapstall's brand) draws it and uploads it,
+ *  and the next tick swaps it in. Until then the topic card stays, so no post ever goes out without a picture.
+ *  A shop's own photo and the motion loop are never replaced: they are better than any card. */
+export const CARD_KEY_RE = /^c[0-9a-f]{16}$/;
+function fnv32(str, seed) {
+  let h = seed >>> 0;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  return h.toString(16).padStart(8, '0');
+}
+export function cardKeyFor(text, pillar) {
+  const s = String(pillar || '') + '|' + String(text || '');
+  return 'c' + fnv32(s, 2166136261) + fnv32(s, 3735928559);
+}
+export function cardSpecFor(item) {
+  const it = item || {};
+  const img = String(it.image || '');
+  const m = /\/brand\/cards\/([a-z0-9-]+)\.png$/.exec(img);
+  if (it.media_kind !== 'image' || !m) return null;
+  const text = String(it.text || '').replace(/https?:\/\/\S+/g, '').replace(/#[\w-]+/g, '').replace(/\s+/g, ' ').trim();
+  if (text.length < 16) return null;
+  const sent = /^(.{12,140}?[.!?])(\s|$)/.exec(text);
+  const headline = sent ? sent[1] : meshClip(text, 110);
+  const body = meshClip(text.slice(headline.length).trim(), 220);
+  const pillar = m[1];
+  return { key: cardKeyFor(headline + ' ' + body, pillar), layout: 'headline', shape: 'wide',
+    kicker: pillar.replace(/-/g, ' ').toUpperCase().slice(0, 24), headline, body, seed: pillar };
+}
+/** { item, want }: the item with its drawn card when one is on file, else the item untouched plus the card to draw. */
+export function cardApply(item, index, origin) {
+  const spec = cardSpecFor(item);
+  if (!spec) return { item, want: null };
+  if (index && index[spec.key]) {
+    return { item: { ...item, image: String(origin || '').replace(/\/+$/, '') + '/m/' + spec.key + '.png', media_w: 1200, media_h: 630,
+      alt: meshClip(spec.headline + ' ' + spec.body, 300) }, want: null };
+  }
+  return { item, want: spec };
+}
+
 export function meshCompanyIdentities(reg) {
   const r = (reg && typeof reg === 'object') ? reg : {};
   return Object.keys(r).map((id) => ({ id, ...r[id] })).filter((e) => MESH_ID_CLASSES.includes(e.class));

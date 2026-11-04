@@ -531,3 +531,33 @@ test('the privacy notice Meta asks for is served, and says what the bot keeps', 
   assert.match(r.text, /deleted after 60 days with no messages/);
   assert.match(r.text, /We cannot read pictures/);
 });
+
+/* ---------------------------------------------------------------- v2.4.0 per-post cards, through the Worker */
+test('cards: wanted list and upload need the cards token; /m/ serves the uploaded PNG', async () => {
+  env.CARDS_TOKEN = 'cards-test-token';
+  const key = 'c0123456789abcdef';
+  await env.ORDERS.put('cards:wanted', JSON.stringify({ items: { [key]: { key, layout: 'headline', headline: 'Hi there.' } }, dispatched_at: '' }));
+  assert.equal((await call('/api/press/cards/wanted')).status, 401);
+  assert.equal((await call('/api/press/cards/wanted', { headers: { authorization: 'Bearer nope-nope-nope-nope' } })).status, 401);
+  const w = await call('/api/press/cards/wanted', { headers: { authorization: 'Bearer cards-test-token' } });
+  assert.equal(w.status, 200);
+  assert.equal(w.json.items[0].key, key);
+  assert.equal((await call('/m/' + key + '.png')).status, 404);
+  const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 250]);
+  const auth = { authorization: 'Bearer cards-test-token', 'content-type': 'image/png' };
+  assert.equal((await call('/api/press/cards/' + key, { method: 'PUT', raw: png })).status, 401);
+  assert.equal((await call('/api/press/cards/' + key, { method: 'PUT', raw: new Uint8Array([60, 115, 118, 103, 32, 32, 32, 32, 32]), headers: auth })).status, 415);
+  assert.equal((await call('/api/press/cards/bad', { method: 'PUT', raw: png, headers: auth })).status, 400);
+  const up = await call('/api/press/cards/' + key, { method: 'PUT', raw: png, headers: auth });
+  assert.equal(up.status, 200, up.text);
+  assert.equal(up.json.url, '/m/' + key + '.png');
+  const idx = await env.ORDERS.get('cards:index', 'json');
+  assert.ok(idx[key]);
+  assert.deepEqual((await env.ORDERS.get('cards:wanted', 'json')).items, {}, 'drawn cards leave the wanted list');
+  const w2 = await load();
+  const res = await w2.fetch(new Request('https://tapstall.test/m/' + key + '.png'), env, { waitUntil() {} });
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('content-type'), 'image/png');
+  assert.deepEqual(new Uint8Array(await res.arrayBuffer()), png);
+  delete env.CARDS_TOKEN;
+});

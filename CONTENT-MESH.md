@@ -289,3 +289,20 @@ calendar and not a budget. Anything that would need a merchant to trust us with 
 every node a merchant owns is one they hold, exactly as hunta keeps the data plane on the customer's own
 repo. And no metric we cannot reproduce from a row: if the number is not on a ledger we read today, it
 does not go in a post, in a report, or in this file.
+
+## Per-post cards (v2.4.0)
+
+Every press post already carries a picture: the shop's own photo, the motion loop (first slot every third day), or a
+topic card from `brand/cards/`. From v2.4.0 a post that would carry a stock topic card gets a card drawn from its own
+words instead, by the same media engine DeskOS uses (`scripts/cards/mediakit.py`, Tapstall brand in
+`scripts/cards/brand.json`):
+
+1. `runPress` names the card (`cardSpecFor` in `worker/core.js`: kicker = topic, headline = first sentence, body = the
+   rest, no links or hashtags) and adds it to KV `cards:wanted`.
+2. At most every 6 hours, and only when something is wanted, the Worker dispatches `.github/workflows/cards.yml`
+   (`GH_DISPATCH_TOKEN`, `CARDS_TOKEN`). The job renders 1200x630 PNGs and `PUT`s them to `/api/press/cards/<key>`.
+3. The Worker keeps them in KV (`card:<key>`, 30 days, index `cards:index`) and serves `/m/<key>.png`. On its next tick
+   the copy being sent carries the drawn card; the queue item and its id (the duplicate guard) are unchanged.
+
+Until a card is drawn the topic card goes out, so no post is ever imageless. A shop photo and the motion loop are
+never replaced. Dormant press (no `PRESS_*` accounts) = no items = no runs. Live press ≈ 1 run/day, ~1 min.

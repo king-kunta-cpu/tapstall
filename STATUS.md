@@ -1,7 +1,7 @@
 # Tapstall — status
 
 
-## v2.3.2 (2026-11-02): Gmail outreach paused, merchant mail kept
+## v2.4.0 (2026-11-02): Gmail outreach paused, merchant mail kept
 
 Owner, 2 Nov 2026: pause Gmail **outreach** in every business; mail people need (PIN resets, receipts,
 order and licence notices) keeps working. `OUTREACH_LV = "off"` is now a shipped var (wrangler.toml is

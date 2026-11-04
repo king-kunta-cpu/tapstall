@@ -1,0 +1,31 @@
+name: cards
+# v2.4.0 per-post cards. Dispatched by the Worker (cardsWant in worker/worker.js) at most every 6 hours and only
+# when a queued post wants a card, so a dormant press (no social accounts yet) never runs this at all, and a live
+# one costs about one short run a day (~1 billable minute), inside the 10-15 min/day Actions budget.
+# Renders the wanted cards with the shared mediakit engine in Tapstall's brand and uploads them to the Worker,
+# which serves them at /m/<key>.png. Secret: CARDS_TOKEN (the same value is a Worker secret).
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cards
+  cancel-in-progress: false
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -q pillow==11.3.0
+      - name: render and upload
+        env:
+          CARDS_TOKEN: ${{ secrets.CARDS_TOKEN }}
+          TAPSTALL_URL: https://tapstall.zlnew.workers.dev
+        run: python3 scripts/cards/render.py
