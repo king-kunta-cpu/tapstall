@@ -165,6 +165,11 @@ export function buildMail(m) {
     if (m.unsubscribe.url) h.push('List-Unsubscribe-Post: List-Unsubscribe=One-Click');   // RFC 8058
   }
   if (m.auto) h.push('Auto-Submitted: auto-generated');
+  if (m.attachments && m.attachments.length) {   // the day-7 guide: multipart/mixed, the plain text first
+    const mb = mailMixedBody(String(m.text || ''), m.attachments);
+    h.push('Content-Type: ' + mb.contentType);
+    return `${h.join('\r\n')}\r\n\r\n${mb.body}`;
+  }
   h.push('Content-Type: text/plain; charset="UTF-8"', 'Content-Transfer-Encoding: base64');
   const body = mailB64(MAIL_ENC.encode(String(m.text || ''))).replace(/.{1,76}/g, '$&\r\n').trimEnd();
   return `${h.join('\r\n')}\r\n\r\n${body}\r\n`;
@@ -253,7 +258,8 @@ export async function mailSend(env, msg, opts) {
   if (!lane) return { sent: false, why: 'lanes_full' };
   const messageId = `<${now.toString(36)}.${Math.random().toString(36).slice(2, 10)}@tapstall.mail>`;
   const mime = buildMail({ from: lane.user, fromName: msg.fromName || lane.fromName, to, subject: msg.subject, text: msg.text,
-    replyTo: msg.replyTo || lane.user, unsubscribe: msg.unsubscribe, auto: kind === 'transactional', inReplyTo: msg.inReplyTo, messageId });
+    replyTo: msg.replyTo || lane.user, unsubscribe: msg.unsubscribe, auto: kind === 'transactional', inReplyTo: msg.inReplyTo, messageId,
+    attachments: msg.attachments });
   let s = null;
   try {
     const open = env.MAIL_TEST_OPEN || (async (l) => smtpSession(await mailOpenTls(l.host, l.port, 15000), { user: l.user, pass: l.pass }));
@@ -356,6 +362,116 @@ export async function mxOk(domain, fetcher) {
   return ok;
 }
 
+/* ------------------------------------------------------------------ PDF (day-7 attachment) */
+// Dependency-free A4 PDF writer, inlined here because build_bundle.sh inlines only rail/discover/mail/wa/core.
+// Helvetica advance widths (1/1000 em) for ASCII 32..126 (standard AFM metrics).
+const MAIL_HW = [278,278,355,556,556,889,667,191,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,278,278,584,584,584,556,1015,667,667,722,722,667,611,778,722,278,500,667,556,833,722,778,667,778,722,667,611,722,667,944,667,667,611,278,278,278,469,556,333,556,556,500,556,556,278,556,556,222,222,500,222,833,556,556,556,556,333,500,278,556,500,722,500,500,500,334,260,334,584];
+const MAIL_HBW = [278,333,474,556,556,889,722,238,333,333,389,584,278,333,278,278,556,556,556,556,556,556,556,556,556,556,333,333,584,584,584,611,975,722,722,722,722,667,611,778,722,278,556,722,611,833,722,778,667,778,722,667,611,722,667,944,667,667,611,333,278,333,584,556,333,556,611,556,611,556,333,611,611,278,278,556,278,889,611,611,611,611,389,556,333,611,556,778,556,556,500,389,280,389,584];
+
+/** Text the built-in fonts can print: curly quotes, dashes, ellipses and accents folded to ASCII. */
+export function mailPdfSafe(s) {
+  return String(s ?? "")
+    .replace(/[\u2018\u2019\u201A\u2032]/g, "'").replace(/[\u201C\u201D\u201E\u2033]/g, '"')
+    .replace(/[\u2013\u2014\u2212]/g, "-").replace(/\u2026/g, "...").replace(/[\u00A0\u2009\u202F]/g, " ")
+    .replace(/\u2022/g, "-").replace(/\u00D7/g, "x")
+    .normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^\x20-\x7E\n]/g, "");
+}
+const mailPdfEsc = (s) => s.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+const mailPdfWidth = (s, size, bold) => { const w = bold ? MAIL_HBW : MAIL_HW; let n = 0; for (const ch of s) n += w[ch.charCodeAt(0) - 32] ?? 556; return (n * size) / 1000; };
+
+function mailPdfWrap(text, size, bold, max) {
+  const out = [];
+  for (const para of mailPdfSafe(text).split("\n")) {
+    let line = "";
+    for (const word of para.split(/\s+/).filter(Boolean)) {
+      const next = line ? line + " " + word : word;
+      if (mailPdfWidth(next, size, bold) <= max || !line) line = next; else { out.push(line); line = word; }
+    }
+    out.push(line);
+  }
+  return out;
+}
+
+function mailPdfRgb(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || "")) || [0, "1f3a5f"];
+  const n = parseInt(m[1], 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => (v / 255).toFixed(3)).join(" ");
+}
+
+export function mailPdf({ title = "", subtitle = "", accent = "#1f3a5f", sections = [], footer = "" } = {}) {
+  const W = 595, H = 842, L = 56, R = 56, TOP = 70, BOTTOM = 64, MAX = W - L - R;
+  const pages = [];
+  let ops = [], y = H - TOP;
+  const newPage = () => { if (ops.length) pages.push(ops); ops = []; y = H - TOP; ops.push(`${mailPdfRgb(accent)} rg 0 ${H - 18} ${W} 18 re f 0 g`); };
+  const need = (h) => { if (y - h < BOTTOM) newPage(); };
+  const text = (s, size, bold, x = L, color = "0 g") => { ops.push(`BT ${color} /${bold ? "F2" : "F1"} ${size} Tf ${x} ${y.toFixed(1)} Td (${mailPdfEsc(s)}) Tj ET`); };
+  newPage();
+  for (const line of mailPdfWrap(title, 20, true, MAX)) { need(26); text(line, 20, true, L, `${mailPdfRgb(accent)} rg`); y -= 26; }
+  if (subtitle) { y -= 2; for (const line of mailPdfWrap(subtitle, 11, false, MAX)) { need(15); text(line, 11, false, L, "0.35 g"); y -= 15; } }
+  y -= 10;
+  for (const sec of sections) {
+    if (sec.heading) { y -= 6; need(34); for (const line of mailPdfWrap(sec.heading, 13, true, MAX)) { text(line, 13, true); y -= 18; } }
+    for (const p of sec.paras || []) { for (const line of mailPdfWrap(p, 10.5, false, MAX)) { need(14.5); text(line, 10.5, false); y -= 14.5; } y -= 6; }
+    if (sec.code && sec.code.length) { // monospace (Courier, built in)
+      y -= 2; const per = Math.floor(MAX / (0.6 * 8.5));
+      for (const raw of sec.code) {
+        let rest = mailPdfSafe(raw), first = true; // long lines wrap with an indent; code is never cut
+        do { const w = first ? per - 2 : per - 6; const piece = (first ? "" : "    ") + rest.slice(0, w); rest = rest.slice(w); first = false;
+          need(11.5); ops.push(`BT 0.12 g /F3 8.5 Tf ${L + 8} ${y.toFixed(1)} Td (${mailPdfEsc(piece)}) Tj ET`); y -= 11.5; } while (rest.length);
+      }
+      y -= 8;
+    }
+    for (const b of sec.bullets || []) {
+      const lines = mailPdfWrap(b, 10.5, false, MAX - 14);
+      lines.forEach((line, i) => { need(14.5); if (i === 0) text("-", 10.5, true); text(line, 10.5, false, L + 14); y -= 14.5; });
+      y -= 3;
+    }
+  }
+  pages.push(ops);
+  const objs = [];
+  const add = (s) => { objs.push(s); return objs.length; };
+  const f1 = add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
+  const f2 = add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");
+  const f3 = add("<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>");
+  const pagesId = objs.length + 1; objs.push(null);
+  const kids = [];
+  pages.forEach((p, i) => {
+    const foot = `BT 0.45 g /F1 8.5 Tf ${L} 36 Td (${mailPdfEsc(mailPdfSafe(footer))}) Tj ET BT 0.45 g /F1 8.5 Tf ${W - R - 30} 36 Td (${i + 1}/${pages.length}) Tj ET`;
+    const stream = [...p, foot].join("\n");
+    const c = add(`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`);
+    kids.push(add(`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${W} ${H}] /Resources << /Font << /F1 ${f1} 0 R /F2 ${f2} 0 R /F3 ${f3} 0 R >> >> /Contents ${c} 0 R >>`));
+  });
+  objs[pagesId - 1] = `<< /Type /Pages /Kids [${kids.map((k) => `${k} 0 R`).join(" ")}] /Count ${kids.length} >>`;
+  const info = add(`<< /Title (${mailPdfEsc(mailPdfSafe(title))}) /Producer (Jacaranda Labs) >>`);
+  const catalog = add(`<< /Type /Catalog /Pages ${pagesId} 0 R >>`);
+  let out = "%PDF-1.4\n";
+  const offs = [];
+  objs.forEach((o, i) => { offs.push(out.length); out += `${i + 1} 0 obj\n${o}\nendobj\n`; });
+  const xref = out.length;
+  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n` + offs.map((o) => String(o).padStart(10, "0") + " 00000 n \n").join("");
+  out += `trailer\n<< /Size ${objs.length + 1} /Root ${catalog} 0 R /Info ${info} 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  const bytes = new Uint8Array(out.length);
+  for (let i = 0; i < out.length; i++) bytes[i] = out.charCodeAt(i) & 255;
+  return bytes;
+}
+
+/** base64 of bytes, wrapped at 76 columns (MIME). */
+export function mailB64wrap(bytes) {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(bin).replace(/.{1,76}/g, "$&\r\n").trimEnd();
+}
+
+/** A multipart/mixed body: the plain text first, then each attachment. Returns { contentType, body }. */
+export function mailMixedBody(text, attachments, boundary = "jl" + Math.random().toString(36).slice(2, 14)) {
+  const parts = [`--${boundary}\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${mailB64wrap(new TextEncoder().encode(text))}\r\n`];
+  for (const a of attachments) {
+    const name = mailPdfSafe(a.filename).replace(/["\\\r\n]/g, "").slice(0, 80) || "brief.pdf";
+    parts.push(`--${boundary}\r\nContent-Type: ${a.type || "application/pdf"}; name="${name}"\r\nContent-Disposition: attachment; filename="${name}"\r\nContent-Transfer-Encoding: base64\r\n\r\n${mailB64wrap(a.content)}\r\n`);
+  }
+  return { contentType: `multipart/mixed; boundary="${boundary}"`, body: parts.join("") + `--${boundary}--\r\n` };
+}
+
 /* ------------------------------------------------------------------ outreach v2 */
 // Outreach v2 (owner, 2026-11-04). Pure, so tests can hold it to the rules:
 //  T1 is plain text with NO links and no attachments ("reply stop" + postal; the one-click unsubscribe
@@ -402,6 +518,41 @@ function v2Evidence(lead) {
 }
 const V2_STOP = 'If you would rather not hear from me again, just reply "stop".';
 
+/** The T2 attachment (owner 2026-11-04): a one-page guide made for this shop. General, checkable advice; no invented numbers. */
+export function v2Guide(lead, { origin, postal }) {
+  const biz = String(lead.business || '').trim() || 'your shop';
+  const link = String(origin || '').replace(/\/+$/, '') + '/onboard';
+  const day = new Date().toISOString().slice(0, 10);
+  const slug = biz.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'shop';
+  return { filename: 'tapstall-guide-' + slug + '.pdf', content: mailPdf({
+    title: biz + ': ending fake proof of payment',
+    subtitle: 'A one-page guide made for ' + biz + ', ' + day + '. From Tapstall, a Jacaranda Labs venture.',
+    accent: '#0b6e4f',
+    sections: [
+      { heading: 'How fake proof of payment happens', bullets: [
+        'An edited or recycled screenshot of a payment that never reached your account.',
+        'A forwarded or typed-out "payment SMS" that did not come from your provider.',
+        'A real payment for a smaller amount, or one already used for another order.',
+        'Twenty payments landing in an hour, and no quick way to tell which one is whose.' ] },
+      { heading: 'Five checks before you hand over goods', bullets: [
+        'Check your own account, or the SMS your provider sent you; never only the customer\'s screenshot.',
+        'Match the exact amount, cents included.',
+        'Match the sender name or reference, and the time.',
+        'A payment you cannot find yet is not received, however urgent the customer sounds.',
+        'Mark each payment as used for one order, so it cannot be claimed twice.' ] },
+      { heading: 'How Tapstall makes the money tell you', paras: [
+        'Customers order from your menu on one page and pay straight into your own EcoCash, PayShap or bank account; Tapstall never holds your money. Every order gets its own exact amount, down to the cent, so the payment that lands tells you which order it is. A screenshot proves nothing; the payment does.' ] },
+      { heading: 'Set up in about two minutes', bullets: [
+        'Add your menu: names and prices.',
+        'Add the account your customers pay into.',
+        'Share your one link on your WhatsApp status, your bio and your groups.' ],
+        paras: [] },
+      { paras: ['Free for 60 days, then USD 60 a year (or USD 7 a month). No commission on your sales and no order cap. Start here: ' + link] },
+    ],
+    footer: 'Tapstall, Jacaranda Labs' + (postal ? ' - ' + String(postal).trim() : ''),
+  }) };
+}
+
 /** touch 0 = T1 (no link), 1 = T2 day 7 (the link), 2 = T3 day 14 (last note). kind 'link' = the answer to a reply. */
 export function v2Compose(lead, { origin, fromName, postal, kind }) {
   const biz = String(lead.business || '').trim() || 'there';
@@ -418,16 +569,21 @@ export function v2Compose(lead, { origin, fromName, postal, kind }) {
   }
   const touch = Math.max(0, Math.min(Number(lead.touches) || 0, V2_MAX_TOUCHES - 1));
   if (touch === 0) {
-    return { subject: subj1, text: `Hi ${biz} team,\n\n${v2Evidence(lead)} I built Tapstall for shops like yours: customers pick from `
-      + 'your menu on one page, pay your own EcoCash, PayShap or bank account, and every order carries a unique amount down to the '
-      + 'cent, so the money that lands identifies the order. No screenshots to argue about.\n\nIt is free for 60 days, then USD 60 a '
-      + 'year. No commission on your sales and no order cap.\n\nWould it help if I sent you the link to try it? Just reply and I will.'
-      + `\n\n${name}, Tapstall\nJacaranda Labs${post ? '\n' + post : ''}\n\n${V2_STOP}` };
+    return { subject: subj1, text: `Hi ${biz} team,\n\n${v2Evidence(lead)} Can I ask about a moment most shops here know too well? `
+      + 'A customer sends a screenshot that says "paid", you hand over the order, and the money never arrives. Or twenty payments land '
+      + 'in one evening and you sit up late matching amounts to names.\n\nI built Tapstall so that moment stops happening. Customers pick '
+      + 'from your menu on one page and pay your own EcoCash, PayShap or bank account, and every order carries its own amount down to the '
+      + 'cent, so the money that lands tells you exactly which order it is. A screenshot proves nothing; the payment does.\n\n'
+      + 'It is free for 60 days, then USD 60 a year. No commission on your sales and no order cap.\n\nWould it help if I sent you the '
+      + `link to try it? Just reply and I will.\n\n${name}, Tapstall\nJacaranda Labs${post ? '\n' + post : ''}\n\n${V2_STOP}` };
   }
   if (touch === 1) {
-    return { subject: re(subj1), text: `Hi again,\n\nIn case it is useful, here is the link: ${link}\n\nYour menu on one page, payment `
-      + 'straight to your own account, and an exact amount per order so fake proof of payment stops working. It takes about two '
-      + `minutes to set up and is free for 60 days.\n\n${name}, Tapstall${post ? '\n' + post : ''}\n\n${V2_STOP}` };
+    return { subject: re(subj1), attachments: [v2Guide(lead, { origin, postal })], text: `Hi again,\n\nRather than ask twice, I made `
+      + `something for ${biz}: the attached one-page guide to ending fake proof of payment. It shows how the fakes usually happen, five `
+      + 'checks to make before you hand over goods, and how to set up a shop page where every order carries its own exact amount. '
+      + 'The checks work even if you never use Tapstall.\n\nWhen you want the money to tell you which order it is, here is the link: '
+      + `${link}\n\nIt takes about two minutes to set up and is free for 60 days. No commission on your sales.\n\n${name}, Tapstall`
+      + `${post ? '\n' + post : ''}\n\n${V2_STOP}` };
   }
   return { subject: re(subj1), text: `Last note from me, and thank you for reading. If taking orders on WhatsApp ever starts costing `
     + `${biz} sales or disputes, your shop page can be live in a few minutes: ${link}\n\nI will not write again.\n\n${name}, Tapstall${post ? '\n' + post : ''}` };

@@ -40,6 +40,7 @@ import json
 import os
 import re
 import smtplib
+import time
 import ssl
 import sys
 import urllib.parse
@@ -175,20 +176,76 @@ def compose(lead, origin, from_name, unsub="", kind=""):
                                f"60 days, then USD 60 a year. No commission on your sales.\n\nAny question, just reply here.\n\n{from_name}")
     touch = min(int(lead.get("touches") or 0), MAX_TOUCHES - 1)
     if touch == 0:
-        return subj, (f"Hi {biz} team,\n\n{evidence_line(lead)} Tapstall gives a shop like yours one page: customers pick from "
-                      "your menu, pay your own EcoCash, PayShap or bank account, and every order carries a unique amount down to the "
-                      "cent, so the money that lands identifies the order. No screenshots to argue about.\n\nIt is free for 60 days, "
-                      "then USD 60 a year. No commission on your sales and no order cap.\n\nWould it help if I sent you the link to "
-                      f"try it? Just reply and I will.\n\n{from_name}{post}{stop}")
+        return subj, (f"Hi {biz} team,\n\n{evidence_line(lead)} Can I ask about a moment most shops here know too well? A customer "
+                      'sends a screenshot that says "paid", you hand over the order, and the money never arrives. Or twenty payments '
+                      "land in one evening and you sit up late matching amounts to names.\n\nTapstall is built so that moment stops "
+                      "happening. Customers pick from your menu on one page and pay your own EcoCash, PayShap or bank account, and every "
+                      "order carries its own amount down to the cent, so the money that lands tells you exactly which order it is. A "
+                      "screenshot proves nothing; the payment does.\n\nIt is free for 60 days, then USD 60 a year. No commission on your "
+                      f"sales and no order cap.\n\nWould it help if I sent you the link to try it? Just reply and I will.\n\n{from_name}{post}{stop}")
     if touch == 1:
-        return "Re: " + subj, (f"Hi again,\n\nIn case it is useful, here is the link: {link}\n\nYour menu on one page, payment "
-                               "straight to your own account, and an exact amount per order so fake proof of payment stops working. "
-                               f"Free for 60 days.\n\n{from_name}{post}{stop}")
+        return "Re: " + subj, (f"Hi again,\n\nRather than ask twice, I made something for {biz}: the attached one-page guide to "
+                               "ending fake proof of payment. It shows how the fakes usually happen, five checks to make before you "
+                               "hand over goods, and how to set up a shop page where every order carries its own exact amount. The "
+                               "checks work even if you never use Tapstall.\n\nWhen you want the money to tell you which order it is, "
+                               f"here is the link: {link}\n\nIt takes about two minutes to set up and is free for 60 days. No commission "
+                               f"on your sales.\n\n{from_name}{post}{stop}")
     return "Re: " + subj, (f"Last note from me, and thank you for reading. If taking orders on WhatsApp ever starts costing {biz} "
                            f"sales or disputes, your shop page can be live in a few minutes: {link}\n\nI will not write again.\n\n{from_name}{post}")
 
 
-def send_smtp(mailbox, to_addr, subject, body, from_name, unsub="", in_reply_to=""):
+def guide_pdf(lead, origin):
+    """The T2 attachment (owner 2026-11-04): the same one-page guide the Worker attaches (worker/mail.js v2Guide)."""
+    from jl_pdf import make_pdf
+    biz = (lead.get("business") or "").strip() or "your shop"
+    code = lead.get("seller_code") or ""
+    link = origin.rstrip("/") + (("/r/" + code) if code else "/onboard")
+    postal = os.environ.get("POSTAL_ADDRESS", "").strip()
+    slug = re.sub(r"[^a-z0-9]+", "-", biz.lower()).strip("-")[:40] or "shop"
+    day = time.strftime("%Y-%m-%d", time.gmtime())
+    pdf = make_pdf(
+        title=f"{biz}: ending fake proof of payment",
+        subtitle=f"A one-page guide made for {biz}, {day}. From Tapstall, a Jacaranda Labs venture.",
+        accent="#0b6e4f",
+        sections=[
+            {"heading": "How fake proof of payment happens", "bullets": [
+                "An edited or recycled screenshot of a payment that never reached your account.",
+                'A forwarded or typed-out "payment SMS" that did not come from your provider.',
+                "A real payment for a smaller amount, or one already used for another order.",
+                "Twenty payments landing in an hour, and no quick way to tell which one is whose."]},
+            {"heading": "Five checks before you hand over goods", "bullets": [
+                "Check your own account, or the SMS your provider sent you; never only the customer's screenshot.",
+                "Match the exact amount, cents included.",
+                "Match the sender name or reference, and the time.",
+                "A payment you cannot find yet is not received, however urgent the customer sounds.",
+                "Mark each payment as used for one order, so it cannot be claimed twice."]},
+            {"heading": "How Tapstall makes the money tell you", "paras": [
+                "Customers order from your menu on one page and pay straight into your own EcoCash, PayShap or bank account; "
+                "Tapstall never holds your money. Every order gets its own exact amount, down to the cent, so the payment that "
+                "lands tells you which order it is. A screenshot proves nothing; the payment does."]},
+            {"heading": "Set up in about two minutes", "bullets": [
+                "Add your menu: names and prices.", "Add the account your customers pay into.",
+                "Share your one link on your WhatsApp status, your bio and your groups."]},
+            {"paras": [f"Free for 60 days, then USD 60 a year (or USD 7 a month). No commission on your sales and no order cap. Start here: {link}"]},
+        ],
+        footer="Tapstall, Jacaranda Labs" + (f" - {postal}" if postal else ""))
+    return f"tapstall-guide-{slug}.pdf", pdf
+
+
+SOFT_REFUSAL_RE = re.compile(r"\b(5\.2\.2|4\.\d\.\d+)\b|mailbox (is )?full|over (the )?quota|quota exceeded|insufficient (storage|space)|temporar", re.I)
+
+
+def refusal_why(exc):
+    """A recipient refused at send: full / temporary is undeliverable (never a stop, never a bounce); else a bounce."""
+    try:
+        codes = [(int(c), (m.decode("utf-8", "replace") if isinstance(m, bytes) else str(m))) for c, m in exc.recipients.values()]
+    except Exception:
+        codes = []
+    soft = any(c < 500 or SOFT_REFUSAL_RE.search(f"{c} {m}") for c, m in codes)
+    return "undeliverable" if soft else "bounce"
+
+
+def send_smtp(mailbox, to_addr, subject, body, from_name, unsub="", in_reply_to="", attachments=()):
     if mailbox.get("smtp") is False:
         raise RuntimeError("poll-only mailbox")     # a Worker-only lane is the Worker's to send on
     msg = EmailMessage()
@@ -204,6 +261,8 @@ def send_smtp(mailbox, to_addr, subject, body, from_name, unsub="", in_reply_to=
         msg["List-Unsubscribe"] = f"<{unsub}>"
         msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
     msg.set_content(body)
+    for name, data in attachments or ():          # the day-7 guide: multipart/mixed, the plain text first
+        msg.add_attachment(data, maintype="application", subtype="pdf", filename=name)
     password = str(mailbox["app_password"]).replace(" ", "")
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30, context=ssl.create_default_context()) as s:
         s.login(mailbox["user"], password)
@@ -394,10 +453,11 @@ def main():
                     continue
                 try:
                     mid = send_smtp(box, lead["email"], subject, body, a.from_name, unsub,
-                                    in_reply_to=(lead.get("first_msgid") or "") if touches else "")
-                except smtplib.SMTPRecipientsRefused:
+                                    in_reply_to=(lead.get("first_msgid") or "") if touches else "",
+                                    attachments=[guide_pdf(lead, a.origin)] if touches == 1 else ())
+                except smtplib.SMTPRecipientsRefused as refused:
                     try:
-                        act(a.origin, secret, lead["id"], "dnc", seller_code=code, sender=box["user"])
+                        act(a.origin, secret, lead["id"], "dnc", seller_code=code, sender=box["user"], why=refusal_why(refused))
                     except Exception:
                         pass
                     counts["refused_by_server"] = counts.get("refused_by_server", 0) + 1
@@ -484,6 +544,17 @@ def selftest(a):
     for f in _fx:
         assert classify_inbound(f["from"], f["subject"], f["text"], f.get("headers"))[0] == f["kind"], f["name"]
     assert classify_reply("info@firm.co.zw", "No longer monitored. Write to accounts@firm.co.zw") == "undeliverable"
+    # owner 2026-11-04: T1 link-free and attachment-free; T2 carries the guide; a full mailbox refused at send is not a stop
+    _n, _pdf = guide_pdf({"business": "Kota Queen"}, "https://tapstall.example")
+    assert _n == "tapstall-guide-kota-queen.pdf" and _pdf.startswith(b"%PDF-1.4") and b"Kota Queen: ending fake proof of payment" in _pdf
+    _s1, _b1 = compose({"business": "Kota Queen", "touches": 0}, "https://tapstall.example", "Tino")
+    assert "http" not in _b1 and 'screenshot that says "paid"' in _b1
+    _s2, _b2 = compose({"business": "Kota Queen", "touches": 1}, "https://tapstall.example", "Tino")
+    assert "attached one-page guide" in _b2
+    _e = smtplib.SMTPRecipientsRefused({"a@b.co": (452, b"4.2.2 The email account that you tried to reach is over quota")})
+    assert refusal_why(_e) == "undeliverable"
+    assert refusal_why(smtplib.SMTPRecipientsRefused({"a@b.co": (550, b"5.1.1 The email account does not exist")})) == "bounce"
+    assert refusal_why(smtplib.SMTPRecipientsRefused({"a@b.co": (552, b"5.2.2 mailbox full")})) == "undeliverable"
     print("SELFTEST OK — compose, eligibility, reply classes, mailbox tags, quotes, one voice, unsubscribe, bounces")
     return 0
 

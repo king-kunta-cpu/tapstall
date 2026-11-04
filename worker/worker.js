@@ -6167,7 +6167,7 @@ async function outreachTick(env, nowMs) {
     const box = kind === 'first' ? lanes[v2BoxIndex(email, lanes.length)].user : String(lead.last_sender || '');
     const m = v2Compose(lead, { origin, fromName, postal, kind: kind === 'link' ? 'link' : '' });
     const unsub = kind === 'link' ? null : { url: await unsubLink(env, lead) };
-    const r = await mailSend(env, { to: email, subject: m.subject, text: m.text, kind: 'outreach', fromName: fromName + ', Tapstall',
+    const r = await mailSend(env, { to: email, subject: m.subject, text: m.text, kind: 'outreach', fromName: fromName + ', Tapstall', ...(m.attachments ? { attachments: m.attachments } : {}),
       laneUser: box, inReplyTo: kind === 'first' ? '' : (lead.first_msgid || ''), ...(unsub ? { unsubscribe: unsub } : {}) }, { now });
     if (r.sent) {
       if (kind === 'link') await leadPut(env, { ...lead, link_owed: false, updated_at: nowIso });
