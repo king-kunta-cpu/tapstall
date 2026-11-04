@@ -28,6 +28,7 @@ Usage:
   ... --poll-only
 """
 import argparse
+import sys as _sys
 import base64
 import email
 import hashlib
@@ -51,7 +52,9 @@ TOUCH_FOLLOW_DAYS = [7, 7, 7]   # outreach v2 (2026-11-04): T1 no link, T2 day 7
 MAX_TOUCHES = len(TOUCH_FOLLOW_DAYS)
 STOP_RE = re.compile(r"\b(stop|unsubscribe|remove me|opt ?out|leave me alone|do not contact)\b", re.I)
 SYSTEM_FROM_RE = re.compile(r"(mailer-daemon|postmaster|no-?reply|donotreply|notifications?)@", re.I)
-BOUNCE_FROM_RE = re.compile(r"(mailer-daemon|postmaster)@", re.I)
+BOUNCE_FROM_RE = re.compile(r"(mailer-?daemon|postmaster|microsoftexchange[0-9a-f]*)@", re.I)
+_sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from inbound import classify_inbound   # noqa: E402  shared rules (owner 2026-11-04): a delivery problem is never a stop
 # v2.0.0: where the person's own words end. Everything below is the quoted original, which says
 # "reply STOP" — reading it as their answer marked every polite reply do-not-contact.
 QUOTE_START_RE = re.compile(r"^(>|On .{0,200}wrote:\s*$|-{2,} ?Original Message|From: .+|Sent from my |_{5,})", re.I | re.M)
@@ -208,13 +211,17 @@ def send_smtp(mailbox, to_addr, subject, body, from_name, unsub="", in_reply_to=
     return msg["Message-ID"]
 
 
-def classify_reply(from_addr, text):
+def classify_reply(from_addr, text, subject="", headers=None):
+    """-> dnc (a person said stop) | undeliverable (full/unavailable/unmonitored/left: end quietly, counts as
+    nothing) | ignore (robots, out-of-office) | replied. Delivery reports are never read for "stop"."""
     if SYSTEM_FROM_RE.search(from_addr or ""):
         return "ignore"
-    words = own_words(text)
-    if STOP_RE.search(words):
+    kind, _ = classify_inbound(from_addr, subject, text, headers)
+    if kind == "stop":
         return "dnc"
-    if AUTO_RE.search(words):
+    if kind in ("soft", "gone"):
+        return "undeliverable"
+    if kind in ("auto", "bounce"):
         return "ignore"   # out-of-office: the sequence carries on
     return "replied"   # any human answer stops the machine; a person takes it from here
 
@@ -271,20 +278,31 @@ def poll_mailbox(origin, secret, mailbox, leads_by_email, seller_code, counts, d
             text = body_text(raw)
             if is_bounce:
                 hit = [leads_by_email[a] for a in bounced_addresses(msg, text) if a in leads_by_email]
+                dsn_kind, _ = classify_inbound(from_addr, str(msg.get("Subject") or ""), text, msg)
+                why = "bounce" if dsn_kind == "bounce" else "undeliverable"   # only a rejected address counts as a bounce
                 for lead in hit:
                     if not dry:
                         try:
-                            act(origin, secret, lead["id"], "dnc", seller_code=lead.get("seller_code") or seller_code, sender=mailbox["user"], why="bounce")
+                            act(origin, secret, lead["id"], "dnc", seller_code=lead.get("seller_code") or seller_code, sender=mailbox["user"], why=why)
                         except Exception:
                             counts["act_errors"] = counts.get("act_errors", 0) + 1
                             continue
                     leads_by_email.pop(str(lead.get("email") or "").lower(), None)
-                    counts["bounced_dnc"] = counts.get("bounced_dnc", 0) + 1
+                    counts["bounced_dnc" if why == "bounce" else "undeliverable"] = counts.get("bounced_dnc" if why == "bounce" else "undeliverable", 0) + 1
                 continue
             lead = leads_by_email.get(from_addr)
-            kind = classify_reply(from_addr, text)
-            if str(msg.get("Auto-Submitted") or "").lower().startswith("auto-replied"):
-                kind = "ignore"
+            kind = classify_reply(from_addr, text, str(msg.get("Subject") or ""), msg)
+            if lead and kind == "undeliverable":
+                if not dry:
+                    try:
+                        act(origin, secret, lead["id"], "dnc", seller_code=lead.get("seller_code") or seller_code,
+                            sender=mailbox["user"], why="undeliverable")
+                    except Exception:
+                        counts["act_errors"] = counts.get("act_errors", 0) + 1
+                        continue
+                leads_by_email.pop(from_addr, None)
+                counts["undeliverable"] = counts.get("undeliverable", 0) + 1
+                continue
             if lead and kind in ("dnc", "replied"):
                 if not dry:
                     try:
@@ -461,6 +479,11 @@ def selftest(a):
     import email as _e
     rep = _e.message_from_string("From: mailer-daemon@googlemail.com\nX-Failed-Recipients: Gone@Shop.co.zw\n\nfailed")
     assert bounced_addresses(rep, "failed") == {"gone@shop.co.zw"}
+    import json as _json
+    _fx = _json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tests", "inbound.fixtures.json")))
+    for f in _fx:
+        assert classify_inbound(f["from"], f["subject"], f["text"], f.get("headers"))[0] == f["kind"], f["name"]
+    assert classify_reply("info@firm.co.zw", "No longer monitored. Write to accounts@firm.co.zw") == "undeliverable"
     print("SELFTEST OK — compose, eligibility, reply classes, mailbox tags, quotes, one voice, unsubscribe, bounces")
     return 0
 

@@ -5834,7 +5834,8 @@ async function leadsAct(req, env) {
   // outreach v2: a real reply to a link-free first touch is owed the link (the Worker sends it in-thread)
   if (b.action === 'contacted' && b.msgid && Number(t.lead.touches) === 1) t.lead.first_msgid = String(b.msgid).slice(0, 200);
   if (b.action === 'replied' && !t.lead.seller_code && Number(t.lead.touches) === 1 && t.lead.first_msgid) t.lead.link_owed = true;
-  if (b.action === 'dnc' && lead.status === 'contacted') await v2Tally(env, b.why === 'bounce' ? 'bounced' : 'stops');
+  // owner 2026-11-04: a full / unavailable / unmonitored inbox ends the lead quietly; it is neither a bounce nor a stop
+  if (b.action === 'dnc' && lead.status === 'contacted' && b.why !== 'undeliverable') await v2Tally(env, b.why === 'bounce' ? 'bounced' : 'stops');
   await env.ORDERS.put('lead:' + id, JSON.stringify(t.lead), { metadata: leadMeta(t.lead) }); quotaNote('writes', 'automation'); memDel('leads:all');
   if (b.action === 'dnc') {
     try {
@@ -6179,7 +6180,13 @@ async function outreachTick(env, nowMs) {
       out.sent++;
       continue;
     }
-    if (r.permanent) { await leadDnc(env, lead, 'refused at send: ' + String(r.why).slice(0, 60), 'bounce'); out.dnc++; wk.bounced = (Number(wk.bounced) || 0) + 1; wkDirty = true; continue; }
+    if (r.permanent) {
+      // a full / temporarily refusing mailbox is not a bounce (owner 2026-11-04)
+      const soft = /\b(5\.2\.2|4\.\d\.\d+)\b|mailbox (is )?full|over (the )?quota|quota exceeded|insufficient (storage|space)|temporar/i.test(String(r.why || ''));
+      await leadDnc(env, lead, (soft ? 'undeliverable at send: ' : 'refused at send: ') + String(r.why).slice(0, 60), soft ? 'undeliverable' : 'bounce'); out.dnc++;
+      if (!soft) { wk.bounced = (Number(wk.bounced) || 0) + 1; wkDirty = true; }
+      continue;
+    }
     if (r.why === 'lanes_full') continue;              // this lead's box is full this hour; the other box may not be
     out.why = r.why; break;
   }
