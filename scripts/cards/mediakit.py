@@ -207,7 +207,8 @@ def render(layout: str, shape: str, data: dict, brand: dict | None = None) -> by
             y = top - 6
             c.text((m, y), num, ns, True)
             y += round(ns * 1.08)
-            y = c.block(m, y, label, 38, colw, True, max_lines=2, lh=1.15) + 10
+            ls = fit_size(c.d, label, brand, colw, 38, 28, max_lines=2)  # shrink a long label before cutting it
+            y = c.block(m, y, label, ls, colw, True, max_lines=2, lh=1.15) + 10
             c.block(m, y, sub, 24, colw, False, "mut", max_lines=3)
             _rows(c, m + colw + 40, top - 4, W - m - (m + colw + 40), bottom - 26, data.get("rows", []), data.get("rows_title", ""), 23, 3)
         else:
