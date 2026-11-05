@@ -3674,16 +3674,20 @@ export function meshQueueItem(beat, opt) {
   const rail = pick.rail;
   const chan = o.channel_name ? String(o.channel_name) : pick.channel;
   const n = Number(beat && beat.seq) || 0;
+  const company = /^company:/.test(String((beat && beat.item_key) || ''));
+  const seo = company ? CONTENT_SEO[String((beat && beat.pillar) || '')] : null;
+  const words = company ? contentNative(String((beat && beat.text) || ''), beat && beat.pillar, rail) : String((beat && beat.text) || '');
   return {
     id: String((beat && (beat.item_key || beat.id)) || ('b' + n)).replace(/[^\w:-]/g, '').slice(0, 40) + '-' + Math.floor(now / 864e5),
     channel: chan, channel_id: String((o.channel_id || '') || '').slice(0, 40),
     due: new Date(o.due_at ? Date.parse(o.due_at) : Math.ceil((now + 60000) / grid) * grid + n * grid).toISOString(),
-    text: String((beat && beat.text) || '').slice(0, Number(beat && beat.max) || 300),
+    text: words.slice(0, Number(beat && beat.max) || (company && rail === 'linkedin' ? 3000 : company && rail === 'mastodon' ? 500 : 300)),
     link: o.no_links ? '' : (beat && beat.kind === 'promo' ? String(beat.link || o.landing || '') : ''),
     ...contentMediaFor({ ...(beat || {}), image: (beat && beat.image) || o.image || '' }, { now, seq: n, media_base: o.media_base }),
     pillar: String((beat && beat.pillar) || ''),
     board: rail === 'pinterest' ? String(o.board || '') : '',
-    pin_title: rail === 'pinterest' ? meshClip((beat && beat.item) || '', 60) : '',
+    pin_title: rail === 'pinterest' ? (seo ? meshClip(seo.title, 100) : meshClip((beat && beat.item) || '', 60)) : '',
+    ...(seo && rail === 'bluesky' ? { tags: seo.hashtags.map((h) => h.toLowerCase()).slice(0, 8) } : {}),
     landing: String(o.landing || ''), store: String(o.store || ''),
     kind: String((beat && beat.kind) || 'value'), posted_by: String((beat && beat.posted_by) || 'shop words'), via: pick.via,
   };
@@ -3786,13 +3790,17 @@ async function meshDirectSend(it, press, fetcher, dry, now) {
     if (u.includes('.jpg') || u.includes('.jpeg')) return 'image/jpeg';
     return fallback || 'image/png';
   };
-  const linkFacets = (text) => {
-    const m = String(text || '').match(/https?:\/\/[^\s]+/);
-    if (!m) return undefined;
-    const enc = new TextEncoder();
-    const start = enc.encode(String(text).slice(0, m.index)).length;
-    return [{ index: { byteStart: start, byteEnd: start + enc.encode(m[0]).length },
-      features: [{ $type: 'app.bsky.richtext.facet#link', uri: m[0] }] }];
+  const linkFacets = (text) => {   // press v3: every link and every hashtag, as UTF-8 byte ranges
+    const t = String(text || ''), enc = new TextEncoder(), out = [];
+    for (const m of t.matchAll(/https?:\/\/[^\s]+/g)) {
+      const start = enc.encode(t.slice(0, m.index)).length;
+      out.push({ index: { byteStart: start, byteEnd: start + enc.encode(m[0]).length }, features: [{ $type: 'app.bsky.richtext.facet#link', uri: m[0] }] });
+    }
+    for (const m of t.matchAll(/(^|\s)(#([A-Za-z][A-Za-z0-9]{1,63}))/g)) {
+      const start = enc.encode(t.slice(0, m.index + m[1].length)).length;
+      out.push({ index: { byteStart: start, byteEnd: start + enc.encode(m[2]).length }, features: [{ $type: 'app.bsky.richtext.facet#tag', tag: m[3] }] });
+    }
+    return out.length ? out : undefined;
   };
   if (it.channel === 'bluesky' && d.bluesky && d.bluesky.handle && d.bluesky.app_password) {
     const url = 'https://bsky.social/xrpc/com.atproto.repo.createRecord';
@@ -3866,7 +3874,8 @@ async function meshDirectSend(it, press, fetcher, dry, now) {
       const r = await fetcher(url, {
         method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + sj.accessJwt },
         body: JSON.stringify({ repo: sj.did, collection: 'app.bsky.feed.post',
-          record: { $type: 'app.bsky.feed.post', text, ...(facets ? { facets } : {}), ...(embed ? { embed } : {}), createdAt: new Date(now).toISOString() } }) });
+          record: { $type: 'app.bsky.feed.post', text, langs: ['en'], ...(facets ? { facets } : {}), ...(Array.isArray(it.tags) && it.tags.length ? { tags: it.tags.slice(0, 8) } : {}),
+            ...(embed ? { embed } : {}), createdAt: new Date(now).toISOString() } }) });
       const ok = r.status >= 200 && r.status < 300;
       return { status: ok ? 'sent' : 'failed', sent: ok, verified: ok, http: r.status, note: ok ? 'accepted by Bluesky' + mediaNote : 'bluesky refused the post' };
     } catch (e) { return { status: 'failed', sent: false, verified: false, err: String(e && e.message || e).slice(0, 160) }; }
@@ -4156,6 +4165,44 @@ export const CONTENT_PILLARS = [
     { text: 'Record the rail a payment came through, not just that it came. At month-end the fees only reconcile if every row remembers which rail carried it.', path: '/fees' },
     { text: 'A debt is an order with no matched amount yet. Write the date the money was promised beside it and the ledger tells you who to ask — instead of your memory.', path: '/guide/whatsapp-shop-payments' } ] },
 ];
+/* ── press v3 (playbook/PRESS-V3.md): the same lesson, written for each platform ──────────────────
+ * A company line is the value; how it is found differs per platform. Bluesky and Nostr read a couple
+ * of hashtags (Bluesky also indexes hidden tags), Mastodon is found almost only through hashtags,
+ * LinkedIn wants 3-5 at the end, and Pinterest is a search engine that ignores hashtags and ranks the
+ * pin title. Shop (seller) posts are the shop's own words and are left exactly as the shop wrote them. */
+export const CONTENT_SEO = {
+  'exact-amount': { keyphrase: 'fake proof of payment', title: 'How to spot a fake proof of payment on WhatsApp',
+    hashtags: ['MobileMoney', 'EcoCash', 'FraudPrevention', 'SmallBusiness', 'Zimbabwe'] },
+  'shop-math': { keyphrase: 'mobile money fees', title: 'Mobile money fees: price your shop with the rail in the room',
+    hashtags: ['EcoCash', 'MobileMoney', 'SmallBusiness', 'Pricing', 'Zimbabwe'] },
+  'till-tips': { keyphrase: 'WhatsApp shop tips', title: 'WhatsApp shop tips: stock, hours and delivery promises',
+    hashtags: ['WhatsAppBusiness', 'SmallBusiness', 'Retail', 'Zimbabwe', 'Entrepreneur'] },
+  'buyer-trust': { keyphrase: 'selling on WhatsApp', title: 'Selling on WhatsApp: how to earn a buyer\'s trust',
+    hashtags: ['WhatsAppBusiness', 'CustomerService', 'SmallBusiness', 'Zimbabwe', 'Ecommerce'] },
+  'menu-craft': { keyphrase: 'online menu tips', title: 'Online menu tips: names, photos and prices that sell',
+    hashtags: ['SmallBusiness', 'FoodBusiness', 'WhatsAppBusiness', 'Zimbabwe', 'Marketing'] },
+  books: { keyphrase: 'bookkeeping for small shops', title: 'Bookkeeping for small shops, straight from the till',
+    hashtags: ['Bookkeeping', 'SmallBusiness', 'Accounting', 'Zimbabwe', 'Entrepreneur'] },
+  promo: { keyphrase: 'WhatsApp shop', title: 'A WhatsApp shop with your own payment numbers',
+    hashtags: ['WhatsAppBusiness', 'SmallBusiness', 'Zimbabwe', 'MobileMoney', 'Ecommerce'] },
+};
+export const CONTENT_HASHTAGS_PER_RAIL = { bluesky: 2, nostr: 3, mastodon: 4, linkedin: 4, pinterest: 0 };
+const CONTENT_RAIL_MAX = { bluesky: 300, nostr: 1000, mastodon: 500, linkedin: 3000, pinterest: 500 };
+/** One company line, in the platform's own shape. Hashtags go on their own last line and are dropped one
+ *  by one before the line itself is ever cut; Pinterest loses any hashtag the line carried. */
+export function contentNative(text, pillar, rail) {
+  const seo = CONTENT_SEO[String(pillar || '')];
+  const t = String(text || '').trim();
+  const r = String(rail || '');
+  if (!seo || !(r in CONTENT_HASHTAGS_PER_RAIL)) return t;
+  if (r === 'pinterest') return t.replace(/(^|\s)#([A-Za-z]\w*)/g, '$1$2');
+  const max = CONTENT_RAIL_MAX[r];
+  const have = new Set((t.match(/#[A-Za-z]\w*/g) || []).map((h) => h.slice(1).toLowerCase()));
+  let tags = seo.hashtags.filter((h) => !have.has(h.toLowerCase())).slice(0, Math.max(0, CONTENT_HASHTAGS_PER_RAIL[r] - have.size));
+  while (tags.length && (t + '\n\n' + tags.map((h) => '#' + h).join(' ')).length > max) tags = tags.slice(0, -1);
+  return tags.length ? t + '\n\n' + tags.map((h) => '#' + h).join(' ') : t;
+}
+
 /** The pool the rotation walks, dealt pillar-by-pillar rather than pillar-by-pillar-block: five lines
  *  of shop math in a row is a lecture, and two different subjects a day is a feed. */
 export const MESH_COMPANY_VALUE = (() => {
