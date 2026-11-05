@@ -165,7 +165,7 @@ test('outreach v2: T1 has no links, T2/T3/link carry it; ramp 10/25/50; brake; o
   for (const m of [t1, t2, t3, lk]) assert.doesNotMatch(m.text + m.subject, /\u2014/);
   assert.deepEqual([O.v2Ramp(Date.parse('2026-11-04T12:00Z')), O.v2Ramp(Date.parse('2026-11-05T12:00Z')), O.v2Ramp(Date.parse('2026-11-12T12:00Z')), O.v2Ramp(Date.parse('2026-11-19T12:00Z'))], [0, 10, 25, 50]);
   assert.equal(O.v2Brake({ sent: 19, bounced: 5 }), '');
-  assert.match(O.v2Brake({ sent: 40, bounced: 3 }), /bounces/);
+  assert.equal(O.v2Brake({ sent: 40, bounced: 20 }), ''); // owner 2026-11-04: a wrong address is not a failure
   assert.match(O.v2Brake({ sent: 40, stops: 2 }), /stops/);
   assert.equal(O.v2Brake({ sent: 40, bounced: 2, stops: 1 }), '');
   assert.equal(O.v2BoxIndex('A@b.co', 2), O.v2BoxIndex('a@B.co', 2));

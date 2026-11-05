@@ -489,7 +489,7 @@ export function v2Ramp(now, start) {
 export function v2Brake(w) {
   const sent = Number(w && w.sent) || 0, b = Number(w && w.bounced) || 0, s = Number(w && w.stops) || 0;
   if (sent < 20) return '';
-  if (b / sent > 0.05) return 'brake: ' + b + ' bounces in ' + sent + ' sends this week';
+  // owner 2026-11-04: a wrong address or missing domain is not a failure; it never brakes or pauses outreach
   if (s / sent > 0.03) return 'brake: ' + s + ' stops in ' + sent + ' sends this week';
   return '';
 }
