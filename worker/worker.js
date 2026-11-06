@@ -65,7 +65,7 @@ import {
   leadsHuntToday,
   cardApply, CARD_KEY_RE, meshFanOut } from './core.js';
 
-const VERSION = '2.5.0';
+const VERSION = '2.5.1';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
@@ -3797,7 +3797,7 @@ async function runPress(env, origin, opt) {
       try { await governedPut(env.ORDERS, 'press:state:' + id, JSON.stringify(ledger), null, 'automation'); } catch (e2) { /* same */ }
     }
     out.push({ id, class: e.class, ok: true, dry: dry, composed: (plan.beats || []).length, in_slot: items.length,
-      skipped_slots: (plan.beats || []).length - items.length, queued_now: merged.added, dropped: merged.dropped.length,
+      skipped_slots: (plan.beats || []).filter((beat, i) => contentSlotMissed(Date.now(), i)).length, queued_now: merged.added, dropped: merged.dropped.length,
       sent: flush.sent, waiting: flush.waiting, duplicates: (flush.duplicates || 0) + settledEarlier,
       expired_slots: expiredQ.expired.length, token_env: e.token_env, token_present: !!press.buffer_token,
       results: flush.results.map((r) => ({ channel: r.channel, status: r.status, due: r.due, err: r.err || r.note || '' })),
