@@ -63,8 +63,7 @@ import {
   QUOTA_LIMITS, quotaAllows, quotaPriorityForKey, storeMeta, storeMetaAction, suspendDecision, SUSPEND_GRACE_DAYS, emailHash,
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
   leadsHuntToday,
-  cardApply, CARD_KEY_RE,
-} from './core.js';
+  cardApply, CARD_KEY_RE, meshFanOut } from './core.js';
 
 const VERSION = '2.4.0';
 const FREE_DAYS = 60;
@@ -3655,6 +3654,14 @@ function directCredsFor(env, e, id) {
   const tgTok = env['PRESS_' + tag + '_TELEGRAM_BOT_TOKEN'] || env.PRESS_TELEGRAM_BOT_TOKEN || '';
   const tgChat = env['PRESS_' + tag + '_TELEGRAM_CHAT_ID'] || (rails.telegram && rails.telegram.channel_id) || '';
   if (tgTok || tgChat) out.telegram = { bot_token: String(tgTok), chat_id: String(tgChat) };
+  // 2026-11-06: Mastodon, Discord and Tumblr send from the Worker too (owner accounts, work-book1.csv column D)
+  const mdTok = env['PRESS_' + tag + '_MASTODON_TOKEN'] || '';
+  if (mdTok) out.mastodon = { token: String(mdTok), instance: String(env['PRESS_' + tag + '_MASTODON_INSTANCE'] || (rails.mastodon && rails.mastodon.handle && String(rails.mastodon.handle).split('@').pop()) || 'mastodon.social') };
+  const dcHook = env['PRESS_' + tag + '_DISCORD_WEBHOOK'] || '';
+  if (dcHook) out.discord = { webhook: String(dcHook) };
+  const tb = { blog: env['PRESS_' + tag + '_TUMBLR_BLOG'] || (rails.tumblr && rails.tumblr.handle) || '', consumer_key: env['PRESS_' + tag + '_TUMBLR_CONSUMER_KEY'] || '',
+    consumer_secret: env['PRESS_' + tag + '_TUMBLR_CONSUMER_SECRET'] || '', token: env['PRESS_' + tag + '_TUMBLR_TOKEN'] || '', token_secret: env['PRESS_' + tag + '_TUMBLR_TOKEN_SECRET'] || '' };
+  if (tb.consumer_key || tb.token) out.tumblr = tb;
   return out;
 }
 
@@ -3663,7 +3670,7 @@ function directCredsFor(env, e, id) {
  *  composes and queues only for active rails, so an identity with no accounts yet costs no KV write
  *  and no queue that fills and expires. Rails with no sender in this Worker (nostr, mastodon, devto)
  *  say so instead of pretending to be waiting. */
-const PRESS_SENDERS = { bluesky: 'direct', telegram: 'direct', x: 'buffer', linkedin: 'buffer', pinterest: 'buffer' };
+const PRESS_SENDERS = { bluesky: 'direct', telegram: 'direct', mastodon: 'direct', discord: 'direct', tumblr: 'direct', x: 'buffer', linkedin: 'buffer', pinterest: 'buffer' };
 function pressRailState(env, e, id) {
   const tag = String(id || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   const rails = (e && e.rails) || {};
@@ -3679,6 +3686,16 @@ function pressRailState(env, e, id) {
     } else if (rail === 'telegram') {
       armed = !!(d.telegram && d.telegram.bot_token && d.telegram.chat_id);
       secrets = ['PRESS_' + tag + '_TELEGRAM_BOT_TOKEN', 'PRESS_' + tag + '_TELEGRAM_CHAT_ID'];
+    } else if (rail === 'mastodon') {
+      armed = !!(d.mastodon && d.mastodon.token);
+      secrets = ['PRESS_' + tag + '_MASTODON_TOKEN', '(optional) PRESS_' + tag + '_MASTODON_INSTANCE'];
+    } else if (rail === 'discord') {
+      armed = !!(d.discord && d.discord.webhook);
+      secrets = ['PRESS_' + tag + '_DISCORD_WEBHOOK'];
+    } else if (rail === 'tumblr') {
+      const t = d.tumblr || {};
+      armed = !!(t.blog && t.consumer_key && t.consumer_secret && t.token && t.token_secret);
+      secrets = ['PRESS_' + tag + '_TUMBLR_CONSUMER_KEY', 'PRESS_' + tag + '_TUMBLR_CONSUMER_SECRET', 'PRESS_' + tag + '_TUMBLR_TOKEN', 'PRESS_' + tag + '_TUMBLR_TOKEN_SECRET'];
     } else {
       armed = !!(env[e.token_env] && r && r.channel_id);
       secrets = [e.token_env, '(and the Buffer channel id, registered on the identity)'];
@@ -3725,9 +3742,18 @@ async function runPress(env, origin, opt) {
     const idRails = armedRails;
     // v1.5.3: a day's beats belong to fixed clock slots, so the same beat is the same item at every
     // tick of the day — and a slot missed by more than the grace window is skipped, not dumped late.
-    const items = (plan.beats || []).filter((beat, i) => !contentSlotMissed(Date.now(), i)).map((beat, i) => meshQueueItem(Object.assign({}, beat, { seq: i, to: idRails.length ? idRails : (beat.to || []) }), { landing: origin + '/fees', store: id, now: Date.now(),
-      channel_id: ((e.rails || {})[beat.rail] || {}).channel_id || press.channels[beat.rail] || '', board: press.board, no_links: e.class === 'seller',
-      due_at: contentSlotDue(Date.now(), i) }));
+    // 2026-11-06: a beat goes to up to topic_max_rails armed rails (the same per-topic limit every business keeps),
+    // rotated by day and slot so each account is used; before this, every beat landed on the first armed rail only.
+    const maxRails = Number(((e.cadence || {}).topic_max_rails) || MESH_QUEUE_DEFAULTS.topic_max_rails) || 3;
+    const items = (plan.beats || []).filter((beat, i) => !contentSlotMissed(Date.now(), i)).flatMap((beat, i) => {
+      const targets = idRails.length ? meshFanOut(idRails, i, Date.now(), maxRails) : (beat.to || []).slice(0, 1);
+      return targets.map((r) => {
+        const it = meshQueueItem(Object.assign({}, beat, { seq: i, to: [r] }), { landing: origin + '/fees', store: id, now: Date.now(),
+          channel_id: ((e.rails || {})[r] || {}).channel_id || press.channels[MESH_BUFFER_CHANNEL[r] || r] || '', board: press.board, no_links: e.class === 'seller',
+          due_at: contentSlotDue(Date.now(), i) });
+        return targets.length > 1 ? Object.assign(it, { id: it.id + '-' + r.slice(0, 3) }) : it;
+      });
+    });
     const prevQ = await env.ORDERS.get('press:queue:' + id, 'json').catch(() => null) || {};
     const expiredQ = Array.isArray(prevQ.items) ? meshQueueExpire(prevQ.items.map((it) => applyContentLinkPolicy(it, e.class)), { now: Date.now() }) : { items: [], expired: [] };
     prevQ.items = expiredQ.items;

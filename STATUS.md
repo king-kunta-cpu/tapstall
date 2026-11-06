@@ -1,6 +1,29 @@
 # Tapstall — status
 
 
+## v2.5.0 (2026-11-06): company press live on its own accounts
+
+Owner, 6 Nov 2026: Tapstall's own accounts (work-book1.csv column D) post the company lessons, and the
+strategy (playbook/TAPSTALL-PROFIT-STRATEGY.md) widens the market to sellers in the 105 countries Stripe
+does not serve. This release is build step 1:
+
+* **New direct senders:** Mastodon (card uploaded, then the status), Discord (webhook, `wait=true`, card as
+  an embed, no mentions, browser user agent), Tumblr (titled text post, card on top, tags, OAuth 1.0a
+  signed in WebCrypto; the signature test uses the published HMAC-SHA1 reference). Secrets are
+  `PRESS_OWNER_{MASTODON_TOKEN,DISCORD_WEBHOOK,TUMBLR_*}`; a rail without its secret stays
+  "on (waiting for account)".
+* **Buffer publishes:** the call was `createDraft` on `buffer.com/graphql`, which leaves a draft nobody sees
+  and could be counted as sent. It is now `createPost` (shareNow) on `api.buffer.com`, only
+  `PostActionSuccess` counts, and Pinterest carries its board and a keyword title.
+* **Fan-out under the per-topic limit:** every beat used to land on the first armed rail only. A beat now goes
+  to at most `topic_max_rails` (3) armed rails, rotated by day and slot, so a day's beats reach every account
+  without one topic flooding all of them.
+* **Proof pillar for sellers everywhere:** three new lines (reused transaction codes; Yape/GCash/M-Pesa/bKash/
+  EcoCash, same rule; pressure is part of the fake) and global hashtags instead of #Zimbabwe on that pillar.
+
+Waiting: Tumblr (the owner's one Allow click), Nostr (no nsec), Reddit (no password, no app id/secret).
+Medium cannot be automated (it issues no new API tokens).
+
 ## v2.4.0 (2026-11-02): Gmail outreach paused, merchant mail kept
 
 Owner, 2 Nov 2026: pause Gmail **outreach** in every business; mail people need (PIN resets, receipts,

@@ -3577,6 +3577,8 @@ export const MESH_PUBLISH = {
   nostr:     { via: 'direct', grid_min: 40, needs: 'an nsec per shop and any public relay: no signup, no cost, nothing to approve' },
   telegram:  { via: 'direct', grid_min: 40, needs: 'bot token + channel id' },
   mastodon:  { via: 'direct', grid_min: 40, needs: 'instance + access token' },
+  discord:   { via: 'direct', grid_min: 40, needs: 'a channel webhook URL' },
+  tumblr:    { via: 'direct', grid_min: 40, needs: 'blog name + OAuth consumer key/secret + the blog owner token/secret (one Allow click)' },
   devto:     { via: 'direct', grid_min: 40, needs: 'free api key; the long-form home of the value beats' },
   gpages:    { via: 'own',    grid_min: 40, needs: 'nothing: these are our nodes' },
   whatsapp:  { via: 'none',   grid_min: 0,  needs: 'their number, their hand: no API exists and we do not pretend one does' },
@@ -3647,7 +3649,7 @@ export function meshRailsTotal(beats) {
 export const MESH_BUFFER_CHANNEL = { x: 'twitter', linkedin: 'linkedin', pinterest: 'pinterest' };
 export const MESH_QUEUE_DEFAULTS = { grid_min: 40, per_day: 3, promo_per_day: 1, promo_min_gap_days: 3,
   reply_per_day: 4, run_target: 4, longform_days: 7, topic_max_rails: 3 };
-export const MESH_GRAPHQL_URL = 'https://buffer.com/graphql';
+export const MESH_GRAPHQL_URL = 'https://api.buffer.com';   // 2026-11-06: buffer.com/graphql was the old app endpoint
 
 /** The queue item for one beat, in their keys, with a due time on the grid. `link` is only present on
  *  the shop-facts half, because the value half has no link by design. */
@@ -3666,6 +3668,20 @@ export function meshBeatChannel(beat) {
   }
   for (const w of want) { const pub = MESH_PUBLISH[String(w)]; if (pub) return { channel: String(w), via: 'none', rail: String(w) }; }
   return { channel: 'bluesky', via: 'none', rail: String((beat && beat.rail) || 'bluesky') };
+}
+
+/** Which rails one beat goes to: at most `maxRails` of the armed rails, starting at a rotating offset (day and
+ *  slot), so a day's beats together cover every account and no single topic floods every rail at once. */
+export function meshFanOut(rails, seq, now, maxRails) {
+  const list = (Array.isArray(rails) ? rails : []).filter(Boolean);
+  const n = list.length;
+  if (!n) return [];
+  const k = Math.min(n, Math.max(1, Number(maxRails) || Number(MESH_QUEUE_DEFAULTS.topic_max_rails) || 3));
+  const day = Math.floor((Number(now) || Date.now()) / DAY_MS);
+  const start = (((day * 7) + (Number(seq) || 0) * k) % n + n) % n;
+  const out = [];
+  for (let j = 0; j < k; j += 1) out.push(list[(start + j) % n]);
+  return out;
 }
 
 export function meshQueueItem(beat, opt) {
@@ -3688,6 +3704,7 @@ export function meshQueueItem(beat, opt) {
     board: rail === 'pinterest' ? String(o.board || '') : '',
     pin_title: rail === 'pinterest' ? (seo ? meshClip(seo.title, 100) : meshClip((beat && beat.item) || '', 60)) : '',
     ...(seo && rail === 'bluesky' ? { tags: seo.hashtags.map((h) => h.toLowerCase()).slice(0, 8) } : {}),
+    ...(seo && rail === 'tumblr' ? { tags: [seo.keyphrase].concat(seo.hashtags.map((h) => h.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase())).slice(0, 10) } : {}),
     landing: String(o.landing || ''), store: String(o.store || ''),
     kind: String((beat && beat.kind) || 'value'), posted_by: String((beat && beat.posted_by) || 'shop words'), via: pick.via,
   };
@@ -3732,11 +3749,18 @@ export function meshBufferCall(press, item) {
   if (!p.buffer_token) return { call: null, err: 'no Buffer access token wired for this account' };
   const ch = String(item.channel_id || (p.channels || {})[item.channel] || '');
   if (!ch) return { call: null, err: 'no Buffer channel id for ' + item.channel };
+  // 2026-11-06: createPost (shareNow), not createDraft. A draft sits in Buffer and is never published, so the old
+  // call could report "sent" for words nobody saw. Pinterest needs its board and a title in metadata.
+  const input = { channelId: ch, text: String(item.text || ''), schedulingType: 'automatic', mode: 'shareNow',
+    assets: item.image ? [{ image: { url: String(item.image) } }] : [] };
+  if (item.channel === 'pinterest') {
+    if (!item.board) return { call: null, err: 'no Pinterest board id for this identity (the Buffer channel lists its boards)' };
+    input.metadata = { pinterest: { boardServiceId: String(item.board), title: String(item.pin_title || '').slice(0, 100),
+      ...(item.link || item.landing ? { url: String(item.link || item.landing) } : {}) } };
+  }
   const body = JSON.stringify({
-    operationName: 'createDraft',
-    query: 'mutation createDraft($input: CreateDraftInput!) { createDraft(input: $input) { draft { id state } } }',
-    variables: { input: { channelId: ch, text: item.text, publishAt: item.due,
-      attachments: item.image ? [{ type: 'IMAGE', url: item.image }] : undefined } },
+    query: 'mutation($input: CreatePostInput!) { createPost(input: $input) { __typename ... on PostActionSuccess { post { id status } } ... on MutationError { message } } }',
+    variables: { input },
   });
   return { err: '', call: { url: MESH_GRAPHQL_URL, method: 'POST',
     headers: { 'content-type': 'application/json', authorization: 'Bearer ' + String(p.buffer_token).slice(0, 200) },
@@ -3897,7 +3921,93 @@ async function meshDirectSend(it, press, fetcher, dry, now) {
       return { status: ok ? 'sent' : 'failed', sent: ok, verified: ok, http: r.status, note: ok ? 'accepted by Telegram with media' : 'telegram refused the post' };
     } catch (e) { return { status: 'failed', sent: false, verified: false, err: String(e && e.message || e).slice(0, 160) }; }
   }
+  if (it.channel === 'mastodon' && d.mastodon && d.mastodon.token) {
+    const inst = 'https://' + String(d.mastodon.instance || 'mastodon.social').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    const url = inst + '/api/v1/statuses';
+    if (dry) return { status: 'dry', url, due: it.due, chars: String(it.text).length, verified: false };
+    if (!fetcher) return { status: 'queued', sent: false, verified: false, err: 'no fetch in this runtime' };
+    try {
+      const auth = { authorization: 'Bearer ' + String(d.mastodon.token).slice(0, 200) };
+      const ids = []; let mediaNote = '';
+      if (media.image && typeof FormData === 'function' && typeof Blob === 'function') {
+        try {
+          const ir = await fetcher(media.image);
+          if (ir && ir.status >= 200 && ir.status < 300) {
+            const ct = (ir.headers && typeof ir.headers.get === 'function' && ir.headers.get('content-type')) || typeOf(media.image, 'image/png');
+            const fd = new FormData();
+            fd.append('file', new Blob([await bytesOf(ir)], { type: String(ct).split(';')[0] }), 'tapstall.png');
+            fd.append('description', String(media.alt || it.text).slice(0, 1400));
+            const up = await fetcher(inst + '/api/v2/media', { method: 'POST', headers: auth, body: fd });
+            const uj = await asJson(up);
+            if (uj && uj.id) { ids.push(String(uj.id)); mediaNote = ' + branded card'; }
+          }
+        } catch (me) { mediaNote = ' (card upload refused, text sent)'; }
+      }
+      const r = await fetcher(url, { method: 'POST',
+        headers: { ...auth, 'content-type': 'application/json', 'idempotency-key': String(it.id || '').slice(0, 64) },
+        body: JSON.stringify({ status: String(it.text).slice(0, 500), visibility: 'public', language: 'en', ...(ids.length ? { media_ids: ids } : {}) }) });
+      const j = await asJson(r);
+      const ok = r.status >= 200 && r.status < 300 && !!(j && j.id);
+      return { status: ok ? 'sent' : 'failed', sent: ok, verified: ok, http: r.status, note: ok ? 'accepted by Mastodon' + mediaNote : 'mastodon refused the post' };
+    } catch (e) { return { status: 'failed', sent: false, verified: false, err: String(e && e.message || e).slice(0, 160) }; }
+  }
+  if (it.channel === 'discord' && d.discord && d.discord.webhook) {
+    const hook = String(d.discord.webhook);
+    if (!/^https:\/\/(?:discord|discordapp)\.com\/api\/webhooks\//.test(hook)) return { status: 'failed', sent: false, verified: false, err: 'the Discord secret is not a webhook URL' };
+    if (dry) return { status: 'dry', url: 'discord webhook', due: it.due, chars: String(it.text).length, verified: false };
+    if (!fetcher) return { status: 'queued', sent: false, verified: false, err: 'no fetch in this runtime' };
+    try {
+      // Discord's edge refuses bare clients: a browser-shaped user agent is required.
+      const r = await fetcher(hook + (hook.includes('?') ? '&' : '?') + 'wait=true', { method: 'POST',
+        headers: { 'content-type': 'application/json', 'user-agent': 'Mozilla/5.0 (compatible; Tapstall/2.5; +https://tapstall.zlnew.workers.dev)' },
+        body: JSON.stringify({ content: String(it.text).slice(0, 1900), allowed_mentions: { parse: [] },
+          ...(media.image ? { embeds: [{ image: { url: media.image } }] } : {}) }) });
+      const j = await asJson(r);
+      const ok = r.status >= 200 && r.status < 300 && !!(j && j.id);
+      return { status: ok ? 'sent' : 'failed', sent: ok, verified: ok, http: r.status, note: ok ? 'accepted by Discord' : 'discord refused the post' };
+    } catch (e) { return { status: 'failed', sent: false, verified: false, err: String(e && e.message || e).slice(0, 160) }; }
+  }
+  if (it.channel === 'tumblr' && d.tumblr && d.tumblr.blog && d.tumblr.consumer_key && d.tumblr.consumer_secret && d.tumblr.token && d.tumblr.token_secret) {
+    const blog = String(d.tumblr.blog).replace(/^@/, '').replace(/\.tumblr\.com$/, '');
+    const url = 'https://api.tumblr.com/v2/blog/' + encodeURIComponent(blog) + '.tumblr.com/post';
+    if (dry) return { status: 'dry', url, due: it.due, chars: String(it.text).length, verified: false };
+    if (!fetcher) return { status: 'queued', sent: false, verified: false, err: 'no fetch in this runtime' };
+    try {
+      const esc = (v) => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      const words = String(it.text).replace(/\n\n#[^\n]*$/, '');
+      const paras = words.split(/\n\s*\n/).filter((x) => x.trim()).map((x) => '<p>' + esc(x).replace(/\n/g, '<br>') + '</p>').join('')
+        .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1">$1</a>');
+      const pic = media.image ? '<p><img src="' + esc(media.image) + '" alt="' + esc(String(media.alt || 'Tapstall').slice(0, 200)) + '"></p>' : '';
+      const form = { type: 'text', format: 'html', title: String(it.pin_title || words.split('\n')[0]).slice(0, 140), body: pic + paras,
+        tags: (Array.isArray(it.tags) ? it.tags : []).slice(0, 10).join(',') };
+      const auth = await oauth1Header('POST', url, form, d.tumblr, now);
+      const r = await fetcher(url, { method: 'POST', headers: { authorization: auth, 'content-type': 'application/x-www-form-urlencoded' },
+        body: Object.entries(form).map(([k, v]) => oauthEnc(k) + '=' + oauthEnc(v)).join('&') });
+      const j = await asJson(r);
+      const resp = (j && j.response) || {};
+      const ok = r.status >= 200 && r.status < 300 && !!(resp.id || resp.id_string);
+      return { status: ok ? 'sent' : 'failed', sent: ok, verified: ok, http: r.status, note: ok ? 'accepted by Tumblr' : 'tumblr refused the post' };
+    } catch (e) { return { status: 'failed', sent: false, verified: false, err: String(e && e.message || e).slice(0, 160) }; }
+  }
   return null;
+}
+
+/** OAuth 1.0a (HMAC-SHA1) for Tumblr, with WebCrypto: the form fields are part of the signature base, the
+ *  JSON body never is (Tumblr's legacy /post takes a form). Exported for the test that pins the signature. */
+export function oauthEnc(v) {
+  return encodeURIComponent(String(v)).replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+}
+export async function oauth1Header(method, url, form, cred, nowMs, nonceIn) {
+  const c = cred || {};
+  const oa = { oauth_consumer_key: String(c.consumer_key), oauth_nonce: String(nonceIn || (Math.random().toString(36).slice(2) + Date.now().toString(36))),
+    oauth_signature_method: 'HMAC-SHA1', oauth_timestamp: String(Math.floor((nowMs || Date.now()) / 1000)), oauth_token: String(c.token), oauth_version: '1.0' };
+  const all = Object.entries(Object.assign({}, form || {}, oa)).map(([k, v]) => [oauthEnc(k), oauthEnc(v)]).sort((a, b) => (a[0] === b[0] ? (a[1] < b[1] ? -1 : 1) : (a[0] < b[0] ? -1 : 1)));
+  const base = String(method).toUpperCase() + '&' + oauthEnc(url) + '&' + oauthEnc(all.map(([k, v]) => k + '=' + v).join('&'));
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(oauthEnc(c.consumer_secret) + '&' + oauthEnc(c.token_secret)), { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']);
+  const sig = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(base)));
+  let bin = ''; for (const b of sig) bin += String.fromCharCode(b);
+  oa.oauth_signature = btoa(bin);
+  return 'OAuth ' + Object.entries(oa).map(([k, v]) => oauthEnc(k) + '="' + oauthEnc(v) + '"').join(', ');
 }
 
 /** Send what is due. `dry` returns exactly what would be sent and calls nothing; a real send records
@@ -3954,9 +4064,9 @@ async function pressAttempt(it, press, fetcher, dry, now) {
     try {
       const r = await fetcher(call.call.url, { method: call.call.method || 'POST', headers: call.call.headers, body: call.call.body });
       const txt = await r.text();
-      const ok = r.status >= 200 && r.status < 300 && !/"errors"\s*:\s*\[/.test(txt);
+      const ok = r.status >= 200 && r.status < 300 && !/"errors"\s*:\s*\[/.test(txt) && /PostActionSuccess/.test(txt);
       return { status: ok ? 'sent' : 'failed', http: r.status, sent: ok,
-        verified: ok, note: ok ? 'the draft was accepted by Buffer' : txt.slice(0, 160) };
+        verified: ok, note: ok ? 'the post was accepted by Buffer' : txt.slice(0, 160) };
     } catch (e) {
       return { status: 'failed', sent: false, err: String(e && e.message || e).slice(0, 160), verified: false };
     }
@@ -4133,7 +4243,10 @@ export const CONTENT_PILLARS = [
     { text: 'Before you mark anything paid, search the amount first and the name second. Names repeat; exact amounts do not.', path: '/guide/payment-reference-matching' },
     { text: 'A proof-of-payment picture proves someone can edit a picture. A code from the paying app, matched to the exact amount, proves a payment.', path: '/guide/payment-reference-matching' },
     { text: 'Two payments of the same amount on the same day are one search, not two receipts. Note the time beside the amount when your app shows one — a clock is the tiebreaker that names the right buyer.', path: '/guide/payment-reference-matching' },
-    { text: 'When a buyer sends the screenshot instead of the money, answer with the exact amount and one line: "Searching for the 12.43 — read me the code on your confirmation." It comes back answered, or it does not come back.', path: '/guide/payment-reference-matching' } ] },
+    { text: 'When a buyer sends the screenshot instead of the money, answer with the exact amount and one line: "Searching for the 12.43 — read me the code on your confirmation." It comes back answered, or it does not come back.', path: '/guide/payment-reference-matching' },
+    { text: 'An old screenshot sent twice is the oldest trick in the book. Keep the transaction codes you have already accepted, and a code that comes back for a second order is your answer.', path: '/guide/payment-reference-matching' },
+    { text: 'Yape, GCash, M-Pesa, bKash, EcoCash, a bank transfer: the screenshot looks different, the rule is the same. Release the goods when the money is in your own app, not when the picture is in your chat.', path: '/guide/whatsapp-shop-payments' },
+    { text: 'A payment message that arrives with a hurry attached ("the driver is waiting", "I am travelling") deserves the slowest check of the day. Pressure is part of the fake.', path: '/guide/payment-reference-matching' } ] },
   { id: 'shop-math', label: 'Shop Math', card: 'shop-math', lines: [
     { text: 'Price with the rail in the room: transfer fee + IMTT + cash-out is the real cost of "free" mobile money. Decide who carries it before the buyer checks out, not after.', path: '/fees' },
     { text: 'If a payment method takes 3% and your margin is 10%, the rail is eating a third of the profit — not 3% of it. Do that division before you set the price.', path: '/fees' },
@@ -4172,7 +4285,7 @@ export const CONTENT_PILLARS = [
  * pin title. Shop (seller) posts are the shop's own words and are left exactly as the shop wrote them. */
 export const CONTENT_SEO = {
   'exact-amount': { keyphrase: 'fake proof of payment', title: 'How to spot a fake proof of payment on WhatsApp',
-    hashtags: ['MobileMoney', 'EcoCash', 'FraudPrevention', 'SmallBusiness', 'Zimbabwe'] },
+    hashtags: ['FraudPrevention', 'MobileMoney', 'SmallBusiness', 'WhatsAppBusiness', 'ScamAlert'] },
   'shop-math': { keyphrase: 'mobile money fees', title: 'Mobile money fees: price your shop with the rail in the room',
     hashtags: ['EcoCash', 'MobileMoney', 'SmallBusiness', 'Pricing', 'Zimbabwe'] },
   'till-tips': { keyphrase: 'WhatsApp shop tips', title: 'WhatsApp shop tips: stock, hours and delivery promises',
@@ -4186,8 +4299,8 @@ export const CONTENT_SEO = {
   promo: { keyphrase: 'WhatsApp shop', title: 'A WhatsApp shop with your own payment numbers',
     hashtags: ['WhatsAppBusiness', 'SmallBusiness', 'Zimbabwe', 'MobileMoney', 'Ecommerce'] },
 };
-export const CONTENT_HASHTAGS_PER_RAIL = { bluesky: 2, nostr: 3, mastodon: 4, linkedin: 4, pinterest: 0 };
-const CONTENT_RAIL_MAX = { bluesky: 300, nostr: 1000, mastodon: 500, linkedin: 3000, pinterest: 500 };
+export const CONTENT_HASHTAGS_PER_RAIL = { bluesky: 2, nostr: 3, mastodon: 4, linkedin: 4, pinterest: 0, discord: 0, tumblr: 0 };
+const CONTENT_RAIL_MAX = { bluesky: 300, nostr: 1000, mastodon: 500, linkedin: 3000, pinterest: 500, discord: 1900, tumblr: 4000 };
 /** One company line, in the platform's own shape. Hashtags go on their own last line and are dropped one
  *  by one before the line itself is ever cut; Pinterest loses any hashtag the line carried. */
 export function contentNative(text, pillar, rail) {

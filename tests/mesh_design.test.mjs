@@ -387,14 +387,14 @@ test('no credential means queued, never posted: the sender only says sent when t
   assert.match(noChan.results[0].err, /no Buffer channel id/, 'a token with no channel id is a named missing piece, not a silent skip');
   const dry = await core.meshPressFlush([{ ...item, channel_id: 'abc', text: 'value post' }], { buffer_token: 't' }, { dry: true, now: Date.now() });
   assert.equal(dry.results[0].status, 'dry', 'dry runs describe the call and send nothing');
-  assert.match(dry.results[0].url, /buffer\.com\/graphql/, 'to the same endpoint the pipeline uses');
+  assert.match(dry.results[0].url, /^https:\/\/api\.buffer\.com/, 'to Buffer\'s public API');
   const future = await core.meshPressFlush([{ ...item, channel_id: 'abc', due: new Date(Date.now() + 3600e3).toISOString() }], { buffer_token: 't' }, { now: Date.now() });
   assert.equal(future.results[0].status, 'waiting', 'an item due later stays waiting rather than firing early');
   const calls = [];
   const ok = await core.meshPressFlush([{ ...item, channel_id: 'abc', text: 'value post' }], { buffer_token: 't' },
     { now: Date.now(), fetch: async (u, o) => {
         calls.push({ u, auth: o.headers.authorization, body: o.body });
-        return { status: 200, text: async () => '{"data":{"createDraft":{"draft":{"id":"d1"}}}}' };
+        return { status: 200, text: async () => '{"data":{"createPost":{"__typename":"PostActionSuccess","post":{"id":"p1","status":"sent"}}}}' };
     } });
   assert.equal(ok.sent, 1, 'a real send, verified by the response');
   assert.equal(ok.results[0].status, 'sent', 'and the status is the platform\'s answer, not ours');

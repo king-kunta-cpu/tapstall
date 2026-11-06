@@ -11,8 +11,8 @@ test('press v3: each platform gets its own hashtag count, Pinterest gets none an
   const bs = C.meshQueueItem(beat('bluesky'), { now });
   assert.equal((bs.text.match(/#\w+/g) || []).length, 2);
   assert.ok(bs.text.length <= 300);
-  assert.ok(bs.text.endsWith('#MobileMoney #EcoCash'));
-  assert.deepEqual(bs.tags, ['mobilemoney', 'ecocash', 'fraudprevention', 'smallbusiness', 'zimbabwe']);
+  assert.ok(bs.text.endsWith('#FraudPrevention #MobileMoney'));
+  assert.deepEqual(bs.tags, ['fraudprevention', 'mobilemoney', 'smallbusiness', 'whatsappbusiness', 'scamalert']);
   const li = C.meshQueueItem(beat('linkedin'), { now });
   assert.equal((li.text.match(/#\w+/g) || []).length, 4);
   const pin = C.meshQueueItem(beat('pinterest', { text: line + ' #EcoCash' }), { now, board: 'b1' });
@@ -51,5 +51,5 @@ test('press v3: the Bluesky record has clickable hashtags and links, a language 
   assert.ok(rec.tags.length && rec.tags.length <= 8);
   const enc = new TextEncoder(), dec = new TextDecoder();
   const spans = rec.facets.map((f) => [f.features[0].$type.split('#')[1], dec.decode(enc.encode(rec.text).slice(f.index.byteStart, f.index.byteEnd))]);
-  assert.deepEqual(spans, [['link', 'https://tapstall.zlnew.workers.dev/guide'], ['tag', '#MobileMoney'], ['tag', '#EcoCash']]);
+  assert.deepEqual(spans, [['link', 'https://tapstall.zlnew.workers.dev/guide'], ['tag', '#FraudPrevention'], ['tag', '#MobileMoney']]);
 });
