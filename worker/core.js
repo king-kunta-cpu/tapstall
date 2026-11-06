@@ -4655,6 +4655,13 @@ export function leadJunkReason(o) {
  *  fact in the row (a reachable number, an address that belongs to the business, the page itself
  *  shows WhatsApp selling or payment friction) — never a model's opinion, and never the mere
  *  existence of a URL. Two signals is the door out of research_hold. */
+/** A lead's country as a lowercase ISO code ('' when unknown). Older leads carry codes; a name is mapped. */
+export function leadCc(country) {
+  const c = String(country || '').trim().toLowerCase();
+  if (/^[a-z]{2}$/.test(c)) return c;
+  return ({ zimbabwe: 'zw', 'south africa': 'za', kenya: 'ke', nigeria: 'ng' })[c] || '';
+}
+
 export function leadSignalsOf(input) {
   const o = input || {};
   const out = new Set();
@@ -4758,6 +4765,8 @@ export function leadTransition(lead, action, actor, opt) {
   if (act === 'trial') { if (!mine) return conflict(); return stamp({ status: 'trial', claimed_by: cur.claimed_by || who, shop: slug(String(o.shop || cur.shop || '')).slice(0, 30) }); }
   if (act === 'closed') { if (!mine) return conflict(); return stamp({ status: 'closed', shop: slug(String(o.shop || cur.shop || '')).slice(0, 30) }); }
   if (act === 'dnc') { if (!mine) return conflict(); return stamp({ status: 'dnc' }); }
+  // 2026-11-06: back to research, not a stop: the lead no longer meets the evidence rule (no trigger or no site email)
+  if (act === 'hold') { if (!mine) return conflict(); if (cur.status !== 'queued') return { ok: false, error: 'only a queued lead is put on hold' }; return stamp({ status: 'research_hold' }); }
   if (act === 'follow') {
     if (!mine) return conflict();
     const days = Math.min(60, Math.max(1, Number(o.follow_days) || 2));
@@ -4991,12 +5000,12 @@ export function tsdbLeadCols(l) {
   if (!id) return null;
   return [id, JSON.stringify(Object.assign({}, l, { id })), String(l.status || ''), l.email ? 1 : 0, String(l.seller_code || ''),
     Number(l.touches) || 0, Math.round(Number(l.score) || 0), String(l.next_follow_at || '').slice(0, 30),
-    String(l.last_sender || '').toLowerCase().slice(0, 80), l.link_owed ? 1 : 0, String(l.country || l.cc || '').toLowerCase().slice(0, 2),
+    String(l.last_sender || '').toLowerCase().slice(0, 80), l.link_owed ? 1 : 0, leadCc(l.country || l.cc),
     String(l.updated_at || l.created_at || '').slice(0, 30)];
 }
 /** An index row (the fields the outreach pick reads) from a leads row. */
 export function tsdbIndexRow(x) {
   return { id: x.id, status: x.status, email: x.has_email ? 1 : '', seller_code: x.seller || '', touches: Number(x.touches) || 0,
-    score: Number(x.score) || 0, next_follow_at: x.next_follow_at || '', last_sender: x.last_sender || '', link_owed: x.link_owed ? 1 : 0 };
+    score: Number(x.score) || 0, next_follow_at: x.next_follow_at || '', last_sender: x.last_sender || '', link_owed: x.link_owed ? 1 : 0, country: x.cc || '' };
 }
 

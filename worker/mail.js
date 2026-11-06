@@ -481,6 +481,10 @@ export function mailMixedBody(text, attachments, boundary = "jl" + Math.random()
 //  new first touches when a week shows >5% bounces or >3% stops (from 20 sends).
 export const V2_FOLLOW_DAYS = [7, 7, 7];
 export const V2_MAX_TOUCHES = 3;
+/** 2026-11-06: countries whose sellers the current templates are written for (they name EcoCash and PayShap).
+ *  The global harvest files leads everywhere; a first touch waits until its country has copy (build step 4). */
+export const V2_MARKETS = ['zw', 'za'];
+export function v2Market(cc) { return V2_MARKETS.includes(String(cc || '').toLowerCase()); }
 
 export function v2Ramp(now, start) {
   const days = Math.floor((now - Date.parse((start || '2026-11-05') + 'T00:00:00Z')) / 864e5);

@@ -133,3 +133,17 @@ test('every deploy path carries the SQL store binding and its migration after wa
   assert.match(readFileSync(join(root, '.github/workflows/deploy.yml'), 'utf8'), /node-version: '22'/, 'node:sqlite needs Node 22');
   assert.equal(typeof mod.TsDb, 'function');
 });
+
+test('harvest: the script selftest passes, and the market helpers say who has copy', async () => {
+  const out = execFileSync('python3', [join(root, 'scripts/harvest_global.py'), '--selftest'], { encoding: 'utf8' });
+  assert.match(out, /SELFTEST OK/);
+  const core = await import(pathToFileURL(join(root, 'worker/core.js')).href);
+  const mail = await import(pathToFileURL(join(root, 'worker/mail.js')).href);
+  assert.equal(core.leadCc('ZA'), 'za');
+  assert.equal(core.leadCc('Zimbabwe'), 'zw');
+  assert.equal(core.leadCc('somewhere'), '');
+  assert.equal(mail.v2Market('ZW'), true);
+  assert.equal(mail.v2Market('pe'), false);
+  assert.equal(mail.v2Market(''), false);
+  assert.equal(core.tsdbIndexRow({ id: 'x', status: 'queued', cc: 'pe' }).country, 'pe');
+});

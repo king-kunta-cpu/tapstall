@@ -25,7 +25,7 @@ import {
 } from './rail.js';
 import {
   mailSend, mailDeliver, mailDrain, mailArmed, mailLanes, mailStatus, mailResume, mailRoom, mxOk,
-  v2Compose, v2Ramp, v2Brake, v2BoxIndex, v2PerTick, v2WeekKey, V2_FOLLOW_DAYS, V2_MAX_TOUCHES } from './mail.js';
+  v2Compose, v2Ramp, v2Brake, v2BoxIndex, v2PerTick, v2WeekKey, V2_FOLLOW_DAYS, V2_MAX_TOUCHES, v2Market } from './mail.js';
 import {
   waInbound, waSigOk, waStep, waTextBody, waReactBody, waBotLink, waMerchantNote, WA_HANDLE_RE,
 } from './wa.js';
@@ -63,9 +63,9 @@ import {
   QUOTA_LIMITS, quotaAllows, quotaPriorityForKey, storeMeta, storeMetaAction, suspendDecision, SUSPEND_GRACE_DAYS, emailHash,
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
   leadsHuntToday,
-  cardApply, CARD_KEY_RE, meshFanOut, TSDB_SCHEMA, TSDB_LEAD_UPSERT, tsdbLeadCols, tsdbIndexRow } from './core.js';
+  cardApply, CARD_KEY_RE, meshFanOut, TSDB_SCHEMA, TSDB_LEAD_UPSERT, tsdbLeadCols, tsdbIndexRow, leadCc } from './core.js';
 
-const VERSION = '2.6.0';
+const VERSION = '2.7.0';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
@@ -5771,7 +5771,7 @@ async function leadsMigrate(env) {
  *  pick falls back to reading documents until the nightly sweep has re-filed it. */
 function leadMeta(l) {
   return { s: String(l.status || ''), e: l.email ? 1 : 0, k: l.seller_code ? 1 : 0, t: Number(l.touches) || 0,
-    p: Number(l.score) || 0, f: String(l.next_follow_at || '').slice(0, 30), ls: String(l.last_sender || '').toLowerCase().slice(0, 80), lo: l.link_owed ? 1 : 0 };
+    p: Number(l.score) || 0, f: String(l.next_follow_at || '').slice(0, 30), ls: String(l.last_sender || '').toLowerCase().slice(0, 80), lo: l.link_owed ? 1 : 0, c: leadCc(l.country) };
 }
 /** One list, no reads: { rows (id + the metadata fields, listLeads order), legacy: keys without metadata }. */
 async function leadIndex(env) {
@@ -5784,7 +5784,7 @@ async function leadIndex(env) {
       const m = k.metadata;
       if (!m || typeof m.s !== 'string') { legacy.push(k.name); continue; }
       rows.push({ id: String(k.name).slice(5), status: m.s, email: m.e ? 1 : '', seller_code: m.k ? 'x' : '', touches: m.t || 0,
-        score: m.p || 0, next_follow_at: m.f || '', last_sender: m.ls || '', link_owed: m.lo ? 1 : 0 });
+        score: m.p || 0, next_follow_at: m.f || '', last_sender: m.ls || '', link_owed: m.lo ? 1 : 0, country: m.c || '' });
     }
     cursor = l.list_complete ? null : l.cursor;
   } while (cursor && loops++ < 3);
@@ -6222,7 +6222,9 @@ async function outreachTick(env, nowMs) {
   const links = house.filter((l) => l.status === 'replied' && l.link_owed);
   const follow = house.filter((l) => l.status === 'contacted' && (Number(l.touches) || 0) < V2_MAX_TOUCHES
     && l.next_follow_at && l.next_follow_at <= nowIso && users.includes(String(l.last_sender || '').toLowerCase()));
-  const first = brake ? [] : house.filter((l) => l.status === 'queued');
+  // a lead whose country is known but has no template yet (V2_MARKETS) waits for step 4's copy; an unknown
+  // country (keys filed before 2026-11-06, a self-submitted form) keeps today's behaviour
+  const first = brake ? [] : house.filter((l) => l.status === 'queued' && (!leadCc(l.country) || v2Market(leadCc(l.country))));
   const out = { considered: links.length + follow.length + first.length, sent: 0, held: 0, dnc: 0, daily, sent_today: sentToday, budget };
   if (brake) out.brake = brake;
   const origin = env.PUBLIC_ORIGIN || PRESS_ORIGIN_FALLBACK;

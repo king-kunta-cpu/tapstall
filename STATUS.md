@@ -1,6 +1,23 @@
 # Tapstall — status
 
 
+## v2.7.0 (2026-11-06): the global harvest (build step 3)
+
+* **`scripts/harvest_global.py`** replaces the OSM/classifieds hunter on the Mon/Wed/Fri dispatch
+  (`leads-hunt.yml`). Pool: the public Chrome UX Report country lists for the 105 countries Stripe does
+  not serve, hosts on the country's own domain (886,370 hosts in 97 countries, CrUX 202609). Each run
+  probes one slice (run number mod 600, so no host twice): one homepage GET, plus one contact page for a
+  page that already shows the evidence. A lead needs all three facts: it sells online, a trigger
+  (WhatsApp order link, local wallet, bank transfer, proof of payment) and a generic inbox on its own
+  domain. Never a named person's address; a site that loads Stripe is skipped. Dry run of 400 hosts:
+  12 leads (3%), so about 50 a run at the default 1,700 hosts, ~6 Actions minutes.
+* **`--recheck`** (workflow input `mode=recheck`) re-reads the queued leads against the same rule; a lead
+  that fails goes on **hold** (new lead action: back to research, never a stop, nothing deleted).
+* **Market guard:** today's T1/T2 name EcoCash and PayShap, so a lead whose country is known and is not
+  in `V2_MARKETS` (zw, za) waits, queued and untouched, until build step 4 writes its language's copy.
+  Leads with no recorded country keep today's behaviour.
+* Lead index rows (KV metadata and TS_DB) carry the country.
+
 ## v2.6.0 (2026-11-06): the SQL store (build step 2)
 
 KV gives the whole account 1,000 writes a day, shared with the shops' orders, and the global harvest

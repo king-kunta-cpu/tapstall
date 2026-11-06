@@ -1,11 +1,12 @@
 name: leads-hunt
-# The hunter, run where fetching the open web is cheap and time is free: GitHub Actions.
-# The Worker (single clock) dispatches this on weekday mornings (GH_DISPATCH_TOKEN on the Worker); a person can also run it by hand. It never emails anyone — it only files
-# prospects into the Worker, which scores them by evidence (two signals before outreach),
-# allocates each to exactly one seller, and drops anything on the do-not-contact ledger.
+# Build step 3 (2026-11-06): the global harvest. Sellers in the 105 countries Stripe does not serve, from the
+# public Chrome UX Report country lists; one slice of the pool per run (the run number picks it), one homepage
+# GET per host plus one contact page for a page that already shows the evidence. A lead needs all three facts:
+# it sells online, a trigger (WhatsApp order link, local wallet, bank transfer, proof of payment), and a generic
+# inbox on its own domain. It never emails anyone: it files into the Worker (POST /api/leads/ingest), which
+# re-judges every lead and keeps them in TS_DB. The Worker's 06:15 UTC sweep dispatches this Mon/Wed/Fri.
+# The OSM / classifieds hunter (scripts/lead_hunt.py) is retired from the schedule.
 on:
-  # v2.0.0: no schedule. The Worker's 06:15 UTC sweep dispatches this Mon/Wed/Fri (2026-11-01 budget; LEADS_HUNT_DAYS) and, since
-  # v2.0.0, retries a failed dispatch at the next sweep; a schedule here as well ran it twice a day.
   workflow_dispatch:
     inputs:
       post:
@@ -13,13 +14,13 @@ on:
         required: false
         default: 'true'
       limit:
-        description: 'Max leads to file'
+        description: 'Hosts to probe this run'
         required: false
-        default: '60'
-      countries:
-        description: 'Country codes, comma-separated'
+        default: '1700'
+      mode:
+        description: 'harvest, or recheck (re-read the queued leads against the evidence rule)'
         required: false
-        default: 'ZA,ZW'
+        default: 'harvest'
   repository_dispatch:
     types: [leads-hunt]
 
@@ -33,21 +34,28 @@ concurrency:
 jobs:
   hunt:
     runs-on: ubuntu-latest
-    timeout-minutes: 10   # 2026-11-01 budget: Mon/Wed/Fri, ~5-7 min a run
+    timeout-minutes: 12   # ~6 min a run, Mon/Wed/Fri
     steps:
       - uses: actions/checkout@v4
-      - name: hunt
+      - name: selftest
+        run: python3 scripts/harvest_global.py --selftest
+      - name: CrUX lists (cached; refreshed when a new month appears)
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/crux
+          key: crux-${{ github.run_id }}
+          restore-keys: crux-
+      - name: harvest
         env:
           TAPSTALL_ORIGIN: https://tapstall.zlnew.workers.dev
           ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
         run: |
-          # A Worker dispatch carries no inputs, so the defaults below are what actually
-          # runs unattended: file the batch, 40 at a time, South Africa and Zimbabwe.
           POST_FLAG="--dry-run"
           [ "${{ github.event.inputs.post || 'true' }}" = "true" ] && POST_FLAG="--post"
-          python3 scripts/lead_hunt.py $POST_FLAG \
-            --limit "${{ github.event.inputs.limit || '40' }}" \
-            --countries "${{ github.event.inputs.countries || 'ZA,ZW' }}"
-      - name: summary
-        if: always()
-        run: echo "Lead hunt finished. Results land in the Worker (POST /api/leads/ingest); see the hunt step log for counts." >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ github.event.inputs.mode || 'harvest' }}" = "recheck" ]; then
+            python3 scripts/harvest_global.py --recheck $POST_FLAG | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            # keep only this month's lists in the cache
+            find "$RUNNER_TEMP/crux" -name '*.csv.gz' -mtime +40 -delete 2>/dev/null || true
+            python3 scripts/harvest_global.py $POST_FLAG --limit "${{ github.event.inputs.limit || '1700' }}" --cache "$RUNNER_TEMP/crux" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi

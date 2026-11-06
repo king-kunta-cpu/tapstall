@@ -5386,3 +5386,45 @@ test('outreach v2: a real reply to the link-free first touch gets the link once,
     assert.equal(after.status, 'replied', 'the conversation is the owner\'s now');
   } finally { disarmMail(); delete env.OUTREACH_WINDOW; delete env.MAIL_TEST_FETCH; }
 });
+
+test('2026-11-06 outreach guard: a harvested lead abroad waits for its country\'s copy; a ZW lead is written to', async () => {
+  const sent = armMail();
+  env.OUTREACH_WINDOW = 'always';
+  env.MAIL_TEST_FETCH = async () => new Response(JSON.stringify({ Status: 0, Answer: [{ type: 15, data: '10 mx.example.' }] }));
+  try {
+    const ing = await call('/api/leads/ingest', { method: 'POST', confirm: true, headers: { 'x-tapstall-admin': SECRET }, body: { leads: [
+      { business: 'Panaderia Rosa', email: 'ventas@panaderiarosa.com.pe', website: 'https://panaderiarosa.com.pe', source_url: 'https://panaderiarosa.com.pe/',
+        country: 'PE', source: 'crux-harvest', evidence: { has_whatsapp: true, has_order_button: true, page_checked: true }, signals: ['payment_friction'],
+        note: 'Site: orders over WhatsApp; mentions yape' },
+      { business: 'Bulawayo Bakes', email: 'orders@bulawayobakes.co.zw', source_url: 'https://bulawayobakes.co.zw/order',
+        note: 'EcoCash accepted', country: 'ZW' },
+    ] } });
+    assert.equal(ing.status, 200, ing.text);
+    let pe, zw;
+    for (const [k, v] of env.ORDERS._map) {
+      if (!k.startsWith('lead:')) continue;
+      const l = JSON.parse(v.value || v);
+      if (l.business === 'Panaderia Rosa' || l.business === 'Bulawayo Bakes') {
+        l.seller_code = ''; await env.ORDERS.put(k, JSON.stringify(l));
+        if (l.country === 'PE') pe = l; else zw = l;
+      }
+    }
+    assert.equal(pe.status, 'queued', 'the harvest evidence passes the Worker gate: ' + JSON.stringify(pe.signals));
+    assert.ok(pe.score > zw.score, 'and outranks the ZW lead, so the guard must be in the pick, not after it');
+    const w = await load();
+    const jobs = [];
+    await w.scheduled({ cron: '5 * * * *', scheduledTime: Date.now() }, env, { waitUntil: (p) => jobs.push(p) });
+    const out = await jobs[0];
+    assert.ok(!sent.some((m) => /panaderiarosa/.test(m.mime)), 'no mail to a country without copy');
+    assert.equal((await env.ORDERS.get('lead:' + pe.id, 'json')).status, 'queued', 'it waits, untouched');
+    assert.equal(out.outreach.sent, 1, JSON.stringify(out.outreach));
+    assert.equal((await env.ORDERS.get('lead:' + zw.id, 'json')).status, 'contacted');
+    const held = await call('/api/leads/act', { method: 'POST', body: { code: 'owner', key: SECRET, id: pe.id, action: 'hold', note: 'recheck 2026-11: no trigger on the site' } });
+    assert.equal(held.status, 200, held.text);
+    const after = await env.ORDERS.get('lead:' + pe.id, 'json');
+    assert.equal(after.status, 'research_hold', 'hold is back to research');
+    assert.equal(await env.STORES.get('Lead:' + pe.email), null, 'and never a stop: no do-not-contact entry');
+    const again = await call('/api/leads/act', { method: 'POST', body: { code: 'owner', key: SECRET, id: zw.id, action: 'hold' } });
+    assert.equal(again.status, 422, 'only a queued lead is put on hold');
+  } finally { disarmMail(); delete env.OUTREACH_WINDOW; delete env.MAIL_TEST_FETCH; }
+});
