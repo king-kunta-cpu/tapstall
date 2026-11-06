@@ -994,7 +994,12 @@ export function priceOrder(st = {}, items = [], service = 'pickup', railKey = 'c
   const mode = st.surcharge_mode === 'pass' ? 'pass' : 'absorb';
   const fee = rail.type === 'cod' ? 0 : round2(subtotal * (rail.pct || 0) + (rail.fixed || 0) + subtotal * (rail.imtt || 0));
   const total = round2(subtotal + (mode === 'pass' ? fee : 0));
-  const jitter = st.unique_change === false ? 0 : (Math.abs(Math.round(total * 100)) % 97) / 100;
+  // 2026-11-06: a currency paid in whole units (CFA franc, rupiah, dong, M-Pesa shillings...) gets its odd amount in
+  // whole units, never in cents nobody can send; the cents path is unchanged.
+  const step = payStep(st.currency);
+  const jitter = st.unique_change === false ? 0
+    : step === 1 ? (Math.abs(Math.round(total)) % (PAY_JITTER_MOD[String(st.currency || '').toUpperCase()] || 97))
+    : (Math.abs(Math.round(total * 100)) % 97) / 100;
   return {
     lines, itemsTotal, delivery: del, tax, taxPct: vat.rate_pct, subtotal,
     // The rate and the mode ride on the order, not just the number: a shop that changes its VAT
@@ -1018,9 +1023,17 @@ export function priceOrder(st = {}, items = [], service = 'pickup', railKey = 'c
     fee: mode === 'pass' ? fee : 0,
     fee_absorbed_by_merchant: mode === 'absorb' ? fee : 0,
     surcharge_mode: mode,
-    total, pay_now: round2(total + jitter), unique_change: round2(jitter),
+    total, pay_now: step === 1 ? Math.round(total + jitter) : round2(total + jitter), unique_change: round2(jitter),
   };
 }
+
+/** Currencies that wallets and banks move in whole units only (ISO 4217 exponent 0, or cents that exist on paper
+ *  but cannot be sent: M-Pesa shillings, Nequi pesos, SINPE colones). */
+export const ZERO_DECIMAL = new Set(['XOF', 'XAF', 'IDR', 'VND', 'UGX', 'RWF', 'CLP', 'PYG', 'COP', 'KMF', 'GNF', 'DJF', 'MGA', 'BIF',
+  'CDF', 'TZS', 'KES', 'LAK', 'KHR', 'MNT', 'UZS', 'MWK', 'AOA', 'ISK', 'JPY', 'KRW', 'VUV', 'XPF', 'IQD', 'LBP', 'PKR', 'KZT', 'CRC', 'SLL']);
+/** The odd-amount range in whole units where a unit is worth more (97 shillings would add about USD 0.75). */
+export const PAY_JITTER_MOD = { KES: 37 };
+export function payStep(cur) { return ZERO_DECIMAL.has(String(cur || '').toUpperCase()) ? 1 : 0.01; }
 
 /** Unique pay-this amount per order — the anti-screenshot trick. */
 export function uniqueAmount(total, enabled = true) {

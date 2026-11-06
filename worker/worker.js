@@ -25,7 +25,7 @@ import {
 } from './rail.js';
 import {
   mailSend, mailDeliver, mailDrain, mailArmed, mailLanes, mailStatus, mailResume, mailRoom, mxOk,
-  v2Compose, v2Ramp, v2Brake, v2BoxIndex, v2PerTick, v2WeekKey, V2_FOLLOW_DAYS, V2_MAX_TOUCHES, v2Market } from './mail.js';
+  v2Compose, v2Ramp, v2Brake, v2BoxIndex, v2PerTick, v2WeekKey, V2_FOLLOW_DAYS, V2_MAX_TOUCHES, v2Market, v2Lang, V2_GUIDE_BASE, v2GuideFile } from './mail.js';
 import {
   waInbound, waSigOk, waStep, waTextBody, waReactBody, waBotLink, waMerchantNote, WA_HANDLE_RE,
 } from './wa.js';
@@ -65,7 +65,7 @@ import {
   leadsHuntToday,
   cardApply, CARD_KEY_RE, meshFanOut, TSDB_SCHEMA, TSDB_LEAD_UPSERT, tsdbLeadCols, tsdbIndexRow, leadCc } from './core.js';
 
-const VERSION = '2.7.0';
+const VERSION = '2.8.0';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
@@ -6222,8 +6222,7 @@ async function outreachTick(env, nowMs) {
   const links = house.filter((l) => l.status === 'replied' && l.link_owed);
   const follow = house.filter((l) => l.status === 'contacted' && (Number(l.touches) || 0) < V2_MAX_TOUCHES
     && l.next_follow_at && l.next_follow_at <= nowIso && users.includes(String(l.last_sender || '').toLowerCase()));
-  // a lead whose country is known but has no template yet (V2_MARKETS) waits for step 4's copy; an unknown
-  // country (keys filed before 2026-11-06, a self-submitted form) keeps today's behaviour
+  // 2026-11-06 step 4: every country has copy (its language, or English); a country field that is not a country code waits
   const first = brake ? [] : house.filter((l) => l.status === 'queued' && (!leadCc(l.country) || v2Market(leadCc(l.country))));
   const out = { considered: links.length + follow.length + first.length, sent: 0, held: 0, dnc: 0, daily, sent_today: sentToday, budget };
   if (brake) out.brake = brake;
@@ -6247,7 +6246,11 @@ async function outreachTick(env, nowMs) {
     if (await env.STORES.get('Lead:' + email).catch(() => null)) { await leadDnc(env, lead, 'on the do-not-contact ledger', 'ledger'); out.dnc++; continue; }
     if (kind === 'first' && !await mxOk(email.split('@')[1], env.MAIL_TEST_FETCH)) { await leadDnc(env, lead, 'domain publishes no mail server', 'mx'); out.dnc++; continue; }
     const box = kind === 'first' ? lanes[v2BoxIndex(email, lanes.length)].user : String(lead.last_sender || '');
-    const m = v2Compose(lead, { origin, fromName, postal, kind: kind === 'link' ? 'link' : '' });
+    // a T2 in a language other than English carries the pre-rendered guide; no guide this tick = no T2 this tick
+    const guide = kind === 'follow' && (Number(lead.touches) || 0) === 1 && v2Lang(leadCc(lead.country)) !== 'en'
+      ? await v2GuideFetch(env, v2Lang(leadCc(lead.country))) : null;
+    const m = v2Compose({ ...lead, country: leadCc(lead.country) }, { origin, fromName, postal, kind: kind === 'link' ? 'link' : '', guide });
+    if (m.missing) { out.guide_wait = (out.guide_wait || 0) + 1; continue; }
     const unsub = kind === 'link' ? null : { url: await unsubLink(env, lead) };
     const r = await mailSend(env, { to: email, subject: m.subject, text: m.text, kind: 'outreach', fromName: fromName + ', Tapstall', ...(m.attachments ? { attachments: m.attachments } : {}),
       laneUser: box, inReplyTo: kind === 'first' ? '' : (lead.first_msgid || ''), ...(unsub ? { unsubscribe: unsub } : {}) }, { now });
@@ -6276,6 +6279,22 @@ async function outreachTick(env, nowMs) {
   if (wkDirty) { try { await env.STORES.put(wkKey, JSON.stringify(wk), { expirationTtl: 21 * 86400 }); } catch (e) { void e; } }
   out.sent_today = sentToday;
   return out;
+}
+
+/** The guide PDFs live on the Pages mirror (pages/public/guides); one fetch per language per isolate. */
+const V2_GUIDES = new Map();
+async function v2GuideFetch(env, lang) {
+  if (V2_GUIDES.has(lang)) return V2_GUIDES.get(lang);
+  const base = String(env.GUIDE_BASE || V2_GUIDE_BASE).replace(/\/+$/, '');
+  try {
+    const r = await (env.MAIL_TEST_FETCH || fetch)(base + '/' + v2GuideFile(lang), { cf: { cacheTtl: 86400, cacheEverything: true } });
+    if (!r || !r.ok) return null;
+    const buf = new Uint8Array(await r.arrayBuffer());
+    if (buf.length < 2000 || buf.length > 2e6 || String.fromCharCode(...buf.slice(0, 5)) !== '%PDF-') return null;
+    const g = { filename: 'tapstall-guide-' + lang + '.pdf', type: 'application/pdf', content: buf };
+    V2_GUIDES.set(lang, g);
+    return g;
+  } catch (e) { void e; return null; }
 }
 
 /** /u/<lead>/<tok>: GET shows one button (scanners prefetch); POST (the button, or a mail client's

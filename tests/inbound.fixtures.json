@@ -231,5 +231,159 @@
   "subject": "Out of Office",
   "text": "Away",
   "kind": "auto"
+ },
+ {
+  "name": "es bare no",
+  "from": "shop@example.com",
+  "subject": "Re: x",
+  "text": "Alto, no me escriban más",
+  "kind": "stop"
+ },
+ {
+  "name": "es not interested",
+  "from": "shop@example.com",
+  "subject": "Re: x",
+  "text": "Gracias, pero no me interesa.",
+  "kind": "stop"
+ },
+ {
+  "name": "pt no thanks",
+  "from": "shop@example.com",
+  "subject": "Re: x",
+  "text": "Não, obrigado",
+  "kind": "stop"
+ },
+ {
+  "name": "pt not interested",
+  "from": "shop@example.com",
+  "subject": "Re: x",
+  "text": "Bom dia. Não temos interesse, obrigado.",
+  "kind": "stop"
+ },
+ {
+  "name": "fr no thanks",
+  "from": "shop@example.com",
+  "subject": "Re: x",
+  "text": "Non merci",
+  "kind": "stop"
+ },
+ {
+  "name": "fr not interested",
+  "from": "shop@example.com",
+  "subject": "Re: x",
+  "text": "Bonjour, nous ne sommes pas intéressés.",
+  "kind": "stop"
+ },
+ {
+  "name": "tr bare no",
+  "from": "shop@example.com",
+  "subject": "Re: x",
+  "text": "Hayır",
+  "kind": "stop"
+ },
+ {
+  "name": "tr not interested",
+  "from": "shop@example.com",
+  "subject": "Re: x",
+  "text": "Teşekkürler, ilgilenmiyoruz.",
+  "kind": "stop"
+ },
+ {
+  "name": "id not interested",
+  "from": "shop@example.com",
+  "subject": "Re: x",
+  "text": "Maaf, kami tidak tertarik.",
+  "kind": "stop"
+ },
+ {
+  "name": "uk no",
+  "from": "shop@example.com",
+  "subject": "Re: x",
+  "text": "Ні, дякую",
+  "kind": "stop"
+ },
+ {
+  "name": "uk not interested",
+  "from": "shop@example.com",
+  "subject": "Re: x",
+  "text": "Нам не цікаво.",
+  "kind": "stop"
+ },
+ {
+  "name": "vi not interested",
+  "from": "shop@example.com",
+  "subject": "Re: x",
+  "text": "Chúng tôi không quan tâm, cảm ơn.",
+  "kind": "stop"
+ },
+ {
+  "name": "ar not interested",
+  "from": "shop@example.com",
+  "subject": "Re: x",
+  "text": "شكرا، غير مهتم",
+  "kind": "stop"
+ },
+ {
+  "name": "ar bare stop",
+  "from": "shop@example.com",
+  "subject": "Re: x",
+  "text": "توقف",
+  "kind": "stop"
+ },
+ {
+  "name": "es yes",
+  "from": "shop@example.com",
+  "subject": "Re: x",
+  "text": "Sí, envíenme el enlace por favor",
+  "kind": "reply"
+ },
+ {
+  "name": "fr yes",
+  "from": "shop@example.com",
+  "subject": "Re: x",
+  "text": "Oui, envoyez-moi le lien",
+  "kind": "reply"
+ },
+ {
+  "name": "id no problem is a yes",
+  "from": "shop@example.com",
+  "subject": "Re: x",
+  "text": "Tidak masalah, kirim linknya",
+  "kind": "reply"
+ },
+ {
+  "name": "pt no-question is a conversation",
+  "from": "shop@example.com",
+  "subject": "Re: x",
+  "text": "Não tenho WhatsApp, funciona assim mesmo?",
+  "kind": "reply"
+ },
+ {
+  "name": "tr word starting dur is not a stop",
+  "from": "shop@example.com",
+  "subject": "Re: x",
+  "text": "Durum nedir? Fiyat ne kadar?",
+  "kind": "reply"
+ },
+ {
+  "name": "es reply with spanish quote of our stop line",
+  "from": "shop@example.com",
+  "subject": "Re: x",
+  "text": "Me interesa, ¿cómo empiezo?\n\nEl jue, 6 nov 2026 a las 10:00, Courage <c@gmail.com> escribió:\n> Si prefieren no recibir más mensajes míos, respondan \"stop\" o \"baja\".",
+  "kind": "reply"
+ },
+ {
+  "name": "fr reply with french quote",
+  "from": "shop@example.com",
+  "subject": "Re: x",
+  "text": "Ça m'intéresse.\n\nLe jeu. 6 nov. 2026 à 10:00, Courage <c@gmail.com> a écrit :\n> Si vous préférez ne plus recevoir de messages de ma part, répondez simplement « stop ».",
+  "kind": "reply"
+ },
+ {
+  "name": "vi reply with vietnamese quote",
+  "from": "shop@example.com",
+  "subject": "Re: x",
+  "text": "Gửi link giúp tôi nhé.\n\nVào Th 5, 6 thg 11, 2026 lúc 10:00 Courage <c@gmail.com> đã viết:\n> Nếu anh chị không muốn nhận thư của tôi nữa, chỉ cần trả lời \"stop\" hoặc \"dừng\".",
+  "kind": "reply"
  }
 ]

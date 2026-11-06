@@ -481,11 +481,6 @@ export function mailMixedBody(text, attachments, boundary = "jl" + Math.random()
 //  new first touches when a week shows >5% bounces or >3% stops (from 20 sends).
 export const V2_FOLLOW_DAYS = [7, 7, 7];
 export const V2_MAX_TOUCHES = 3;
-/** 2026-11-06: countries whose sellers the current templates are written for (they name EcoCash and PayShap).
- *  The global harvest files leads everywhere; a first touch waits until its country has copy (build step 4). */
-export const V2_MARKETS = ['zw', 'za'];
-export function v2Market(cc) { return V2_MARKETS.includes(String(cc || '').toLowerCase()); }
-
 export function v2Ramp(now, start) {
   const days = Math.floor((now - Date.parse((start || '2026-11-05') + 'T00:00:00Z')) / 864e5);
   return days < 0 ? 0 : days < 7 ? 10 : days < 14 ? 25 : 50;
@@ -513,19 +508,195 @@ export const v2WeekKey = (now) => {
   return 'outreach:wk:' + Math.floor((day + 3) / 7);
 };
 
-function v2Evidence(lead) {
-  const biz = String(lead.business || '').trim() || 'your shop';
-  const sig = new Set(lead.signals || []);
-  return sig.has('whatsapp_selling') ? `I came across ${biz} taking orders on WhatsApp.`
-    : sig.has('payment_friction') ? `I came across ${biz} while looking at how shops here match payments to orders.`
-    : `I came across ${biz} online.`;
+/** 2026-11-06 (build step 4): one copy set per language, picked by the lead's country; English is the fallback, so
+ *  every country has a template. Price lines live in V2_PRICE only (step 7 swaps them for the free plan).
+ *  The claim is what the product does today: each order shows an exact amount and a short reference to pay, and the
+ *  seller matches the money in their own account to the order. Nothing promises cents (CFA, rupiah and M-Pesa have none). */
+export const V2_LANG = {
+  es: ['pe', 'co', 'ar', 'bo', 'ec', 'py', 'uy', 'cl', 'gt', 'hn', 'sv', 'ni', 'cr', 'pa', 'do'],
+  pt: ['ao', 'mz', 'cv', 'st', 'gw'],
+  fr: ['ci', 'sn', 'ml', 'bf', 'ne', 'tg', 'bj', 'gn', 'cd', 'cg', 'ga', 'dj', 'mg', 'km', 'cm', 'tn', 'dz', 'ma', 'ht', 'td', 'cf', 'bi'],
+  ar: ['eg', 'jo', 'lb', 'om', 'bh', 'kw', 'qa', 'sa', 'ps', 'mr'],
+  tr: ['tr'], id: ['id'], uk: ['ua'], vi: ['vn'],
+};
+export const V2_LANGS = ['en', 'es', 'pt', 'fr', 'ar', 'tr', 'id', 'uk', 'vi'];
+export function v2Lang(cc) {
+  const c = String(cc || '').toLowerCase();
+  for (const [lang, list] of Object.entries(V2_LANG)) if (list.includes(c)) return lang;
+  return 'en';
 }
-const V2_STOP = 'If you would rather not hear from me again, just reply "stop".';
+/** Every country now has copy (English where there is no local set); the guard stays for codes that are not countries. */
+export function v2Market(cc) { return /^[a-z]{2}$/.test(String(cc || '').toLowerCase()); }
 
-/** The T2 attachment (owner 2026-11-04): a one-page guide made for this shop. General, checkable advice; no invented numbers. */
+/** The wallet a seller in this country most likely means by "pay me" (used only when the site names none). */
+const V2_WALLET_CC = { pe: 'Yape', co: 'Nequi', ar: 'Mercado Pago', cr: 'SINPE Móvil', ke: 'M-Pesa', tz: 'M-Pesa', cd: 'M-Pesa', mz: 'M-Pesa',
+  gh: 'MoMo', ug: 'MoMo', rw: 'MoMo', zm: 'MoMo', cm: 'Orange Money', ci: 'Orange Money', sn: 'Orange Money', ml: 'Orange Money',
+  bf: 'Orange Money', et: 'telebirr', bd: 'bKash', pk: 'JazzCash', in: 'UPI', ph: 'GCash', np: 'eSewa', eg: 'InstaPay', mw: 'Airtel Money',
+  zw: 'EcoCash', za: 'PayShap', vn: 'MoMo' };
+/** How the harvest's lower-case matches are written by their owners. */
+const V2_WALLET_NAME = { yape: 'Yape', plin: 'Plin', nequi: 'Nequi', daviplata: 'Daviplata', gcash: 'GCash', paymaya: 'Maya', 'maya wallet': 'Maya',
+  mpesa: 'M-Pesa', 'm-pesa': 'M-Pesa', jazzcash: 'JazzCash', easypaisa: 'Easypaisa', bkash: 'bKash', nagad: 'Nagad', momo: 'MoMo',
+  'orange money': 'Orange Money', 'wave money': 'Wave', 'airtel money': 'Airtel Money', ecocash: 'EcoCash', gopay: 'GoPay', 'dana wallet': 'DANA',
+  'vodafone cash': 'Vodafone Cash', sinpe: 'SINPE Móvil', 'tigo money': 'Tigo Money', mercadopago: 'Mercado Pago', 'mercado pago': 'Mercado Pago',
+  telebirr: 'telebirr', paytm: 'Paytm', phonepe: 'PhonePe', upi: 'UPI', zalopay: 'ZaloPay', fawry: 'Fawry', instapay: 'InstaPay',
+  monobank: 'monobank', privat24: 'Privat24' };
+/** What the site itself showed (the harvest writes "Site: orders over WhatsApp; mentions yape, plin; takes bank transfers"). */
+export function v2Seen(lead) {
+  const note = String(lead.note || '');
+  const sig = new Set(lead.signals || []);
+  const m = note.match(/mentions ([^;]+)/i);
+  const wallets = [...new Set((m ? m[1].split(',') : []).map((w) => V2_WALLET_NAME[w.trim().toLowerCase()]).filter(Boolean))].slice(0, 2);
+  return { wa: sig.has('whatsapp_selling') || /orders over WhatsApp/i.test(note) || !!(lead.evidence && lead.evidence.has_whatsapp),
+    wallets, transfers: /takes bank transfers/i.test(note), friction: sig.has('payment_friction') };
+}
+
+const V2_PRICE = {
+  en: { t1: 'It is free for 60 days, then USD 60 a year. No commission on your sales and no order cap.', t2: 'It is free for 60 days. No commission on your sales.',
+    link: 'Free for 60 days, then USD 60 a year (or USD 7 a month). No commission on your sales.' },
+  es: { t1: 'Es gratis durante 60 días y luego cuesta 60 USD al año. Sin comisión sobre sus ventas y sin límite de pedidos.', t2: 'Es gratis durante 60 días. Sin comisión sobre sus ventas.',
+    link: 'Gratis durante 60 días; luego 60 USD al año (o 7 USD al mes). Sin comisión sobre sus ventas.' },
+  pt: { t1: 'É grátis durante 60 dias e depois custa 60 USD por ano. Sem comissão sobre as vossas vendas e sem limite de encomendas.', t2: 'É grátis durante 60 dias. Sem comissão sobre as vossas vendas.',
+    link: 'Grátis durante 60 dias; depois 60 USD por ano (ou 7 USD por mês). Sem comissão sobre as vossas vendas.' },
+  fr: { t1: "C'est gratuit pendant 60 jours, puis 60 USD par an. Aucune commission sur vos ventes et aucune limite de commandes.", t2: "C'est gratuit pendant 60 jours. Aucune commission sur vos ventes.",
+    link: 'Gratuit pendant 60 jours, puis 60 USD par an (ou 7 USD par mois). Aucune commission sur vos ventes.' },
+  tr: { t1: '60 gün ücretsiz, sonrasında yılda 60 USD. Satışlarınızdan komisyon yok, sipariş sınırı yok.', t2: '60 gün ücretsiz. Satışlarınızdan komisyon yok.',
+    link: '60 gün ücretsiz, sonra yılda 60 USD (veya ayda 7 USD). Satışlarınızdan komisyon yok.' },
+  id: { t1: 'Gratis selama 60 hari, lalu USD 60 per tahun. Tanpa komisi dari penjualan Anda dan tanpa batas pesanan.', t2: 'Gratis selama 60 hari. Tanpa komisi dari penjualan Anda.',
+    link: 'Gratis selama 60 hari, lalu USD 60 per tahun (atau USD 7 per bulan). Tanpa komisi dari penjualan Anda.' },
+  uk: { t1: 'Перші 60 днів безкоштовно, далі 60 USD на рік. Без комісії з ваших продажів і без ліміту замовлень.', t2: 'Перші 60 днів безкоштовно. Без комісії з ваших продажів.',
+    link: 'Перші 60 днів безкоштовно, далі 60 USD на рік (або 7 USD на місяць). Без комісії з ваших продажів.' },
+  vi: { t1: 'Miễn phí 60 ngày, sau đó 60 USD mỗi năm. Không thu hoa hồng trên doanh số và không giới hạn số đơn.', t2: 'Miễn phí 60 ngày. Không thu hoa hồng trên doanh số.',
+    link: 'Miễn phí 60 ngày, sau đó 60 USD mỗi năm (hoặc 7 USD mỗi tháng). Không thu hoa hồng trên doanh số.' },
+  ar: { t1: 'الخدمة مجانية لمدة 60 يومًا، ثم 60 دولارًا أمريكيًا في السنة. بلا عمولة على مبيعاتكم وبلا حد لعدد الطلبات.', t2: 'الخدمة مجانية لمدة 60 يومًا. بلا عمولة على مبيعاتكم.',
+    link: 'مجاني لمدة 60 يومًا، ثم 60 دولارًا أمريكيًا في السنة (أو 7 دولارات شهريًا). بلا عمولة على مبيعاتكم.' },
+};
+
+export const V2_COPY = {
+  en: { shop: 'your shop', and: ' and ', transfers: 'bank transfers',
+    subj: (b) => `${b}: a screenshot is not a payment`,
+    ev: { waPay: (b, p) => `I came across ${b} and saw that you take orders on WhatsApp and accept ${p}.`, wa: (b) => `I came across ${b} taking orders on WhatsApp.`,
+      pay: (b, p) => `I came across ${b} and saw that you accept ${p}.`, fric: (b) => `I came across ${b} while looking at how shops match payments to orders.`,
+      none: (b) => `I came across ${b} online.` },
+    into: (w) => (w ? `your own ${w} or bank account` : 'your own mobile wallet or bank account'),
+    stop: 'If you would rather not hear from me again, just reply "stop".',
+    t1: (c) => `Hi ${c.biz} team,\n\n${c.ev} Can I ask about a moment most shops know too well?\n\nA customer sends a screenshot that says "paid", you hand over the order, and the money never arrives. Or twenty payments land in one evening and you sit up late matching amounts to names.\n\nI built Tapstall so that moment stops happening. Customers pick from your menu on one page and pay straight into ${c.into}. Each order shows the exact amount and a short reference to pay, so you match the money that lands in your account to the order, not to a screenshot. A screenshot proves nothing; the payment does.\n\n${c.P.t1}\n\nWould it help if I sent you the link to try it? Just reply and I will.`,
+    t2: (c) => `Hi again,\n\nRather than ask twice, I made something for ${c.biz}: the attached one-page guide to ending fake proof of payment. It shows how the fakes usually happen, five checks to make before you hand over goods, and how a shop page gives every order an exact amount and a reference to pay. The checks work even if you never use Tapstall.\n\nWhen you want the money to tell you which order it is, here is the link: ${c.link}\n\nIt takes about two minutes to set up. ${c.P.t2}`,
+    t3: (c) => `Last note from me, and thank you for reading. If fake screenshots or late nights matching payments ever start costing ${c.biz} sales, your shop page can be live in a few minutes: ${c.link}\n\nI will not write again.`,
+    link: (c) => `Thank you for writing back. Here is the link: ${c.link}\n\nYou set up your menu once, customers order from one link and pay into ${c.into}, and each order shows its exact amount and a reference, so the payment that lands tells you which order it is. ${c.P.link}\n\nAny question, just reply here.` },
+  es: { shop: 'su tienda', and: ' y ', transfers: 'transferencias bancarias',
+    subj: (b) => `${b}: una captura de pantalla no es un pago`,
+    ev: { waPay: (b, p) => `Conocí ${b} y vi que reciben pedidos por WhatsApp y aceptan ${p}.`, wa: (b) => `Conocí ${b} y vi que reciben pedidos por WhatsApp.`,
+      pay: (b, p) => `Conocí ${b} y vi que aceptan ${p}.`, fric: (b) => `Conocí ${b} mientras veía cómo las tiendas cuadran pagos con pedidos.`,
+      none: (b) => `Conocí ${b} en internet.` },
+    into: (w) => (w ? `su propia cuenta de ${w} o su cuenta bancaria` : 'su propia billetera móvil o su cuenta bancaria'),
+    stop: 'Si prefieren no recibir más mensajes míos, respondan "stop" o "baja".',
+    t1: (c) => `Hola, equipo de ${c.biz}:\n\n${c.ev} ¿Puedo preguntarles por un momento que muchas tiendas conocen demasiado bien?\n\nUn cliente envía una captura que dice "pagado", ustedes entregan el pedido y el dinero nunca llega. O llegan veinte pagos en una sola noche y se quedan hasta tarde cuadrando montos con nombres.\n\nCreé Tapstall para que ese momento deje de pasar. Los clientes eligen de su menú en una sola página y pagan directamente a ${c.into}. Cada pedido muestra el monto exacto y una referencia corta para pagar, así ustedes comparan el dinero que llega a su cuenta con el pedido, no con una captura. Una captura no prueba nada; el pago sí.\n\n${c.P.t1}\n\n¿Les sirve que les envíe el enlace para probarlo? Solo respondan y se lo envío.`,
+    t2: (c) => `Hola de nuevo:\n\nEn lugar de preguntar dos veces, les preparé algo que pueden usar hoy: la guía adjunta de una página para acabar con los comprobantes de pago falsos. Muestra cómo suelen ocurrir los engaños, cinco verificaciones antes de entregar un pedido y cómo una página de tienda da a cada pedido un monto exacto y una referencia para pagar. Las verificaciones sirven aunque nunca usen Tapstall.\n\nCuando quieran que el dinero les diga a qué pedido corresponde, este es el enlace: ${c.link}\n\nConfigurarlo toma unos dos minutos. ${c.P.t2}`,
+    t3: (c) => `Esta es mi última nota; gracias por leer. Si algún día las capturas falsas o las noches cuadrando pagos empiezan a costarle ventas a ${c.biz}, su página de tienda puede estar lista en pocos minutos: ${c.link}\n\nNo volveré a escribirles.`,
+    link: (c) => `Gracias por responder. Este es el enlace: ${c.link}\n\nConfiguran su menú una vez, los clientes piden desde un solo enlace y pagan a ${c.into}, y cada pedido muestra su monto exacto y una referencia, así el pago que llega les dice a qué pedido corresponde. ${c.P.link}\n\nCualquier pregunta, respondan aquí.` },
+  pt: { shop: 'a vossa loja', and: ' e ', transfers: 'transferências bancárias',
+    subj: (b) => `${b}: uma captura de ecrã não é um pagamento`,
+    ev: { waPay: (b, p) => `Encontrei ${b} e vi que recebem encomendas pelo WhatsApp e aceitam ${p}.`, wa: (b) => `Encontrei ${b} e vi que recebem encomendas pelo WhatsApp.`,
+      pay: (b, p) => `Encontrei ${b} e vi que aceitam ${p}.`, fric: (b) => `Encontrei ${b} enquanto via como as lojas fazem corresponder pagamentos e encomendas.`,
+      none: (b) => `Encontrei ${b} na internet.` },
+    into: (w) => (w ? `a vossa própria conta ${w} ou conta bancária` : 'a vossa própria carteira móvel ou conta bancária'),
+    stop: 'Se preferirem não receber mais mensagens minhas, basta responder "stop" ou "parar".',
+    t1: (c) => `Olá, equipa ${c.biz},\n\n${c.ev} Posso perguntar sobre um momento que muitas lojas conhecem bem demais?\n\nUm cliente envia uma captura de ecrã a dizer "pago", vocês entregam a encomenda e o dinheiro nunca chega. Ou chegam vinte pagamentos numa só noite e ficam até tarde a fazer corresponder valores a nomes.\n\nCriei o Tapstall para que esse momento deixe de acontecer. Os clientes escolhem do vosso menu numa só página e pagam diretamente para ${c.into}. Cada encomenda mostra o valor exato e uma referência curta para pagar, por isso vocês comparam o dinheiro que entra na vossa conta com a encomenda, não com uma captura de ecrã. Uma captura de ecrã não prova nada; o pagamento prova.\n\n${c.P.t1}\n\nAjudaria se eu vos enviasse o link para experimentar? Basta responder e eu envio.`,
+    t2: (c) => `Olá novamente,\n\nEm vez de perguntar duas vezes, preparei algo que podem usar hoje: o guia de uma página em anexo para acabar com comprovativos de pagamento falsos. Mostra como as fraudes costumam acontecer, cinco verificações antes de entregar uma encomenda e como uma página de loja dá a cada encomenda um valor exato e uma referência para pagar. As verificações funcionam mesmo que nunca usem o Tapstall.\n\nQuando quiserem que o dinheiro vos diga a que encomenda pertence, aqui está o link: ${c.link}\n\nA configuração demora cerca de dois minutos. ${c.P.t2}`,
+    t3: (c) => `Esta é a minha última mensagem; obrigado por lerem. Se um dia as capturas falsas ou as noites a conferir pagamentos começarem a custar vendas, a vossa página de loja pode estar pronta em poucos minutos: ${c.link}\n\nNão voltarei a escrever.`,
+    link: (c) => `Obrigado pela resposta. Aqui está o link: ${c.link}\n\nConfiguram o vosso menu uma vez, os clientes encomendam a partir de um só link e pagam para ${c.into}, e cada encomenda mostra o valor exato e uma referência, por isso o pagamento que entra diz-vos a que encomenda pertence. ${c.P.link}\n\nQualquer dúvida, basta responder aqui.` },
+  fr: { shop: 'votre boutique', and: ' et ', transfers: 'les virements bancaires',
+    subj: (b) => `${b} : une capture d'écran n'est pas un paiement`,
+    ev: { waPay: (b, p) => `J'ai découvert ${b} et j'ai vu que vous prenez les commandes sur WhatsApp et acceptez ${p}.`, wa: (b) => `J'ai découvert ${b} et j'ai vu que vous prenez les commandes sur WhatsApp.`,
+      pay: (b, p) => `J'ai découvert ${b} et j'ai vu que vous acceptez ${p}.`, fric: (b) => `J'ai découvert ${b} en regardant comment les boutiques rapprochent paiements et commandes.`,
+      none: (b) => `J'ai découvert ${b} en ligne.` },
+    into: (w) => (w ? `votre propre compte ${w} ou votre compte bancaire` : 'votre propre portefeuille mobile ou votre compte bancaire'),
+    stop: 'Si vous préférez ne plus recevoir de messages de ma part, répondez simplement « stop ».',
+    t1: (c) => `Bonjour à l'équipe ${c.biz},\n\n${c.ev} Puis-je vous parler d'un moment que beaucoup de boutiques connaissent trop bien ?\n\nUn client envoie une capture d'écran qui dit « payé », vous remettez la commande, et l'argent n'arrive jamais. Ou vingt paiements arrivent en une soirée et vous veillez tard pour faire correspondre les montants aux noms.\n\nJ'ai créé Tapstall pour que ce moment n'arrive plus. Vos clients choisissent dans votre menu sur une seule page et paient directement sur ${c.into}. Chaque commande affiche le montant exact et une courte référence de paiement, vous comparez donc l'argent reçu sur votre compte avec la commande, pas avec une capture d'écran. Une capture d'écran ne prouve rien ; le paiement, si.\n\n${c.P.t1}\n\nVoulez-vous que je vous envoie le lien pour l'essayer ? Il suffit de répondre.`,
+    t2: (c) => `Bonjour à nouveau,\n\nPlutôt que de demander deux fois, j'ai préparé quelque chose d'utile dès aujourd'hui : le guide d'une page ci-joint pour en finir avec les fausses preuves de paiement. Il montre comment les fraudes se produisent le plus souvent, cinq vérifications à faire avant de remettre une commande, et comment une page boutique donne à chaque commande un montant exact et une référence de paiement. Ces vérifications sont utiles même si vous n'utilisez jamais Tapstall.\n\nQuand vous voudrez que l'argent vous dise à quelle commande il correspond, voici le lien : ${c.link}\n\nLa mise en place prend environ deux minutes. ${c.P.t2}`,
+    t3: (c) => `Dernier message de ma part, merci de m'avoir lu. Si les fausses captures ou les soirées passées à vérifier les paiements finissent par coûter des ventes à ${c.biz}, votre page boutique peut être en ligne en quelques minutes : ${c.link}\n\nJe ne vous écrirai plus.`,
+    link: (c) => `Merci pour votre réponse. Voici le lien : ${c.link}\n\nVous configurez votre menu une fois, vos clients commandent depuis un seul lien et paient sur ${c.into}, et chaque commande affiche son montant exact et une référence : le paiement reçu vous dit à quelle commande il correspond. ${c.P.link}\n\nPour toute question, répondez simplement ici.` },
+  tr: { shop: 'mağazanız', and: ' ve ', transfers: 'havale/EFT',
+    subj: (b) => `${b}: ekran görüntüsü ödeme değildir`,
+    ev: { waPay: (b, p) => `${b} ile karşılaştım; WhatsApp üzerinden sipariş aldığınızı ve ${p} kabul ettiğinizi gördüm.`, wa: (b) => `${b} ile karşılaştım; WhatsApp üzerinden sipariş aldığınızı gördüm.`,
+      pay: (b, p) => `${b} ile karşılaştım; ${p} kabul ettiğinizi gördüm.`, fric: (b) => `Mağazaların ödemeleri siparişlerle nasıl eşleştirdiğine bakarken ${b} ile karşılaştım.`,
+      none: (b) => `${b} ile internette karşılaştım.` },
+    into: (w) => (w ? `kendi ${w} hesabınıza veya banka hesabınıza` : 'kendi banka hesabınıza veya mobil cüzdanınıza'),
+    stop: 'Benden tekrar mesaj almak istemezseniz "stop" veya "dur" yazarak yanıtlamanız yeterli.',
+    t1: (c) => `Merhaba ${c.biz} ekibi,\n\n${c.ev} Pek çok mağazanın çok iyi bildiği bir anı sorabilir miyim?\n\nBir müşteri "ödendi" yazan bir ekran görüntüsü gönderir, siz siparişi teslim edersiniz ve para hiç gelmez. Ya da bir akşamda yirmi ödeme gelir ve gece geç saatlere kadar tutarları isimlerle eşleştirirsiniz.\n\nTapstall'ı bu an bir daha yaşanmasın diye yaptım. Müşteriler tek bir sayfada menünüzden seçer ve ödemeyi doğrudan ${c.into} yapar. Her sipariş ödenecek tam tutarı ve kısa bir referansı gösterir; böylece hesabınıza gelen parayı ekran görüntüsüyle değil, siparişle eşleştirirsiniz. Ekran görüntüsü hiçbir şeyi kanıtlamaz; ödeme kanıtlar.\n\n${c.P.t1}\n\nDenemeniz için bağlantıyı göndermemi ister misiniz? Yanıtlamanız yeterli, hemen gönderirim.`,
+    t2: (c) => `Tekrar merhaba,\n\nİki kez sormak yerine bugün kullanabileceğiniz bir şey hazırladım: sahte ödeme dekontlarına son vermek için ekteki tek sayfalık rehber. Sahteciliklerin genellikle nasıl yapıldığını, siparişi teslim etmeden önce yapılacak beş kontrolü ve bir mağaza sayfasının her siparişe nasıl tam bir tutar ve ödeme referansı verdiğini anlatıyor. Bu kontroller Tapstall'ı hiç kullanmasanız da işe yarar.\n\nGelen paranın hangi siparişe ait olduğunu size söylemesini istediğinizde bağlantı burada: ${c.link}\n\nKurulum yaklaşık iki dakika sürer. ${c.P.t2}`,
+    t3: (c) => `Bu benden son mesaj, okuduğunuz için teşekkürler. Sahte ekran görüntüleri ya da ödemeleri kontrol ederek geçen geceler bir gün ${c.biz} için satış kaybına dönüşürse, mağaza sayfanız birkaç dakikada hazır olabilir: ${c.link}\n\nBir daha yazmayacağım.`,
+    link: (c) => `Yanıtınız için teşekkürler. Bağlantı burada: ${c.link}\n\nMenünüzü bir kez kurarsınız, müşteriler tek bir bağlantıdan sipariş verir ve ödemeyi ${c.into} yapar; her sipariş tam tutarını ve bir referansı gösterir, böylece gelen ödeme hangi siparişe ait olduğunu size söyler. ${c.P.link}\n\nHer türlü sorunuz için buradan yanıtlamanız yeterli.` },
+  id: { shop: 'toko Anda', and: ' dan ', transfers: 'transfer bank',
+    subj: (b) => `${b}: tangkapan layar bukan pembayaran`,
+    ev: { waPay: (b, p) => `Saya menemukan ${b} dan melihat bahwa Anda menerima pesanan lewat WhatsApp dan pembayaran lewat ${p}.`, wa: (b) => `Saya menemukan ${b} dan melihat bahwa Anda menerima pesanan lewat WhatsApp.`,
+      pay: (b, p) => `Saya menemukan ${b} dan melihat bahwa Anda menerima pembayaran lewat ${p}.`, fric: (b) => `Saya menemukan ${b} saat melihat bagaimana toko mencocokkan pembayaran dengan pesanan.`,
+      none: (b) => `Saya menemukan ${b} di internet.` },
+    into: (w) => (w ? `akun ${w} atau rekening bank Anda sendiri` : 'rekening bank atau dompet digital Anda sendiri'),
+    stop: 'Jika Anda tidak ingin menerima pesan dari saya lagi, cukup balas "stop" atau "berhenti".',
+    t1: (c) => `Halo tim ${c.biz},\n\n${c.ev} Boleh saya bertanya tentang satu momen yang terlalu dikenal banyak toko?\n\nPelanggan mengirim tangkapan layar bertuliskan "sudah bayar", Anda menyerahkan pesanan, dan uangnya tidak pernah masuk. Atau dua puluh pembayaran masuk dalam satu malam dan Anda begadang mencocokkan nominal dengan nama.\n\nSaya membuat Tapstall agar momen itu tidak terjadi lagi. Pelanggan memilih dari menu Anda di satu halaman dan membayar langsung ke ${c.into}. Setiap pesanan menampilkan nominal yang tepat dan referensi singkat untuk dibayar, jadi Anda mencocokkan uang yang masuk ke rekening Anda dengan pesanannya, bukan dengan tangkapan layar. Tangkapan layar tidak membuktikan apa pun; pembayaranlah buktinya.\n\n${c.P.t1}\n\nApakah akan membantu jika saya kirimkan tautannya untuk dicoba? Cukup balas, dan saya kirimkan.`,
+    t2: (c) => `Halo lagi,\n\nDaripada bertanya dua kali, saya menyiapkan sesuatu yang bisa Anda pakai hari ini: panduan satu halaman terlampir untuk menghentikan bukti transfer palsu. Isinya cara penipuan ini biasanya terjadi, lima pemeriksaan sebelum menyerahkan pesanan, dan bagaimana halaman toko memberi setiap pesanan nominal yang tepat dan referensi pembayaran. Pemeriksaan ini tetap berguna walaupun Anda tidak pernah memakai Tapstall.\n\nKetika Anda ingin uang yang masuk memberi tahu pesanan mana pemiliknya, ini tautannya: ${c.link}\n\nPenyiapannya sekitar dua menit. ${c.P.t2}`,
+    t3: (c) => `Ini pesan terakhir dari saya, terima kasih sudah membaca. Jika suatu hari tangkapan layar palsu atau malam-malam mencocokkan pembayaran mulai membuat ${c.biz} kehilangan penjualan, halaman toko Anda bisa siap dalam beberapa menit: ${c.link}\n\nSaya tidak akan menulis lagi.`,
+    link: (c) => `Terima kasih sudah membalas. Ini tautannya: ${c.link}\n\nAnda menyiapkan menu sekali, pelanggan memesan dari satu tautan dan membayar ke ${c.into}, dan setiap pesanan menampilkan nominal yang tepat dan referensi, sehingga pembayaran yang masuk memberi tahu pesanan mana pemiliknya. ${c.P.link}\n\nAda pertanyaan, cukup balas di sini.` },
+  uk: { shop: 'ваш магазин', and: ' і ', transfers: 'банківський переказ',
+    subj: (b) => `${b}: скриншот не є оплатою`,
+    ev: { waPay: (b, p) => `Я натрапив на ${b} і побачив, що ви берете замовлення у WhatsApp і приймаєте оплату через ${p}.`, wa: (b) => `Я натрапив на ${b} і побачив, що ви берете замовлення у WhatsApp.`,
+      pay: (b, p) => `Я натрапив на ${b} і побачив, що ви приймаєте оплату через ${p}.`, fric: (b) => `Я натрапив на ${b}, коли дивився, як магазини звіряють оплати із замовленнями.`,
+      none: (b) => `Я натрапив на ${b} в інтернеті.` },
+    into: (w) => (w ? `ваш власний рахунок ${w} або банківський рахунок` : 'вашу власну картку або банківський рахунок'),
+    stop: 'Якщо не бажаєте більше отримувати від мене листів, просто дайте відповідь "stop" або "стоп".',
+    t1: (c) => `Добрий день, командо ${c.biz}!\n\n${c.ev} Можна запитати про момент, який багато магазинів знають надто добре?\n\nКлієнт надсилає скриншот із написом "оплачено", ви віддаєте замовлення, а гроші так і не надходять. Або за один вечір приходить двадцять оплат, і ви до ночі звіряєте суми з іменами.\n\nЯ створив Tapstall, щоб цей момент більше не траплявся. Клієнти обирають із вашого меню на одній сторінці й платять напряму на ${c.into}. Кожне замовлення показує точну суму та короткий код для оплати, тож ви звіряєте гроші, що надійшли на ваш рахунок, із замовленням, а не зі скриншотом. Скриншот нічого не доводить; доводить оплата.\n\n${c.P.t1}\n\nНадіслати вам посилання, щоб спробувати? Просто дайте відповідь, і я надішлю.`,
+    t2: (c) => `Ще раз добрий день,\n\nЗамість того щоб питати вдруге, я підготував те, що ви можете використати вже сьогодні: доданий односторінковий посібник про те, як покласти край фальшивим підтвердженням оплати. У ньому: як зазвичай підробляють оплату, п'ять перевірок перед тим, як віддати замовлення, і як сторінка магазину дає кожному замовленню точну суму та код для оплати. Перевірки корисні, навіть якщо ви ніколи не користуватиметеся Tapstall.\n\nКоли захочете, щоб гроші самі показували, до якого замовлення вони належать, ось посилання: ${c.link}\n\nНалаштування займає близько двох хвилин. ${c.P.t2}`,
+    t3: (c) => `Це мій останній лист, дякую, що прочитали. Якщо фальшиві скриншоти чи вечори за звірянням оплат колись почнуть коштувати ${c.biz} продажів, сторінка вашого магазину може запрацювати за кілька хвилин: ${c.link}\n\nБільше не писатиму.`,
+    link: (c) => `Дякую за відповідь. Ось посилання: ${c.link}\n\nВи один раз налаштовуєте меню, клієнти замовляють за одним посиланням і платять на ${c.into}, а кожне замовлення показує точну суму й код, тож оплата, що надійшла, сама показує, до якого замовлення вона належить. ${c.P.link}\n\nЯкщо є питання, просто дайте відповідь тут.` },
+  vi: { shop: 'cửa hàng của anh chị', and: ' và ', transfers: 'chuyển khoản ngân hàng',
+    subj: (b) => `${b}: ảnh chụp màn hình không phải là thanh toán`,
+    ev: { waPay: (b, p) => `Tôi biết đến ${b} và thấy cửa hàng nhận đơn qua WhatsApp và nhận thanh toán qua ${p}.`, wa: (b) => `Tôi biết đến ${b} và thấy cửa hàng nhận đơn qua WhatsApp.`,
+      pay: (b, p) => `Tôi biết đến ${b} và thấy cửa hàng nhận thanh toán qua ${p}.`, fric: (b) => `Tôi biết đến ${b} khi tìm hiểu cách các cửa hàng đối chiếu thanh toán với đơn hàng.`,
+      none: (b) => `Tôi biết đến ${b} trên mạng.` },
+    into: (w) => (w ? `tài khoản ${w} hoặc tài khoản ngân hàng của chính anh chị` : 'ví điện tử hoặc tài khoản ngân hàng của chính anh chị'),
+    stop: 'Nếu anh chị không muốn nhận thư của tôi nữa, chỉ cần trả lời "stop" hoặc "dừng".',
+    t1: (c) => `Xin chào đội ngũ ${c.biz},\n\n${c.ev} Tôi có thể hỏi về một khoảnh khắc mà nhiều cửa hàng đã quá quen thuộc không?\n\nKhách gửi một ảnh chụp màn hình ghi "đã chuyển khoản", anh chị giao hàng, rồi tiền không bao giờ về. Hoặc hai mươi khoản thanh toán đổ về trong một buổi tối và anh chị thức khuya đối chiếu số tiền với tên người gửi.\n\nTôi làm ra Tapstall để khoảnh khắc đó không xảy ra nữa. Khách chọn từ danh mục của anh chị trên một trang duy nhất và thanh toán thẳng vào ${c.into}. Mỗi đơn hàng hiển thị số tiền chính xác và một mã tham chiếu ngắn để thanh toán, nên anh chị đối chiếu tiền về tài khoản với đơn hàng, chứ không phải với ảnh chụp màn hình. Ảnh chụp màn hình không chứng minh điều gì; khoản thanh toán mới là bằng chứng.\n\n${c.P.t1}\n\nAnh chị có muốn tôi gửi đường link để dùng thử không? Chỉ cần trả lời, tôi sẽ gửi.`,
+    t2: (c) => `Xin chào lần nữa,\n\nThay vì hỏi lại lần hai, tôi đã chuẩn bị một thứ anh chị có thể dùng ngay hôm nay: bản hướng dẫn một trang đính kèm để chấm dứt bằng chứng thanh toán giả. Hướng dẫn cho biết các vụ gian lận thường diễn ra thế nào, năm bước kiểm tra trước khi giao hàng, và cách một trang cửa hàng gán cho mỗi đơn một số tiền chính xác cùng mã tham chiếu để thanh toán. Các bước kiểm tra vẫn hữu ích ngay cả khi anh chị không bao giờ dùng Tapstall.\n\nKhi anh chị muốn chính khoản tiền về cho biết nó thuộc đơn nào, đây là đường link: ${c.link}\n\nViệc thiết lập mất khoảng hai phút. ${c.P.t2}`,
+    t3: (c) => `Đây là thư cuối cùng của tôi, cảm ơn anh chị đã đọc. Nếu một ngày ảnh chụp màn hình giả hay những đêm đối chiếu thanh toán bắt đầu làm ${c.biz} mất doanh số, trang cửa hàng của anh chị có thể sẵn sàng chỉ trong vài phút: ${c.link}\n\nTôi sẽ không viết thư nữa.`,
+    link: (c) => `Cảm ơn anh chị đã trả lời. Đây là đường link: ${c.link}\n\nAnh chị thiết lập danh mục một lần, khách đặt hàng từ một đường link và thanh toán vào ${c.into}, mỗi đơn hiển thị số tiền chính xác và mã tham chiếu, nên khoản tiền về cho anh chị biết nó thuộc đơn nào. ${c.P.link}\n\nNếu có câu hỏi, anh chị chỉ cần trả lời tại đây.` },
+  ar: { shop: 'متجركم', and: ' و', transfers: 'التحويلات البنكية',
+    subj: (b) => `${b}: لقطة الشاشة ليست دفعة`,
+    ev: { waPay: (b, p) => `تعرّفت على ${b} ورأيت أنكم تستقبلون الطلبات عبر واتساب وتقبلون الدفع عبر ${p}.`, wa: (b) => `تعرّفت على ${b} ورأيت أنكم تستقبلون الطلبات عبر واتساب.`,
+      pay: (b, p) => `تعرّفت على ${b} ورأيت أنكم تقبلون الدفع عبر ${p}.`, fric: (b) => `تعرّفت على ${b} أثناء بحثي في كيفية مطابقة المتاجر للدفعات مع الطلبات.`,
+      none: (b) => `تعرّفت على ${b} عبر الإنترنت.` },
+    into: (w) => (w ? `حسابكم الخاص على ${w} أو حسابكم البنكي` : 'محفظتكم الإلكترونية أو حسابكم البنكي'),
+    stop: 'إذا كنتم تفضّلون عدم تلقي رسائل مني مجددًا، يكفي أن تردّوا بكلمة "stop" أو "توقف".',
+    t1: (c) => `مرحبًا فريق ${c.biz}،\n\n${c.ev} هل تسمحون لي بالسؤال عن لحظة يعرفها كثير من التجار جيدًا؟\n\nيرسل العميل لقطة شاشة مكتوبًا عليها "تم الدفع"، فتسلّمونه الطلب، ثم لا يصل المال أبدًا. أو تصلكم عشرون دفعة في مساء واحد فتسهرون لمطابقة المبالغ مع الأسماء.\n\nأنشأت Tapstall حتى لا تتكرر هذه اللحظة. يختار العملاء من قائمتكم في صفحة واحدة ويدفعون مباشرة إلى ${c.into}. يعرض كل طلب المبلغ الدقيق ورمزًا مرجعيًا قصيرًا للدفع، فتطابقون المال الذي يصل إلى حسابكم مع الطلب، لا مع لقطة شاشة. لقطة الشاشة لا تثبت شيئًا؛ الدفعة هي الدليل.\n\n${c.P.t1}\n\nهل يفيدكم أن أرسل لكم الرابط لتجربته؟ يكفي أن تردّوا وسأرسله.`,
+    t2: (c) => `مرحبًا مجددًا،\n\nبدلًا من أن أسأل مرتين، أعددت لكم شيئًا يمكنكم استخدامه اليوم: الدليل المرفق في صفحة واحدة لإيقاف إثباتات الدفع المزيفة. يشرح كيف يحدث التزوير عادةً، وخمس خطوات تحقق قبل تسليم أي طلب، وكيف تمنح صفحة المتجر كل طلب مبلغًا دقيقًا ورمزًا مرجعيًا للدفع. خطوات التحقق مفيدة حتى لو لم تستخدموا Tapstall أبدًا.\n\nعندما تريدون أن يدلّكم المال الواصل على الطلب الذي يخصه، هذا هو الرابط: ${c.link}\n\nيستغرق الإعداد نحو دقيقتين. ${c.P.t2}`,
+    t3: (c) => `هذه آخر رسالة مني، وشكرًا على القراءة. إذا بدأت لقطات الشاشة المزيفة أو ليالي مطابقة الدفعات تكلّف ${c.biz} مبيعات في يوم من الأيام، يمكن أن تكون صفحة متجركم جاهزة خلال دقائق: ${c.link}\n\nلن أراسلكم مرة أخرى.`,
+    link: (c) => `شكرًا على ردكم. هذا هو الرابط: ${c.link}\n\nتُعدّون قائمتكم مرة واحدة، ويطلب العملاء من رابط واحد ويدفعون إلى ${c.into}، ويعرض كل طلب مبلغه الدقيق ورمزًا مرجعيًا، فتعرفون من الدفعة الواصلة الطلب الذي تخصه. ${c.P.link}\n\nلأي سؤال، يكفي الرد هنا.` },
+};
+
+/** Everything a template needs, worked out once: language, evidence sentence, wallet, link, signatures. */
+export function v2Ctx(lead, { origin, fromName, postal }) {
+  const lang = v2Lang(lead.country);
+  const L = V2_COPY[lang];
+  const biz = String(lead.business || '').trim() || L.shop;
+  const seen = v2Seen(lead);
+  const pays = [...seen.wallets, ...(seen.transfers ? [L.transfers] : [])];
+  const pay = pays.length > 1 ? pays.slice(0, -1).join(', ') + L.and + pays[pays.length - 1] : (pays[0] || '');
+  const ev = seen.wa && pay ? L.ev.waPay(biz, pay) : seen.wa ? L.ev.wa(biz) : pay ? L.ev.pay(biz, pay) : seen.friction ? L.ev.fric(biz) : L.ev.none(biz);
+  const wallet = seen.wallets[0] || V2_WALLET_CC[String(lead.country || '').toLowerCase()] || '';
+  const post = String(postal || '').trim();
+  const name = String(fromName || 'Courage');
+  return { lang, L, biz, ev, into: L.into(wallet), wallet, link: String(origin || '').replace(/\/+$/, '') + '/onboard', name, P: V2_PRICE[lang],
+    sig: `${name}, Tapstall\nJacaranda Labs${post ? '\n' + post : ''}`, sig2: `${name}, Tapstall${post ? '\n' + post : ''}` };
+}
+/** The pre-rendered guide for a language other than English (pages/public/guides, built by scripts/render_guides.mjs). */
+export const V2_GUIDE_BASE = 'https://king-kunta-cpu.github.io/tapstall/guides';
+export const v2GuideFile = (lang) => 'fake-proof-of-payment-' + lang + '.pdf';
+
+/** The English T2 attachment (owner 2026-11-04): a one-page guide made for this shop (mailPdf is ASCII/Helvetica, so
+ *  only English is built here; other languages attach the pre-rendered guide). General, checkable advice; no invented numbers. */
 export function v2Guide(lead, { origin, postal }) {
-  const biz = String(lead.business || '').trim() || 'your shop';
-  const link = String(origin || '').replace(/\/+$/, '') + '/onboard';
+  const c = v2Ctx({ ...lead, country: lead.country && v2Lang(lead.country) === 'en' ? lead.country : '' }, { origin, postal });
+  const biz = c.biz;
   const day = new Date().toISOString().slice(0, 10);
   const slug = biz.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'shop';
   return { filename: 'tapstall-guide-' + slug + '.pdf', content: mailPdf({
@@ -539,56 +710,38 @@ export function v2Guide(lead, { origin, postal }) {
         'A real payment for a smaller amount, or one already used for another order.',
         'Twenty payments landing in an hour, and no quick way to tell which one is whose.' ] },
       { heading: 'Five checks before you hand over goods', bullets: [
-        'Check your own account, or the SMS your provider sent you; never only the customer\'s screenshot.',
-        'Match the exact amount, cents included.',
+        'Check your own account, or the message your provider sent you; never only the customer\'s screenshot.',
+        'Match the exact amount.',
         'Match the sender name or reference, and the time.',
         'A payment you cannot find yet is not received, however urgent the customer sounds.',
         'Mark each payment as used for one order, so it cannot be claimed twice.' ] },
       { heading: 'How Tapstall makes the money tell you', paras: [
-        'Customers order from your menu on one page and pay straight into your own EcoCash, PayShap or bank account; Tapstall never holds your money. Every order gets its own exact amount, down to the cent, so the payment that lands tells you which order it is. A screenshot proves nothing; the payment does.' ] },
+        'Customers order from your menu on one page and pay straight into ' + c.into + '; Tapstall never holds your money. Each order shows the exact amount and a short reference to pay, so you match the money that lands in your account to the order, not to a screenshot. A screenshot proves nothing; the payment does.' ] },
       { heading: 'Set up in about two minutes', bullets: [
         'Add your menu: names and prices.',
         'Add the account your customers pay into.',
         'Share your one link on your WhatsApp status, your bio and your groups.' ],
         paras: [] },
-      { paras: ['Free for 60 days, then USD 60 a year (or USD 7 a month). No commission on your sales and no order cap. Start here: ' + link] },
+      { paras: [c.P.link + ' Start here: ' + c.link] },
     ],
     footer: 'Tapstall, Jacaranda Labs' + (postal ? ' - ' + String(postal).trim() : ''),
   }) };
 }
 
-/** touch 0 = T1 (no link), 1 = T2 day 7 (the link), 2 = T3 day 14 (last note). kind 'link' = the answer to a reply. */
-export function v2Compose(lead, { origin, fromName, postal, kind }) {
-  const biz = String(lead.business || '').trim() || 'there';
-  const link = String(origin || '').replace(/\/+$/, '') + '/onboard';
-  const name = String(fromName || 'Courage');
-  const post = String(postal || '').trim();
-  const re = (s) => 'Re: ' + s;
-  const subj1 = `${biz}: orders that identify their own payment`;
-  if (kind === 'link') {
-    return { subject: re(subj1), text: `Thank you for writing back. Here is the link: ${link}\n\n`
-      + 'You set up your menu once, customers order from one link and pay your own EcoCash, PayShap or bank account, and every '
-      + 'order carries its own exact amount, so the payment that lands tells you which order it is. Free for 60 days, then USD 60 '
-      + 'a year (or USD 7 a month). No commission on your sales.\n\nAny question, just reply here.\n\n' + name + ', Tapstall' };
-  }
+/** touch 0 = T1 (no link), 1 = T2 day 7 (the link + the guide), 2 = T3 day 14 (last note). kind 'link' = the answer to a reply.
+ *  `guide` = the pre-rendered PDF for a language other than English; without it a T2 comes back with `missing: 'guide'`
+ *  and the sender skips the lead this tick (T2 never goes out without its attachment). */
+export function v2Compose(lead, { origin, fromName, postal, kind, guide }) {
+  const c = v2Ctx(lead, { origin, fromName, postal });
+  const L = c.L;
+  const subj1 = L.subj(c.biz);
+  const re = (x) => 'Re: ' + x;
+  if (kind === 'link') return { lang: c.lang, subject: re(subj1), text: L.link(c) + `\n\n${c.name}, Tapstall` };
   const touch = Math.max(0, Math.min(Number(lead.touches) || 0, V2_MAX_TOUCHES - 1));
-  if (touch === 0) {
-    return { subject: subj1, text: `Hi ${biz} team,\n\n${v2Evidence(lead)} Can I ask about a moment most shops here know too well? `
-      + 'A customer sends a screenshot that says "paid", you hand over the order, and the money never arrives. Or twenty payments land '
-      + 'in one evening and you sit up late matching amounts to names.\n\nI built Tapstall so that moment stops happening. Customers pick '
-      + 'from your menu on one page and pay your own EcoCash, PayShap or bank account, and every order carries its own amount down to the '
-      + 'cent, so the money that lands tells you exactly which order it is. A screenshot proves nothing; the payment does.\n\n'
-      + 'It is free for 60 days, then USD 60 a year. No commission on your sales and no order cap.\n\nWould it help if I sent you the '
-      + `link to try it? Just reply and I will.\n\n${name}, Tapstall\nJacaranda Labs${post ? '\n' + post : ''}\n\n${V2_STOP}` };
-  }
+  if (touch === 0) return { lang: c.lang, subject: subj1, text: `${L.t1(c)}\n\n${c.sig}\n\n${L.stop}` };
   if (touch === 1) {
-    return { subject: re(subj1), attachments: [v2Guide(lead, { origin, postal })], text: `Hi again,\n\nRather than ask twice, I made `
-      + `something for ${biz}: the attached one-page guide to ending fake proof of payment. It shows how the fakes usually happen, five `
-      + 'checks to make before you hand over goods, and how to set up a shop page where every order carries its own exact amount. '
-      + 'The checks work even if you never use Tapstall.\n\nWhen you want the money to tell you which order it is, here is the link: '
-      + `${link}\n\nIt takes about two minutes to set up and is free for 60 days. No commission on your sales.\n\n${name}, Tapstall`
-      + `${post ? '\n' + post : ''}\n\n${V2_STOP}` };
+    const att = c.lang === 'en' ? v2Guide(lead, { origin, postal }) : (guide && guide.content ? guide : null);
+    return { lang: c.lang, subject: re(subj1), text: `${L.t2(c)}\n\n${c.sig2}\n\n${L.stop}`, attachments: att ? [att] : [], ...(att ? {} : { missing: 'guide' }) };
   }
-  return { subject: re(subj1), text: `Last note from me, and thank you for reading. If taking orders on WhatsApp ever starts costing `
-    + `${biz} sales or disputes, your shop page can be live in a few minutes: ${link}\n\nI will not write again.\n\n${name}, Tapstall${post ? '\n' + post : ''}` };
+  return { lang: c.lang, subject: re(subj1), text: `${L.t3(c)}\n\n${c.sig2}` };
 }

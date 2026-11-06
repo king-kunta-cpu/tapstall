@@ -16,7 +16,27 @@ GONE = re.compile(r"(no longer (with|at|employed|working|part of)|(has|have) lef
 AUTO = re.compile(r"\b(out of (the )?office|automatic reply|auto-?reply|autoreply|auto-?response|away from (the |my )?(office|desk)|on (annual |parental |maternity |paternity |sick )?leave|currently (away|travel+ing|out)|limited access to (e-?mail|my e-?mail)|i am away|i'?m away|back in the office on|will (respond|reply|get back to you) (to your (e-?mail|message) )?(as soon as|when|on my return)|thank you for (your (e-?mail|message)|contacting)[^.]{0,60}(we|our team) will|this is an automated)\b", re.I)
 AUTO_SUBJECT = re.compile(r"^(auto(matic)?[ -]?(reply|response)|out of (the )?office|ooo\b|away:|abwesenheit|r[ée]ponse automatique|respuesta autom)", re.I)
 STOP_PHRASE = re.compile(r"\b(unsubscribe|remove me|take me off|opt(ed)? ?out|not interested|no,? thanks|no thank you|stop (emailing|writing|contacting|sending|messaging)|do not (email|contact|write|message)|don'?t (email|contact|write|message)|leave (me|us) alone|please stop|stop it|remove (us|me|our (address|e-?mail|details))( from)?)\b", re.I)
-_QUOTE = [re.compile(p, re.I) for p in (r"^\s*>", r"^\s*On .{4,200}wrote:\s*$", r"^\s*On .{4,200}\d{4}.*<[^>]+@", r"^\s*-- ?$", r"^-{2,}\s*(original message|forwarded message)",
+# 2026-11-06 (Tapstall step 4): first touches go out in es/pt/fr/ar/tr/id/uk/vi, so a person's "no" can come back in any of them.
+STOP_PHRASE_INTL = re.compile(r"(no (me|nos) interesa|no estoy interesad|no estamos interesad|no me escrib|no nos escrib|dejen? de escribir|darme de baja|dar(nos)? de baja|"
+                              r"n[ãa]o (tenho|temos) interesse|n[ãa]o estou interessad|n[ãa]o estamos interessad|parem de (me |nos )?(enviar|escrever)|descadastr|"
+                              r"pas int[ée]ress|ne m'[ée]crivez plus|n'[ée]crivez plus|cessez de (m'|nous )?[ée]crire|d[ée]sinscri|d[ée]sabonn|"
+                              r"ilgilenmiyor|bana yazmay|bize yazmay|abonelikten [çc]ık|"
+                              r"tidak tertarik|jangan (kirim|hubungi|email)|berhenti berlangganan|"
+                              r"не цікав|не зацікавлен|не пишіть|відпиш|"
+                              r"kh[oô]ng quan t[aâ]m|đừng gửi|ngừng gửi|hủy đăng ký|"
+                              r"غير مهتم|لسنا مهتمين|لست مهتم|لا تراسل|توقفوا عن|إلغاء الاشتراك|الغاء الاشتراك)", re.I)
+# a bare first word that means "stop" / "no" in those languages (short replies only, like the English "no")
+STOP_WORD_INTL = re.compile(r"^\W*(alto|basta|baja|parar|pare|cancelar|arr[êe]te[rz]?|stoppez|d[ée]sabonner|dur|durdur|berhenti|"
+                            r"стоп|зупиніть|досить|dừng|dung lai|توقف|إلغاء|الغاء)(\W|$)", re.I)
+NO_WORD_INTL = re.compile(r"^\W*(n[ãa]o|non|hay[ıi]r|tidak|ні|kh[oô]ng|لا)(\W|$)", re.I)
+# ... but "no problem, send it" is a yes in every language
+NOT_A_NO = re.compile(r"^\W*(no (problem|worries|hay problema|pasa nada)|n[ãa]o h[áa] problema|sem problema|pas de probl[èe]me|non, (envoy|je veux)|"
+                      r"sorun (yok|değil)|tidak (masalah|apa)|не проблема|kh[oô]ng (sao|vấn đề|có gì)|لا مشكلة|لا بأس)", re.I)
+
+_QUOTE = [re.compile(p, re.I) for p in (r"^\s*>", r"^\s*On .{4,200}wrote:\s*$",
+                                         r"(escribi[óo]|escreveu|a [ée]crit|yazd[ıi]|menulis|пише|написа(в|ла)|đã viết|كتب)\s*:\s*$",
+                                         r"^\s*(kimden|dari|від|từ|من|enviado|envoy[ée]|gönderen|отправлено)\s*:\s",
+                                         r"^\s*(enviado desde|enviado do|envoy[ée] de mon|iPhone'umdan|dikirim dari|надіслано з|gửi từ)\s", r"^\s*On .{4,200}\d{4}.*<[^>]+@", r"^\s*-- ?$", r"^-{2,}\s*(original message|forwarded message)",
                                          r"^\s*(from|sent|von|de):\s", r"^\s*sent from my ", r"^_{5,}")]
 
 
@@ -45,9 +65,11 @@ def is_stop(words: str) -> bool:
         return False
     if re.match(r"^\W*(stop|unsubscribe|remove( me)?)\b", w, re.I):
         return True
-    if re.match(r"^\W*(no|nope|nah)\b", w, re.I) and len(w) <= 60 and not GONE.search(w) and not SOFT.search(w):
+    # a short reply that asks something ("No WhatsApp here, does it work?") is a conversation, not a stop
+    short = len(w) <= 60 and not GONE.search(w) and not SOFT.search(w) and not NOT_A_NO.search(w) and not re.search(r"[?\u061f]", w)
+    if short and (re.match(r"^\W*(no|nope|nah)\b", w, re.I) or STOP_WORD_INTL.search(w) or NO_WORD_INTL.search(w)):
         return True
-    return _stop_phrase(w[:600])
+    return _stop_phrase(w[:600]) or bool(STOP_PHRASE_INTL.search(w[:600]))
 
 
 def _h(headers, name: str) -> str:

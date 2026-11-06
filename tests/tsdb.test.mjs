@@ -143,7 +143,8 @@ test('harvest: the script selftest passes, and the market helpers say who has co
   assert.equal(core.leadCc('Zimbabwe'), 'zw');
   assert.equal(core.leadCc('somewhere'), '');
   assert.equal(mail.v2Market('ZW'), true);
-  assert.equal(mail.v2Market('pe'), false);
+  assert.equal(mail.v2Market('pe'), true, 'step 4: every country has copy');
   assert.equal(mail.v2Market(''), false);
+  assert.deepEqual(['pe', 'ao', 'ci', 'eg', 'tr', 'id', 'ua', 'vn', 'ke', 'zw'].map(mail.v2Lang), ['es', 'pt', 'fr', 'ar', 'tr', 'id', 'uk', 'vi', 'en', 'en']);
   assert.equal(core.tsdbIndexRow({ id: 'x', status: 'queued', cc: 'pe' }).country, 'pe');
 });

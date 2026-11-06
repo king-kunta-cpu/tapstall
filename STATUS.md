@@ -1,6 +1,28 @@
 # Tapstall — status
 
 
+## v2.8.0 (2026-11-06): outreach in nine languages, worldwide (build step 4)
+
+* **Copy per language** (`V2_COPY` in `worker/mail.js`): English, Spanish, Portuguese, French, Arabic, Turkish,
+  Indonesian, Ukrainian, Vietnamese, picked from the lead's country (`v2Lang`); English everywhere else, so every
+  country now has copy and the step 3 market guard lets every harvested lead through. T1 names what the site itself
+  showed (WhatsApp orders, the wallets it mentions, bank transfers) and pays "into your own Yape / M-Pesa / GCash...";
+  without a named wallet it uses the country's usual one, or a neutral phrase. Price lines sit in one place
+  (`V2_PRICE`) for step 7.
+* **Honest claim:** "each order shows the exact amount and a short reference to pay, so you match the money in your
+  account to the order". The old "down to the cent" line is gone from every template and the English guide.
+* **Whole-unit amounts:** `priceOrder` gives currencies that move in whole units (CFA franc, rupiah, dong, Ugandan,
+  Kenyan and Tanzanian shillings, Colombian and Chilean pesos...: `ZERO_DECIMAL`) their odd amount in whole units
+  (0 to 96; Kenya 0 to 36, so about USD 0.30 at most). Cents currencies are unchanged.
+* **T2 guides:** one-page "stop fake proof of payment" PDFs in all nine languages, rendered with Chromium and Noto
+  fonts (`scripts/render_guides.mjs`, text in `scripts/guides.json`) to `pages/public/guides/`, served by the Pages
+  mirror. The Worker fetches the lead's language once per isolate; if it cannot, that T2 waits for the next tick
+  (`guide_wait`), so T2 never goes out without its attachment. English keeps the guide made for the shop.
+* **Stops in every language** (`scripts/inbound.py`): "no / not interested / stop / unsubscribe" in the eight new
+  languages, quote headers ("escribió", "a écrit", "đã viết", ...) so our own quoted stop line is never read as
+  theirs, and "no problem, send it" or a short question is never a stop. 22 new fixtures.
+* Daily volume unchanged (50/day ramp, owner 2026-11-06).
+
 ## v2.7.0 (2026-11-06): the global harvest (build step 3)
 
 * **`scripts/harvest_global.py`** replaces the OSM/classifieds hunter on the Mon/Wed/Fri dispatch
