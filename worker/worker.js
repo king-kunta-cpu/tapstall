@@ -65,7 +65,7 @@ import {
   leadsHuntToday,
   cardApply, CARD_KEY_RE, meshFanOut } from './core.js';
 
-const VERSION = '2.4.0';
+const VERSION = '2.5.0';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
