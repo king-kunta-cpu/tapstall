@@ -34,9 +34,18 @@ id = "{oid}"
 name = "WA_BOT"
 class_name = "WaBot"
 
+# 2026-11-06 (build step 2): the SQL store. Leads and the Proof Check ledger, off KV's 1,000 writes a day.
+[[durable_objects.bindings]]
+name = "TS_DB"
+class_name = "TsDb"
+
 [[migrations]]
 tag = "wa-v1"
 new_sqlite_classes = ["WaBot"]
+
+[[migrations]]
+tag = "db-v1"
+new_sqlite_classes = ["TsDb"]
 
 [triggers]
 crons = ["15 6,12,18,0 * * *", "5 * * * *"]

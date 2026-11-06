@@ -91,6 +91,7 @@ def manifest_for(assets_dir):
 
 
 WA_MIGRATION_TAG = "wa-v1"
+DB_MIGRATION_TAG = "db-v1"
 
 
 def main():
@@ -119,14 +120,18 @@ def main():
     # the class orphaned and every chat would fall back to an isolate's memory, so it ships with
     # every upload; the migration ships only until Cloudflare reports the tag as applied.
     bindings.append({"type": "durable_object_namespace", "name": "WA_BOT", "class_name": "WaBot"})
+    # 2026-11-06: the SQL store (leads, the Proof Check ledger); tag db-v1 follows wa-v1.
+    bindings.append({"type": "durable_object_namespace", "name": "TS_DB", "class_name": "TsDb"})
     migration = None
     try:
         listed = api("GET", f"/accounts/{acct}/workers/scripts", None, None, token).get("result") or []
         tag = next((s.get("migration_tag") for s in listed if s.get("id") == name), None)
     except Exception:
         tag = None
-    if tag != WA_MIGRATION_TAG:
-        migration = {"new_tag": WA_MIGRATION_TAG, "new_sqlite_classes": ["WaBot"]}
+    if tag == WA_MIGRATION_TAG:
+        migration = {"old_tag": WA_MIGRATION_TAG, "new_tag": DB_MIGRATION_TAG, "new_sqlite_classes": ["TsDb"]}
+    elif tag != DB_MIGRATION_TAG:
+        migration = {"new_tag": DB_MIGRATION_TAG, "steps": [{"new_sqlite_classes": ["WaBot"]}, {"new_sqlite_classes": ["TsDb"]}]}
         if tag:
             migration["old_tag"] = tag
 

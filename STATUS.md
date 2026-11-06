@@ -1,6 +1,23 @@
 # Tapstall — status
 
 
+## v2.6.0 (2026-11-06): the SQL store (build step 2)
+
+KV gives the whole account 1,000 writes a day, shared with the shops' orders, and the global harvest
+(step 3) files about a thousand leads a day. Leads and the Proof Check ledger now live in **TS_DB**, one
+SQLite-backed Durable Object ("main"): the same free limits as D1 (5 GB; 100k requests and row writes a
+day) and no new Cloudflare permission (the zlnew token cannot create D1 databases).
+
+* `leads` table: the whole lead document plus the columns the outreach pick sorts on. `leadGet`/`leadPut`/
+  `leadIndex`/`listLeads` switch to it once `leadsMigrate` (6-hourly sweep) has copied every KV lead and
+  checked the count; until then nothing changes. The KV lead keys stay as the backup copy.
+* `ledger` table (for Proof Check, step 5): a salted hash of a transaction reference, the wallet, country,
+  verdict, first/last seen and a count; `ledger.seen` refuses anything that is not a hex hash.
+* Migration tag `db-v1` after `wa-v1` in wrangler.toml, the generator and the fallback publisher.
+* CI runs Node 22 (Node 20 is deprecated on Actions; the store's tests use `node:sqlite`).
+* Orders stay on KV for now: one write per order, and zero shops today. Move them when KV writes pass
+  half the daily budget for three days running.
+
 ## v2.5.0 (2026-11-06): company press live on its own accounts
 
 Owner, 6 Nov 2026: Tapstall's own accounts (work-book1.csv column D) post the company lessons, and the

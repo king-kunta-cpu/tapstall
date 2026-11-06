@@ -4961,3 +4961,42 @@ export function leadsHuntDays(setting) {
 export function leadsHuntToday(utcDay, setting) {
   return leadsHuntDays(setting).includes(Number(utcDay));
 }
+
+/* ------------------------------------------------------------ the SQL store (2026-11-06, build step 2)
+ * KV allows 1,000 writes a day for the whole account, shared with the shops' orders. Leads (the harvest
+ * files about a thousand a day) and the Proof Check ledger live in one SQLite-backed Durable Object
+ * instead: the same free limits as D1 (5 GB; 100k requests and writes a day) and no new Cloudflare
+ * permission. One statement per exec, so the schema runs the same in the Durable Object and in tests. */
+export const TSDB_SCHEMA = [
+  'CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT)',
+  "CREATE TABLE IF NOT EXISTS leads (id TEXT PRIMARY KEY, doc TEXT NOT NULL, status TEXT NOT NULL DEFAULT '', has_email INTEGER NOT NULL DEFAULT 0, "
+    + "seller TEXT NOT NULL DEFAULT '', touches INTEGER NOT NULL DEFAULT 0, score INTEGER NOT NULL DEFAULT 0, next_follow_at TEXT NOT NULL DEFAULT '', "
+    + "last_sender TEXT NOT NULL DEFAULT '', link_owed INTEGER NOT NULL DEFAULT 0, cc TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT '')",
+  'CREATE INDEX IF NOT EXISTS leads_pick ON leads (status, score DESC)',
+  'CREATE INDEX IF NOT EXISTS leads_seller ON leads (seller)',
+  // The Proof Check ledger: a salted hash of a transaction reference, never the reference itself, never the
+  // phone number or the message. n counts how often it was checked; a second shop seeing it is the signal.
+  "CREATE TABLE IF NOT EXISTS ledger (hash TEXT PRIMARY KEY, wallet TEXT NOT NULL DEFAULT '', cc TEXT NOT NULL DEFAULT '', "
+    + "verdict TEXT NOT NULL DEFAULT '', store TEXT NOT NULL DEFAULT '', first_at TEXT NOT NULL, last_at TEXT NOT NULL, n INTEGER NOT NULL DEFAULT 1)",
+  'CREATE INDEX IF NOT EXISTS ledger_day ON ledger (first_at)',
+];
+export const TSDB_LEAD_UPSERT = 'INSERT INTO leads (id, doc, status, has_email, seller, touches, score, next_follow_at, last_sender, link_owed, cc, updated_at) '
+  + 'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET doc = excluded.doc, status = excluded.status, '
+  + 'has_email = excluded.has_email, seller = excluded.seller, touches = excluded.touches, score = excluded.score, '
+  + 'next_follow_at = excluded.next_follow_at, last_sender = excluded.last_sender, link_owed = excluded.link_owed, cc = excluded.cc, updated_at = excluded.updated_at';
+/** The bound values for TSDB_LEAD_UPSERT, or null for a document that is not a lead. */
+export function tsdbLeadCols(l) {
+  if (!l || typeof l !== 'object' || !l.id) return null;
+  const id = String(l.id).replace(/[^a-z0-9-]/gi, '').slice(0, 40);
+  if (!id) return null;
+  return [id, JSON.stringify(Object.assign({}, l, { id })), String(l.status || ''), l.email ? 1 : 0, String(l.seller_code || ''),
+    Number(l.touches) || 0, Math.round(Number(l.score) || 0), String(l.next_follow_at || '').slice(0, 30),
+    String(l.last_sender || '').toLowerCase().slice(0, 80), l.link_owed ? 1 : 0, String(l.country || l.cc || '').toLowerCase().slice(0, 2),
+    String(l.updated_at || l.created_at || '').slice(0, 30)];
+}
+/** An index row (the fields the outreach pick reads) from a leads row. */
+export function tsdbIndexRow(x) {
+  return { id: x.id, status: x.status, email: x.has_email ? 1 : '', seller_code: x.seller || '', touches: Number(x.touches) || 0,
+    score: Number(x.score) || 0, next_follow_at: x.next_follow_at || '', last_sender: x.last_sender || '', link_owed: x.link_owed ? 1 : 0 };
+}
+

@@ -63,9 +63,9 @@ import {
   QUOTA_LIMITS, quotaAllows, quotaPriorityForKey, storeMeta, storeMetaAction, suspendDecision, SUSPEND_GRACE_DAYS, emailHash,
   genPin, pinRecord, pinOk, pinMiss, validPin, PIN_NORMALIZE, PIN_ITER,
   leadsHuntToday,
-  cardApply, CARD_KEY_RE, meshFanOut } from './core.js';
+  cardApply, CARD_KEY_RE, meshFanOut, TSDB_SCHEMA, TSDB_LEAD_UPSERT, tsdbLeadCols, tsdbIndexRow } from './core.js';
 
-const VERSION = '2.5.1';
+const VERSION = '2.6.0';
 const FREE_DAYS = 60;
 const PRICE_USD = 60;
 // MAX_ORDERS_KEPT lives in core.js beside the row itself, so a cap and a row cannot drift apart.
@@ -2108,6 +2108,7 @@ async function runCron(env) {
   catch (e) { out.dispatch = { error: String(e && e.message || e).slice(0, 160) }; }
   try { out.press = await pressTick(env); }        // also on the hourly tick; press:last dedupes a minute
   catch (e) { out.press = { error: String(e && e.message || e).slice(0, 160) }; }
+  try { out.leads_db = await leadsMigrate(env); } catch (e) { out.leads_db = { error: String(e && e.message || e).slice(0, 120) }; }
   if (nightly) {
     // v2.1.0: the tick drains only when the queued-mail flag is set; once a day the queue is listed
     // regardless, so a flag lost to a race delays mail by hours, never loses it.
@@ -2699,6 +2700,7 @@ async function selftest(env) {
     && maskField('feed_url', 'https://docs.google.com/spreadsheets/d/abcdef/edit').indexOf('abcdef') === -1;
   // the WhatsApp bot's state, as facts rather than a verdict: unarmed is a normal state for a
   // platform whose number is not live yet, so none of this is a boolean the verdict would count
+  t.ts_db = env.TS_DB ? 'durable_object' : 'absent';
   t.wa_bot = { armed: waArmed(env), sessions: env.WA_BOT ? 'durable_object' : 'isolate_memory',
     number: waNumber(env) ? '•••' + waNumber(env).slice(-4) : '', month_cap: waMonthCap(env), lines: waLines(env).size,
     billed_replies_per_order: 2, buyer_day_cap: Math.floor(Number(env.WA_BUYER_DAY_CAP) || 0) || 8, shop_ping: env.WA_SHOP_PING === 'on' };
@@ -5717,6 +5719,53 @@ async function sellerView(url, env) {
 }
 
 /* ---- leads ---- */
+/* 2026-11-06 (build step 2): leads move to the SQL store (TS_DB, a SQLite Durable Object). Until the one-time
+ * copy has run (leadsMigrate, in the 6-hourly sweep) every call below keeps using KV exactly as before; after
+ * it, lead reads and writes cost no KV operation at all. The old KV keys stay as the backup copy. */
+function tsdb(env) { return env && env.TS_DB ? env.TS_DB.get(env.TS_DB.idFromName('main')) : null; }
+async function dbOp(env, op, args) {
+  const stub = tsdb(env);
+  if (!stub) throw new Error('no TS_DB binding');
+  const r = await stub.fetch('https://tsdb/' + op, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(Object.assign({ op }, args || {})) });
+  const j = await r.json().catch(() => null);
+  if (!j || j.ok === false) throw new Error('tsdb ' + op + ': ' + ((j && j.error) || ('http ' + r.status)));
+  return j;
+}
+const leadsDbFlag = new WeakMap();
+async function leadsOnDb(env) {
+  if (!env || !env.TS_DB) return false;
+  const hit = leadsDbFlag.get(env);
+  if (hit && (hit.v || Date.now() - hit.at < 5 * 60e3)) return hit.v;
+  let v = false;
+  try { v = !!(await dbOp(env, 'meta.get', { k: 'leads_migrated' })).v; } catch (e) { v = false; }
+  leadsDbFlag.set(env, { v, at: Date.now() });
+  return v;
+}
+async function leadGet(env, id) {
+  const key = String(id || '');
+  if (!key) return null;
+  if (await leadsOnDb(env)) return ((await dbOp(env, 'lead.get', { ids: [key] })).docs || {})[key] || null;
+  return env.ORDERS.get('lead:' + key, 'json').catch(() => null);
+}
+/** One-time copy of every KV lead into TS_DB, then the flag that moves reads and writes over. Idempotent. */
+async function leadsMigrate(env) {
+  if (!env.TS_DB || !env.ORDERS) return { skipped: 'no TS_DB binding' };
+  if (await leadsOnDb(env)) return { done: true };
+  const keys = await listKeys(env.ORDERS, 'lead:', 5000);
+  const docs = [];
+  for (const k of keys) {
+    const l = await env.ORDERS.get(k, 'json').catch(() => null); quotaNote('reads', 'automation');
+    if (l && l.id) docs.push(l);
+  }
+  for (let i = 0; i < docs.length; i += 50) await dbOp(env, 'lead.put', { docs: docs.slice(i, i + 50) });
+  const count = (await dbOp(env, 'lead.count', {})).total;
+  if (count < docs.length) return { error: 'copied ' + count + ' of ' + docs.length + '; KV stays the store' };
+  await dbOp(env, 'meta.set', { k: 'leads_migrated', v: new Date().toISOString() + ' ' + docs.length });
+  leadsDbFlag.set(env, { v: true, at: Date.now() });
+  memDel('leads:all');
+  return { copied: docs.length };
+}
+
 /** What the outreach pick needs, carried on the key so a list answers it without a read per lead.
  *  KV allows 1,024 bytes of metadata; this is ~120. A key written before v2.1.0 has none, and the
  *  pick falls back to reading documents until the nightly sweep has re-filed it. */
@@ -5726,6 +5775,7 @@ function leadMeta(l) {
 }
 /** One list, no reads: { rows (id + the metadata fields, listLeads order), legacy: keys without metadata }. */
 async function leadIndex(env) {
+  if (await leadsOnDb(env)) return { rows: (await dbOp(env, 'lead.index', { limit: 5000 })).rows || [], legacy: [] };
   const rows = [], legacy = [];
   let cursor, loops = 0;
   do {
@@ -5744,7 +5794,7 @@ async function leadIndex(env) {
 }
 /** Nightly: give pre-v2.1.0 lead keys their metadata (a read + a write each, once, capped). */
 async function leadMetaBackfill(env, cap) {
-  if (!env.ORDERS) return 0;
+  if (!env.ORDERS || await leadsOnDb(env)) return 0;
   const { legacy } = await leadIndex(env);
   let n = 0;
   for (const k of legacy.slice(0, cap || 60)) {
@@ -5758,6 +5808,9 @@ async function leadMetaBackfill(env, cap) {
 async function listLeads(env, filter) {
   const f = filter || {};
   if (!env.ORDERS) return [];
+  if (await leadsOnDb(env)) {
+    return (await dbOp(env, 'lead.all', { seller: f.seller || '', status: f.status || '', limit: Math.min(2000, Number(f.limit) || 500) })).docs || [];
+  }
   const out = await cached('leads:all', 60e3, async () => {
     const keys = await listKeys(env.ORDERS, 'lead:', 2000);
     const rows = [];
@@ -5797,7 +5850,7 @@ async function ingestLeads(env, rawList) {
     const dncHit = (lead.email && await env.STORES.get('Lead:' + lead.email).catch(() => null))
       || (lead.phone && await env.STORES.get('Lead:' + lead.phone).catch(() => null));
     if (dncHit) { counts.dnc_skipped++; continue; }
-    const existing = await env.ORDERS.get('lead:' + lead.id, 'json').catch(() => null);
+    const existing = await leadGet(env, lead.id);
     if (existing) {
       if (existing.status === 'dnc') { counts.dnc_skipped++; continue; }
       const merged = [...new Set([].concat(existing.signals || [], lead.signals || []))].sort();
@@ -5807,13 +5860,13 @@ async function ingestLeads(env, rawList) {
       if (existing.status === 'research_hold' && merged.length >= 2 && !leadJunkReason(existing) && (existing.email || existing.phone)) existing.status = 'queued';
       if (!existing.source_url && lead.source_url) existing.source_url = lead.source_url;
       if (JSON.stringify([existing.signals, existing.status, existing.score]) !== before) {
-        await env.ORDERS.put('lead:' + lead.id, JSON.stringify(existing), { metadata: leadMeta(existing) }); quotaNote('writes', 'automation'); memDel('leads:all'); counts.updated++;
+        await leadPut(env, existing); counts.updated++;
       } else counts.duplicate++;
       continue;
     }
     lead.seller_code = (lead.seller_code && activeCodes.includes(lead.seller_code))
       ? lead.seller_code : allocateSeller(lead.dedupe, activeCodes);
-    await env.ORDERS.put('lead:' + lead.id, JSON.stringify(lead), { metadata: leadMeta(lead) }); quotaNote('writes', 'automation'); memDel('leads:all'); memDelPrefix('listkeys:');
+    await leadPut(env, lead); memDelPrefix('listkeys:');
     counts.added++; if (lead.status === 'research_hold') counts.research_hold++;
     if (added.length < 100) added.push(lead.id);
   }
@@ -5831,7 +5884,7 @@ async function leadsAct(req, env) {
   const doc = await leadActor(env, b.code || '', b.key || '');
   if (!doc) return json({ ok: false, error: 'seller code + key required' }, 401);
   const id = String(b.id || '').replace(/[^a-z0-9-]/gi, '').slice(0, 40);
-  const lead = id ? await env.ORDERS.get('lead:' + id, 'json').catch(() => null) : null;
+  const lead = id ? await leadGet(env, id) : null;
   if (!lead) return json({ ok: false, error: 'no such lead' }, 404);
   if (!doc.owner && lead.seller_code && lead.seller_code !== doc.code) {
     return json({ ok: false, conflict: true, error: 'allocated to ' + lead.seller_code + ' — one prospect, one voice' }, 409);
@@ -5862,7 +5915,7 @@ async function leadsAct(req, env) {
   if (b.action === 'replied' && !t.lead.seller_code && Number(t.lead.touches) === 1 && t.lead.first_msgid) t.lead.link_owed = true;
   // owner 2026-11-04: a full / unavailable / unmonitored inbox ends the lead quietly; it is neither a bounce nor a stop
   if (b.action === 'dnc' && lead.status === 'contacted' && b.why !== 'undeliverable') await v2Tally(env, b.why === 'bounce' ? 'bounced' : 'stops');
-  await env.ORDERS.put('lead:' + id, JSON.stringify(t.lead), { metadata: leadMeta(t.lead) }); quotaNote('writes', 'automation'); memDel('leads:all');
+  await leadPut(env, t.lead);
   if (b.action === 'dnc') {
     try {
       if (t.lead.email) await env.STORES.put('Lead:' + t.lead.email, JSON.stringify({ at: new Date().toISOString(), by: doc.code }));
@@ -6117,6 +6170,7 @@ async function unsubLink(env, lead) {
   return `${String(env.PUBLIC_ORIGIN || PRESS_ORIGIN_FALLBACK).replace(/\/+$/, '')}/u/${lead.id}/${tok}`;
 }
 async function leadPut(env, lead) {
+  if (await leadsOnDb(env)) { await dbOp(env, 'lead.put', { docs: [lead] }); memDel('leads:all'); return; }
   await env.ORDERS.put('lead:' + lead.id, JSON.stringify(lead), { metadata: leadMeta(lead) }); quotaNote('writes', 'automation'); memDel('leads:all');
 }
 async function leadDnc(env, lead, why, by) {
@@ -6179,7 +6233,7 @@ async function outreachTick(env, nowMs) {
     const kind = links.includes(lead0) ? 'link' : follow.includes(lead0) ? 'follow' : 'first';
     if (kind !== 'link' && counted >= budget) break;
     if (checks++ >= budget + 6) break;                // each check may cost a DNS fetch + a write
-    const lead = await env.ORDERS.get('lead:' + lead0.id, 'json').catch(() => null);   // fresh: the runner may have moved it
+    const lead = await leadGet(env, lead0.id);   // fresh: the runner may have moved it
     if (!lead || !lead.id) continue;
     if (kind === 'link' ? !(lead.status === 'replied' && lead.link_owed) : lead.status !== (kind === 'first' ? 'queued' : 'contacted')) continue;
     const email = kind === 'first' ? leadEmailFor(lead.email, lead.source_url, lead.website) : String(lead.email || '').toLowerCase();
@@ -6231,7 +6285,7 @@ async function unsubRoute(req, url, env) {
   if (!m) return page('That link is not complete. Reply to the email with the word STOP and a person will remove you.');
   const want = (await sign(capKey(env), 'unsub:' + m[1])).replace(/[^A-Za-z0-9]/g, '').slice(0, 22);
   if (!timingSafeEq(want, m[2])) return page('That link is not valid. Reply to the email with the word STOP and a person will remove you.');
-  const lead = await env.ORDERS.get('lead:' + m[1], 'json').catch(() => null);
+  const lead = await leadGet(env, m[1]);
   if (req.method !== 'POST') {
     if (lead && lead.status === 'dnc') return page('You are already unsubscribed. We will not write again.');
     return page('Stop all emails from Tapstall to this business?', '<form method=post><button style="font:inherit;padding:.7rem 1.2rem">Unsubscribe</button></form>');
@@ -6854,6 +6908,70 @@ async function waPingMerchant(env, m, placed) {
  * plan's kind), read and written through the key-value calls, and swept by an alarm after 60 quiet
  * days so an abandoned cart does not live forever.
  */
+/** The SQL store (build step 2). One instance, "main". Every operation is a single short transaction. */
+export class TsDb {
+  constructor(state, env) {
+    this.sql = state.storage.sql;
+    this.env = env;
+    for (const q of TSDB_SCHEMA) this.sql.exec(q);
+  }
+  all(q, ...args) { return this.sql.exec(q, ...args).toArray(); }
+  async fetch(req) {
+    const b = await req.json().catch(() => ({}));
+    try { return Response.json(Object.assign({ ok: true }, this.op(String(b.op || ''), b))); }
+    catch (e) { return Response.json({ ok: false, error: String((e && e.message) || e).slice(0, 200) }, { status: 500 }); }
+  }
+  op(op, b) {
+    if (op === 'meta.get') { const r = this.all('SELECT v FROM meta WHERE k = ?', String(b.k || '')); return { v: r.length ? r[0].v : null }; }
+    if (op === 'meta.set') { this.sql.exec('INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v', String(b.k || ''), String(b.v == null ? '' : b.v)); return {}; }
+    if (op === 'lead.get') {
+      const ids = (Array.isArray(b.ids) ? b.ids : []).map(String).filter(Boolean).slice(0, 90);
+      if (!ids.length) return { docs: {} };
+      const r = this.all('SELECT id, doc FROM leads WHERE id IN (' + ids.map(() => '?').join(', ') + ')', ...ids);
+      return { docs: Object.fromEntries(r.map((x) => [x.id, JSON.parse(x.doc)])) };
+    }
+    if (op === 'lead.put') {
+      let n = 0;
+      for (const d of (Array.isArray(b.docs) ? b.docs : []).slice(0, 100)) { const c = tsdbLeadCols(d); if (!c) continue; this.sql.exec(TSDB_LEAD_UPSERT, ...c); n++; }
+      return { n };
+    }
+    if (op === 'lead.index') {
+      const r = this.all("SELECT id, status, has_email, seller, touches, score, next_follow_at, last_sender, link_owed FROM leads "
+        + "WHERE status IN ('queued', 'contacted', 'replied') ORDER BY score DESC, CASE WHEN next_follow_at = '' THEN '9999' ELSE next_follow_at END ASC LIMIT ?",
+        Math.min(20000, Number(b.limit) || 5000));
+      return { rows: r.map(tsdbIndexRow) };
+    }
+    if (op === 'lead.all') {
+      const seller = String(b.seller || ''), status = String(b.status || '');
+      const r = this.all("SELECT doc FROM leads WHERE (? = '' OR seller = ?) AND (? = '' OR status = ?) "
+        + "ORDER BY score DESC, CASE WHEN next_follow_at = '' THEN '9999' ELSE next_follow_at END ASC LIMIT ?",
+        seller, seller, status, status, Math.min(2000, Number(b.limit) || 500));
+      return { docs: r.map((x) => JSON.parse(x.doc)) };
+    }
+    if (op === 'lead.count') {
+      const r = this.all('SELECT status, COUNT(*) AS n FROM leads GROUP BY status');
+      return { total: r.reduce((a, x) => a + Number(x.n), 0), by_status: Object.fromEntries(r.map((x) => [x.status, Number(x.n)])) };
+    }
+    if (op === 'ledger.seen') {
+      const hash = String(b.hash || '');
+      if (!/^[a-f0-9]{32,64}$/.test(hash)) throw new Error('ledger.seen needs a hex hash');
+      const at = String(b.at || new Date().toISOString()).slice(0, 30);
+      const prior = this.all('SELECT n, first_at, last_at, store, verdict FROM ledger WHERE hash = ?', hash)[0] || null;
+      this.sql.exec('INSERT INTO ledger (hash, wallet, cc, verdict, store, first_at, last_at, n) VALUES (?, ?, ?, ?, ?, ?, ?, 1) '
+        + 'ON CONFLICT(hash) DO UPDATE SET n = n + 1, last_at = excluded.last_at', hash, String(b.wallet || '').slice(0, 30),
+        String(b.cc || '').toLowerCase().slice(0, 2), String(b.verdict || '').slice(0, 20), String(b.store || '').slice(0, 40), at, at);
+      return { prior: prior ? { n: Number(prior.n), first_at: prior.first_at, last_at: prior.last_at, same_store: !!b.store && prior.store === String(b.store), verdict: prior.verdict } : null };
+    }
+    if (op === 'ledger.stats') {
+      const since = String(b.since || '');
+      const r = this.all('SELECT wallet, cc, verdict, COUNT(*) AS refs, SUM(n) AS checks, SUM(CASE WHEN n > 1 THEN 1 ELSE 0 END) AS repeats FROM ledger '
+        + "WHERE (? = '' OR first_at >= ?) GROUP BY wallet, cc, verdict ORDER BY checks DESC LIMIT 500", since, since);
+      return { rows: r.map((x) => ({ wallet: x.wallet, cc: x.cc, verdict: x.verdict, refs: Number(x.refs), checks: Number(x.checks), repeats: Number(x.repeats) })) };
+    }
+    throw new Error('unknown op ' + op);
+  }
+}
+
 export class WaBot {
   constructor(state, env) {
     this.state = state;
