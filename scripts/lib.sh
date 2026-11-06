@@ -364,7 +364,7 @@ PYEOF
 run_tests() {
   command -v node >/dev/null || die "node required for tests"
   say "unit tests"
-  if node --test tests/ >/tmp/tp_tests.log 2>&1; then
+  if node --test tests/*.test.mjs >/tmp/tp_tests.log 2>&1; then
     grep -E '^# (tests|pass|fail)' /tmp/tp_tests.log | tr '\n' ' '; echo
   else
     tail -50 /tmp/tp_tests.log; die "tests failed — refusing to deploy"

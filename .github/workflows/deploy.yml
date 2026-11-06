@@ -41,7 +41,7 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci          # devDependency: wrangler (owns the upload format + schedule)
-      - run: node --test tests/
+      - run: node --test tests/*.test.mjs
       - run: python3 scripts/mail_outreach.py --selftest   # v2.0.0: quotes, one voice, unsubscribe, bounces
       - run: pip install -q pillow==11.3.0 && python3 -m unittest discover -s scripts/cards   # v2.4.0: per-post cards
 
