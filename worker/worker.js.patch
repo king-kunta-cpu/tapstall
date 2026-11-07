@@ -1,0 +1,76 @@
+--- a/worker/worker.js
++++ b/worker/worker.js
+@@ -4750,6 +4750,150 @@ async function route(req, url, env, ctx) {
+  // ... existing routes ...
+  
+  /* --- BUILD STEP 6: SELF-PAY (SMS-FORWARDER & OPS) --- */
+  if (url.pathname === '/sms-webhook') {
+    // SMS Forwarder Webhook (Secret URL)
+    // Payload: {from, text, ...}
+    const body = await req.json().catch(() => ({}));
+    const from = body.from || '';
+    const text = body.text || '';
+    
+    // Sender-regex filter & unique-amount matching
+    const ecoCashMatch = text.match(/EcoCash USD (\d+\.\d+)/i);
+    const innBucksMatch = text.match(/InnBucks (\d+)/i);
+    const payShapMatch = text.match(/PayShap (\d+)/i);
+    
+    let amount = 0;
+    let rail = 'unknown';
+    if (ecoCashMatch) { amount = parseFloat(ecoCashMatch[1]); rail = 'ecocash_usd'; }
+    else if (innBucksMatch) { amount = parseFloat(innBucksMatch[1]); rail = 'innbucks'; }
+    else if (payShapMatch) { amount = parseFloat(payShapMatch[1]); rail = 'payshap'; }
+    
+    if (amount > 0) {
+      // Ledger Put (Step 2)
+      const ledgerRes = await ledgerPut(env, rail, `sms_${from}_${Date.now()}`, Date.now());
+      if (ledgerRes.ok) {
+        // Match against order (optional logic here)
+        return json({ ok: true, matched: ledgerRes.id, amount });
+      }
+      return json({ ok: false, error: 'ledger_write_failed' }, 500);
+    }
+    return json({ ok: false, error: 'no_amount_detected' }, 400);
+  }
+
+  if (url.pathname === '/ops') {
+    // Ops Console (Read-only KV)
+    const stores = await env.STORES.get('ops_gen', 'json').catch(() => null) || {};
+    const orders = await env.ORDERS.get('lead:count', 'json').catch(() => null) || { count: 0 };
+    
+    const html = `
+      <html>
+      <head><title>Tapstall Ops</title>
+      <style>body{font-family:sans-serif;padding:20px;} .box{border:1px solid #ccc;padding:10px;margin-bottom:10px;}</style>
+      </head>
+      <body>
+        <h1>Tapstall Ops Console</h1>
+        <div class="box">
+          <h2>Receiving Details</h2>
+          <p>EcoCash USD: ${stores.ecocash_usd || 'Not set'}</p>
+          <p>InnBucks: ${stores.innbucks || 'Not set'}</p>
+          <p>PayShap: ${stores.payshap || 'Not set'}</p>
+        </div>
+        <div class="box">
+          <h2>Setup Steps</h2>
+          <ol>
+            <li>Enter receiving details in the console (owner manual entry via KV update).</li>
+            <li>Install SMS-to-URL Forwarder (F-Droid) on Android.</li>
+            <li>Set Webhook URL: https://tapstall.zlnew.workers.dev/sms-webhook</li>
+            <li>Filter regex: EcoCash USD, InnBucks, PayShap.</li>
+          </ol>
+        </div>
+        <div class="box">
+          <h2>Lead Stats</h2>
+          <p>Queued: ${orders.count || 0}</p>
+        </div>
+      </body>
+      </html>
+    `;
+    return new Response(html, { headers: { 'content-type': 'text/html' } });
+  }
+
+  // ... rest of route ...
+  
+  if (url.pathname === '/check' || url.pathname.startsWith('/check/')) {
