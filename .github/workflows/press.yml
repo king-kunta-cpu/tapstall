@@ -1,0 +1,64 @@
+name: press
+# Tapstall's own voice. Until now the venture had accounts and no press: this is the bank in
+# press/press.py, published through press/social.py, one post per run at most, gated by the
+# 30-hour cadence in the script so an hourly trigger cannot turn into a firehose.
+# The rules the owner set are enforced in code, not here: every post carries a card, and value
+# outnumbers promo 2:1 (press.py --selftest fails the build if either breaks).
+on:
+  schedule:
+    - cron: "40 * * * *"
+  workflow_dispatch:
+    inputs:
+      post:
+        description: "specific post id to send now (blank = next in rotation)"
+        required: false
+        default: ""
+      dry:
+        description: "1 = render and check the card, publish nothing"
+        required: false
+        default: "0"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: press
+  cancel-in-progress: false
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q coincurve websocket-client pillow
+      - name: the bank still keeps the rules
+        run: python3 press/press.py --selftest
+      - name: publish
+        env:
+          TAPSTALL_BSKY_ID: ${{ secrets.TAPSTALL_BSKY_ID }}
+          TAPSTALL_BSKY_PASS: ${{ secrets.TAPSTALL_BSKY_PASS }}
+          TAPSTALL_MASTODON_INSTANCE: ${{ secrets.TAPSTALL_MASTODON_INSTANCE }}
+          TAPSTALL_MASTODON_TOKEN: ${{ secrets.TAPSTALL_MASTODON_TOKEN }}
+          TAPSTALL_NOSTR_NSEC: ${{ secrets.TAPSTALL_NOSTR_NSEC }}
+          TAPSTALL_NOSTR_RELAYS: "wss://relay.nostr.net,wss://relay.primal.net,wss://nos.lol"
+          DRY: ${{ github.event.inputs.dry }}
+          ONE: ${{ github.event.inputs.post }}
+        run: |
+          cd press
+          if [ -n "$ONE" ]; then
+            python3 press.py --post "$ONE" ${DRY:+$([ "$DRY" = "1" ] && echo --dry)}
+          else
+            python3 press.py --due ${DRY:+$([ "$DRY" = "1" ] && echo --dry)}
+          fi
+      - name: remember what went out
+        run: |
+          if git diff --quiet -- press/press-state.json; then echo "nothing sent"; exit 0; fi
+          git config user.name "Tapstall press"
+          git config user.email "tapstall@atomicmail.io"
+          git add press/press-state.json
+          git commit -m "press: $(date -u +%FT%TZ) — the next post in the rotation"
+          git push
