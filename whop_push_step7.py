@@ -3,9 +3,14 @@ import os
 import requests
 import json
 
-# Whop API Keys (from Handover Section 5)
-ACCOUNT_KEY = "apik_o96JS6MoCADS0_C4829895_C_accab6c2333a1459ea7f7042462d1ae3c3606804feeecb6e7aa86c30fe2c55"
-APP_KEY = "apik_qgd4zqubN1PPj_A2035984_C_c07db10804dd6e115add34201d717a7a78f44bb169d60a555815dca7b0a467"
+# Whop API keys come from the environment. They were hard-coded here once, in a public repository,
+# which handed anybody who read it full read access to this company's products, plans and payments.
+# Never put one back in a file: a key belongs in GitHub Actions secrets or a local .env, nowhere else.
+ACCOUNT_KEY = os.environ.get("WHOP_ACCOUNT_KEY", "").strip()
+APP_KEY = os.environ.get("WHOP_APP_KEY", "").strip()
+if not ACCOUNT_KEY:
+    raise SystemExit("WHOP_ACCOUNT_KEY is not set — export it, or set the repo secret. "
+                     "Refusing to run with an empty key.")
 COMPANY_ID = "biz_dUYhC6sMZONDgB"
 ACCOUNT_ID = "account_id_from_whop_dashboard" # Owner to provide or fetch
 APP_ID = "app_65JU1MvfiLXdxh"

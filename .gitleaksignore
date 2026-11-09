@@ -1,0 +1,9 @@
+# Accepted, not fixed: these two keys were committed before this scanner existed. They are recorded
+# here rather than allowlisted by pattern so the *rule* stays armed for every other file — the point
+# of the ignore is "this exact historical value is known and retired", not "Whop keys are fine".
+#
+# REQUIRED ACTION, and it is not one a script can do: revoke both keys in the Whop dashboard
+# (Settings → Developer/API) and issue replacements, then set WHOP_API_KEY / WHOP_APP_KEY as repo
+# secrets. Until that happens this ignore list is a mitigation, not a fix.
+2d8141be8df946ef92cec4a88ac09ee5da2fa479:whop_push_step7.py:whop-api-key:7
+2d8141be8df946ef92cec4a88ac09ee5da2fa479:whop_push_step7.py:whop-api-key:8
