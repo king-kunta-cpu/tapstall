@@ -1,5 +1,19 @@
 {
- "sent": ["till-tips"],
- "last_at": "2026-11-09T00:00:00Z",
- "log": [{"id": "till-tips", "at": "2026-11-09T00:00:00Z", "rails": 3}]
+ "sent": [
+  "till-tips",
+  "promo-free"
+ ],
+ "last_at": "2026-11-10T12:56:19.477455Z",
+ "log": [
+  {
+   "id": "till-tips",
+   "at": "2026-11-09T00:00:00Z",
+   "rails": 3
+  },
+  {
+   "id": "promo-free",
+   "at": "2026-11-10T12:56:19.477455Z",
+   "rails": 3
+  }
+ ]
 }
