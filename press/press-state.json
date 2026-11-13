@@ -2,9 +2,10 @@
  "sent": [
   "till-tips",
   "promo-free",
-  "exact-amount"
+  "exact-amount",
+  "shop-math"
  ],
- "last_at": "2026-11-11T22:59:56.430871Z",
+ "last_at": "2026-11-13T09:56:07.654395Z",
  "log": [
   {
    "id": "till-tips",
@@ -19,6 +20,11 @@
   {
    "id": "exact-amount",
    "at": "2026-11-11T22:59:56.430871Z",
+   "rails": 3
+  },
+  {
+   "id": "shop-math",
+   "at": "2026-11-13T09:56:07.654395Z",
    "rails": 3
   }
  ]
