@@ -27,5 +27,5 @@ jobs:
       - name: render and upload
         env:
           CARDS_TOKEN: ${{ secrets.CARDS_TOKEN }}
-          TAPSTALL_URL: https://tapstall.zlnew.workers.dev
+          TAPSTALL_URL: https://tapstall.tapstall.workers.dev
         run: python3 scripts/cards/render.py

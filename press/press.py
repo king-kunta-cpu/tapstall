@@ -31,7 +31,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 STATE = HERE / "press-state.json"
 CARDS = "https://king-kunta-cpu.github.io/tapstall/brand/cards"
-SITE = "https://tapstall.zlnew.workers.dev"
+SITE = "https://tapstall.tapstall.workers.dev"
 FREE_DAYS = 60
 
 # --------------------------------------------------------------------------- the bank

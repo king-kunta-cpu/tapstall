@@ -157,7 +157,7 @@ test('the plan posts itself where a channel can be posted to, and never pretends
                 { id: 'm2', name: 'Maheu', category: 'Drinks', price: 2, available: false },
                 { id: 'm3', name: 'Matoke', category: 'Mains', price: 5, available: false }];
   const plan = core.meshSchedule(st, rows, { hours_text: 'Mon-Fri 08:00-16:00', feed_ok: true },
-    { now: Date.parse('2026-10-13T04:00:00Z'), origin: 'https://tapstall.zlnew.workers.dev', state: { auto: { on: true } } });
+    { now: Date.parse('2026-10-13T04:00:00Z'), origin: 'https://tapstall.tapstall.workers.dev', state: { auto: { on: true } } });
   assert.equal(plan.on, true, 'granted, so the plan is live');
   assert.ok(plan.beats.length >= 2, 'there is something to say: ' + JSON.stringify(plan.beats).slice(0, 160));
   assert.ok(plan.beats.some((b) => b.kind === 'promo'), 'including the shop-facts one, with money in it');
@@ -441,7 +441,7 @@ test('company content is composed with the same provenance rule as a shop: no nu
   const core = await import('file://' + join(root, 'worker', 'core.js'));
   const reg = core.meshRegister({}, { id: 'owner', class: 'owner', rails: { x: { channel_id: 'a' }, bluesky: {}, devto: {} } });
   const idn = reg.identity;
-  const b = core.meshCompanyBeats(idn, { price_usd: 60, free_days: 60 }, { origin: 'https://tapstall.zlnew.workers.dev', now: Date.parse('2026-10-14T06:00:00Z') });
+  const b = core.meshCompanyBeats(idn, { price_usd: 60, free_days: 60 }, { origin: 'https://tapstall.tapstall.workers.dev', now: Date.parse('2026-10-14T06:00:00Z') });
   assert.equal(b.beats.length, core.MESH_QUEUE_DEFAULTS.per_day, 'three beats a day on a company account, the pipeline number');
   assert.equal(b.beats.filter((x) => x.kind === 'value').length, 2, 'two of them value');
   assert.equal(b.beats.filter((x) => x.kind === 'promo').length, 1, 'one company facts, with the price in it');
@@ -462,7 +462,7 @@ test('company content is composed with the same provenance rule as a shop: no nu
   assert.deepEqual(core.CONTENT_STUDIO_POLICY.post_to, ['owner', 'seller'], 'the studio posts to company + seller accounts only');
   assert.ok(core.CONTENT_STUDIO_POLICY.never_post_to.includes('operator'), 'operators are tenants, never a posting surface');
   const sellerPlan = core.meshIdentityPlan({ id: 'seller:a', class: 'seller', rails: { bluesky: {} }, source: {} }, { beats: [] },
-    { price_usd: 60, free_days: 60 }, { origin: 'https://tapstall.zlnew.workers.dev', now: Date.parse('2026-10-14T06:00:00Z') });
+    { price_usd: 60, free_days: 60 }, { origin: 'https://tapstall.tapstall.workers.dev', now: Date.parse('2026-10-14T06:00:00Z') });
   const sellerPromo = sellerPlan.beats.find((x) => x.kind === 'promo');
   assert.ok(sellerPromo && !/https?:\/\//.test(sellerPromo.text) && /Link in bio\.$/.test(sellerPromo.text),
     'a seller promo carries no link ever — it says Link in bio: ' + (sellerPromo && sellerPromo.text));
@@ -498,7 +498,7 @@ test('a seller whose shop has nothing to say posts the company material instead 
   const core = await import('file://' + join(root, 'worker', 'core.js'));
   const idn = core.meshRegister({}, { id: 'seller:a', class: 'seller', rails: { x: { channel_id: 'a' } }, source: { store: 'novatmode' } }).identity;
   const empty = core.meshIdentityPlan(Object.assign({ id: 'seller:a' }, idn), { beats: [], blocked: [{ why: 'no items to price' }] },
-    { price_usd: 60, free_days: 60 }, { origin: 'https://tapstall.zlnew.workers.dev', now: Date.parse('2026-10-14T06:00:00Z') });
+    { price_usd: 60, free_days: 60 }, { origin: 'https://tapstall.tapstall.workers.dev', now: Date.parse('2026-10-14T06:00:00Z') });
   assert.equal(empty.source, 'company', 'the fallback is the company material, not silence');
   assert.equal(empty.beats.length, core.MESH_QUEUE_DEFAULTS.per_day, 'and it is a full day of it');
   assert.equal(empty.fallback_from, 'novatmode', 'it says which shop had nothing, so the operator can see the hole');
@@ -684,7 +684,7 @@ test('1.5.3 the value pool is deep enough to keep teaching for a fortnight, and 
   const pillars = [];
   for (let d = 0; d < 15; d += 1) {
     const plan = C.meshCompanyBeats({ id: 'owner', rails: { bluesky: {} } }, { price_usd: 60, free_days: 60 },
-      { origin: 'https://tapstall.zlnew.workers.dev', now: base + d * 864e5 });
+      { origin: 'https://tapstall.tapstall.workers.dev', now: base + d * 864e5 });
     for (const b of plan.beats) if (b.kind === 'value') { count.set(b.text, (count.get(b.text) || 0) + 1); pillars.push(b.pillar); }
   }
   assert.ok(count.size >= 20, 'fifteen days of value posts are not the same sentences on a loop: ' + count.size);

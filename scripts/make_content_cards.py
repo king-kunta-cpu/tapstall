@@ -97,7 +97,7 @@ def card(slug, kicker, headline, sub):
     for line in wrap(d, sub, font(27, False), W - 170):
         d.text((64, y + 8), line, font=font(27, False), fill=(207, 224, 238))
         y += 36
-    d.text((64, H - 52), "tapstall.zlnew.workers.dev", font=font(21, False), fill=(143, 160, 175))
+    d.text((64, H - 52), "tapstall.tapstall.workers.dev", font=font(21, False), fill=(143, 160, 175))
     return img
 
 

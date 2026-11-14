@@ -47,7 +47,7 @@ jobs:
           restore-keys: crux-
       - name: harvest
         env:
-          TAPSTALL_ORIGIN: https://tapstall.zlnew.workers.dev
+          TAPSTALL_ORIGIN: https://tapstall.tapstall.workers.dev
           ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
         run: |
           POST_FLAG="--dry-run"

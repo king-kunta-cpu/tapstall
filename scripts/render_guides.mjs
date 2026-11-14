@@ -11,7 +11,7 @@ const { chromium } = require('playwright-core');
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const G = JSON.parse(readFileSync(join(root, 'scripts/guides.json'), 'utf8'));
 const FONTS = process.env.FONTS || '';
-const LINK = 'https://tapstall.zlnew.workers.dev/onboard';
+const LINK = 'https://tapstall.tapstall.workers.dev/onboard';
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const face = (fam, file, w) => `@font-face{font-family:'${fam}';src:url('file://${join(FONTS, file)}');font-weight:${w}}`;
 const page = (lang, t) => `<!doctype html><html lang="${lang}" dir="${lang === 'ar' ? 'rtl' : 'ltr'}"><meta charset="utf-8"><title>${esc(t.title)}</title><style>
@@ -29,7 +29,7 @@ footer{position:absolute;bottom:9mm;inset-inline:15mm;font-size:8.6pt;color:#5a6
 <h2>${esc(t.h2)}</h2><ol>${t.b2.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>
 <h2>${esc(t.h3)}</h2><p style="margin:0">${esc(t.p3)}</p><p class="q">${esc(t.quote)}</p>
 <h2>${esc(t.h4)}</h2><ol>${t.b4.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>
-<div class="cta"><div><b>${esc(t.cta)}</b><span>${esc(t.note)}</span></div><a href="${LINK}">tapstall.zlnew.workers.dev/onboard</a></div>
+<div class="cta"><div><b>${esc(t.cta)}</b><span>${esc(t.note)}</span></div><a href="${LINK}">tapstall.tapstall.workers.dev/onboard</a></div>
 </main><footer>${esc(t.from)} <span dir="ltr" style="unicode-bidi:isolate">P.O. Box 900, Bulawayo, Zimbabwe</span></footer></body></html>`;
 
 const out = join(root, 'pages/public/guides');

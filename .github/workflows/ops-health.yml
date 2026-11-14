@@ -21,7 +21,7 @@ jobs:
       - name: owner-console health (booleans only)
         env:
           ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
-          ORIGIN: https://tapstall.zlnew.workers.dev
+          ORIGIN: https://tapstall.tapstall.workers.dev
         run: |
           python3 - <<'PY'
           import json

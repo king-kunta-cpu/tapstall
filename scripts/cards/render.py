@@ -4,7 +4,7 @@
 PNG (PUT /api/press/cards/<key>); the Worker serves them at /m/<key>.png and swaps them into the post on its next tick.
 A post whose card is not ready yet keeps its topic card, so it never goes out without an image.
 
-  CARDS_TOKEN=... python3 scripts/cards/render.py [--url https://tapstall.zlnew.workers.dev] [--dry outdir]
+  CARDS_TOKEN=... python3 scripts/cards/render.py [--url https://tapstall.tapstall.workers.dev] [--dry outdir]
 Run by .github/workflows/cards.yml, which the Worker dispatches (at most every 6 hours, only when a card is wanted)."""
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ def render_spec(spec: dict) -> bytes:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--url", default=os.environ.get("TAPSTALL_URL", "https://tapstall.zlnew.workers.dev"))
+    ap.add_argument("--url", default=os.environ.get("TAPSTALL_URL", "https://tapstall.tapstall.workers.dev"))
     ap.add_argument("--dry", default="", help="write PNGs here instead of uploading")
     a = ap.parse_args(argv)
     token = os.environ.get("CARDS_TOKEN", "")

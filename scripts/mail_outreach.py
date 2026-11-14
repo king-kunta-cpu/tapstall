@@ -48,7 +48,7 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 
-ORIGIN_DEFAULT = "https://tapstall.zlnew.workers.dev"
+ORIGIN_DEFAULT = "https://tapstall.tapstall.workers.dev"
 TOUCH_FOLLOW_DAYS = [7, 7, 7]   # outreach v2 (2026-11-04): T1 no link, T2 day 7 (link), T3 day 14, then stop
 MAX_TOUCHES = len(TOUCH_FOLLOW_DAYS)
 STOP_RE = re.compile(r"\b(stop|unsubscribe|remove me|opt ?out|leave me alone|do not contact)\b", re.I)

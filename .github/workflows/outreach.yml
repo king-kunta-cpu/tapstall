@@ -38,7 +38,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: outreach
         env:
-          TAPSTALL_ORIGIN: https://tapstall.zlnew.workers.dev
+          TAPSTALL_ORIGIN: https://tapstall.tapstall.workers.dev
           ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
           OWNER_NOTIFY_EMAIL: ${{ secrets.OWNER_NOTIFY_EMAIL }}
           OUTREACH_FROM_NAME: ${{ secrets.OUTREACH_FROM_NAME }}

@@ -89,9 +89,9 @@ test('worker: KV until the copy, then every lead read and write on TS_DB with no
   globalThis.fetch = async () => new Response('{}', { status: 404 });
   try {
     const ORDERS = kv(), STORES = kv();
-    const env = { ORDERS, STORES, ADMIN_SECRET: 'x', PUBLIC_ORIGIN: 'https://tapstall.zlnew.workers.dev' };
+    const env = { ORDERS, STORES, ADMIN_SECRET: 'x', PUBLIC_ORIGIN: 'https://tapstall.tapstall.workers.dev' };
     env.TS_DB = doNamespace(mod.TsDb, env);
-    const ingest = (leads) => W.fetch(new Request('https://tapstall.zlnew.workers.dev/api/leads/ingest', { method: 'POST',
+    const ingest = (leads) => W.fetch(new Request('https://tapstall.tapstall.workers.dev/api/leads/ingest', { method: 'POST',
       headers: { 'x-tapstall-admin': 'x', 'x-tapstall-confirm': '1', 'content-type': 'application/json' }, body: JSON.stringify({ leads }) }), env, { waitUntil() {} }).then((r) => r.json());
     const shop = (n) => ({ business: 'Panaderia ' + n, email: 'ventas@panaderia' + n + '.pe', website: 'https://panaderia' + n + '.pe',
       source_url: 'https://panaderia' + n + '.pe/contacto', signals: ['whatsapp_order', 'yape'], country: 'PE' });
@@ -115,7 +115,7 @@ test('worker: KV until the copy, then every lead read and write on TS_DB with no
     assert.equal(c.total, 3);
     const again = await Promise.all((() => { const w = []; W.scheduled({ cron: '15 6,12,18,0 * * *' }, env, { waitUntil: (p) => w.push(p) }); return w; })());
     assert.deepEqual(again[0].leads_db, { done: true }, 'the copy runs once');
-    const self = await (await W.fetch(new Request('https://tapstall.zlnew.workers.dev/__selftest'), env, { waitUntil() {} })).json();
+    const self = await (await W.fetch(new Request('https://tapstall.tapstall.workers.dev/__selftest'), env, { waitUntil() {} })).json();
     assert.equal(self.ts_db, 'durable_object');
   } finally { globalThis.fetch = realFetch; }
 });

@@ -19,7 +19,7 @@ seller, and respects the do-not-contact ledger.
 Usage:
   python3 scripts/lead_hunt.py --selftest
   python3 scripts/lead_hunt.py --dry-run [--limit 40] [--countries ZA,ZW]
-  ADMIN_SECRET=... python3 scripts/lead_hunt.py --post [--origin https://tapstall.zlnew.workers.dev]
+  ADMIN_SECRET=... python3 scripts/lead_hunt.py --post [--origin https://tapstall.tapstall.workers.dev]
 """
 import argparse
 import html
@@ -91,7 +91,7 @@ def osm_city(cc, city, bbox, limit=40, parts=OSM_MAIN_PARTS, endpoints=None):
     for attempt, ep in enumerate(endpoints or OVERPASS_ENDPOINTS):
         try:
             _, body = fetch(ep, data=urllib.parse.urlencode({"data": ql}).encode(), timeout=35,
-                            headers={"User-Agent": "tapstall-lead-hunt/2.0 (+https://tapstall.zlnew.workers.dev)"})
+                            headers={"User-Agent": "tapstall-lead-hunt/2.0 (+https://tapstall.tapstall.workers.dev)"})
             break
         except Exception as e:          # 429/502/504 at capacity: next mirror after a short backoff
             last = e
@@ -259,7 +259,7 @@ def selftest():
 
 def main():
     ap = argparse.ArgumentParser(description="TapStall lead hunter")
-    ap.add_argument("--origin", default=os.environ.get("TAPSTALL_ORIGIN", "https://tapstall.zlnew.workers.dev"))
+    ap.add_argument("--origin", default=os.environ.get("TAPSTALL_ORIGIN", "https://tapstall.tapstall.workers.dev"))
     ap.add_argument("--limit", type=int, default=60)
     ap.add_argument("--countries", default="ZW,ZA")
     ap.add_argument("--post", action="store_true")

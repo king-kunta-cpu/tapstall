@@ -35,7 +35,7 @@ test('press v3: hashtags are dropped before the lesson is ever cut', () => {
 
 test('press v3: the Bluesky record has clickable hashtags and links, a language and hidden tags', async () => {
   const now = Date.parse('2026-11-05T08:30:00Z');
-  const it = { ...C.meshQueueItem(beat('bluesky', { text: 'Read https://tapstall.zlnew.workers.dev/guide first. ' + line }), { now: now - 3600e3 }), due: new Date(now - 60e3).toISOString(), image: '', video: '' };
+  const it = { ...C.meshQueueItem(beat('bluesky', { text: 'Read https://tapstall.tapstall.workers.dev/guide first. ' + line }), { now: now - 3600e3 }), due: new Date(now - 60e3).toISOString(), image: '', video: '' };
   const calls = [];
   const fetcher = async (url, init) => {
     calls.push({ url, body: init && init.body });
@@ -51,5 +51,5 @@ test('press v3: the Bluesky record has clickable hashtags and links, a language 
   assert.ok(rec.tags.length && rec.tags.length <= 8);
   const enc = new TextEncoder(), dec = new TextDecoder();
   const spans = rec.facets.map((f) => [f.features[0].$type.split('#')[1], dec.decode(enc.encode(rec.text).slice(f.index.byteStart, f.index.byteEnd))]);
-  assert.deepEqual(spans, [['link', 'https://tapstall.zlnew.workers.dev/guide'], ['tag', '#FraudPrevention'], ['tag', '#MobileMoney']]);
+  assert.deepEqual(spans, [['link', 'https://tapstall.tapstall.workers.dev/guide'], ['tag', '#FraudPrevention'], ['tag', '#MobileMoney']]);
 });

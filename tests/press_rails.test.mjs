@@ -82,12 +82,12 @@ test('buffer: Pinterest is published with createPost, its board and title; a Mut
   const sent = [];
   const okF = async (url, init) => { sent.push(JSON.parse(init.body)); return { status: 200, text: async () => '{"data":{"createPost":{"__typename":"PostActionSuccess","post":{"id":"p1"}}}}' }; };
   const press = { buffer_token: 't', channels: { pinterest: 'chan1' } };
-  const out = await C.meshPressFlush([item('pinterest', { board: '2242', link: 'https://tapstall.zlnew.workers.dev/onboard' })], press, { now, fetch: okF });
+  const out = await C.meshPressFlush([item('pinterest', { board: '2242', link: 'https://tapstall.tapstall.workers.dev/onboard' })], press, { now, fetch: okF });
   assert.equal(out.sent, 1, JSON.stringify(out.results));
   const inp = sent[0].variables.input;
   assert.match(sent[0].query, /createPost/);
   assert.equal(inp.mode, 'shareNow');
-  assert.deepEqual(inp.metadata.pinterest, { boardServiceId: '2242', title: 'How to spot a fake proof of payment on WhatsApp', url: 'https://tapstall.zlnew.workers.dev/onboard' });
+  assert.deepEqual(inp.metadata.pinterest, { boardServiceId: '2242', title: 'How to spot a fake proof of payment on WhatsApp', url: 'https://tapstall.tapstall.workers.dev/onboard' });
   assert.deepEqual(inp.assets, [{ image: { url: 'https://x.test/c.png' } }]);
   const badF = async () => ({ status: 200, text: async () => '{"data":{"createPost":{"__typename":"InvalidInputError","message":"no board"}}}' });
   const bad = await C.meshPressFlush([item('pinterest', { board: '2242' })], press, { now, fetch: badF });

@@ -2539,7 +2539,7 @@ async function selftest(env) {
     t.press_operator_refused = meshRegister({}, { id: 'anyshop', class: 'operator' }, { refuse_ids: ['anyshop'] }).ok === false;
     t.press_no_secrets_in_registry = meshRegister({ owner: {} }, { id: 'seller-x', class: 'seller', buffer_token: 'no' }).ok === false;
     t.press_company_beats_priced = (function () { const r = meshRegister({}, { id: 'owner', class: 'owner', rails: { x: { channel_id: 'abc' } } }, {});
-      const b = meshCompanyBeats(r.identity, { price_usd: PRICE_USD, free_days: FREE_DAYS }, { origin: 'https://tapstall.zlnew.workers.dev', now: Date.now() });
+      const b = meshCompanyBeats(r.identity, { price_usd: PRICE_USD, free_days: FREE_DAYS }, { origin: 'https://tapstall.tapstall.workers.dev', now: Date.now() });
       return b.beats.length === MESH_QUEUE_DEFAULTS.per_day && b.beats.some((x) => x.kind === 'promo'); })();
     t.press_queue_shape = (function () { const it = meshQueueItem({ kind: 'value', rail: 'x', item_key: 'k1', text: 'value line', to: ['x'], max: 280 }, { now: Date.now(), channel_id: 'abc' });
       return it.channel === 'twitter' && it.channel_id === 'abc' && it.via === 'buffer'; })();
@@ -6086,7 +6086,7 @@ async function partnerApply(req, url, env) {
 }
 
 /* ---- scheduler slots ---- */
-const PRESS_ORIGIN_FALLBACK = 'https://tapstall.zlnew.workers.dev';
+const PRESS_ORIGIN_FALLBACK = 'https://tapstall.tapstall.workers.dev';
 async function pressTick(env) {
   if (!env.ORDERS) return { ran: 0, why: 'no ORDERS binding' };
   const reg = await pressRegistry(env);

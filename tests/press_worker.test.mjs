@@ -52,7 +52,7 @@ test('company press: four armed rails, three per beat, every rail used, Tumblr w
       return new Response(new Uint8Array(8), { status: 200, headers: { 'content-type': 'image/png' } });
     };
     const W = (await import(pathToFileURL(bundle).href + '?press')).default;
-    const run = async () => (await (await W.fetch(new Request('https://tapstall.zlnew.workers.dev/api/press/run', { method: 'POST',
+    const run = async () => (await (await W.fetch(new Request('https://tapstall.tapstall.workers.dev/api/press/run', { method: 'POST',
       headers: { 'x-tapstall-admin': 'x', 'x-tapstall-confirm': '1', 'content-type': 'application/json' }, body: '{}' }), env, { waitUntil() {} })).json()).ran[0];
 
     const r = await run();

@@ -54,7 +54,7 @@ NON_COMMERCIAL = (".gov.", ".edu.", ".ac.", ".mil.", ".org.", ".gob.", ".go.", "
 SLICES = 600
 CRUX = "https://raw.githubusercontent.com/zakird/crux-top-lists/main/data/country/{cc}/{month}.csv.gz"
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-ORIGIN = "https://tapstall.zlnew.workers.dev"
+ORIGIN = "https://tapstall.tapstall.workers.dev"
 
 RX = {
     "wa": re.compile(r"wa\.me/|api\.whatsapp\.com/send|whatsapp://send|web\.whatsapp\.com/send|chat\.whatsapp\.com/", re.I),

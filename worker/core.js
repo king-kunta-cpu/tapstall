@@ -3972,7 +3972,7 @@ async function meshDirectSend(it, press, fetcher, dry, now) {
     try {
       // Discord's edge refuses bare clients: a browser-shaped user agent is required.
       const r = await fetcher(hook + (hook.includes('?') ? '&' : '?') + 'wait=true', { method: 'POST',
-        headers: { 'content-type': 'application/json', 'user-agent': 'Mozilla/5.0 (compatible; Tapstall/2.5; +https://tapstall.zlnew.workers.dev)' },
+        headers: { 'content-type': 'application/json', 'user-agent': 'Mozilla/5.0 (compatible; Tapstall/2.5; +https://tapstall.tapstall.workers.dev)' },
         body: JSON.stringify({ content: String(it.text).slice(0, 1900), allowed_mentions: { parse: [] },
           ...(media.image ? { embeds: [{ image: { url: media.image } }] } : {}) }) });
       const j = await asJson(r);

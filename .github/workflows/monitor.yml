@@ -29,7 +29,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: ping the live Worker (read-only)
         env:
-          ORIGIN: https://tapstall.zlnew.workers.dev
+          ORIGIN: https://tapstall.tapstall.workers.dev
         run: |
           want=$(node -p "require('./package.json').version")
           ping=$(curl -sf -A "Mozilla/5.0" --max-time 20 "$ORIGIN/__ping")
@@ -50,7 +50,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}   # ops-console section [8] needs a session
-          ORIGIN: https://tapstall.zlnew.workers.dev
+          ORIGIN: https://tapstall.tapstall.workers.dev
           HANDLE: logintest        # the internal test store, never a real operator's shop
         run: |
           set +e   # GitHub's bash -e would kill the step on rc=1 before anything prints —

@@ -45,8 +45,8 @@ except ImportError:  # pragma: no cover - the module sits next to this file in t
     _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import postimage
 
-UA = "Mozilla/5.0 (compatible; Tapstall/1.0; +https://tapstall.zlnew.workers.dev)"
-SITE = os.environ.get("TAPSTALL_SITE_URL", "https://tapstall.zlnew.workers.dev").rstrip("/")
+UA = "Mozilla/5.0 (compatible; Tapstall/1.0; +https://tapstall.tapstall.workers.dev)"
+SITE = os.environ.get("TAPSTALL_SITE_URL", "https://tapstall.tapstall.workers.dev").rstrip("/")
 BRAND = "https://king-kunta-cpu.github.io/tapstall/brand"
 CARD = BRAND + "/og-banner.png"
 # the second hosted card: if the og card 404s, this is still a url a platform can fetch

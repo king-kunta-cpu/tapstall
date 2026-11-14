@@ -1886,7 +1886,7 @@ test('2026-11-01 budget: the lead hunt is dispatched Mon/Wed/Fri by default; the
 import { cardKeyFor, cardSpecFor, cardApply, CARD_KEY_RE } from '../worker/core.js';
 {
   const stock = { id: 'x1', channel: 'bluesky', media_kind: 'image', image: 'https://king-kunta-cpu.github.io/tapstall/brand/cards/shop-math.png',
-    text: 'Know the rail cost before you quote. Fees are a pricing decision, not a month-end surprise. https://tapstall.zlnew.workers.dev/fees #smallbusiness' };
+    text: 'Know the rail cost before you quote. Fees are a pricing decision, not a month-end surprise. https://tapstall.tapstall.workers.dev/fees #smallbusiness' };
   test('cards: a stock topic card names a card drawn from the post itself', () => {
     const s = cardSpecFor(stock);
     assert.match(s.key, CARD_KEY_RE);
@@ -1898,7 +1898,7 @@ import { cardKeyFor, cardSpecFor, cardApply, CARD_KEY_RE } from '../worker/core.
     assert.equal(cardKeyFor('a', 'b').length, 17);
   });
   test('cards: a shop photo or the motion loop is never replaced', () => {
-    assert.equal(cardSpecFor({ ...stock, image: 'https://tapstall.zlnew.workers.dev/img/shop/abc.jpg' }), null);
+    assert.equal(cardSpecFor({ ...stock, image: 'https://tapstall.tapstall.workers.dev/img/shop/abc.jpg' }), null);
     assert.equal(cardSpecFor({ ...stock, media_kind: 'video' }), null);
     assert.equal(cardSpecFor({ ...stock, text: 'tiny' }), null);
   });
