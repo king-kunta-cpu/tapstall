@@ -163,7 +163,7 @@ test('the plan posts itself where a channel can be posted to, and never pretends
   assert.ok(plan.beats.some((b) => b.kind === 'promo'), 'including the shop-facts one, with money in it');
   const promo = plan.beats.find((b) => b.kind === 'promo');
   assert.match(promo.text, /6\.00 USD|5\.00 USD|2\.00 USD/, 'a promo beat states a real price from the row');
-  assert.match(promo.text, /tapstall\.zlnew\.workers\.dev\/s\/mamatoe/, 'and the link, because this is the half that is allowed to have one');
+  assert.match(promo.text, /tapstall\.tapstall\.workers\.dev\/s\/mamatoe/, 'and the link, because this is the half that is allowed to have one');
   assert.ok(plan.beats.every((b) => b.slot), 'each beat is on the clock, not fired at random');
   assert.equal(new Set(plan.beats.map((b) => b.slot)).size, plan.beats.length, 'and no two share a window on the same day');
   assert.ok(plan.beats.every((b) => b.auto_send === true), 'an authorised API channel means it sends itself');
@@ -467,7 +467,7 @@ test('company content is composed with the same provenance rule as a shop: no nu
   assert.ok(sellerPromo && !/https?:\/\//.test(sellerPromo.text) && /Link in bio\.$/.test(sellerPromo.text),
     'a seller promo carries no link ever — it says Link in bio: ' + (sellerPromo && sellerPromo.text));
   const ownerPromo = b.beats.find((x) => x.kind === 'promo');
-  assert.match(ownerPromo.text, /https:\/\/tapstall\.zlnew\.workers\.dev\/onboard/, 'a company promo may carry the actual URL');
+  assert.match(ownerPromo.text, /https:\/\/tapstall\.tapstall\.workers\.dev\/onboard/, 'a company promo may carry the actual URL');
   const overdue = core.meshQueueMerge({ items: [{ id: 'due:1', channel: 'bluesky', due: new Date(Date.now() - 3600e3).toISOString(), kind: 'value' }] }, [], { now: Date.now() });
   assert.equal(overdue.items.length, 1, 'an item an hour overdue is kept for the next tick to send, not silently dropped at merge');
   assert.ok(!/discount|%\s?off|free trial month/i.test(JSON.stringify(b.beats)), 'no invented offer on a company promo either');
