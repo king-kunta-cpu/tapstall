@@ -6,9 +6,10 @@
   "shop-math",
   "promo-price",
   "buyer-trust",
-  "menu-craft"
+  "menu-craft",
+  "promo-orders"
  ],
- "last_at": "2026-11-17T14:51:27.406305Z",
+ "last_at": "2026-11-18T22:18:35.645738Z",
  "log": [
   {
    "id": "till-tips",
@@ -43,6 +44,11 @@
   {
    "id": "menu-craft",
    "at": "2026-11-17T14:51:27.406305Z",
+   "rails": 3
+  },
+  {
+   "id": "promo-orders",
+   "at": "2026-11-18T22:18:35.645738Z",
    "rails": 3
   }
  ]
