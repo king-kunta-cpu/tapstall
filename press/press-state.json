@@ -8,9 +8,10 @@
   "buyer-trust",
   "menu-craft",
   "promo-orders",
-  "books"
+  "books",
+  "launch"
  ],
- "last_at": "2026-11-20T13:32:48.190997Z",
+ "last_at": "2026-11-21T19:44:40.957511Z",
  "log": [
   {
    "id": "till-tips",
@@ -55,6 +56,11 @@
   {
    "id": "books",
    "at": "2026-11-20T13:32:48.190997Z",
+   "rails": 3
+  },
+  {
+   "id": "launch",
+   "at": "2026-11-21T19:44:40.957511Z",
    "rails": 3
   }
  ]
