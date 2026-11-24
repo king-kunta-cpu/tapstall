@@ -10,9 +10,10 @@
   "promo-orders",
   "books",
   "launch",
-  "promo-week"
+  "promo-week",
+  "repeat"
  ],
- "last_at": "2026-11-23T01:57:05.036393Z",
+ "last_at": "2026-11-24T19:03:59.897018Z",
  "log": [
   {
    "id": "till-tips",
@@ -67,6 +68,11 @@
   {
    "id": "promo-week",
    "at": "2026-11-23T01:57:05.036393Z",
+   "rails": 3
+  },
+  {
+   "id": "repeat",
+   "at": "2026-11-24T19:03:59.897018Z",
    "rails": 3
   }
  ]
